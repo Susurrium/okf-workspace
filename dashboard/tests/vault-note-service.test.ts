@@ -50,6 +50,10 @@ describe("VaultNoteService", () => {
     const capture = await notes.createCapture("一个待处理想法", "稍后整理这条内容。");
     const daily = await notes.createDaily();
     await notes.appendDailyCapture("这条内容属于今天，而不是 Inbox。");
+    const weeklyReview = await notes.createReview("weekly", new Date(2026, 7, 17, 12));
+    const monthlyReview = await notes.createReview("monthly", new Date(2026, 7, 17, 12));
+    const yearlyReview = await notes.createReview("yearly", new Date(2026, 7, 17, 12));
+    const boundaryReview = await notes.createReview("weekly", new Date(2021, 0, 1, 12));
     const project = await notes.createProject("测试项目", "test-project");
     const course = await notes.createCourse("测试课程", "test-course");
     const linkedCapture = await notes.createCapture(
@@ -84,6 +88,14 @@ describe("VaultNoteService", () => {
     expect(markdown.get(project.path)).toContain("SHARED ARTIFACT CONTRACT");
     expect(markdown.get("projects/test-project/log.md")).toContain("测试项目 · 项目日志");
     expect(markdown.get(daily.path)).toContain("这条内容属于今天，而不是 Inbox。");
+    expect(weeklyReview.path).toBe("life/reviews/weekly/2026-W34.md");
+    expect(monthlyReview.path).toBe("life/reviews/monthly/2026-08.md");
+    expect(yearlyReview.path).toBe("life/reviews/yearly/2026.md");
+    expect(boundaryReview.path).toBe("life/reviews/weekly/2020-W53.md");
+    expect(markdown.get(weeklyReview.path)).toContain('type: "Review"');
+    expect(markdown.get(weeklyReview.path)).toContain("复盘范围：2026-08-17 — 2026-08-23");
+    expect(markdown.get(boundaryReview.path)).toContain("复盘范围：2020-12-28 — 2021-01-03");
+    expect(await notes.createReview("weekly", new Date(2026, 7, 19, 12))).toEqual(weeklyReview);
     expect(markdown.get(linkedCapture.path)).toContain(
       'course: "/learning/courses/test-course/course.md"',
     );

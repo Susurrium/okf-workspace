@@ -361,13 +361,6 @@ def test_human_decisions_only_materialize_the_selected_outcome(vault: Path, tmp_
     assert ignored.source is None
     assert service.store.load(ignored_item)["action"] == "ignore"  # type: ignore[index]
 
-    undecided_item = _ai_item("state:later")
-    undecided = service.decide(undecided_item, DecisionAction.LATER)
-    assert undecided.source and Path(undecided.source).is_file()
-    assert "purpose" not in read_document(Path(undecided.source)).frontmatter
-    assert read_document(Path(undecided.source)).frontmatter["uses"] == [{"purpose": "undecided"}]
-    assert read_document(Path(undecided.source)).frontmatter["ingested_via"] == "feed"
-
     deferred = service.decide(_ai_item("learn-later:1", "稍后学习主题"), DecisionAction.LEARN_LATER)
     assert deferred.source and Path(deferred.source).is_file()
     assert deferred.source_text and Path(deferred.source_text).is_file()
@@ -392,7 +385,7 @@ def test_human_decisions_only_materialize_the_selected_outcome(vault: Path, tmp_
     assert source_only.wiki is None
 
 
-def test_latest_human_feed_decision_is_reflected_in_an_existing_source(
+def test_additional_human_feed_decision_is_reflected_in_an_existing_source(
     vault: Path, tmp_path: Path
 ) -> None:
     service = FeedDecisionService(vault, tmp_path / "state")
@@ -400,16 +393,16 @@ def test_latest_human_feed_decision_is_reflected_in_an_existing_source(
     first = service.decide(item, DecisionAction.SOURCE_ONLY, checkpoint=False)
     assert first.source is not None
 
-    service.decide(item, DecisionAction.LATER, checkpoint=False)
+    service.decide(item, DecisionAction.LEARN_LATER, checkpoint=False)
 
     source = read_document(Path(first.source))
     stored = service.store.load(item)
     assert "purpose" not in source.frontmatter
     assert source.frontmatter["uses"] == [
         {"purpose": "reference"},
-        {"purpose": "undecided"},
+        {"purpose": "study"},
     ]
-    assert stored is not None and stored["action"] == "later"
+    assert stored is not None and stored["action"] == "learn-later"
 
 
 def test_learn_still_materializes_when_git_checkpoint_is_unavailable(

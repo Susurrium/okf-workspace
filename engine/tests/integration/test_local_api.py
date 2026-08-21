@@ -6,11 +6,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from okf_workspace.api import LocalTokenStore, create_app
 from okf_workspace.config import BrainPaths
-from okf_workspace.feeds import FeedCache
+from okf_workspace.feeds import FeedCache, FeedDecisionService
 from okf_workspace.feeds.models import FeedEdition, FeedItem, FeedKind
 from okf_workspace.importers import DocumentImporter
 from okf_workspace.importers.models import ParserExport, ParserName
@@ -56,6 +57,33 @@ class StaticParser:
             parser=ParserName.MINERU,
             parser_version="api-fixture",
         )
+
+
+def test_system_status_can_force_live_service_probes(
+    vault: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[bool] = []
+
+    def status(
+        _vault: Path,
+        _state: Path,
+        *,
+        refresh_services: bool = False,
+    ) -> dict[str, object]:
+        calls.append(refresh_services)
+        return {"generated_at": "2026-08-22T00:00:00+08:00", "items": []}
+
+    monkeypatch.setattr("okf_workspace.api.app.system_status", status)
+    client, headers, _paths = _client(vault, tmp_path)
+
+    assert client.get("/system/status", headers=headers).status_code == 200
+    assert (
+        client.get("/system/status?refresh_services=true", headers=headers).status_code
+        == 200
+    )
+    assert calls == [False, True]
 
 
 def test_loopback_api_auth_today_capture_catalog_and_status_update(
@@ -255,20 +283,46 @@ def test_feed_api_lists_previews_opens_and_applies_human_decisions_without_absol
         f"/feeds/ai-daily/items/{item.item_id}/recommend", headers=headers
     )
     assert removed_recommendation.status_code == 404
-    decided = client.post(
+    rejected = client.post(
         f"/feeds/ai-daily/items/{item.item_id}/decision",
         headers=headers,
         json={"action": "later"},
-    ).json()
-    assert decided["action"] == "later"
-    assert decided["source"].startswith("sources/records/ai-daily/")
-    assert "E:\\" not in str(decided)
+    )
+    assert rejected.status_code == 422
+    store = FeedDecisionService(vault, paths.state).store
+    assert store.load(item) is None
+    assert not (vault / "sources" / "records" / "ai-daily").exists()
+
+    legacy_path = store.path_for(item)
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_source = vault / "sources" / "records" / "ai-daily" / "legacy.md"
+    legacy_text = vault / "sources" / "text" / "ai-daily" / "legacy.md"
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "item_id": item.item_id,
+                "action": "later",
+                "outputs": {
+                    "item_id": item.item_id,
+                    "action": "later",
+                    "source": str(legacy_source),
+                    "source_text": str(legacy_text),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     recovered = client.get(
         f"/feeds/ai-daily/items/{item.item_id}/decision",
         headers=headers,
     )
     assert recovered.status_code == 200
-    assert recovered.json() == decided
+    assert recovered.json() == {
+        "item_id": item.item_id,
+        "action": "later",
+        "source": "sources/records/ai-daily/legacy.md",
+        "source_text": "sources/text/ai-daily/legacy.md",
+    }
 
     deferred = client.post(
         f"/feeds/ai-daily/items/{second_item.item_id}/decision",

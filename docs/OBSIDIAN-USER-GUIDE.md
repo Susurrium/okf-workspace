@@ -35,6 +35,12 @@
 
 系统不会自动改写原文，也不会从日记擅自推断长期偏好。明确的待办仍使用 Obsidian Tasks 语法 `- [ ]`；Tasks/Dataview 负责查询展示，YAML Contract 不复制它们的状态。
 
+阶段复盘从 Dashboard → Life 点“新建 Review”，再选择 Weekly、Monthly 或 Yearly。系统直接
+创建或打开当期 `life/reviews/<周期>/` Markdown，模板引导你回看进展、阻力、变化和下一周期；
+不启动后台服务，也不要求 AI。也可以用 Templater 的“从模板新建笔记”选择 `Review`；Templater
+只负责首次创建，同周期文件已存在时会拒绝重复创建，已有 Review 请从 Dashboard 打开。
+终端或 Codex 也可使用 `okf note new review --period weekly|monthly|yearly` 创建或打开当期文件。
+
 ## 4. 导入 PDF、Word 或 PowerPoint
 
 在 Dashboard 点“导入资料”，依次选择文件、解析策略、用途和归属：
@@ -121,7 +127,7 @@ Codex 会先检索已有 Wiki，选择新建、更新、合并或拆分，并在
 
 Today 把 AI Daily 与树洞分成两个独立、单列、有限高度并可内部滚动的区域。Dashboard 展示全部条目的关键摘要；完整正文、评论和判断在 Obsidian 原生 Digest 中阅读。
 
-系统不替你计算兴趣或价值。每条由你选择：现在学习、稍后学习、直接形成 Wiki、只保存参考、不保留或稍后决定。对应的长期决定写入 `Source.uses[]`，`purpose` 为 `study / wiki / reference / undecided`，并可携带明确选择的 Course/Project。同一 Source 可以有多个上下文用途；正式决定只清理被覆盖的 `undecided`。选择“现在”会额外启动后台任务；选择“稍后”不会制造空白 Study Guide/Wiki。
+系统不替你计算兴趣或价值。每条由你选择：现在学习、稍后学习、直接形成 Wiki、只保存参考或不保留。对应的长期决定写入 `Source.uses[]`，`purpose` 为 `study / wiki / reference`，并可携带明确选择的 Course/Project。同一 Source 可以有多个上下文用途。暂时不能决定时直接离开即可：条目仍在 Feed 和原生 Digest 中，不产生决定回执、Source 或 `undecided`。选择“现在”会额外启动后台任务；选择“稍后学习”不会制造空白 Study Guide/Wiki。
 
 详见 [Feed 人工判断流程](FEED-WORKFLOW.md)。
 
@@ -147,7 +153,7 @@ okf context "你的问题" --scope auto --json
 ## 10. Dashboard、模板和插件
 
 - Dashboard 是首选目录与操作入口；Vault 根目录唯一 `index.md` 是手机端或 Dashboard 不可用时的结构化备用目录。
-- Templater 适合人工主动创建并填充模板；Codex 不“调用 Templater”，而是直接遵守同一个 Contract/模板语义写文件。
+- Templater 适合人工主动创建并填充 Reflection、Review 等模板；Codex 不“调用 Templater”，而是直接遵守同一个 Contract/模板语义写文件。
 - QuickAdd 可绑定高频 Dashboard/插件命令；不复制路径和 YAML 逻辑。
 - Dataview、Tasks、Recent Files 直接读取 Vault，适合查询和阅读增强，无需与 Dashboard 建立双向状态同步。
 - Chinese Calendar 与 Core Daily Notes 指向同一 Daily 模板和路径，不产生两套日记。

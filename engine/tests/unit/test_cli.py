@@ -10,6 +10,11 @@ def test_cli_exposes_m1_commands() -> None:
     assert parser.parse_args(["init", "--vault", "vault", "--with-git"]).with_git is True
     assert parser.parse_args(["validate", "--vault", "vault"]).command == "validate"
     assert parser.parse_args(["note", "new", "daily", "--vault", "vault"]).kind == "daily"
+    review = parser.parse_args(
+        ["note", "new", "review", "--period", "monthly", "--date", "2026-08-01"]
+    )
+    assert review.kind == "review"
+    assert review.period == "monthly"
     assert parser.parse_args(["tasks", "rebuild", "--vault", "vault"]).command == "tasks"
     assert parser.parse_args(["index", "rebuild", "--vault", "vault"]).command == "index"
     assert parser.parse_args(["search", "同步与备份"]).command == "search"

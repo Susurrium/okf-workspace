@@ -229,8 +229,9 @@ export class LocalApi {
     return this.request("/changes/latest");
   }
 
-  public systemStatus(): Promise<SystemStatus> {
-    return this.request("/system/status");
+  public systemStatus(refreshServices = false): Promise<SystemStatus> {
+    const query = refreshServices ? "?refresh_services=true" : "";
+    return this.request(`/system/status${query}`);
   }
 
   public syncFeeds(): Promise<unknown[]> {

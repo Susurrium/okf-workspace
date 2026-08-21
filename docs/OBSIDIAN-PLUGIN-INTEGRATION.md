@@ -24,7 +24,9 @@ Templater / QuickAdd / Chinese Calendar / Dashboard
 system/templates/interactive/
 ```
 
-当前提供 Reflection 和 Project Update。Templater 不调用 Codex，Codex 也不“操作 Templater”；
+当前提供 Reflection、Review 和 Project Update。用“从模板新建笔记”执行 `Review` 时会先选择
+Weekly、Monthly 或 Yearly，再移动到对应的 `life/reviews/` 路径；若当期文件已经存在则拒绝
+重复创建，使用 Dashboard 直接打开已有 Review。Templater 不调用 Codex，Codex 也不“操作 Templater”；
 两者共同遵守 `system/contracts/`。日记由 Core Daily Notes 使用
 `system/templates/core/Daily.md`，避免 Templater 与 Chinese Calendar 生成不同结构。
 
@@ -40,6 +42,7 @@ system/templates/interactive/
 | `okf-workspace-dashboard:open-today-daily` | 打开/创建今日日记 |
 | `okf-workspace-dashboard:append-today-daily` | 一句话写入今日日记 |
 | `okf-workspace-dashboard:quick-capture` | 保存到 Inbox |
+| `okf-workspace-dashboard:new-review` | 打开或新建当前周期 Review |
 | `okf-workspace-dashboard:new-lesson` | 选择已有课程后创建 Lesson |
 | `okf-workspace-dashboard:new-project` | 新建项目 |
 | `okf-workspace-dashboard:import-document` | 导入 PDF/Word/PowerPoint |

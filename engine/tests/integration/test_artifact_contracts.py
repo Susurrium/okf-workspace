@@ -34,8 +34,10 @@ def test_vault_installs_shared_contracts_templates_and_native_views(tmp_path: Pa
 
     assert (vault / "system/contracts/daily.yaml").is_file()
     assert (vault / "system/templates/canonical/daily.md").is_file()
+    assert (vault / "system/templates/canonical/review.md").is_file()
     assert (vault / "system/templates/core/Daily.md").is_file()
     assert (vault / "system/templates/interactive/Reflection.md").is_file()
+    assert (vault / "system/templates/interactive/Review.md").is_file()
     assert (vault / "system/views/Tasks.md").is_file()
     assert not (vault / "log.md").exists()
 

@@ -21,7 +21,6 @@ class DecisionAction(StrEnum):
     WIKI_NOW = "wiki-now"
     SOURCE_ONLY = "source-only"
     IGNORE = "ignore"
-    LATER = "later"
 
 
 @dataclass(frozen=True, slots=True)

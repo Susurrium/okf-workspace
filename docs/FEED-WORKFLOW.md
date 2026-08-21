@@ -25,10 +25,10 @@ Dashboard 展示该期全部条目，每条只显示关键摘要和必要元数�
 ├─ 只保存资料             → Source + Source Text（uses[] 增加 reference）
 └─ 不保留                 → 只在 Runtime State 记住界面决定
 
-暂时不能决定             → Source + Source Text（uses[] 增加 undecided）→ Inbox
+暂时不能决定             → 不操作；条目继续留在 Feed cache 和 Digest
 ```
 
-界面操作值保持为 `learn-now / learn-later / wiki-now / source-only / ignore / later`；它们表示“本次要执行什么”，不是长期 YAML 状态。真正持久的人工决定写入 `Source.uses[]`：
+界面只有 `learn-now / learn-later / wiki-now / source-only / ignore` 五个实际动作；它们表示“本次要执行什么”，不是长期 YAML 状态。未点击任何动作时不写决定回执、不创建 Source，也不写 `undecided`。真正需要保留资料时，人工决定写入 `Source.uses[]`：
 
 ```yaml
 uses:
@@ -40,13 +40,15 @@ uses:
 
 一个 Feed 条目与 Web Clipper 或其它 Feed 指向同一真实来源时，会复用同一 Source。每个
 `purpose + course + project` 组合只记一次，因此可以在多个 Course/Project 中使用同一来源，
-也不会因重复点击产生重复用途。从“稍后决定”改为正式决定时，只移除这一上下文被覆盖的
-`undecided`，不会删除其它课程、项目或已确认用途。
+也不会因重复点击产生重复用途。复用的旧 Source 如果已经存在 Intake 创建的
+`undecided`，正式决定只清理当前上下文被覆盖的待决定用途，不会删除其它课程、项目或已确认用途。
+
+早期版本写入 Runtime State 的 `action: later` 仅作为只读历史回执兼容；界面可显示它并允许重新判断，但 API 和 CLI 不再接受这一动作。
 
 ## 3. “现在”与“稍后”
 
 - “现在生成”先原子保存 Source 和 Source Text，再创建 Semantic Operation，并立即给 Dashboard 返回任务编号。
-- “稍后生成”不创建空白 Study Guide 或 Wiki。Learning 从 `uses[].purpose: study` 且尚无目标成果的真实 Source 汇总“待生成”；Inbox 只汇总 Capture 和 `undecided` 用途。用户以后可在 Dashboard 启动生成，也可在可见 Codex 会话中调用对应 Skill。
+- “稍后生成”不创建空白 Study Guide 或 Wiki。Learning 从 `uses[].purpose: study` 且尚无目标成果的真实 Source 汇总“待生成”；Inbox 只汇总 Capture 和 Intake 中明确选择暂存的 `undecided` 用途。用户以后可在 Dashboard 启动生成，也可在可见 Codex 会话中调用对应 Skill。
 - `study` 生成的成果进入 Learning，`wiki` 生成的成果进入 Knowledge，`reference` 不创建 Study Guide 或 Wiki。
 - 后台状态 `queued → running → completed|failed` 只存在 Runtime State。
 - 完成后卡片直接显示目标链接并发送通知；页面切换或重启不会重新变成“是否学习”。

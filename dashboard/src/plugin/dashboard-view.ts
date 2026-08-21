@@ -2309,6 +2309,8 @@ export class OkfDashboardView extends ItemView {
     jot.addEventListener("click", () => this.plugin.promptDailyCapture());
     const reflection = actions.createEl("button", { text: "新建 Reflection", cls: "okf-dashboard__ghost-action" });
     reflection.addEventListener("click", () => this.plugin.promptReflection());
+    const review = actions.createEl("button", { text: "新建 Review", cls: "okf-dashboard__ghost-action" });
+    review.addEventListener("click", () => this.plugin.promptReview());
     const calendar = actions.createEl("button", { text: "打开日历", cls: "okf-dashboard__ghost-action" });
     calendar.addEventListener("click", () => this.plugin.openChineseCalendar());
 
@@ -2472,10 +2474,10 @@ export class OkfDashboardView extends ItemView {
       header.setText(`Dashboard ${DASHBOARD_VERSION} · 正在后台读取系统快照…`);
       content.createDiv({ cls: "okf-dashboard__empty", text: "本地笔记功能不受系统诊断影响。" });
     }
-    const load = async (): Promise<void> => {
+    const load = async (refreshServices = false): Promise<void> => {
       refresh.disabled = true;
       const [status, latest] = await Promise.allSettled([
-        this.api().systemStatus(),
+        this.api().systemStatus(refreshServices),
         this.api().latestChange(),
       ]);
       if (!container.isConnected) return;
@@ -2500,7 +2502,7 @@ export class OkfDashboardView extends ItemView {
       }
       refresh.disabled = false;
     };
-    refresh.addEventListener("click", () => void load());
+    refresh.addEventListener("click", () => void load(true));
     void load();
   }
 

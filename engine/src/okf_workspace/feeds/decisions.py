@@ -50,7 +50,6 @@ def _purpose(action: DecisionAction) -> str:
         DecisionAction.LEARN_LATER: "study",
         DecisionAction.WIKI_NOW: "wiki",
         DecisionAction.SOURCE_ONLY: "reference",
-        DecisionAction.LATER: "undecided",
     }[action]
 
 
@@ -327,7 +326,6 @@ class FeedDecisionService:
             DecisionAction.LEARN_LATER,
             DecisionAction.WIKI_NOW,
             DecisionAction.SOURCE_ONLY,
-            DecisionAction.LATER,
         }
         changes_vault = creates_artifacts or (
             existing_source.is_file() and action is not DecisionAction.IGNORE

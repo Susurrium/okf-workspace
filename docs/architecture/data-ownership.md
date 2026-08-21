@@ -25,7 +25,9 @@ Other pending and confirmed uses remain intact.
 
 `study` produces a Study Guide owned by Workspace Learning, `wiki` produces a Wiki owned by Workspace
 Knowledge, and `reference` intentionally produces no semantic artifact. `undecided` remains visible to
-Inbox. Queue, retry, progress, and failure are Operations runtime data rather than Source state.
+Inbox for Intake sources that the user explicitly routed there. Taking no action on a Feed item leaves it
+only in Feed cache and its Digest; it does not create a Source or `undecided` use. Queue, retry, progress,
+and failure are Operations runtime data rather than Source state.
 
 The Markdown model does not depend on a Vault Git repository. Local checkpoints are an optional recovery
 feature that becomes active only after the user explicitly opts in.

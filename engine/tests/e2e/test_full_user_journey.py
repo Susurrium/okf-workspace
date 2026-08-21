@@ -82,16 +82,16 @@ def test_generated_vault_supports_the_full_daily_organize_project_feed_and_searc
     assert "完成一次端到端操作" in str(refreshed_project["recent_log"])
 
     feed_item = FeedItem(
-        item_id="e2e:later",
+        item_id="e2e:source-only",
         feed=FeedKind.AI_DAILY,
         edition_id="2026-08-17-news",
-        title="稍后决定的消息",
-        body="这条内容只验证决策状态，不应创建 Source。",
+        title="只作参考的消息",
+        body="这条内容验证只保存来源的明确人工决定。",
         stream="news",
     )
-    decision = FeedDecisionService(vault, state).decide(feed_item, DecisionAction.LATER)
+    decision = FeedDecisionService(vault, state).decide(feed_item, DecisionAction.SOURCE_ONLY)
     assert decision.source is not None
-    assert read_document(Path(decision.source)).frontmatter["uses"] == [{"purpose": "undecided"}]
+    assert read_document(Path(decision.source)).frontmatter["uses"] == [{"purpose": "reference"}]
 
     index = SearchIndex(vault, state / "brain.sqlite")
     index.sync()

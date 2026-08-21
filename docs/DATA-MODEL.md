@@ -154,6 +154,9 @@ uses:
 - `reference`：只保留 Source 与 Source Text，不触发语义生成；
 - `undecided`：该上下文还没有决定，显示在 Inbox。
 
+`undecided` 只用于文件导入等 Intake 流程中用户明确要求暂存归类的 Source。Feed 条目暂时
+无法判断时不执行动作，继续保留在 Feed cache 和 Digest，不为了“稍后决定”创建 Source。
+
 同一个 Source 可以同时服务多个 Course、Project 或独立场景。系统按
 `purpose + course + project` 这一完整组合幂等写入：重复点击同一选择不会产生重复项，
 在另一个上下文作出的选择也不会覆盖既有用途。Course 与 Project 都是可选的真实 Vault

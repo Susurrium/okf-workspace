@@ -72,7 +72,7 @@ Feed     → Digest   → Source → Source Text ┘
 ## 5. 最短工作流
 
 1. 随手内容写入 Daily 或 Capture；外部文档从 Dashboard 导入。
-2. 由你决定：现在学习、稍后学习、直接生成 Wiki、只保留 Source，或稍后决定。
+2. 由你决定：现在学习、稍后学习、直接生成 Wiki 或只保留 Source；Feed 暂时不判断时直接离开。
 3. 第一版 Study Guide 使用 `$prepare-study-guide`；讨论后使用 `$update-study-guide`。
 4. 长期沉淀使用 `$distill-wiki`；需要主题导航时使用 `$maintain-wiki-map`。
 5. Project 进展写入 `log.md`，当前状态同步回 `project.md`。

@@ -7,6 +7,14 @@ import {
   type CaptureRelation,
 } from "../domain/capture-context.js";
 
+export type ReviewPeriod = "weekly" | "monthly" | "yearly";
+
+interface ReviewDescriptor {
+  key: string;
+  title: string;
+  range: string;
+}
+
 function slugify(value: string, fallback = "note"): string {
   const normalized = value.normalize("NFKC").trim()
     .replace(/[^\p{Letter}\p{Number}_\u3400-\u9fff]+/gu, "-")
@@ -31,6 +39,57 @@ function localTimestamp(value = new Date()): string {
     .toISOString()
     .slice(0, 19);
   return `${local}${sign}${hours}:${minutes}`;
+}
+
+function utcDate(value: Date): Date {
+  return new Date(Date.UTC(value.getFullYear(), value.getMonth(), value.getDate()));
+}
+
+function utcDateText(value: Date): string {
+  const year = value.getUTCFullYear();
+  const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(value.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function reviewDescriptor(period: ReviewPeriod, value: Date): ReviewDescriptor {
+  const year = value.getFullYear();
+  const month = value.getMonth();
+  if (period === "weekly") {
+    const current = utcDate(value);
+    const weekday = current.getUTCDay() || 7;
+    const start = new Date(current);
+    start.setUTCDate(current.getUTCDate() - weekday + 1);
+    const end = new Date(start);
+    end.setUTCDate(start.getUTCDate() + 6);
+    const thursday = new Date(current);
+    thursday.setUTCDate(current.getUTCDate() + 4 - weekday);
+    const isoYear = thursday.getUTCFullYear();
+    const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+    const week = Math.ceil((((thursday.getTime() - yearStart.getTime()) / 86_400_000) + 1) / 7);
+    const key = `${isoYear}-W${String(week).padStart(2, "0")}`;
+    return {
+      key,
+      title: `${key} Weekly Review`,
+      range: `${utcDateText(start)} — ${utcDateText(end)}`,
+    };
+  }
+  if (period === "monthly") {
+    const key = `${year}-${String(month + 1).padStart(2, "0")}`;
+    const start = new Date(Date.UTC(year, month, 1));
+    const end = new Date(Date.UTC(year, month + 1, 0));
+    return {
+      key,
+      title: `${key} Monthly Review`,
+      range: `${utcDateText(start)} — ${utcDateText(end)}`,
+    };
+  }
+  const key = String(year);
+  return {
+    key,
+    title: `${key} Yearly Review`,
+    range: `${key}-01-01 — ${key}-12-31`,
+  };
 }
 
 function document(
@@ -173,6 +232,23 @@ export class VaultNoteService {
       `# ${title}\n\n${content.trim()}`,
     );
     await this.create(path, document("Reflection", title, body, {}));
+    return { path };
+  }
+
+  /** Create or reopen a periodic Review entirely inside the Vault. */
+  public async createReview(
+    period: ReviewPeriod,
+    value = new Date(),
+  ): Promise<{ path: string }> {
+    const review = reviewDescriptor(period, value);
+    const path = `life/reviews/${period}/${review.key}.md`;
+    if (this.app.vault.getAbstractFileByPath(path) instanceof TFile) return { path };
+    const body = await this.renderBody(
+      "review",
+      { title: review.title, period_range: review.range },
+      `# ${review.title}\n\n> 复盘范围：${review.range}\n\n## 本期回看\n\n## 做得好的\n\n## 阻力与偏差\n\n## 学到与改变\n\n## 下一周期\n\n## 补充记录\n\n<!-- ai:auto:start name="organized-review" -->\n<!-- ai:auto:end name="organized-review" -->`,
+    );
+    await this.create(path, document("Review", review.title, body, {}));
     return { path };
   }
 

@@ -1,9 +1,7 @@
 import type {
   FeedDecisionAction,
   FeedDecisionResult,
-  FeedItem,
 } from "../feeds/types.js";
-import type { AiDailyDecisionController } from "../services/ai-daily-decision-controller.js";
 
 export const FEED_DECISION_ACTIONS: readonly {
   action: FeedDecisionAction;
@@ -15,14 +13,7 @@ export const FEED_DECISION_ACTIONS: readonly {
   { action: "wiki-now", label: "直接整理成 Wiki", result: "保存来源并生成未学习 Wiki" },
   { action: "source-only", label: "只保留原始资料", result: "仅保存来源和可读摘录" },
   { action: "ignore", label: "不保留", result: "记录决定但不写入 Vault" },
-  { action: "later", label: "暂不处理（旧记录）", result: "只记录决定，不创建 Source 或学习入口" },
 ];
-
-export interface InlineDecisionView {
-  itemId: string;
-  pending: boolean;
-  selected?: FeedDecisionAction | undefined;
-}
 
 export interface FeedDecisionFeedback {
   message: string;
@@ -63,26 +54,12 @@ export function feedDecisionFeedback(result: FeedDecisionResult): FeedDecisionFe
     case "ignore":
       return { message: "已记录为不保留；没有向 Vault 写入内容。" };
     case "later":
-      return { message: "已记录为稍后决定；没有创建 Source 或学习入口，以后仍可回来重新判断。" };
-  }
-}
-
-export class AiDailyInlineDecision {
-  public constructor(
-    private readonly item: FeedItem,
-    private readonly controller: AiDailyDecisionController,
-  ) {}
-
-  public view(): InlineDecisionView {
-    const state = this.controller.state(this.item.item_id);
-    return {
-      itemId: this.item.item_id,
-      pending: state.pending,
-      selected: state.result?.action,
-    };
-  }
-
-  public choose(action: FeedDecisionAction): Promise<unknown> {
-    return this.controller.decide(this.item, action);
+      return {
+        message: result.source
+          ? "这是旧版的稍后决定记录；当时已保存 Source 并放入 Inbox，你仍可重新作出正式判断。"
+          : "这是旧版的稍后决定记录；记录中没有可用的 Source，你仍可重新作出正式判断。",
+        target: result.source,
+        targetLabel: result.source ? "打开旧 Source" : undefined,
+      };
   }
 }

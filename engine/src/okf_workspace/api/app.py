@@ -190,7 +190,6 @@ class FeedDecisionRequest(BaseModel):
         "wiki-now",
         "source-only",
         "ignore",
-        "later",
     ]
 
 
@@ -1064,8 +1063,12 @@ def create_app(
         return latest_checkpoint_summary(configured.vault)
 
     @app.get("/system/status", dependencies=protected)
-    def get_system_status() -> dict[str, object]:
-        return system_status(configured.vault, configured.state)
+    def get_system_status(refresh_services: bool = False) -> dict[str, object]:
+        return system_status(
+            configured.vault,
+            configured.state,
+            refresh_services=refresh_services,
+        )
 
     @app.get("/system/governance", dependencies=protected)
     def get_governance_report() -> dict[str, object]:

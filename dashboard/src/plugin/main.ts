@@ -42,7 +42,7 @@ import { ChoiceModal, FieldsPromptModal, TextPromptModal } from "./prompts.js";
 import { QuickCaptureModal } from "./quick-capture-modal.js";
 import { SemanticOperationMonitor } from "./semantic-monitor.js";
 import { VaultDashboardReader } from "./vault-dashboard.js";
-import { VaultNoteService } from "./vault-note-service.js";
+import { VaultNoteService, type ReviewPeriod } from "./vault-note-service.js";
 import {
   CHINESE_CALENDAR_COMMAND_ID,
   CHINESE_CALENDAR_PLUGIN_ID,
@@ -471,6 +471,34 @@ export default class OkfBrainPlugin extends Plugin {
           values.title ?? "反思",
           values.content ?? "",
         );
+        await this.openVaultPath(result.path);
+      },
+    ).open();
+  }
+
+  public promptReview(): void {
+    new ChoiceModal<ReviewPeriod>(
+      this.app,
+      [
+        {
+          value: "weekly",
+          label: "Weekly Review",
+          description: "打开已有或创建本周复盘",
+        },
+        {
+          value: "monthly",
+          label: "Monthly Review",
+          description: "打开已有或创建本月复盘",
+        },
+        {
+          value: "yearly",
+          label: "Yearly Review",
+          description: "打开已有或创建本年复盘",
+        },
+      ],
+      "选择 Review 周期",
+      async (period) => {
+        const result = await this.notes().createReview(period);
         await this.openVaultPath(result.path);
       },
     ).open();
@@ -1266,6 +1294,11 @@ export default class OkfBrainPlugin extends Plugin {
       id: "new-reflection",
       name: "新建反思",
       callback: () => this.promptReflection(),
+    });
+    this.addCommand({
+      id: "new-review",
+      name: "打开/新建周期复盘",
+      callback: () => this.promptReview(),
     });
     this.addCommand({
       id: "new-course",

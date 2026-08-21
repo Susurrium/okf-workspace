@@ -1,4 +1,4 @@
-"""Review-note API reserved for the M1 review workflow."""
+"""Periodic Review entry point backed by the canonical note service."""
 
 from .create import NoteService
 

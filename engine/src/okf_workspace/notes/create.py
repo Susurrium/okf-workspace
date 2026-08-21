@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import calendar
 from collections.abc import Callable, Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from okf_workspace.ingestion import DIRECT_ENTRY
 from okf_workspace.okf.artifacts import render_artifact_body
@@ -14,6 +15,7 @@ from okf_workspace.okf.paths import slugify
 from okf_workspace.okf.relations import explicit_context_fields, inherited_context_fields
 
 Clock = Callable[[], datetime]
+ReviewPeriod = Literal["weekly", "monthly", "yearly"]
 
 
 def _system_clock() -> datetime:
@@ -148,6 +150,49 @@ class NoteService:
             title=title,
             body=render_artifact_body(
                 self.vault, "reflection", title=title, content=content.strip()
+            ),
+        )
+
+    def create_review(
+        self,
+        period: ReviewPeriod,
+        target_date: date | None = None,
+    ) -> Path:
+        """Create or reopen the current human-authored periodic Review."""
+
+        value = target_date or self.clock().date()
+        if period == "weekly":
+            iso = value.isocalendar()
+            key = f"{iso.year}-W{iso.week:02d}"
+            title = f"{key} Weekly Review"
+            start = value - timedelta(days=value.weekday())
+            end = start + timedelta(days=6)
+        elif period == "monthly":
+            key = f"{value:%Y-%m}"
+            title = f"{key} Monthly Review"
+            start = value.replace(day=1)
+            end = value.replace(day=calendar.monthrange(value.year, value.month)[1])
+        elif period == "yearly":
+            key = f"{value:%Y}"
+            title = f"{key} Yearly Review"
+            start = value.replace(month=1, day=1)
+            end = value.replace(month=12, day=31)
+        else:
+            raise ValueError(f"unsupported review period: {period}")
+
+        relative = Path("life") / "reviews" / period / f"{key}.md"
+        path = self.vault / relative
+        if path.is_file():
+            return path
+        return self._create(
+            relative,
+            note_type="Review",
+            title=title,
+            body=render_artifact_body(
+                self.vault,
+                "review",
+                title=title,
+                period_range=f"{start} — {end}",
             ),
         )
 

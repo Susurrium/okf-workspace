@@ -120,6 +120,11 @@ def build_parser() -> argparse.ArgumentParser:
     daily.add_argument("--vault", type=Path, default=defaults.vault)
     daily.add_argument("--date", type=_date)
 
+    review = kinds.add_parser("review")
+    review.add_argument("--vault", type=Path, default=defaults.vault)
+    review.add_argument("--period", choices=("weekly", "monthly", "yearly"), required=True)
+    review.add_argument("--date", type=_date)
+
     for kind in ("capture", "reflection", "wiki"):
         item = kinds.add_parser(kind)
         item.add_argument("--vault", type=Path, default=defaults.vault)
@@ -356,7 +361,6 @@ def build_parser() -> argparse.ArgumentParser:
             "wiki-now",
             "source-only",
             "ignore",
-            "later",
         ),
     )
     decide_feed.add_argument("--vault", type=Path, default=defaults.vault)
@@ -384,6 +388,8 @@ def _note_command(args: argparse.Namespace) -> Path:
     service = NoteService(args.vault)
     if args.kind == "daily":
         return service.create_daily(args.date)
+    if args.kind == "review":
+        return service.create_review(args.period, args.date)
     if args.kind == "capture":
         return service.create_capture(args.title, args.content)
     if args.kind == "reflection":

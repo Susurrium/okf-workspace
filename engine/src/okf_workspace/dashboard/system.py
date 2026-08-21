@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
+import threading
+import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -27,6 +30,73 @@ class SystemItem:
     action: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _ServiceProbe:
+    kind: str
+    expires_at: float
+    status_code: int | None = None
+
+
+_SERVICE_PROBE_CACHE: dict[tuple[str, str, bytes], _ServiceProbe] = {}
+_SERVICE_PROBE_LOCK = threading.Lock()
+
+
+def _probe_service(
+    url: str,
+    health_path: str,
+    headers: Mapping[str, str],
+    *,
+    cache_namespace: str,
+    timeouts: tuple[float, ...],
+    refresh: bool,
+    success_ttl_seconds: float,
+    failure_ttl_seconds: float,
+) -> _ServiceProbe:
+    endpoint = f"{url.rstrip('/')}{health_path}"
+    authorization_fingerprint = hashlib.sha256(
+        headers.get("Authorization", "").encode("utf-8")
+    ).digest()
+    cache_key = (cache_namespace, endpoint, authorization_fingerprint)
+    now = time.monotonic()
+    if not refresh:
+        with _SERVICE_PROBE_LOCK:
+            cached = _SERVICE_PROBE_CACHE.get(cache_key)
+        if cached is not None and cached.expires_at > now:
+            return cached
+
+    kind = "unreachable"
+    status_code: int | None = None
+    for attempt, timeout_seconds in enumerate(timeouts):
+        try:
+            response = httpx.get(
+                endpoint,
+                headers=dict(headers),
+                timeout=timeout_seconds,
+            )
+            status_code = response.status_code
+            if status_code == 200:
+                kind = "available"
+            elif status_code in {401, 403}:
+                kind = "authentication-failed"
+            else:
+                kind = "degraded"
+            if status_code not in {502, 504} or attempt == len(timeouts) - 1:
+                break
+        except httpx.TransportError:
+            if attempt == len(timeouts) - 1:
+                kind = "unreachable"
+
+    ttl_seconds = success_ttl_seconds if kind == "available" else failure_ttl_seconds
+    result = _ServiceProbe(
+        kind=kind,
+        status_code=status_code,
+        expires_at=time.monotonic() + ttl_seconds,
+    )
+    with _SERVICE_PROBE_LOCK:
+        _SERVICE_PROBE_CACHE[cache_key] = result
+    return result
+
+
 def _service_item(
     item_id: str,
     label: str,
@@ -34,6 +104,11 @@ def _service_item(
     *,
     health_path: str = "/health",
     token_file: Path | None = None,
+    cache_namespace: str = "default",
+    probe_timeouts: tuple[float, ...] = (1.5,),
+    refresh: bool = False,
+    success_ttl_seconds: float = 60.0,
+    failure_ttl_seconds: float = 15.0,
 ) -> SystemItem:
     headers: dict[str, str] = {}
     if token_file is not None:
@@ -50,15 +125,33 @@ def _service_item(
                 action=f"配置 {label} token 文件",
             )
         headers["Authorization"] = f"Bearer {token}"
-    try:
-        response = httpx.get(
-            f"{url.rstrip('/')}{health_path}",
-            headers=headers,
-            timeout=1.5,
+    probe = _probe_service(
+        url,
+        health_path,
+        headers,
+        cache_namespace=cache_namespace,
+        timeouts=probe_timeouts,
+        refresh=refresh,
+        success_ttl_seconds=success_ttl_seconds,
+        failure_ttl_seconds=failure_ttl_seconds,
+    )
+    if probe.kind == "authentication-failed":
+        return SystemItem(
+            item_id=item_id,
+            label=label,
+            status="unavailable",
+            detail="认证失败",
+            action=f"检查 {label} token",
         )
-        available = response.status_code == 200
-    except httpx.HTTPError:
-        available = False
+    if probe.kind == "degraded":
+        return SystemItem(
+            item_id=item_id,
+            label=label,
+            status="degraded",
+            detail=f"服务可连接，但健康检查异常；HTTP {probe.status_code}",
+            action=f"检查 {label} Worker 或存储状态",
+        )
+    available = probe.kind == "available"
     return SystemItem(
         item_id=item_id,
         label=label,
@@ -171,17 +264,33 @@ def _backup_configured(runtime: Path) -> bool:
     return isinstance(repository, str) and bool(repository.strip())
 
 
-def system_status(vault: Path, state: Path) -> dict[str, object]:
+def system_status(
+    vault: Path,
+    state: Path,
+    *,
+    refresh_services: bool = False,
+) -> dict[str, object]:
     root = vault.resolve()
     runtime = state.resolve()
     settings = ImportSettings.from_env()
-    mineru = _service_item("mineru", "MinerU", settings.mineru_url)
+    cache_namespace = str(runtime)
+    mineru = _service_item(
+        "mineru",
+        "MinerU",
+        settings.mineru_url,
+        cache_namespace=cache_namespace,
+        refresh=refresh_services,
+        failure_ttl_seconds=60.0 if settings.mineru_ssh_managed else 15.0,
+    )
     markitdown = _service_item(
         "markitdown",
         "MarkItDown",
         settings.markitdown_url,
         health_path="/v1/health",
         token_file=settings.markitdown_token_file,
+        cache_namespace=cache_namespace,
+        probe_timeouts=(1.5, 4.0),
+        refresh=refresh_services,
     )
     if mineru.status != "available" and settings.mineru_ssh_managed:
         mineru = SystemItem(

@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+import httpx
 import pytest
 
 from okf_workspace.dashboard.system import system_status
@@ -159,3 +160,52 @@ def test_system_status_prompts_only_when_optional_backup_is_enabled(
 
     assert items["backup"]["status"] == "not-configured"
     assert items["backup"]["action"] == "执行首次备份"
+
+
+def test_system_status_retries_a_transient_markitdown_timeout(
+    vault: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, float]] = []
+
+    def get(url: str, **kwargs: object) -> HealthyResponse:
+        timeout = cast(float, kwargs["timeout"])
+        calls.append((url, timeout))
+        if url.endswith("/v1/health") and timeout < 2.0:
+            raise httpx.ReadTimeout("temporary remote latency")
+        return HealthyResponse()
+
+    monkeypatch.setattr("okf_workspace.dashboard.system.httpx.get", get)
+    monkeypatch.delenv("OKF_MARKITDOWN_TOKEN_FILE", raising=False)
+
+    status = system_status(vault, tmp_path / "state")
+    items = {item["item_id"]: item for item in cast(list[dict[str, object]], status["items"])}
+
+    assert items["markitdown"]["status"] == "available"
+    markitdown_calls = [call for call in calls if call[0].endswith("/v1/health")]
+    assert [timeout for _, timeout in markitdown_calls] == [1.5, 4.0]
+
+
+def test_system_status_caches_service_probes_but_can_force_refresh(
+    vault: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def get(*_args: object, **_kwargs: object) -> HealthyResponse:
+        nonlocal calls
+        calls += 1
+        return HealthyResponse()
+
+    monkeypatch.setattr("okf_workspace.dashboard.system.httpx.get", get)
+    monkeypatch.delenv("OKF_MARKITDOWN_TOKEN_FILE", raising=False)
+    state = tmp_path / "state"
+
+    system_status(vault, state)
+    system_status(vault, state)
+    assert calls == 2
+
+    system_status(vault, state, refresh_services=True)
+    assert calls == 4

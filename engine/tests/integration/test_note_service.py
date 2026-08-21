@@ -35,6 +35,36 @@ def test_human_capture_daily_and_reflection_flow(tmp_path: Path) -> None:
     assert validate_bundle(vault).valid
 
 
+def test_periodic_reviews_are_human_first_and_idempotent(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    service = NoteService(vault, clock=lambda: NOW)
+
+    weekly = service.create_review("weekly")
+    monthly = service.create_review("monthly")
+    yearly = service.create_review("yearly")
+    boundary_week = service.create_review(
+        "weekly",
+        target_date=NOW.date().replace(year=2021, month=1, day=1),
+    )
+
+    assert weekly.relative_to(vault).as_posix() == "life/reviews/weekly/2026-W34.md"
+    assert monthly.relative_to(vault).as_posix() == "life/reviews/monthly/2026-08.md"
+    assert yearly.relative_to(vault).as_posix() == "life/reviews/yearly/2026.md"
+    assert boundary_week.relative_to(vault).as_posix() == "life/reviews/weekly/2020-W53.md"
+    assert service.create_review("weekly") == weekly
+    weekly_document = read_document(weekly)
+    assert weekly_document.frontmatter == {
+        "type": "Review",
+        "title": "2026-W34 Weekly Review",
+        "created_at": NOW.isoformat(timespec="seconds"),
+    }
+    assert "复盘范围：2026-08-17 — 2026-08-23" in weekly_document.body
+    assert "## 下一周期" in weekly_document.body
+    assert '<!-- ai:auto:start name="organized-review" -->' in weekly_document.body
+    assert "复盘范围：2020-12-28 — 2021-01-03" in read_document(boundary_week).body
+    assert validate_bundle(vault).valid
+
+
 def test_course_lesson_project_and_wiki_flow(tmp_path: Path) -> None:
     vault = initialize_vault(tmp_path / "vault")
     service = NoteService(vault, clock=lambda: NOW)

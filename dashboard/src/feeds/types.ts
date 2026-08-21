@@ -4,8 +4,10 @@ export type FeedDecisionAction =
   | "learn-later"
   | "wiki-now"
   | "source-only"
-  | "ignore"
-  | "later";
+  | "ignore";
+
+/** Read-only compatibility for receipts created before `later` was removed. */
+export type FeedDecisionReceiptAction = FeedDecisionAction | "later";
 
 export interface FeedComment {
   text: string;
@@ -29,7 +31,7 @@ export interface FeedItem {
   metrics: Record<string, number | string>;
   comments: FeedComment[];
   media: string[];
-  decision?: FeedDecisionAction;
+  decision?: FeedDecisionReceiptAction;
 }
 
 export interface FeedDigest {
@@ -84,7 +86,7 @@ export interface FeedDashboardDigest {
 
 export interface FeedDecisionResult {
   item_id: string;
-  action: FeedDecisionAction;
+  action: FeedDecisionReceiptAction;
   source?: string;
   source_text?: string;
   study_guide?: string;
