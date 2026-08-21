@@ -13,12 +13,30 @@ function Write-OkfJson {
     )
     $parent = Split-Path -Parent $Path
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
-    $json = $Value | ConvertTo-Json -Depth 10
-    [System.IO.File]::WriteAllText(
-        (Resolve-OkfPath $Path),
-        $json,
-        (New-Object System.Text.UTF8Encoding($false))
-    )
+    $json = ConvertTo-Json -InputObject $Value -Depth 10
+    $resolvedPath = Resolve-OkfPath $Path
+    $temporaryPath = Join-Path $parent ".$(Split-Path -Leaf $resolvedPath).tmp-$([guid]::NewGuid().ToString('N'))"
+    $backupPath = Join-Path $parent ".$(Split-Path -Leaf $resolvedPath).backup-$([guid]::NewGuid().ToString('N'))"
+    try {
+        [System.IO.File]::WriteAllText(
+            $temporaryPath,
+            $json,
+            (New-Object System.Text.UTF8Encoding($false))
+        )
+        if (Test-Path -LiteralPath $resolvedPath -PathType Leaf) {
+            [System.IO.File]::Replace($temporaryPath, $resolvedPath, $backupPath)
+            Remove-Item -LiteralPath $backupPath -Force
+        } else {
+            [System.IO.File]::Move($temporaryPath, $resolvedPath)
+        }
+    } finally {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force
+        }
+        if (Test-Path -LiteralPath $backupPath) {
+            Remove-Item -LiteralPath $backupPath -Force
+        }
+    }
 }
 
 function Read-OkfConfig {
@@ -210,37 +228,49 @@ function Write-OkfOwnershipMarker {
     })
 }
 
-function Install-OkfPluginAtomic {
+function Install-OkfPluginArtifactsAtomic {
     param(
-        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Artifacts,
         [Parameter(Mandatory)][string]$Target,
         [Parameter(Mandatory)][string]$ExpectedId
     )
 
-    $sourcePath = Resolve-OkfPath $Source
     $targetPath = Resolve-OkfPath $Target
-    if (-not (Test-Path -LiteralPath $sourcePath -PathType Container)) {
-        throw "Plugin source directory not found: $sourcePath"
+    if ((Split-Path -Leaf $targetPath) -cne $ExpectedId) {
+        throw "Plugin target directory must be named '$ExpectedId': $targetPath"
     }
 
     $requiredFiles = @('main.js', 'manifest.json', 'styles.css')
     foreach ($file in $requiredFiles) {
-        $sourceFile = Join-Path $sourcePath $file
+        if (-not $Artifacts.Contains($file)) {
+            throw "Plugin artifact mapping is missing: $file"
+        }
+        $sourceFile = Resolve-OkfPath ([string]$Artifacts[$file])
         if (-not (Test-Path -LiteralPath $sourceFile -PathType Leaf)) {
             throw "Plugin file missing: $sourceFile"
         }
     }
+    $manifestPath = Resolve-OkfPath ([string]$Artifacts['manifest.json'])
     try {
-        $manifest = Get-Content -LiteralPath (Join-Path $sourcePath 'manifest.json') -Raw | ConvertFrom-Json
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     } catch {
-        throw "Plugin manifest is invalid JSON: $(Join-Path $sourcePath 'manifest.json')"
+        throw "Plugin manifest is invalid JSON: $manifestPath"
     }
-    if ([string]$manifest.id -ne $ExpectedId) {
+    if ([string]$manifest.id -cne $ExpectedId) {
         throw "Plugin manifest id must be '$ExpectedId', found '$([string]$manifest.id)'"
     }
 
     $targetParent = Split-Path -Parent $targetPath
     New-Item -ItemType Directory -Force -Path $targetParent | Out-Null
+    if (Test-Path -LiteralPath $targetPath) {
+        if (-not (Test-Path -LiteralPath $targetPath -PathType Container)) {
+            throw "Plugin target is not a directory: $targetPath"
+        }
+        $targetItem = Get-Item -LiteralPath $targetPath -Force
+        if (($targetItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing plugin install through a reparse point: $targetPath"
+        }
+    }
     $operationId = [guid]::NewGuid().ToString('N')
     $stagePath = Join-Path $targetParent ".$ExpectedId.stage-$operationId"
     $backupPath = Join-Path $targetParent ".$ExpectedId.backup-$operationId"
@@ -251,7 +281,8 @@ function Install-OkfPluginAtomic {
                 Copy-Item -Destination $stagePath -Recurse -Force
         }
         foreach ($file in $requiredFiles) {
-            Copy-Item -LiteralPath (Join-Path $sourcePath $file) -Destination (Join-Path $stagePath $file) -Force
+            Copy-Item -LiteralPath (Resolve-OkfPath ([string]$Artifacts[$file])) `
+                -Destination (Join-Path $stagePath $file) -Force
         }
 
         if (Test-Path -LiteralPath $targetPath) {
@@ -274,4 +305,134 @@ function Install-OkfPluginAtomic {
         }
     }
     return $targetPath
+}
+
+function Install-OkfPluginAtomic {
+    param(
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][string]$ExpectedId
+    )
+
+    $sourcePath = Resolve-OkfPath $Source
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Container)) {
+        throw "Plugin source directory not found: $sourcePath"
+    }
+    return Install-OkfPluginArtifactsAtomic `
+        -Artifacts ([ordered]@{
+            'main.js' = Join-Path $sourcePath 'main.js'
+            'manifest.json' = Join-Path $sourcePath 'manifest.json'
+            'styles.css' = Join-Path $sourcePath 'styles.css'
+        }) `
+        -Target $Target `
+        -ExpectedId $ExpectedId
+}
+
+function Install-OkfDashboardPluginAtomic {
+    param(
+        [Parameter(Mandatory)][string]$DashboardRoot,
+        [Parameter(Mandatory)][string]$Target
+    )
+
+    $sourcePath = Resolve-OkfPath $DashboardRoot
+    if (-not (Test-Path -LiteralPath $sourcePath -PathType Container)) {
+        throw "Dashboard source directory not found: $sourcePath"
+    }
+    return Install-OkfPluginArtifactsAtomic `
+        -Artifacts ([ordered]@{
+            'main.js' = Join-Path $sourcePath 'dist\main.js'
+            'manifest.json' = Join-Path $sourcePath 'manifest.json'
+            'styles.css' = Join-Path $sourcePath 'styles.css'
+        }) `
+        -Target $Target `
+        -ExpectedId 'okf-workspace-dashboard'
+}
+
+function Complete-OkfDashboardPluginMigration {
+    param([Parameter(Mandatory)][string]$Vault)
+
+    $currentId = 'okf-workspace-dashboard'
+    $legacyId = 'okf-brain-dashboard'
+    $vaultPath = Resolve-OkfPath $Vault
+    $obsidianRoot = Join-Path $vaultPath '.obsidian'
+    $pluginsRoot = Join-Path $obsidianRoot 'plugins'
+    $currentTarget = Assert-OkfChildPath `
+        -Parent $pluginsRoot `
+        -Child (Join-Path $pluginsRoot $currentId)
+    $currentManifestPath = Join-Path $currentTarget 'manifest.json'
+    if (-not (Test-Path -LiteralPath $currentManifestPath -PathType Leaf)) {
+        throw "Installed Dashboard manifest is missing: $currentManifestPath"
+    }
+    try {
+        $currentManifest = Get-Content -LiteralPath $currentManifestPath -Raw | ConvertFrom-Json
+    } catch {
+        throw "Installed Dashboard manifest is invalid JSON: $currentManifestPath"
+    }
+    if ([string]$currentManifest.id -cne $currentId) {
+        throw "Installed Dashboard manifest id must be '$currentId', found '$([string]$currentManifest.id)'"
+    }
+
+    $legacyTarget = Assert-OkfChildPath `
+        -Parent $pluginsRoot `
+        -Child (Join-Path $pluginsRoot $legacyId)
+    $removeLegacy = Test-Path -LiteralPath $legacyTarget
+    if ($removeLegacy) {
+        if (-not (Test-Path -LiteralPath $legacyTarget -PathType Container)) {
+            throw "Legacy Dashboard path is not a directory: $legacyTarget"
+        }
+        $legacyItem = Get-Item -LiteralPath $legacyTarget -Force
+        if (($legacyItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Refusing legacy Dashboard cleanup through a reparse point: $legacyTarget"
+        }
+        $legacyManifestPath = Join-Path $legacyTarget 'manifest.json'
+        if (Test-Path -LiteralPath $legacyManifestPath -PathType Leaf) {
+            try {
+                $legacyManifest = Get-Content -LiteralPath $legacyManifestPath -Raw | ConvertFrom-Json
+            } catch {
+                throw "Legacy Dashboard manifest is invalid JSON: $legacyManifestPath"
+            }
+            if ([string]$legacyManifest.id -cne $legacyId) {
+                throw "Refusing to remove legacy Dashboard directory with manifest id '$([string]$legacyManifest.id)': $legacyTarget"
+            }
+        }
+    }
+
+    $communityPlugins = Join-Path $obsidianRoot 'community-plugins.json'
+    $loaded = @()
+    if (Test-Path -LiteralPath $communityPlugins -PathType Leaf) {
+        $rawCommunityPlugins = Get-Content -LiteralPath $communityPlugins -Raw
+        if (-not $rawCommunityPlugins.Trim().StartsWith('[') -or
+            -not $rawCommunityPlugins.Trim().EndsWith(']')) {
+            throw "Obsidian community plugin configuration must be a JSON array: $communityPlugins"
+        }
+        try {
+            # Windows PowerShell 5.1 emits a JSON array as one Object[] pipeline
+            # item, while PowerShell 7 enumerates it. Assign first, then normalize.
+            $parsedCommunityPlugins = ConvertFrom-Json -InputObject $rawCommunityPlugins
+            $loaded = @($parsedCommunityPlugins)
+        } catch {
+            throw "Obsidian community plugin configuration is invalid JSON: $communityPlugins"
+        }
+    }
+
+    $preserved = [System.Collections.Generic.List[string]]::new()
+    foreach ($pluginId in $loaded) {
+        if ($pluginId -isnot [string]) {
+            throw "Obsidian community plugin configuration contains a non-string id: $communityPlugins"
+        }
+        if ([string]::Equals($pluginId, $currentId, [System.StringComparison]::Ordinal) -or
+            [string]::Equals($pluginId, $legacyId, [System.StringComparison]::Ordinal)) {
+            continue
+        }
+        $preserved.Add($pluginId)
+    }
+    $enabled = @($currentId) + @($preserved.ToArray())
+
+    # Commit the load order before deleting the retired code. A failed delete is
+    # safe to retry: the old directory remains present but is no longer enabled.
+    Write-OkfJson -Path $communityPlugins -Value $enabled
+    if ($removeLegacy) {
+        Remove-Item -LiteralPath $legacyTarget -Recurse -Force
+    }
+    return $enabled
 }

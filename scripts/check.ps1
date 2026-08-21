@@ -4,6 +4,8 @@ param()
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
+& (Join-Path $root 'deploy\windows\test-dashboard-plugin-migration.ps1')
+
 Push-Location (Join-Path $root 'engine')
 try {
     & uv run pytest

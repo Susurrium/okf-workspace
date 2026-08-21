@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from okf_workspace.config import default_template_root
 from okf_workspace.migration import migrate_current_layout
 from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
-from okf_workspace.okf.templates import initialize_vault
+from okf_workspace.okf.templates import VAULT_DYNAMIC_DIRECTORIES, initialize_vault
 from okf_workspace.okf.validator import validate_bundle
 
 
@@ -61,6 +62,38 @@ def test_migration_replaces_root_navigation_and_removes_nested_indexes(tmp_path:
     assert "generated.at" in knowledge_view
     assert "verified.at" in knowledge_view
     assert "ai_unverified" not in knowledge_view
+    assert migrate_current_layout(vault, default_template_root()) == ()
+
+
+def test_migration_repairs_missing_standard_directories_without_restoring_content(
+    tmp_path: Path,
+) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    removed_top_levels = (
+        "archive",
+        "feeds",
+        "inbox",
+        "knowledge",
+        "learning",
+        "life",
+        "projects",
+        "sources",
+    )
+    for top_level in removed_top_levels:
+        shutil.rmtree(vault / top_level)
+    (vault / "self/decisions").rmdir()
+    (vault / "self/hypotheses").rmdir()
+    personal_note = vault / "self/private.md"
+    personal_note.write_text("keep\n", encoding="utf-8")
+
+    changes = migrate_current_layout(vault, default_template_root())
+
+    assert all((vault / relative).is_dir() for relative in VAULT_DYNAMIC_DIRECTORIES)
+    assert personal_note.read_text(encoding="utf-8") == "keep\n"
+    assert not (vault / "learning/topics").exists()
+    assert not (vault / "sources/extracts").exists()
+    assert all(not any((vault / relative).iterdir()) for relative in VAULT_DYNAMIC_DIRECTORIES)
+    assert any(change.endswith("(created standard directory)") for change in changes)
     assert migrate_current_layout(vault, default_template_root()) == ()
 
 

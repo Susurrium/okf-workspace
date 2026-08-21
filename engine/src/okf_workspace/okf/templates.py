@@ -29,27 +29,40 @@ _STATIC_FILES = (
     "self/profile.md",
 )
 _STATIC_DIRECTORIES = ("system",)
-_DYNAMIC_DIRECTORIES = (
-    "archive/captures",
-    "feeds/ai-daily",
-    "feeds/treehole",
-    "inbox/captures",
-    "knowledge/maps",
-    "knowledge/wiki",
-    "learning/courses",
-    "learning/guides",
-    "learning/plans",
-    "life/areas",
-    "life/daily",
-    "life/reflections",
-    "life/reviews",
-    "projects",
-    "self/decisions",
-    "self/hypotheses",
-    "sources/assets",
-    "sources/records",
-    "sources/text",
+VAULT_DYNAMIC_DIRECTORIES = (
+    Path("archive/captures"),
+    Path("feeds/ai-daily"),
+    Path("feeds/treehole"),
+    Path("inbox/captures"),
+    Path("knowledge/maps"),
+    Path("knowledge/wiki"),
+    Path("learning/courses"),
+    Path("learning/guides"),
+    Path("learning/plans"),
+    Path("life/areas"),
+    Path("life/daily"),
+    Path("life/reflections"),
+    Path("life/reviews"),
+    Path("projects"),
+    Path("self/decisions"),
+    Path("self/hypotheses"),
+    Path("sources/assets"),
+    Path("sources/records"),
+    Path("sources/text"),
 )
+
+
+def ensure_vault_dynamic_directories(target: Path) -> tuple[Path, ...]:
+    """Create any missing user-content directories without copying content."""
+
+    created: list[Path] = []
+    for relative in VAULT_DYNAMIC_DIRECTORIES:
+        directory = target / relative
+        if directory.is_dir():
+            continue
+        directory.mkdir(parents=True, exist_ok=True)
+        created.append(relative)
+    return tuple(created)
 
 
 def _copy_workspace_kit(template: Path, target: Path) -> None:
@@ -66,8 +79,7 @@ def _copy_workspace_kit(template: Path, target: Path) -> None:
         if not source.is_dir():
             raise VaultInitializationError(f"Workspace Kit directory is missing: {source}")
         shutil.copytree(source, target / name)
-    for relative in _DYNAMIC_DIRECTORIES:
-        (target / relative).mkdir(parents=True, exist_ok=True)
+    ensure_vault_dynamic_directories(target)
 
 
 def initialize_vault(

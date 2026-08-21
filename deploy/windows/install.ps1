@@ -266,23 +266,20 @@ Write-OkfJson -Path $configPath -Value $config
 
 $pluginTarget = Join-Path $vaultPath '.obsidian\plugins\okf-workspace-dashboard'
 $legacyPluginTarget = Join-Path $vaultPath '.obsidian\plugins\okf-brain-dashboard'
-New-Item -ItemType Directory -Force -Path $pluginTarget | Out-Null
-Copy-Item -LiteralPath (Join-Path $repo 'dashboard\dist\main.js') -Destination (Join-Path $pluginTarget 'main.js') -Force
-Copy-Item -LiteralPath (Join-Path $repo 'dashboard\manifest.json') -Destination (Join-Path $pluginTarget 'manifest.json') -Force
-Copy-Item -LiteralPath (Join-Path $repo 'dashboard\styles.css') -Destination (Join-Path $pluginTarget 'styles.css') -Force
+Install-OkfDashboardPluginAtomic `
+    -DashboardRoot (Join-Path $repo 'dashboard') `
+    -Target $pluginTarget | Out-Null
 & (Join-Path $repo 'scripts\install-okf-claudian.ps1') `
     -Vault $vaultPath `
     -ClaudianRepository $claudianRepo
 if ($LASTEXITCODE -ne 0) { throw 'OKF Claudian installation failed' }
 $pluginDataPath = Join-Path $pluginTarget 'data.json'
 $legacyPluginDataPath = Join-Path $legacyPluginTarget 'data.json'
-if (-not (Test-Path -LiteralPath $pluginDataPath -PathType Leaf) -and
-    (Test-Path -LiteralPath $legacyPluginDataPath -PathType Leaf)) {
-    Copy-Item -LiteralPath $legacyPluginDataPath -Destination $pluginDataPath -Force
-}
 $pluginData = @{}
 if (Test-Path -LiteralPath $pluginDataPath -PathType Leaf) {
     $pluginData = Get-Content -LiteralPath $pluginDataPath -Raw | ConvertFrom-Json -AsHashtable
+} elseif (Test-Path -LiteralPath $legacyPluginDataPath -PathType Leaf) {
+    $pluginData = Get-Content -LiteralPath $legacyPluginDataPath -Raw | ConvertFrom-Json -AsHashtable
 }
 $pluginData['baseUrl'] = "http://127.0.0.1:$ApiPort"
 $pluginData['tokenFile'] = $tokenFile
@@ -293,6 +290,10 @@ if (-not $pluginData.ContainsKey('manageLocalService')) { $pluginData['manageLoc
 $pluginData.Remove('token')
 Write-OkfJson -Path $pluginDataPath -Value $pluginData
 
+# Only after the replacement plugin and its settings are durable do we switch
+# Obsidian's load order and retire the explicitly supported legacy plugin id.
+$enabled = @(Complete-OkfDashboardPluginMigration -Vault $vaultPath)
+
 $obsidianAppConfig = Join-Path $vaultPath '.obsidian\app.json'
 $obsidianAppSettings = @{}
 if (Test-Path -LiteralPath $obsidianAppConfig -PathType Leaf) {
@@ -302,17 +303,6 @@ $obsidianAppSettings['alwaysUpdateLinks'] = $true
 Write-OkfJson -Path $obsidianAppConfig -Value $obsidianAppSettings
 
 $communityPlugins = Join-Path $vaultPath '.obsidian\community-plugins.json'
-$enabled = @()
-if (Test-Path -LiteralPath $communityPlugins) {
-    $loaded = Get-Content -LiteralPath $communityPlugins -Raw | ConvertFrom-Json
-    if ($loaded) { $enabled = @($loaded) }
-}
-$enabled = @($enabled | Where-Object { $_ -ne 'okf-brain-dashboard' })
-if ($enabled -notcontains 'okf-workspace-dashboard') { $enabled += 'okf-workspace-dashboard' }
-
-# Optional community plugins remain user-owned. Installation preserves their
-# enabled/disabled state even when their code is already present in the Vault.
-Write-OkfJson -Path $communityPlugins -Value $enabled
 
 $templaterManifest = Join-Path $vaultPath '.obsidian\plugins\templater-obsidian\manifest.json'
 if (Test-Path -LiteralPath $templaterManifest -PathType Leaf) {

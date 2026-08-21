@@ -6,6 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $root 'deploy\windows\common.ps1')
 $vaultRoot = [System.IO.Path]::GetFullPath($Vault)
 if (-not (Test-Path -LiteralPath $vaultRoot -PathType Container)) {
     throw "Vault does not exist: $vaultRoot"
@@ -16,15 +17,18 @@ if (-not (Test-Path -LiteralPath $obsidianRoot -PathType Container)) {
 }
 & (Join-Path $PSScriptRoot 'build-dashboard.ps1')
 $target = Join-Path $vaultRoot '.obsidian\plugins\okf-workspace-dashboard'
-New-Item -ItemType Directory -Force -Path $target | Out-Null
-Copy-Item -LiteralPath (Join-Path $root 'dashboard\dist\main.js') -Destination $target -Force
-Copy-Item -LiteralPath (Join-Path $root 'dashboard\manifest.json') -Destination $target -Force
-Copy-Item -LiteralPath (Join-Path $root 'dashboard\styles.css') -Destination $target -Force
+Install-OkfDashboardPluginAtomic `
+    -DashboardRoot (Join-Path $root 'dashboard') `
+    -Target $target | Out-Null
 
 $dataPath = Join-Path $target 'data.json'
+$legacyTarget = Join-Path $vaultRoot '.obsidian\plugins\okf-brain-dashboard'
+$legacyDataPath = Join-Path $legacyTarget 'data.json'
 $data = @{}
 if (Test-Path -LiteralPath $dataPath -PathType Leaf) {
     $data = Get-Content -LiteralPath $dataPath -Raw | ConvertFrom-Json -AsHashtable
+} elseif (Test-Path -LiteralPath $legacyDataPath -PathType Leaf) {
+    $data = Get-Content -LiteralPath $legacyDataPath -Raw | ConvertFrom-Json -AsHashtable
 }
 
 $explicitState = [bool]$State
@@ -64,14 +68,9 @@ if ($explicitState -or -not $data.ContainsKey('serviceLogDirectory')) {
 }
 if (-not $data.ContainsKey('manageLocalService')) { $data['manageLocalService'] = $true }
 $data.Remove('token')
-$data | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $dataPath -Encoding UTF8 -NoNewline
+Write-OkfJson -Path $dataPath -Value $data
 
-$communityPlugins = Join-Path $vaultRoot '.obsidian\community-plugins.json'
-$enabled = @()
-if (Test-Path -LiteralPath $communityPlugins -PathType Leaf) {
-    $enabled = @(Get-Content -LiteralPath $communityPlugins -Raw | ConvertFrom-Json)
-}
-$enabled = @($enabled | Where-Object { $_ -ne 'okf-brain-dashboard' })
-if ($enabled -notcontains 'okf-workspace-dashboard') { $enabled += 'okf-workspace-dashboard' }
-$enabled | ConvertTo-Json -Depth 2 | Set-Content -LiteralPath $communityPlugins -Encoding UTF8 -NoNewline
+# Preserve every user-owned plugin in its existing order, make the Dashboard
+# load first for a stable Ribbon position, then remove only its retired id.
+Complete-OkfDashboardPluginMigration -Vault $vaultRoot | Out-Null
 Write-Host "Dashboard installed: $target"

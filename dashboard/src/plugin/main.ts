@@ -31,6 +31,10 @@ import {
   feedDecisionFeedback,
 } from "../ui/ai-daily-inline-decision.js";
 import { OkfDashboardView, OKF_DASHBOARD_VIEW } from "./dashboard-view.js";
+import {
+  DASHBOARD_COMMAND_ID,
+  registerDashboardRibbon,
+} from "./dashboard-ribbon.js";
 import { IndexSyncCoordinator } from "./index-sync.js";
 import { feedLivePreviewExtension } from "./live-preview.js";
 import { LocalServiceManager } from "./local-service.js";
@@ -91,6 +95,10 @@ export default class OkfBrainPlugin extends Plugin {
   private dashboardUiStateStore: DashboardUiStateStore | undefined;
 
   public async onload(): Promise<void> {
+    // Keep the primary UI entry available even if settings or service setup fail.
+    this.registerView(OKF_DASHBOARD_VIEW, (leaf) => new OkfDashboardView(leaf, this));
+    registerDashboardRibbon(this, () => void this.openDashboard());
+
     await this.loadSettings();
     this.dashboardUiStateStore = new DashboardUiStateStore(
       this.settings.dashboardUiState,
@@ -114,8 +122,6 @@ export default class OkfBrainPlugin extends Plugin {
     this.indexSync = new IndexSyncCoordinator(async () => {
       await this.api().syncIndex();
     });
-    this.registerView(OKF_DASHBOARD_VIEW, (leaf) => new OkfDashboardView(leaf, this));
-    this.addRibbonIcon("brain-circuit", "打开 Dashboard", () => void this.openDashboard());
     this.addSettingTab(new OkfBrainSettingTab(this.app, this));
     this.registerCommands();
     this.registerReadingViewControls();
@@ -1228,7 +1234,7 @@ export default class OkfBrainPlugin extends Plugin {
 
   private registerCommands(): void {
     this.addCommand({
-      id: "open-dashboard",
+      id: DASHBOARD_COMMAND_ID,
       name: "打开 Dashboard",
       callback: () => void this.openDashboard(),
     });

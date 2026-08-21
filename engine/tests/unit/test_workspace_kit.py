@@ -4,25 +4,36 @@ import shutil
 from pathlib import Path
 
 from okf_workspace.config import default_template_root
-from okf_workspace.okf.templates import initialize_vault
+from okf_workspace.okf.templates import (
+    VAULT_DYNAMIC_DIRECTORIES,
+    ensure_vault_dynamic_directories,
+    initialize_vault,
+)
 
 
 def test_workspace_kit_creates_canonical_empty_content_directories(tmp_path: Path) -> None:
     vault = initialize_vault(tmp_path / "vault")
 
-    for relative in (
-        "inbox/captures",
-        "learning/courses",
-        "learning/guides",
-        "knowledge/wiki",
-        "projects",
-        "sources/records",
-        "sources/text",
-    ):
+    for relative in VAULT_DYNAMIC_DIRECTORIES:
         assert (vault / relative).is_dir()
 
     assert not (vault / "learning/topics").exists()
     assert not (vault / "sources/extracts").exists()
+
+
+def test_dynamic_directory_repair_is_idempotent_and_never_copies_content(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    existing = vault / "inbox/captures"
+    existing.mkdir(parents=True)
+    note = existing / "keep.md"
+    note.write_text("keep\n", encoding="utf-8")
+
+    created = ensure_vault_dynamic_directories(vault)
+
+    assert Path("inbox/captures") not in created
+    assert note.read_text(encoding="utf-8") == "keep\n"
+    assert all((vault / relative).is_dir() for relative in VAULT_DYNAMIC_DIRECTORIES)
+    assert ensure_vault_dynamic_directories(vault) == ()
 
 
 def test_workspace_kit_never_copies_dynamic_content(tmp_path: Path) -> None:

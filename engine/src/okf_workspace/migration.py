@@ -25,6 +25,10 @@ from okf_workspace.okf.relations import (
     normalize_context_reference,
     source_paths,
 )
+from okf_workspace.okf.templates import (
+    VAULT_DYNAMIC_DIRECTORIES,
+    ensure_vault_dynamic_directories,
+)
 from okf_workspace.projections.navigation import rebuild_root_index
 from okf_workspace.sources import SourcePublisher
 
@@ -122,6 +126,7 @@ def _rewrite_links(root: Path, mapping: dict[str, str]) -> list[str]:
 
 def _remove_nested_indexes(root: Path) -> list[str]:
     changes: list[str] = []
+    preserved_directories = frozenset(VAULT_DYNAMIC_DIRECTORIES)
     for path in sorted(root.rglob("index.md")):
         if path == root / "index.md":
             continue
@@ -141,6 +146,8 @@ def _remove_nested_indexes(root: Path) -> list[str]:
     ):
         relative = directory.relative_to(root)
         if any(part in {".git", ".obsidian", ".trash"} for part in relative.parts):
+            continue
+        if relative in preserved_directories:
             continue
         with suppress(OSError):
             directory.rmdir()
@@ -1164,6 +1171,10 @@ def migrate_current_layout(
         )
     )
     changes.extend(_remove_nested_indexes(root))
+    changes.extend(
+        f"{relative.as_posix()}/ (created standard directory)"
+        for relative in ensure_vault_dynamic_directories(root)
+    )
 
     root_index = root / "index.md"
     canonical_index = (templates / "index.md").read_text(encoding="utf-8")
