@@ -101,6 +101,8 @@ date: 2026-08-16
     )
     assert treehole.edition_id == "snapshot-1"
     assert treehole.items[0].metrics["reply_count"] == 18
+    assert treehole.items[0].metrics["favorite_count"] == 9
+    assert treehole.items[0].metrics["like_count"] == 2
     assert [comment.text for comment in treehole.items[0].comments] == ["评论"]
     assert treehole.items[0].media[0].startswith("data:image/jpeg")
 

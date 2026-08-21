@@ -203,8 +203,10 @@ def treehole_from_v1(
                 metrics[key] = value
         aliases = {
             "reply_count": ("reply_count", "peak_reply"),
-            "like_count": ("like_count", "peak_likenum"),
-            "favorite_count": ("favorite_count", "peak_praise_num"),
+            # V1 uses ``likenum`` for favorites and ``praise_num`` for likes.
+            # Keep the canonical names unambiguous for every downstream view.
+            "like_count": ("like_count", "peak_praise_num"),
+            "favorite_count": ("favorite_count", "peak_likenum"),
             "captured_comments": ("captured_comments",),
         }
         for target, sources in aliases.items():
