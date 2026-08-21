@@ -69,6 +69,31 @@ def test_system_status_treats_codex_as_primary_and_livesync_as_deferred(
     assert "ChatGPT 订阅" in str(items["ai"]["detail"])
 
 
+def test_system_status_does_not_treat_nonempty_unconfigured_livesync_as_ready(
+    vault: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plugin = vault / ".obsidian" / "plugins" / "obsidian-livesync"
+    plugin.mkdir(parents=True)
+    (plugin / "data.json").write_text(
+        '{"isConfigured":false,"liveSync":false,"syncOnStart":false}',
+        encoding="utf-8",
+    )
+    codex = tmp_path / "codex.cmd"
+    codex.write_text("", encoding="utf-8")
+    monkeypatch.setattr("okf_workspace.dashboard.system.httpx.get", _healthy_get)
+    monkeypatch.setenv("OKF_AI_MODE", "codex")
+    monkeypatch.setenv("OKF_CODEX_COMMAND", str(codex))
+    monkeypatch.delenv("OKF_LIVESYNC_REQUIRED", raising=False)
+
+    status = system_status(vault, tmp_path / "state")
+    items = {item["item_id"]: item for item in cast(list[dict[str, object]], status["items"])}
+
+    assert items["livesync"]["status"] == "deferred"
+    assert items["livesync"]["action"] is None
+
+
 def test_system_status_can_require_livesync_later(
     vault: Path,
     tmp_path: Path,

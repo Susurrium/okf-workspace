@@ -83,6 +83,22 @@ def _conversion_failures(state: Path) -> int:
     return count
 
 
+def _livesync_is_configured(settings_path: Path) -> bool:
+    try:
+        loaded = cast(object, json.loads(settings_path.read_text(encoding="utf-8")))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(loaded, dict):
+        return False
+    settings = cast(Mapping[object, object], loaded)
+    explicit = settings.get("isConfigured")
+    if isinstance(explicit, bool):
+        return explicit
+    remote_type = settings.get("remoteType")
+    database = settings.get("database")
+    return isinstance(remote_type, str) and bool(remote_type.strip()) and bool(database)
+
+
 def _semantic_counts(state: Path) -> tuple[int, int]:
     pending = 0
     failed = 0
@@ -297,9 +313,8 @@ def system_status(vault: Path, state: Path) -> dict[str, object]:
         "yes",
         "on",
     }
-    if not livesync_required and (
-        not livesync_settings.is_file() or livesync_settings.stat().st_size <= 2
-    ):
+    livesync_configured = _livesync_is_configured(livesync_settings)
+    if not livesync_required and not livesync_configured:
         livesync_status = "deferred"
         livesync_detail = "已按计划延后；当前单机使用不受影响"
         livesync_action = None
@@ -307,7 +322,7 @@ def system_status(vault: Path, state: Path) -> dict[str, object]:
         livesync_status = "not-installed"
         livesync_detail = "插件尚未安装"
         livesync_action = "安装并配置 LiveSync"
-    elif not livesync_settings.is_file() or livesync_settings.stat().st_size <= 2:
+    elif not livesync_configured:
         livesync_status = "not-configured"
         livesync_detail = "插件已安装，尚未导入本 Vault 的 Setup URI"
         livesync_action = "使用自己的 Setup URI 配对"
