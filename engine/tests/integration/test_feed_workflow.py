@@ -199,6 +199,64 @@ def test_existing_treehole_note_refreshes_only_generated_comments(vault: Path) -
     assert rendered.endswith("我的阅读批注。\n")
 
 
+def test_existing_treehole_note_refreshes_managed_metrics_without_rewriting_content(
+    vault: Path,
+) -> None:
+    old_item = FeedItem(
+        item_id="treehole:8466293",
+        feed=FeedKind.TREEHOLE,
+        edition_id="metrics-refresh",
+        title="TreeHole #8466293",
+        body="洞正文\n\n- 指标：这是正文里的人工记录",
+        pid=8466293,
+        metrics={"reply_count": 15, "like_count": 43, "favorite_count": 3},
+        comments=(FeedComment(text="旧评论"),),
+    )
+    old_edition = FeedEdition(
+        edition_id="metrics-refresh",
+        feed=FeedKind.TREEHOLE,
+        edition_at="2026-08-21",
+        title="树洞指标刷新",
+        items=(old_item,),
+    )
+    path = materialize_edition(vault, old_edition)
+    path.write_text(
+        path.read_text(encoding="utf-8") + "\n我的阅读批注。\n",
+        encoding="utf-8",
+    )
+
+    corrected_item = FeedItem(
+        item_id=old_item.item_id,
+        feed=old_item.feed,
+        edition_id=old_item.edition_id,
+        title=old_item.title,
+        body="同步后的正文不应覆盖现有 Digest",
+        pid=old_item.pid,
+        metrics={"reply_count": 15, "like_count": 3, "favorite_count": 43},
+        comments=old_item.comments,
+    )
+
+    materialize_edition(
+        vault,
+        FeedEdition(
+            edition_id=old_edition.edition_id,
+            feed=old_edition.feed,
+            edition_at=old_edition.edition_at,
+            title=old_edition.title,
+            items=(corrected_item,),
+        ),
+    )
+
+    rendered = path.read_text(encoding="utf-8")
+    assert "- 指标：favorite_count: 43 · like_count: 3 · reply_count: 15" in rendered
+    assert "- 指标：favorite_count: 3 · like_count: 43 · reply_count: 15" not in rendered
+    assert "- 指标：这是正文里的人工记录" in rendered
+    assert "洞正文" in rendered
+    assert "同步后的正文不应覆盖现有 Digest" not in rendered
+    assert "旧评论" in rendered
+    assert rendered.endswith("我的阅读批注。\n")
+
+
 def test_treehole_comment_refresh_stays_inside_each_item_section(vault: Path) -> None:
     def item(pid: int, comment: str) -> FeedItem:
         return FeedItem(

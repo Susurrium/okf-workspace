@@ -123,15 +123,22 @@ def render_treehole_comments(vault: Path, item: FeedItem) -> str:
     return "\n".join(lines)
 
 
+def _treehole_metrics_line(item: FeedItem) -> str | None:
+    if not item.metrics:
+        return None
+    metrics = " · ".join(f"{key}: {value}" for key, value in sorted(item.metrics.items()))
+    return f"- 指标：{metrics}"
+
+
 def _treehole_body(vault: Path, edition: FeedEdition) -> str:
     sections = [f"# {edition.title}\n"]
     for item in edition.items:
         sections.append(f"## {item.title}\n")
         if item.published_at:
             sections.append(f"- 时间：{item.published_at}\n")
-        if item.metrics:
-            metrics = " · ".join(f"{key}: {value}" for key, value in sorted(item.metrics.items()))
-            sections.append(f"- 指标：{metrics}\n")
+        metrics_line = _treehole_metrics_line(item)
+        if metrics_line is not None:
+            sections.append(metrics_line + "\n")
         sections.append(item.body.strip() + "\n")
         media = materialize_media_references(vault, item)
         if media:
@@ -162,7 +169,7 @@ def materialize_edition(vault: Path, edition: FeedEdition) -> Path:
             expected_blocks = {item_block_id(item) for item in edition.items}
             actual_blocks = set(re.findall(r"(?m)^\^([^\s]+)[ \t]*$", content))
             if expected_blocks.issubset(actual_blocks):
-                _refresh_treehole_comment_blocks(vault, target, edition)
+                _refresh_treehole_managed_blocks(vault, target, edition)
             else:
                 # A Digest is a rebuildable projection. If an interrupted
                 # historical migration left it structurally incomplete, restore
@@ -213,12 +220,12 @@ def _edition_frontmatter(
     return fields
 
 
-def _refresh_treehole_comment_blocks(
+def _refresh_treehole_managed_blocks(
     vault: Path,
     target: Path,
     edition: FeedEdition,
 ) -> None:
-    """Replace only generated comment callouts, preserving all user-authored text."""
+    """Refresh generated metrics/comments while preserving all user-authored text."""
 
     content = target.read_text(encoding="utf-8")
     updated = content
@@ -233,13 +240,26 @@ def _refresh_treehole_comment_blocks(
         if not headings:
             continue
         start = headings[-1].start()
-        section = updated[start : block.start()]
+        original_section = updated[start : block.start()]
+        section = original_section
+        metrics_line = _treehole_metrics_line(item)
+        if metrics_line is not None:
+            managed_metrics = re.compile(
+                r"\A(?P<prefix>## [^\r\n]+\r?\n(?:[ \t]*\r?\n)*"
+                r"(?:- 时间：[^\r\n]*\r?\n(?:[ \t]*\r?\n)*)?)"
+                r"- 指标：[^\r\n]*"
+            )
+            section = managed_metrics.sub(
+                lambda match, line=metrics_line: f"{match.group('prefix')}{line}",
+                section,
+                count=1,
+            )
         comments = re.compile(
             r"(?m)^> \[!(?:note|comments)\]- (?:评论|已抓取评论)[^\r\n]*"
             r"(?:\r?\n>[^\r\n]*)*"
         )
         refreshed = comments.sub(render_treehole_comments(vault, item), section, count=1)
-        if refreshed != section:
+        if refreshed != original_section:
             updated = updated[:start] + refreshed + updated[block.start() :]
     if updated != content:
         target.write_text(updated, encoding="utf-8", newline="\n")
