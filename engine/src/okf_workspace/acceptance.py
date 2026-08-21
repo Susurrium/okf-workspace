@@ -589,8 +589,21 @@ def _run_command(name: str, command: list[str], root: Path) -> CommandCheck:
     )
 
 
+def resolve_dashboard_root(engine_root: Path) -> Path:
+    """Locate Dashboard from either a monorepo Engine or a legacy package root."""
+    engine_root = engine_root.resolve()
+    candidates = (engine_root.parent / "dashboard", engine_root / "dashboard")
+    for candidate in candidates:
+        if (candidate / "package.json").is_file():
+            return candidate.resolve()
+    raise FileNotFoundError(
+        f"Dashboard package not found beside or below Engine root: {engine_root}"
+    )
+
+
 def run_acceptance_suite(root: Path, *, full_performance: bool) -> dict[str, object]:
     root = root.resolve()
+    dashboard_root = resolve_dashboard_root(root)
     npm = "npm.cmd" if os.name == "nt" else "npm"
     checks = [
         _run_command("python-tests", [sys.executable, "-m", "pytest", "-q"], root),
@@ -600,8 +613,16 @@ def run_acceptance_suite(root: Path, *, full_performance: bool) -> dict[str, obj
             [sys.executable, "-m", "pyright", "--pythonpath", sys.executable],
             root,
         ),
-        _run_command("dashboard-tests", [npm, "test", "--prefix", "dashboard"], root),
-        _run_command("dashboard-build", [npm, "run", "build", "--prefix", "dashboard"], root),
+        _run_command(
+            "dashboard-tests",
+            [npm, "test", "--prefix", str(dashboard_root)],
+            root,
+        ),
+        _run_command(
+            "dashboard-build",
+            [npm, "run", "build", "--prefix", str(dashboard_root)],
+            root,
+        ),
     ]
     with tempfile.TemporaryDirectory(prefix="okf-acceptance-vault-") as temporary:
         fixture_vault = generate_fixture_vault(Path(temporary) / "vault")

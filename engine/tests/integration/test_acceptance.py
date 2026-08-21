@@ -2,7 +2,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from okf_workspace.acceptance import run_one_session_uat, run_performance_benchmark
+from okf_workspace.acceptance import (
+    resolve_dashboard_root,
+    run_one_session_uat,
+    run_performance_benchmark,
+)
+
+
+def test_acceptance_resolves_dashboard_beside_the_engine(tmp_path: Path) -> None:
+    engine = tmp_path / "engine"
+    dashboard = tmp_path / "dashboard"
+    engine.mkdir()
+    dashboard.mkdir()
+    (dashboard / "package.json").write_text("{}\n", encoding="utf-8")
+
+    assert resolve_dashboard_root(engine) == dashboard.resolve()
 
 
 def test_quick_performance_benchmark_covers_scale_and_incremental_paths() -> None:
