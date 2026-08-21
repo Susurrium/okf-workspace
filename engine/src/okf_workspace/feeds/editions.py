@@ -84,10 +84,10 @@ def _format_comment_time(value: str | None) -> str | None:
     if not value:
         return None
     try:
-        return (
-            datetime.fromisoformat(value.replace("Z", "+00:00"))
-            .astimezone()
-            .strftime("%Y-%m-%d %H:%M")
+        # Keep the timestamp's declared offset. Converting through the host
+        # timezone makes the same Digest render differently on Windows and CI.
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime(
+            "%Y-%m-%d %H:%M"
         )
     except ValueError:
         return value
