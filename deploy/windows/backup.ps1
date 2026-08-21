@@ -19,7 +19,11 @@ if (-not (Test-Path -LiteralPath $initialized)) {
         & $restic init --repository-version 2
         if ($LASTEXITCODE -ne 0) { throw 'Restic repository initialization failed' }
     }
-    Set-Content -LiteralPath $initialized -Value ([DateTimeOffset]::Now.ToString('o')) -Encoding utf8NoBOM
+    [System.IO.File]::WriteAllText(
+        $initialized,
+        [DateTimeOffset]::Now.ToString('o'),
+        (New-Object System.Text.UTF8Encoding($false))
+    )
 }
 
 $sources = @(

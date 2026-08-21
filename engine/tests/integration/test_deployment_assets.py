@@ -100,6 +100,8 @@ def test_dashboard_persists_only_external_token_file_path() -> None:
         in quick_installer
     )
     assert "$PSCmdlet.ShouldProcess($task, 'Stop and unregister scheduled task')" in uninstaller
+    assert "System32\\WindowsPowerShell\\v1.0\\powershell.exe" in installer
+    assert "-NonInteractive -WindowStyle Hidden" in installer
     assert "realclaudian" not in claudian_installer
     assert "realclaudian" not in uninstaller
     assert "foreach ($legacyId in @('claudian'))" in claudian_installer

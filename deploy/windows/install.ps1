@@ -364,14 +364,17 @@ if (-not $SkipAcceptance) {
 }
 
 if (-not $SkipScheduledTasks) {
-    $pwsh = Assert-OkfCommand 'pwsh'
+    $maintenanceShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $maintenanceShell -PathType Leaf)) {
+        throw "Stable Windows PowerShell executable not found: $maintenanceShell"
+    }
     $legacyServiceTask = Get-ScheduledTask -TaskName 'OKF Brain Local Service' -ErrorAction SilentlyContinue
     if ($legacyServiceTask) {
         Stop-ScheduledTask -TaskName 'OKF Brain Local Service' -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName 'OKF Brain Local Service' -Confirm:$false
     }
 
-    $maintenanceAction = New-ScheduledTaskAction -Execute $pwsh -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot 'maintenance.ps1')`" -Config `"$configPath`""
+    $maintenanceAction = New-ScheduledTaskAction -Execute $maintenanceShell -Argument "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot 'maintenance.ps1')`" -Config `"$configPath`""
     $maintenanceTrigger = New-ScheduledTaskTrigger -Daily -At '02:30'
     Register-ScheduledTask -TaskName 'OKF Workspace Daily Maintenance' -Action $maintenanceAction -Trigger $maintenanceTrigger -Description 'Refresh indexes and synchronize configured Feed sources; run optional backup when enabled.' -Force | Out-Null
 }

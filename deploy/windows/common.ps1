@@ -13,7 +13,12 @@ function Write-OkfJson {
     )
     $parent = Split-Path -Parent $Path
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
-    $Value | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $Path -Encoding utf8NoBOM
+    $json = $Value | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText(
+        (Resolve-OkfPath $Path),
+        $json,
+        (New-Object System.Text.UTF8Encoding($false))
+    )
 }
 
 function Read-OkfConfig {
