@@ -1,0 +1,5 @@
+{
+  "folder": "life/daily",
+  "format": "YYYY/MM/YYYY-MM-DD",
+  "template": "system/templates/core/Daily"
+}

@@ -1,0 +1,12 @@
+contract_version: 3
+artifact: Project
+authority: markdown
+paths:
+  - projects/<project>/project.md
+required_fields: [project_status]
+field_types:
+  project_status: string
+states:
+  project_status: [active, paused, completed]
+regions:
+  required_ai: [project-current-state]

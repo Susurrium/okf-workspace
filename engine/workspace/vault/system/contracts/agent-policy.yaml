@@ -1,0 +1,6 @@
+contract_version: 3
+artifact: Agent Policy
+authority: markdown
+paths:
+  - system/policies/<slug>.md
+required_fields: []

@@ -1,0 +1,25 @@
+cases:
+  - id: RET-01
+    query: 为什么北大 VPN 和代理不能同时开两个 TUN？
+    must_include: [vpn-guide]
+  - id: RET-02
+    query: 同步能不能代替备份？
+    must_include: [livesync-guide]
+  - id: RET-03
+    query: 多个网络工具抢路由时应该怎么排查？
+    must_include: [vpn-guide]
+  - id: RET-04
+    query: 我当前应该买服务器还是使用 CLab？
+    must_include: [livesync-guide, livesync-source-record]
+  - id: RET-05
+    query: 校园网络和 Obsidian 同步部署有哪些共同风险？
+    must_include: [vpn-guide, livesync-guide]
+  - id: RET-06
+    query: 当前 nonce 是什么？
+    must_include: [nonce-note]
+  - id: RET-07
+    query: 解释一个纯技术问题。
+    must_exclude_paths: [life/daily, self]
+  - id: RET-08
+    query: 结合当前课堂笔记回答。
+    must_prioritize: [current-class-note]

@@ -1,0 +1,6 @@
+contract_version: 3
+artifact: System View
+authority: markdown
+paths:
+  - system/views/<slug>.md
+required_fields: []

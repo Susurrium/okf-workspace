@@ -1,0 +1,6 @@
+contract_version: 3
+artifact: Profile
+authority: markdown
+paths:
+  - self/<slug>.md
+required_fields: []

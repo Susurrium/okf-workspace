@@ -1,0 +1,4 @@
+fixtures:
+  - id: private-example
+    path: C:/absolute/path/to/private-note.md
+    sha256: replace-with-the-file-sha256

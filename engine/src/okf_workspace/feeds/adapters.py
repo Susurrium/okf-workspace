@@ -1,0 +1,261 @@
+"""Normalize existing V1 AI Daily and treehole producer payloads."""
+
+from __future__ import annotations
+
+import hashlib
+import re
+from collections.abc import Mapping
+from datetime import UTC, datetime
+from typing import cast
+
+from .models import FeedComment, FeedEdition, FeedItem, FeedKind
+
+_AI_ITEM_HEADING = re.compile(
+    r"^(?:#{2,3}\s+)?\d+\.\s+\[(?P<title>.+)\]\((?P<url>https?://.+)\)\s*$"
+)
+_MARKDOWN_LINK = re.compile(r"\[(?P<label>[^]]+)\]\((?P<url>https?://[^)]+)\)")
+
+
+def _frontmatter_value(markdown: str, key: str) -> str | None:
+    lines = markdown.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        name, separator, value = line.partition(":")
+        if separator and name.strip() == key:
+            return value.strip().strip('"').strip("'")
+    return None
+
+
+def ai_daily_markdown_from_v1(markdown: str, *, stream: str) -> FeedEdition:
+    """Convert one finalized V1 AI Daily stream Markdown into an edition."""
+
+    if stream not in {"hotspot", "news", "learning"}:
+        raise ValueError(f"unsupported AI Daily stream: {stream}")
+    issue_date = _frontmatter_value(markdown, "date")
+    if not issue_date:
+        raise ValueError("AI Daily Markdown has no date")
+    title = _frontmatter_value(markdown, "title") or f"AI Daily {issue_date} · {stream}"
+    lines = markdown.splitlines()
+    starts: list[tuple[int, re.Match[str]]] = []
+    for index, line in enumerate(lines):
+        match = _AI_ITEM_HEADING.fullmatch(line)
+        if match is not None:
+            starts.append((index, match))
+    items: list[FeedItem] = []
+    seen_urls: set[str] = set()
+    edition_id = f"{issue_date}-{stream}"
+    for item_index, (start, match) in enumerate(starts):
+        end = starts[item_index + 1][0] if item_index + 1 < len(starts) else len(lines)
+        body_lines = lines[start + 1 : end]
+        section_break = next(
+            (index for index, line in enumerate(body_lines) if line.startswith("## ")),
+            None,
+        )
+        if section_break is not None:
+            body_lines = body_lines[:section_break]
+        while body_lines and not body_lines[0].strip():
+            body_lines.pop(0)
+        while body_lines and not body_lines[-1].strip():
+            body_lines.pop()
+        published_at: str | None = None
+        media: list[str] = []
+        rendered_lines: list[str] = []
+        for line in body_lines:
+            if line.startswith("发布时间："):
+                published_at = line.removeprefix("发布时间：").strip() or None
+            if line.startswith("图片："):
+                for link in _MARKDOWN_LINK.finditer(line):
+                    media.append(link.group("url"))
+                line = _MARKDOWN_LINK.sub(r"![\g<label>](\g<url>)", line)
+            rendered_lines.append(line)
+        url = match.group("url")
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        stable = hashlib.sha256(url.encode("utf-8")).hexdigest()[:20]
+        items.append(
+            FeedItem(
+                item_id=f"ai-daily:{stream}:{stable}",
+                feed=FeedKind.AI_DAILY,
+                edition_id=edition_id,
+                title=match.group("title"),
+                body="\n".join(rendered_lines).strip(),
+                url=url,
+                published_at=published_at,
+                stream=stream,
+                media=tuple(dict.fromkeys(media)),
+            )
+        )
+    if not items:
+        raise ValueError("AI Daily Markdown has no item headings")
+    return FeedEdition(
+        edition_id=edition_id,
+        feed=FeedKind.AI_DAILY,
+        edition_at=issue_date,
+        title=title,
+        stream=stream,
+        items=tuple(items),
+    )
+
+
+def _required_int(value: object, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValueError(f"{field} must be an integer")
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an integer") from exc
+
+
+def ai_daily_from_v1(
+    issue: Mapping[str, object],
+    *,
+    content_by_artifact: Mapping[str, str],
+) -> list[FeedEdition]:
+    issue_date = str(issue["issue_date"])
+    streams_value = issue.get("streams")
+    if not isinstance(streams_value, list):
+        raise ValueError("AI Daily issue has no streams")
+    editions: list[FeedEdition] = []
+    for stream_object in cast(list[object], streams_value):
+        if not isinstance(stream_object, dict):
+            continue
+        stream = cast(Mapping[str, object], stream_object)
+        stream_name = str(stream["stream"])
+        channels_value = stream.get("channels", [])
+        items: list[FeedItem] = []
+        if isinstance(channels_value, list):
+            for channel_object in cast(list[object], channels_value):
+                if not isinstance(channel_object, dict):
+                    continue
+                channel = cast(Mapping[str, object], channel_object)
+                channel_items = channel.get("items", [])
+                if not isinstance(channel_items, list):
+                    continue
+                for item_object in cast(list[object], channel_items):
+                    if not isinstance(item_object, dict):
+                        continue
+                    item = cast(Mapping[str, object], item_object)
+                    artifact_id = str(item["artifact_id"])
+                    urls = item.get("source_urls", [])
+                    url = (
+                        str(cast(list[object], urls)[0])
+                        if isinstance(urls, list) and urls
+                        else None
+                    )
+                    items.append(
+                        FeedItem(
+                            item_id=artifact_id,
+                            feed=FeedKind.AI_DAILY,
+                            edition_id=f"{issue_date}-{stream_name}",
+                            title=str(item.get("title") or artifact_id),
+                            body=content_by_artifact.get(
+                                artifact_id,
+                                str(item.get("preview") or ""),
+                            ),
+                            url=url,
+                            published_at=(
+                                str(item["generated_at"]) if item.get("generated_at") else None
+                            ),
+                            stream=stream_name,
+                        )
+                    )
+        editions.append(
+            FeedEdition(
+                edition_id=f"{issue_date}-{stream_name}",
+                feed=FeedKind.AI_DAILY,
+                edition_at=issue_date,
+                title=f"AI Daily {issue_date} · {stream_name}",
+                stream=stream_name,
+                items=tuple(items),
+            )
+        )
+    return editions
+
+
+def treehole_from_v1(
+    batch: Mapping[str, object],
+    *,
+    comments_by_pid: Mapping[int, tuple[FeedComment | str, ...]] | None = None,
+    media_by_pid: Mapping[int, tuple[str, ...]] | None = None,
+) -> FeedEdition:
+    snapshot_value = batch.get("snapshot")
+    snapshot = (
+        cast(Mapping[str, object], snapshot_value) if isinstance(snapshot_value, dict) else batch
+    )
+    snapshot_id = str(snapshot.get("snapshot_id") or snapshot.get("id") or batch.get("event_id"))
+    items_value = snapshot.get("items")
+    if not isinstance(items_value, list):
+        raise ValueError("treehole batch has no items")
+    items: list[FeedItem] = []
+    for item_object in cast(list[object], items_value):
+        if not isinstance(item_object, dict):
+            continue
+        item = cast(Mapping[str, object], item_object)
+        pid = _required_int(item["pid"], field="pid")
+        metrics: dict[str, int | float | str] = {}
+        for key in ("best_rank", "peak_score"):
+            value = item.get(key)
+            if isinstance(value, (int, float, str)) and not isinstance(value, bool):
+                metrics[key] = value
+        aliases = {
+            "reply_count": ("reply_count", "peak_reply"),
+            "like_count": ("like_count", "peak_likenum"),
+            "favorite_count": ("favorite_count", "peak_praise_num"),
+            "captured_comments": ("captured_comments",),
+        }
+        for target, sources in aliases.items():
+            value = next(
+                (item.get(source) for source in sources if item.get(source) is not None),
+                None,
+            )
+            if isinstance(value, (int, float, str)) and not isinstance(value, bool):
+                metrics[target] = value
+        media_value = item.get("post_media", [])
+        embedded_media = (
+            tuple(
+                str(cast(Mapping[str, object], value).get("download_path", ""))
+                for value in cast(list[object], media_value)
+                if isinstance(value, dict)
+            )
+            if isinstance(media_value, list)
+            else ()
+        )
+        comments = tuple(
+            value if isinstance(value, FeedComment) else FeedComment(text=value)
+            for value in (comments_by_pid or {}).get(pid, ())
+        )
+        if comments and "captured_comments" not in metrics:
+            metrics["captured_comments"] = len(comments)
+        timestamp = item.get("timestamp")
+        published_at = (
+            datetime.fromtimestamp(timestamp, UTC).isoformat()
+            if isinstance(timestamp, (int, float)) and not isinstance(timestamp, bool)
+            else str(timestamp or "")
+        )
+        items.append(
+            FeedItem(
+                item_id=f"treehole:{pid}",
+                feed=FeedKind.TREEHOLE,
+                edition_id=snapshot_id,
+                title=f"TreeHole #{pid}",
+                body=str(item.get("text") or ""),
+                published_at=published_at,
+                pid=pid,
+                metrics=metrics,
+                comments=comments,
+                media=(media_by_pid or {}).get(pid, embedded_media),
+            )
+        )
+    return FeedEdition(
+        edition_id=snapshot_id,
+        feed=FeedKind.TREEHOLE,
+        edition_at=str(snapshot["stat_date"]),
+        title=f"树洞热榜 {snapshot['stat_date']} {snapshot.get('checkpoint', '')}",
+        quality=str(snapshot.get("quality") or ""),
+        quality_reason=str(snapshot.get("quality_reason") or "") or None,
+        items=tuple(items),
+    )

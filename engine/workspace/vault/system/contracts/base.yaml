@@ -1,0 +1,20 @@
+contract_version: 3
+authority: markdown
+profile: workspace
+okf_version: "0.2"
+common_required_fields: [type, title, created_at]
+common_field_types:
+  type: string
+  title: string
+  status: string
+  created_at: datetime
+  description: string
+  aliases: string_list
+  tags: string_list
+  sources: source_list
+  resource: string
+  generated: actor_event
+  verified: actor_event_list
+  stale_after: date
+common_states:
+  status: [draft, stable, deprecated]

@@ -1,0 +1,10 @@
+contract_version: 3
+artifact: Course
+authority: markdown
+paths:
+  - learning/courses/<course>/course.md
+required_fields: [course_status]
+field_types:
+  course_status: string
+states:
+  course_status: [active, paused, completed]

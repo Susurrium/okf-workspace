@@ -1,0 +1,44 @@
+services:
+  couchdb:
+    image: couchdb:3
+    restart: unless-stopped
+    env_file:
+      - ./secrets/couchdb.env
+    volumes:
+      - couchdb-data:/opt/couchdb/data
+      - ./couchdb/local.ini:/opt/couchdb/etc/local.d/okf.ini:ro
+    networks:
+      - okf-internal
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5984/_up"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      couchdb:
+        condition: service_healthy
+    environment:
+      OKF_SYNC_DOMAIN: ${OKF_SYNC_DOMAIN:?set OKF_SYNC_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - okf-internal
+
+volumes:
+  couchdb-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  okf-internal:
+    driver: bridge

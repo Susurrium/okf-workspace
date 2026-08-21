@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "obsidian-markitdown-service"
+version = "1.2.0"
+description = "A narrow, authenticated PDF/PPTX/DOCX-to-Markdown fallback service."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "markitdown[docx,pdf,pptx]==0.1.6",
+  "pypdf>=5,<7",
+  "uvicorn>=0.35,<1",
+]
+
+[project.scripts]
+markitdown-service = "markitdown_service.__main__:main"
+
+[dependency-groups]
+dev = [
+  "httpx>=0.28,<1",
+  "olefile>=0.47,<1",
+  "pytest>=8,<9",
+  "pytest-cov>=6,<8",
+  "ruff>=0.12,<1",
+]
+
+[tool.uv]
+default-groups = ["dev"]
+link-mode = "copy"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/markitdown_service"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

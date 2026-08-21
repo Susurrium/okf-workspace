@@ -1,0 +1,478 @@
+{
+  "common": {
+    "save": "Сохранить",
+    "cancel": "Отмена",
+    "delete": "Удалить",
+    "edit": "Редактировать",
+    "add": "Добавить",
+    "remove": "Удалить",
+    "clear": "Очистить",
+    "clearAll": "Очистить всё",
+    "loading": "Загрузка",
+    "error": "Ошибка",
+    "success": "Успех",
+    "warning": "Предупреждение",
+    "confirm": "Подтвердить",
+    "settings": "Настройки",
+    "advanced": "Дополнительно",
+    "enabled": "Включено",
+    "disabled": "Отключено",
+    "platform": "Платформа",
+    "refresh": "Обновить",
+    "rewind": "Откатить"
+  },
+  "chat": {
+    "rewind": {
+      "confirmMessage": "Откатить до этой точки? Изменения файлов после этого сообщения могут быть перезаписаны или удалены. Это действие нельзя отменить.",
+      "confirmMessageConflicts": "Откатить до этой точки? Будут перезаписаны файлы, изменённые вне агента ({count}):\n{files}",
+      "confirmMessageConversationOnly": "Откатить разговор до этой точки? Изменения файлов будут сохранены.",
+      "confirmButton": "Откатить",
+      "inProgress": "Дождитесь завершения текущего отката.",
+      "ariaLabel": "Откатить сюда",
+      "menuConversationOnly": "Откатить только разговор",
+      "menuCodeAndConversation": "Откатить код + разговор",
+      "notice": "Откачено: восстановлено файлов — {count}",
+      "noticeConversationOnly": "Разговор откачен; изменения файлов сохранены",
+      "noticeSaveFailed": "Откат выполнен: восстановлено файлов — {count}, но не удалось сохранить состояние: {error}",
+      "noticeConversationOnlySaveFailed": "Разговор откачен, но не удалось сохранить состояние: {error}",
+      "failed": "Ошибка отката: {error}",
+      "cannot": "Невозможно откатить: {error}",
+      "unavailableStreaming": "Невозможно откатить во время потоковой передачи",
+      "unavailableNoUuid": "Невозможно откатить: отсутствуют идентификаторы сообщений"
+    },
+    "fork": {
+      "ariaLabel": "Ответвить разговор",
+      "chooseTarget": "Ответвить разговор",
+      "targetNewTab": "Новая вкладка",
+      "targetCurrentTab": "Текущая вкладка",
+      "notice": "Ответвлено в новую вкладку",
+      "noticeCurrentTab": "Ответвлено в текущей вкладке",
+      "failed": "Ошибка ответвления: {error}",
+      "unavailableStreaming": "Невозможно ответвить во время потоковой передачи",
+      "unavailableNoUuid": "Невозможно ответвить: отсутствуют идентификаторы сообщений",
+      "unavailableNoResponse": "Невозможно ответвить: нет ответа для ответвления",
+      "errorMessageNotFound": "Сообщение не найдено",
+      "errorNoSession": "Идентификатор сессии недоступен",
+      "errorNoActiveTab": "Нет активной вкладки",
+      "commandNoMessages": "Нельзя форкнуть: в диалоге нет сообщений",
+      "commandNoAssistantUuid": "Нельзя форкнуть: нет ответа ассистента с идентификаторами"
+    },
+    "bangBash": {
+      "placeholder": "> Выполнить команду bash...",
+      "commandPanel": "Панель команд",
+      "copyAriaLabel": "Скопировать вывод последней команды",
+      "clearAriaLabel": "Очистить вывод bash",
+      "commandLabel": "{command}",
+      "statusLabel": "Статус: {status}",
+      "collapseOutput": "Свернуть вывод команды",
+      "expandOutput": "Развернуть вывод команды",
+      "running": "Выполняется...",
+      "copyFailed": "Не удалось скопировать в буфер обмена"
+    }
+  },
+  "settings": {
+    "title": "Настройки Claudian",
+    "tabs": {
+      "general": "Общие",
+      "claude": "Claude",
+      "codex": "Codex"
+    },
+    "display": "Отображение",
+    "conversations": "Разговоры",
+    "content": "Содержание",
+    "input": "Ввод",
+    "setup": "Настройка",
+    "models": "Модели",
+    "experimental": "Экспериментальное",
+    "userName": {
+      "name": "Как Claudian должен обращаться к вам?",
+      "desc": "Ваше имя для персонализированных приветствий (оставьте пустым для общих приветствий)"
+    },
+    "excludedTags": {
+      "name": "Исключенные теги",
+      "desc": "Заметки с этими тегами не будут автоматически загружаться как контекст (по одному в строке, без #)"
+    },
+    "mediaFolder": {
+      "name": "Папка медиафайлов",
+      "desc": "Папка с вложениями/изображениями. Когда заметки используют ![[image.jpg]], Claude будет искать здесь. Оставьте пустым для корня хранилища."
+    },
+    "systemPrompt": {
+      "name": "Пользовательский системный промпт",
+      "desc": "Дополнительные инструкции, добавляемые к системному промпту по умолчанию"
+    },
+    "autoTitle": {
+      "name": "Автоматически генерировать заголовки бесед",
+      "desc": "Автоматически генерировать заголовки бесед после первого сообщения пользователя."
+    },
+    "titleLanguage": {
+      "name": "Язык генерации заголовков",
+      "desc": "Язык для автоматически создаваемых заголовков бесед.",
+      "followInterface": "Как язык интерфейса"
+    },
+    "titleModel": {
+      "name": "Модель генерации заголовков",
+      "desc": "Модель, используемая для автоматической генерации заголовков бесед.",
+      "auto": "Авто (Haiku)"
+    },
+    "navMappings": {
+      "name": "Сопоставления навигации в стиле Vim",
+      "desc": "По одному сопоставлению в строке. Формат: \"map <ключ> <действие>\" (действия: scrollUp, scrollDown, focusInput)."
+    },
+    "requireCommandOrControlEnterToSend": {
+      "name": "Требовать Command/Ctrl+Enter для отправки",
+      "desc": "Если включено, Enter вставляет новую строку. Command+Enter отправляет на macOS; Ctrl+Enter отправляет на Windows и Linux."
+    },
+    "hotkeys": "Горячие клавиши",
+    "inlineEditHotkey": {
+      "name": "Инлайн-редактирование",
+      "descWithKey": "Текущая клавиша: {hotkey}",
+      "descNoKey": "Клавиша не назначена",
+      "btnChange": "Изменить",
+      "btnSet": "Назначить"
+    },
+    "openChatHotkey": {
+      "name": "Открыть чат",
+      "descWithKey": "Текущая клавиша: {hotkey}",
+      "descNoKey": "Клавиша не назначена",
+      "btnChange": "Изменить",
+      "btnSet": "Назначить"
+    },
+    "newSessionHotkey": {
+      "name": "Заменить текущий диалог",
+      "descWithKey": "Текущая клавиша: {hotkey}",
+      "descNoKey": "Клавиша не назначена",
+      "btnChange": "Изменить",
+      "btnSet": "Назначить"
+    },
+    "newTabHotkey": {
+      "name": "Новое",
+      "descWithKey": "Текущая клавиша: {hotkey}",
+      "descNoKey": "Клавиша не назначена",
+      "btnChange": "Изменить",
+      "btnSet": "Назначить"
+    },
+    "closeTabHotkey": {
+      "name": "Закрыть вкладку",
+      "descWithKey": "Текущая клавиша: {hotkey}",
+      "descNoKey": "Клавиша не назначена",
+      "btnChange": "Изменить",
+      "btnSet": "Назначить"
+    },
+    "slashCommands": {
+      "name": "Команды и навыки",
+      "desc": "Управление командами и навыками на уровне хранилища, расположенными в .claude/commands/ и .claude/skills/. Запускаются через /имя."
+    },
+    "hiddenSlashCommands": {
+      "name": "Скрытые команды и навыки",
+      "desc": "Скрыть определённые команды и навыки из выпадающего списка. Полезно для скрытия записей Claude Code, которые не актуальны для Claudian. Вводите имена без начального слэша, по одному на строку.",
+      "placeholder": "commit\nbuild\ntest"
+    },
+    "mcpServers": {
+      "name": "MCP серверы",
+      "descBeforeCommand": "Claude Code управляет MCP-серверами через собственный CLI. Настройте через ",
+      "descAfterCommand": ", и они будут доступны в Claudian. ",
+      "learnMore": "Подробнее"
+    },
+    "plugins": {
+      "name": "Плагины Claude Code",
+      "desc": "Управление плагинами Claude Code из ~/.claude/plugins. Включенные плагины сохраняются для каждого хранилища в .claude/settings.json."
+    },
+    "subagents": {
+      "name": "Субагенты",
+      "desc": "Управление субагентами на уровне хранилища в .claude/agents/. Каждый Markdown-файл определяет одного пользовательского агента.",
+      "noAgents": "Субагенты не настроены. Нажмите +, чтобы создать одного.",
+      "deleteConfirm": "Удалить субагента \"{name}\"?",
+      "saveFailed": "Не удалось сохранить субагента: {message}",
+      "refreshFailed": "Не удалось обновить субагентов: {message}",
+      "deleteFailed": "Не удалось удалить субагента: {message}",
+      "renameCleanupFailed": "Предупреждение: не удалось удалить старый файл для \"{name}\"",
+      "created": "Субагент \"{name}\" создан",
+      "updated": "Субагент \"{name}\" обновлён",
+      "deleted": "Субагент \"{name}\" удалён",
+      "duplicateName": "Агент с именем \"{name}\" уже существует",
+      "descriptionRequired": "Описание обязательно",
+      "promptRequired": "Системный промпт обязателен",
+      "modal": {
+        "titleEdit": "Редактировать субагента",
+        "titleAdd": "Добавить субагента",
+        "name": "Имя",
+        "nameDesc": "Только строчные буквы, цифры и дефисы",
+        "namePlaceholder": "code-reviewer",
+        "description": "Описание",
+        "descriptionDesc": "Краткое описание этого агента",
+        "descriptionPlaceholder": "Проверяет код на ошибки и стиль",
+        "advancedOptions": "Дополнительные параметры",
+        "model": "Модель",
+        "modelDesc": "Переопределение модели для этого агента",
+        "tools": "Инструменты",
+        "toolsDesc": "Список разрешённых инструментов через запятую (пусто = все)",
+        "disallowedTools": "Запрещённые инструменты",
+        "disallowedToolsDesc": "Список инструментов, которые нужно запретить, через запятую",
+        "skills": "Навыки",
+        "skillsDesc": "Список навыков через запятую",
+        "prompt": "Системный промпт",
+        "promptDesc": "Инструкции для агента",
+        "promptPlaceholder": "Вы специалист по проверке кода. Проанализируйте предоставленный код на предмет..."
+      }
+    },
+    "safety": "Безопасность",
+    "loadUserSettings": {
+      "name": "Загружать пользовательские настройки Claude",
+      "desc": "Загружает ~/.claude/settings.json. При включении пользовательские правила разрешений Claude Code могут обходить безопасный режим."
+    },
+    "claudeSafeMode": {
+      "name": "Безопасный режим",
+      "desc": "Режим разрешений, используемый, когда переключатель Safe активен."
+    },
+    "codexSafeMode": {
+      "name": "Безопасный режим",
+      "desc": "Режим песочницы, используемый, когда переключатель Safe активен."
+    },
+    "environment": "Окружение",
+    "customVariables": {
+      "name": "Пользовательские переменные",
+      "desc": "Переменные окружения для Claude SDK (формат KEY=VALUE, по одной в строке). Префикс export поддерживается."
+    },
+    "envSnippets": {
+      "name": "Сниппеты",
+      "addBtn": "Добавить сниппет",
+      "noSnippets": "Нет сохраненных сниппетов окружения. Нажмите +, чтобы сохранить текущую конфигурацию.",
+      "nameRequired": "Пожалуйста, введите название сниппета",
+      "modal": {
+        "titleEdit": "Редактировать сниппет",
+        "titleSave": "Сохранить сниппет",
+        "name": "Имя",
+        "namePlaceholder": "Описательное название для этой конфигурации",
+        "description": "Описание",
+        "descPlaceholder": "Опциональное описание",
+        "envVars": "Переменные окружения",
+        "envVarsPlaceholder": "Формат KEY=VALUE, по одной в строке (префикс export поддерживается)",
+        "save": "Сохранить",
+        "update": "Обновить",
+        "cancel": "Отмена"
+      }
+    },
+    "customModelOverrides": {
+      "name": "Переопределения пользовательских моделей",
+      "desc": "Настройте псевдонимы в селекторе моделей и размеры окна контекста для пользовательских моделей."
+    },
+    "customModelAliases": {
+      "placeholder": "Псевдоним"
+    },
+    "customContextLimits": {
+      "name": "Пользовательские лимиты контекста",
+      "desc": "Установите размеры окна контекста для ваших пользовательских моделей. Оставьте пустым для использования значения по умолчанию (200k токенов).",
+      "invalid": "Неверный формат. Используйте: 256k, 1m или точное число (1000-10000000)."
+    },
+    "customModels": {
+      "name": "Пользовательские модели",
+      "desc": "Добавьте дополнительные ID моделей Claude в список выбора, по одному на строку. Переопределения модели из окружения по-прежнему заменяют список.",
+      "placeholder": "claude-opus-4-6\nclaude-opus-4-5-20251101"
+    },
+    "enableChrome": {
+      "name": "Включить расширение Chrome",
+      "desc": "Разрешить Claude взаимодействовать с Chrome через расширение claude-in-chrome. Требуется установка расширения. Требуется перезапуск сессии."
+    },
+    "enableBangBash": {
+      "name": "Включить режим bash (!)",
+      "desc": "Введите ! в пустом поле ввода, чтобы перейти в режим bash. Команды выполняются напрямую через Node.js child_process. Требуется повторно открыть представление.",
+      "validation": {
+        "noNode": "Node.js не найден в PATH. Установите Node.js или проверьте настройку PATH."
+      }
+    },
+    "maxWarmAgentProcesses": {
+      "name": "Максимум одновременно запущенных сессий",
+      "desc": "Максимальное число сессий агента, готовых к работе одновременно (5-10). Старые неактивные сессии автоматически приостанавливаются и возобновляются при использовании."
+    },
+    "enableDualPane": {
+      "name": "Включить двухпанельный режим",
+      "desc": "Автоматически показывать менеджер сессий рядом с чатом, когда ширина представления не менее 600 px."
+    },
+    "enableFilePane": {
+      "name": "Включить панель файлов",
+      "desc": "Показывать вкладку «Файлы» в менеджере сессий двухпанельного режима."
+    },
+    "dualPaneSide": {
+      "name": "Сторона второй панели",
+      "desc": "Выберите, с какой стороны чата отображается менеджер сессий.",
+      "left": "Слева",
+      "right": "Справа"
+    },
+    "enableAutoScroll": {
+      "name": "Автопрокрутка во время потоковой передачи",
+      "desc": "Автоматически прокручивать вниз, пока Claude передает ответы. Отключите, чтобы оставаться наверху и читать с начала."
+    },
+    "deferMathRenderingDuringStreaming": {
+      "name": "Отложить рендеринг формул во время потока",
+      "desc": "Показывать исходный LaTeX во время потоковой передачи и рендерить формулы один раз после завершения каждого текстового блока."
+    },
+    "expandFileEditsByDefault": {
+      "name": "Раскрывать правки файлов по умолчанию",
+      "desc": "Показывать diff для Write и Edit раскрытым при первом появлении."
+    },
+    "chatViewPlacement": {
+      "name": "Открывать Claudian в",
+      "desc": "Выберите, где открывается панель чата при создании",
+      "rightSidebar": "Правая боковая панель",
+      "leftSidebar": "Левая боковая панель",
+      "mainTab": "Основная вкладка редактора"
+    },
+    "cliPath": {
+      "name": "Путь к CLI Claude",
+      "desc": "Пользовательский путь к Claude Code CLI. Оставьте пустым для автоматического определения.",
+      "descWindows": "Для нативного установщика используйте claude.exe. Для установок через npm/pnpm/yarn или другие менеджеры пакетов используйте путь к cli-wrapper.cjs (не claude.cmd).",
+      "descUnix": "Вставьте вывод команды \"which claude\" — работает как для нативных установок, так и для npm/pnpm/yarn.",
+      "validation": {
+        "notExist": "Путь не существует",
+        "isDirectory": "Путь является директорией, а не файлом"
+      }
+    },
+    "language": {
+      "name": "Язык",
+      "desc": "Изменить язык интерфейса плагина"
+    },
+    "providerEnablement": {
+      "name": "Включить {provider}",
+      "desc": "Сделать включённые модели {provider} доступными для новых бесед. Существующие сеансы сохраняются после отключения.",
+      "lastProviderWarning": "Для работы Claudian должен быть включён хотя бы один провайдер.",
+      "noModelsWarning": "Нет включённых моделей {provider}. В разделе «Модели» ниже включите хотя бы одну модель."
+    },
+    "codex": {
+      "installationMethod": {
+        "name": "Способ установки",
+        "desc": "Как Claudian должен запускать Codex в Windows. Нативный Windows использует путь к Windows-исполняемому файлу. WSL запускает Linux CLI внутри выбранного дистрибутива.",
+        "nativeWindows": "Нативный Windows",
+        "wsl": "WSL"
+      },
+      "cliPath": {
+        "name": "Путь к Codex CLI",
+        "descUnix": "Пользовательский путь к локальному Codex CLI. Оставьте пустым, чтобы сначала использовать известные установки Codex, затем PATH.",
+        "descWindows": "Пользовательский путь к локальному Codex CLI. Оставьте пустым для автоопределения через PATH. Используйте путь к нативному Windows-исполняемому файлу, обычно `codex.exe`.",
+        "descWsl": "Linux-команда Codex или абсолютный путь для запуска внутри WSL. Оставьте пустым для поиска в PATH выбранного дистрибутива.",
+        "validation": {
+          "wslWindowsPath": "В режиме WSL ожидается Linux-команда или абсолютный Linux-путь, а не путь к Windows-исполняемому файлу."
+        }
+      },
+      "wslDistroOverride": {
+        "name": "Переопределение дистрибутива WSL",
+        "desc": "Необязательное расширенное переопределение. Оставьте пустым, чтобы по возможности определить дистрибутив из пути рабочей области WSL, иначе будет использован дистрибутив WSL по умолчанию."
+      },
+      "safeMode": {
+        "workspaceWrite": "Запись в рабочую область",
+        "readOnly": "Только чтение"
+      },
+      "customModels": {
+        "name": "Пользовательские модели",
+        "desc": "Добавьте дополнительные ID моделей Codex в список выбора, по одному на строку. `OPENAI_MODEL` по-прежнему имеет приоритет, если задан.",
+        "placeholder": "gpt-5.4\ngpt-5.3-codex-spark"
+      },
+      "reasoningSummary": {
+        "name": "Сводка рассуждений",
+        "desc": "Показывать сводку процесса рассуждений модели в блоке размышлений.",
+        "auto": "Авто",
+        "concise": "Кратко",
+        "detailed": "Подробно",
+        "off": "Выкл."
+      },
+      "ultraEffort": {
+        "name": "Включить уровень Ultra",
+        "desc": "Показывать Ultra в выборе усилия для моделей Codex, которые его поддерживают. Ultra использует максимальное рассуждение с автоматическим делегированием задач."
+      },
+      "skills": {
+        "name": "Навыки Codex",
+        "desc": "Manage shared vault-level skills stored only in .agents/skills/.",
+        "hiddenName": "Скрытые навыки",
+        "hiddenDesc": "Скрыть отдельные навыки Codex из списка. Введите имена навыков без начального $, по одному на строку.",
+        "hiddenPlaceholder": "analyze\nexplain\nfix"
+      },
+      "subagents": {
+        "name": "Субагенты Codex",
+        "desc": "Управляйте субагентами Codex уровня vault, сохраненными в .codex/agents/. Каждый TOML-файл задает одного пользовательского агента."
+      },
+      "mcp": {
+        "descBeforeCommand": "Codex управляет MCP-серверами через собственный CLI. Настройте через ",
+        "descAfterCommand": ", и они будут доступны в Claudian. ",
+        "learnMore": "Подробнее"
+      },
+      "environment": {
+        "name": "Окружение Codex",
+        "desc": "Только переменные среды выполнения, принадлежащие Codex. Используйте для настроек OPENAI_* и CODEX_*. Если автоопределению Codex нужна помощь, добавьте каталог установки в общий PATH, а не в этот раздел провайдера."
+      }
+    },
+    "agentSkills": {
+      "sectionTitle": "Skills", "fixedRoot": "Managed in .agents/skills", "sharedExpectation": "Manage shared skills in .agents/skills/ for compatible providers.", "noSkills": "No shared skills configured. Click + to create one.", "skillBadge": "skill", "diagnosticsTitle": "Skills needing attention", "loadFailed": "Could not load shared skills.", "savedRefreshFailed": "Saved, but provider refresh failed.", "validationFailed": "Invalid skill: {message}", "collisionFailed": "A skill named \"{name}\" already exists.", "saveFailed": "Failed to save shared skill: {message}", "deleteFailed": "Failed to move shared skill to trash: {message}", "staleConflict": "This skill changed elsewhere; refresh before saving.", "created": "Shared skill \"{name}\" created.", "updated": "Shared skill \"{name}\" updated.", "deleted": "Shared skill \"{name}\" moved to trash.",
+      "modal": { "titleEdit": "Edit Shared Skill", "titleAdd": "Add Shared Skill", "name": "Skill name", "nameDesc": "Lowercase letters and numbers separated by single hyphens", "namePlaceholder": "code-reviewer", "description": "Description", "descriptionDesc": "Required portable description used by providers to select the skill", "descriptionPlaceholder": "Reviews code for correctness and maintainability", "instructions": "Instructions", "instructionsDesc": "Required SKILL.md instructions", "instructionsPlaceholder": "Review the supplied code and report actionable findings..." },
+      "delete": { "title": "Delete Shared Skill", "description": "The entire skill folder, including scripts, references, and assets, will be moved to trash.", "confirm": "Move to trash" }
+    },
+    "codexSkills": {
+      "modal": {
+        "titleEdit": "Редактировать навык Codex",
+        "titleAdd": "Добавить навык Codex",
+        "directory": "Каталог",
+        "directoryDesc": "Где хранить навык",
+        "skillName": "Имя навыка",
+        "skillNameDesc": "Имя, используемое после $ (например, \"analyze\" для $analyze)",
+        "description": "Описание",
+        "descriptionDesc": "Необязательное описание, отображаемое в списке",
+        "instructions": "Инструкции",
+        "instructionsDesc": "Инструкции навыка (содержимое SKILL.md)",
+        "instructionsPlaceholder": "Analyze the code for..."
+      },
+      "instructionsRequired": "Инструкции обязательны",
+      "saveFailed": "Не удалось сохранить навык Codex",
+      "header": "Навыки Codex",
+      "noSkills": "В vault нет навыков Codex. Нажмите +, чтобы создать навык.",
+      "skillBadge": "навык",
+      "deleted": "Навык Codex \"{name}\" удален",
+      "deleteFailed": "Не удалось удалить навык Codex",
+      "created": "Навык Codex \"{name}\" создан",
+      "updated": "Навык Codex \"{name}\" обновлен"
+    },
+    "codexSubagents": {
+      "modal": {
+        "titleEdit": "Редактировать субагента Codex",
+        "titleAdd": "Добавить субагента Codex",
+        "nameDesc": "Имя агента, которое Codex использует при запуске (строчные буквы, дефисы, подчеркивания)",
+        "descriptionDesc": "Когда Codex должен использовать этого агента",
+        "modelDesc": "Переопределение модели (пусто = наследовать)",
+        "namePlaceholder": "code_reviewer"
+      },
+      "reasoningEffort": {
+        "name": "Усилие рассуждения",
+        "desc": "Уровень усилия рассуждения модели",
+        "inherit": "Наследовать",
+        "low": "Низкий",
+        "medium": "Средний",
+        "high": "Высокий",
+        "xhigh": "Очень высокий"
+      },
+      "sandboxMode": {
+        "name": "Режим песочницы",
+        "desc": "Ограничение песочницы для этого агента",
+        "inherit": "Наследовать",
+        "readOnly": "Только чтение",
+        "dangerFullAccess": "Полный доступ",
+        "workspaceWrite": "Запись в рабочую область"
+      },
+      "nicknameCandidates": {
+        "name": "Варианты псевдонимов",
+        "desc": "Отображаемые псевдонимы через запятую (например: atlas, delta, echo)"
+      },
+      "developerInstructions": {
+        "name": "Инструкции разработчика",
+        "desc": "Основные инструкции, определяющие поведение агента",
+        "placeholder": "Review code like an owner.\nPrioritize correctness, security, and missing test coverage.",
+        "required": "Инструкции разработчика обязательны"
+      },
+      "validation": {
+        "nameRequired": "Имя субагента обязательно",
+        "nameTooLong": "Имя субагента должно быть не длиннее {count} символов",
+        "nameInvalid": "Имя субагента может содержать только строчные буквы, цифры, дефисы и подчеркивания",
+        "nicknameInvalid": "Варианты псевдонимов могут содержать только ASCII-буквы, цифры, пробелы, дефисы и подчеркивания",
+        "nicknameDuplicate": "Варианты псевдонимов должны быть уникальными"
+      },
+      "header": "Субагенты Codex",
+      "noAgents": "В vault нет субагентов Codex. Нажмите +, чтобы создать одного."
+    }
+  }
+}

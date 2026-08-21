@@ -1,0 +1,10 @@
+contract_version: 3
+artifact: Review
+authority: markdown
+paths:
+  - life/reviews/weekly/YYYY-Www.md
+  - life/reviews/monthly/YYYY-MM.md
+  - life/reviews/yearly/YYYY.md
+required_fields: []
+regions:
+  optional_ai: [organized-review]

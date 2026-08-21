@@ -1,0 +1,67 @@
+import { getDefaultHiddenProviderCommands } from '../../core/providers/commands/hiddenCommands';
+import { DEFAULT_REASONING_VALUE } from '../../core/providers/reasoning';
+import { type ClaudianSettings } from '../../core/types/settings';
+import { DEFAULT_OKF_SYSTEM_PROMPT_MODE } from '../../integrations/okf/OkfPromptPolicy';
+import { getBuiltInProviderDefaultConfigs } from '../../providers/defaultProviderConfigs';
+
+export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
+  userName: '',
+
+  permissionMode: 'yolo',
+
+  model: 'haiku',
+  thinkingBudget: 'off',
+  effortLevel: DEFAULT_REASONING_VALUE,
+  serviceTier: 'default',
+  enableAutoTitleGeneration: true,
+  titleGenerationLocale: '',
+  titleGenerationModel: '',
+
+  excludedTags: [],
+  mediaFolder: '',
+  systemPrompt: '',
+  systemPromptMode: DEFAULT_OKF_SYSTEM_PROMPT_MODE,
+  replacementSystemPrompt: '',
+  persistentExternalContextPaths: [],
+
+  sharedEnvironmentVariables: '',
+  envSnippets: [],
+  customContextLimits: {},
+  customModelAliases: {},
+
+  keyboardNavigation: {
+    scrollUpKey: 'w',
+    scrollDownKey: 's',
+    focusInputKey: 'i',
+  },
+  requireCommandOrControlEnterToSend: false,
+
+  locale: 'en',
+
+  providerConfigs: getBuiltInProviderDefaultConfigs(),
+
+  settingsProvider: 'claude',
+  lastSelectedChatModel: null,
+  savedProviderModel: {},
+  savedProviderEffort: {},
+  savedProviderServiceTier: {},
+  savedProviderThinkingBudget: {},
+  savedProviderPermissionMode: {},
+  pendingProviderSessionInvalidations: {},
+
+  lastCustomModel: '',
+
+  maxWarmAgentProcesses: 5,
+  enableAutoScroll: true,
+  deferMathRenderingDuringStreaming: true,
+  expandFileEditsByDefault: false,
+  chatViewPlacement: 'right-sidebar',
+  enableDualPane: true,
+  enableFilePane: true,
+  dualPaneSide: 'right',
+  sessionManagerOrganization: 'list',
+  sessionManagerSort: 'last-updated',
+  pinnedLinkedNotePaths: [],
+
+  hiddenProviderCommands: getDefaultHiddenProviderCommands(),
+};

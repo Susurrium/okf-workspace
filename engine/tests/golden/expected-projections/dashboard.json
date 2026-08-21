@@ -1,0 +1,31 @@
+{
+  "today": {
+    "daily_exists": true,
+    "task_count": 1,
+    "active_project_titles": ["个人知识工作区"],
+    "open_inbox_count": 1
+  },
+  "inbox": {
+    "open_titles": ["模糊想法"],
+    "processed_count": 0
+  },
+  "learning": {
+    "active_course_titles": ["医学统计学"],
+    "lesson_count": 1,
+    "pending_guide_count": 0,
+    "ready_guide_count": 0,
+    "completed_guide_count": 0,
+    "unstudied_wiki_count": 7
+  },
+  "projects": {
+    "titles": ["个人知识工作区"],
+    "first_recent_log_contains": "创建了合成测试 Vault",
+    "first_decision_count": 1
+  },
+  "knowledge": {
+    "note_count": 9
+  },
+  "life": {
+    "note_count": 2
+  }
+}

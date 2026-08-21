@@ -1,0 +1,12 @@
+[Unit]
+Description=OKF Brain CouchDB logical snapshot and encrypted backup
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/okf-brain/backup.env
+ExecStart=/opt/okf-brain/deploy/server/backup-server.sh
+User=okf-backup
+Group=okf-backup
+PrivateTmp=true
+NoNewPrivileges=true

@@ -1,0 +1,10 @@
+workspace_schema: 3
+resources_version: 1.0.0
+managed:
+  - vault/AGENTS.md
+  - vault/system/contracts
+  - vault/system/templates
+  - vault/system/views
+  - vault/system/policies
+  - vault/system/integrations/web-clipper
+  - skills

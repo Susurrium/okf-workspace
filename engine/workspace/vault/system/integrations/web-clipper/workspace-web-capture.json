@@ -1,0 +1,41 @@
+{
+  "schemaVersion": "0.1.0",
+  "name": "Workspace · Web Capture",
+  "behavior": "create",
+  "noteContentFormat": "# {{title}}\n\n> [!info] 网页来源\n> [{{site ?? domain}}]({{url}}){% if author %} · {{author}}{% endif %}{% if published %} · 发布于 {{published}}{% endif %}\n{% if description %}\n## 页面说明\n\n{{description}}\n{% endif %}\n{% if highlights %}\n## 高亮\n{% elseif selection %}\n## 选中内容\n{% else %}\n## 网页正文\n{% endif %}\n{{content}}\n",
+  "properties": [
+    {
+      "name": "type",
+      "value": "Capture",
+      "type": "text"
+    },
+    {
+      "name": "title",
+      "value": "{{title}}",
+      "type": "text"
+    },
+    {
+      "name": "created_at",
+      "value": "{{time|date:\"YYYY-MM-DDTHH:mm:ssZ\"}}",
+      "type": "text"
+    },
+    {
+      "name": "capture_status",
+      "value": "open",
+      "type": "text"
+    },
+    {
+      "name": "ingested_via",
+      "value": "web-clip",
+      "type": "text"
+    },
+    {
+      "name": "resource",
+      "value": "{{url}}",
+      "type": "text"
+    }
+  ],
+  "triggers": [],
+  "noteNameFormat": "{{time|date:\"YYYY-MM-DD-HHmmss\"}}-{{title|safe_name}}",
+  "path": "inbox/captures/{{time|date:\"YYYY\"}}/{{time|date:\"MM\"}}"
+}

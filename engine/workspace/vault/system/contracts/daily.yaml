@@ -1,0 +1,10 @@
+contract_version: 3
+artifact: Daily
+authority: markdown
+paths:
+  - life/daily/YYYY/MM/YYYY-MM-DD.md
+required_fields: [date]
+field_types:
+  date: date
+regions:
+  required_ai: [linked-activity, organized-daily]

@@ -1,0 +1,14 @@
+contract_version: 3
+artifact: Study Guide
+authority: markdown
+paths:
+  - learning/guides/<slug>.md
+  - learning/courses/<course>/guides/<slug>.md
+required_fields: []
+field_types:
+  studied_at: temporal
+  course: vault_path
+  project: vault_path
+regions:
+  required_human: [notes]
+  required_ai: [study-material]

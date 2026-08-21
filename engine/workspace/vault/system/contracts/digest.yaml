@@ -1,0 +1,15 @@
+contract_version: 3
+artifact: Digest
+authority: markdown
+paths:
+  - feeds/ai-daily/YYYY/<digest>.md
+  - feeds/treehole/YYYY/<digest>.md
+required_fields: [feed, digest_id, issued_at, items]
+field_types:
+  feed: string
+  digest_id: string
+  issued_at: temporal
+  items: list
+  section: string
+states:
+  feed: [ai-daily, treehole]

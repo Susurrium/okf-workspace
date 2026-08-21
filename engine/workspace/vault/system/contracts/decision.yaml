@@ -1,0 +1,8 @@
+contract_version: 3
+artifact: Decision
+authority: markdown
+paths:
+  - projects/<project>/decisions/YYYY-MM-DD-<slug>.md
+required_fields: [decided_at]
+field_types:
+  decided_at: temporal

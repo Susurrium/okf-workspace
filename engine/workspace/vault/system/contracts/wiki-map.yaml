@@ -1,0 +1,6 @@
+contract_version: 3
+artifact: Wiki Map
+authority: markdown
+paths:
+  - knowledge/maps/<slug>.md
+required_fields: [description]

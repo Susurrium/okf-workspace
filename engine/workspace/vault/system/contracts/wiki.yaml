@@ -1,0 +1,14 @@
+contract_version: 3
+artifact: Wiki
+authority: markdown
+paths:
+  - knowledge/wiki/<slug>.md
+required_fields: [description]
+field_types:
+  studied_at: temporal
+  course: vault_path
+  project: vault_path
+conditional_required_fields:
+  generated: [sources]
+regions:
+  optional_ai: [wiki-content]

@@ -1,0 +1,82 @@
+name: workspace-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --project engine --frozen --extra dev --extra vector
+      - run: uv run --project engine pytest engine/tests
+      - run: uv run --project engine ruff check engine/src engine/tests
+      - run: uv run --project engine pyright --project engine/pyproject.toml
+      - run: uv build --project engine
+      - run: uv run --project engine pytest tests/e2e
+      - run: uv run --project engine ruff check tests/e2e
+
+  markitdown:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --project services/markitdown --frozen
+      - run: uv run --project services/markitdown pytest services/markitdown/tests
+      - run: uv run --project services/markitdown ruff check services/markitdown/src services/markitdown/tests
+      - run: uv build --project services/markitdown
+
+  windows-release-assets:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --project engine --frozen --extra dev
+      - run: uv run --project engine pytest tests/e2e/test_markitdown_release_package.py
+
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+
+  assistant:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: claudian
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: claudian/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build

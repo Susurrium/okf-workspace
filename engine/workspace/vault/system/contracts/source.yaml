@@ -1,0 +1,18 @@
+contract_version: 3
+artifact: Source
+authority: markdown
+paths:
+  - sources/records/<kind>/<slug>.md
+required_fields: [resource, kind, text, uses]
+workspace_write_fields: [ingested_via]
+field_types:
+  resource: string
+  sha256: string
+  kind: string
+  text: vault_path
+  uses: source_use_list
+  ingested_via: string
+  feed_item: string
+  digest: string
+states:
+  ingested_via: [web-clip, file-import, feed, direct-entry]

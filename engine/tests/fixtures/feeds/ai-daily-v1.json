@@ -1,0 +1,25 @@
+{
+  "issue_date": "2026-08-17",
+  "title": "AI Daily 2026-08-17",
+  "streams": [
+    {
+      "stream": "news",
+      "label": "AI 资讯",
+      "channels": [
+        {
+          "edition_id": "news-main",
+          "title": "资讯",
+          "items": [
+            {
+              "artifact_id": "ai-daily:2026-08-17:news:001",
+              "title": "本地 AI 工具发布完整部署指南",
+              "preview": "包含配置步骤、技术文档和实验数据。",
+              "source_urls": ["https://example.test/ai-tool"],
+              "generated_at": "2026-08-17T08:00:00+08:00"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

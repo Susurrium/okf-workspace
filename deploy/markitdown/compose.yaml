@@ -1,0 +1,121 @@
+name: obsidian-markitdown-fallback
+
+x-common-environment: &common-environment
+  MARKITDOWN_STATE_DIR: /data/state
+  MARKITDOWN_SPOOL_DIR: /data/spool
+  MARKITDOWN_ENGINE_VERSION: "0.1.6"
+  MARKITDOWN_ENGINE_BUILD_ID: ${MARKITDOWN_ENGINE_BUILD_ID:-markitdown-0.1.6-py31213-v3}
+  MARKITDOWN_MAX_UPLOAD_BYTES: ${MARKITDOWN_MAX_UPLOAD_BYTES:-67108864}
+  MARKITDOWN_MAX_RESULT_BYTES: ${MARKITDOWN_MAX_RESULT_BYTES:-134217728}
+  MARKITDOWN_MAX_PAGES: ${MARKITDOWN_MAX_PAGES:-500}
+  MARKITDOWN_MAX_ACTIVE_TASKS: ${MARKITDOWN_MAX_ACTIVE_TASKS:-3}
+  MARKITDOWN_MAX_CONCURRENT_UPLOADS: ${MARKITDOWN_MAX_CONCURRENT_UPLOADS:-1}
+  MARKITDOWN_MAX_SPOOL_BYTES: ${MARKITDOWN_MAX_SPOOL_BYTES:-2147483648}
+  MARKITDOWN_MIN_FREE_BYTES: ${MARKITDOWN_MIN_FREE_BYTES:-2147483648}
+  MARKITDOWN_CONVERSION_TIMEOUT_SECONDS: ${MARKITDOWN_CONVERSION_TIMEOUT_SECONDS:-600}
+  MARKITDOWN_SUCCESS_TTL_SECONDS: ${MARKITDOWN_SUCCESS_TTL_SECONDS:-7200}
+  MARKITDOWN_FAILURE_TTL_SECONDS: ${MARKITDOWN_FAILURE_TTL_SECONDS:-86400}
+  MARKITDOWN_TOMBSTONE_TTL_SECONDS: ${MARKITDOWN_TOMBSTONE_TTL_SECONDS:-86400}
+  MARKITDOWN_ORPHAN_TTL_SECONDS: ${MARKITDOWN_ORPHAN_TTL_SECONDS:-86400}
+  MARKITDOWN_WORKER_POLL_SECONDS: ${MARKITDOWN_WORKER_POLL_SECONDS:-1}
+  MARKITDOWN_WORKER_STALE_SECONDS: ${MARKITDOWN_WORKER_STALE_SECONDS:-15}
+  MARKITDOWN_MAX_ATTEMPTS: ${MARKITDOWN_MAX_ATTEMPTS:-2}
+  MARKITDOWN_ENABLE_PLUGINS: "false"
+  MARKITDOWN_RELEASE_MANIFEST_SHA256: ${MARKITDOWN_RELEASE_MANIFEST_SHA256}
+
+x-common-service: &common-service
+  image: ${MARKITDOWN_IMAGE:-obsidian-markitdown-service:1.2.0}
+  build:
+    context: ../../services/markitdown
+    dockerfile: Dockerfile
+    args:
+      PYTHON_IMAGE: ${MARKITDOWN_PYTHON_IMAGE:-docker.m.daocloud.io/library/python:3.12.13-slim-bookworm}
+      SERVICE_UID: ${MARKITDOWN_UID:-10002}
+      SERVICE_GID: ${MARKITDOWN_GID:-10002}
+      ENGINE_BUILD_ID: ${MARKITDOWN_ENGINE_BUILD_ID:-markitdown-0.1.6-py31213-v3}
+      RELEASE_MANIFEST_SHA256: ${MARKITDOWN_RELEASE_MANIFEST_SHA256}
+  user: "${MARKITDOWN_UID:-10002}:${MARKITDOWN_GID:-10002}"
+  read_only: true
+  init: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 128
+  restart: "on-failure:5"
+  environment: *common-environment
+  tmpfs:
+    - /tmp:size=64m,mode=0700,uid=${MARKITDOWN_UID:-10002},gid=${MARKITDOWN_GID:-10002}
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  api:
+    <<: *common-service
+    command: ["api"]
+    environment:
+      <<: *common-environment
+      MARKITDOWN_BIND_HOST: 0.0.0.0
+      MARKITDOWN_BIND_PORT: "8080"
+      MARKITDOWN_API_TOKEN_FILE: /run/secrets/api_tokens
+    volumes:
+      - type: bind
+        source: ${MARKITDOWN_DATA_ROOT:-/srv/markitdown-data}/state
+        target: /data/state
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MARKITDOWN_DATA_ROOT:-/srv/markitdown-data}/spool
+        target: /data/spool
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MARKITDOWN_TOKEN_FILE:-/etc/obsidian-markitdown/api-tokens.txt}
+        target: /run/secrets/api_tokens
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - api-internal
+    mem_limit: 256m
+    cpus: 0.50
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          token=next(line.strip() for line in open('/run/secrets/api_tokens', encoding='utf-8') if line.strip() and not line.lstrip().startswith('#'));
+          request=urllib.request.Request('http://127.0.0.1:8080/v1/health', headers={'Authorization':'Bearer '+token});
+          urllib.request.urlopen(request, timeout=2).read()
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+
+  worker:
+    <<: *common-service
+    command: ["worker"]
+    network_mode: none
+    mem_limit: 2g
+    cpus: 1.5
+    stop_grace_period: 15s
+    volumes:
+      - type: bind
+        source: ${MARKITDOWN_DATA_ROOT:-/srv/markitdown-data}/state
+        target: /data/state
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MARKITDOWN_DATA_ROOT:-/srv/markitdown-data}/spool
+        target: /data/spool
+        bind:
+          create_host_path: false
+
+networks:
+  api-internal:
+    internal: true

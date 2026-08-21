@@ -1,0 +1,75 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "okf-workspace-engine"
+version = "1.6.0"
+description = "Vault-native OKF workspace engine for Obsidian and Codex"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<0.29",
+  "python-multipart>=0.0.20,<1",
+  "ruamel-yaml>=0.18.10,<0.19",
+  "uvicorn>=0.34,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4,<9",
+  "pytest-cov>=6.2,<7",
+  "pyright>=1.1.403,<2",
+  "ruff>=0.12,<1",
+]
+vector = [
+  "fastembed>=0.7,<0.8",
+]
+
+[project.scripts]
+okf = "okf_workspace.cli:main"
+okf-server = "okf_workspace.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/okf_workspace"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"workspace/vault/AGENTS.md" = "okf_workspace/resources/vault/AGENTS.md"
+"workspace/vault/index.md" = "okf_workspace/resources/vault/index.md"
+"workspace/vault/.gitignore" = "okf_workspace/resources/vault/.gitignore"
+"workspace/vault/.obsidian/app.json" = "okf_workspace/resources/vault/.obsidian/app.json"
+"workspace/vault/.obsidian/daily-notes.json" = "okf_workspace/resources/vault/.obsidian/daily-notes.json"
+"workspace/vault/.obsidian/templates.json" = "okf_workspace/resources/vault/.obsidian/templates.json"
+"workspace/vault/self/capabilities.md" = "okf_workspace/resources/vault/self/capabilities.md"
+"workspace/vault/self/constraints.md" = "okf_workspace/resources/vault/self/constraints.md"
+"workspace/vault/self/direction.md" = "okf_workspace/resources/vault/self/direction.md"
+"workspace/vault/self/now.md" = "okf_workspace/resources/vault/self/now.md"
+"workspace/vault/self/preferences.md" = "okf_workspace/resources/vault/self/preferences.md"
+"workspace/vault/self/profile.md" = "okf_workspace/resources/vault/self/profile.md"
+"workspace/vault/system" = "okf_workspace/resources/vault/system"
+"workspace/skills" = "okf_workspace/resources/skills"
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+allowed-confusables = ["，", "。", "？", "；", "：", "！"]
+
+[tool.pyright]
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
+exclude = [
+  "**/node_modules",
+  "tests/fixtures/documents/build_docx.py",
+  "tests/fixtures/documents/build_pdfs.py",
+]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"

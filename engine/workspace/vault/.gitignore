@@ -1,0 +1,18 @@
+# Obsidian session state is machine-local and changes on every open/close.
+.obsidian/workspace*.json
+
+# Third-party community plugin binaries and device-local settings are installed
+# separately. Already tracked Workspace/LiveSync files remain tracked by Git.
+.obsidian/plugins/*/
+
+# LiveSync data can contain credentials and must never enter Vault Git history.
+.obsidian/plugins/obsidian-livesync/data.json
+
+# Installer ownership metadata is device-local and can include absolute paths.
+.okf-workspace-owner.json
+.agents/skills/.okf-managed-skills.json
+
+# Generated media remains covered by the external backup, not Git checkpoints.
+sources/assets/treehole-media/
+
+.trash/

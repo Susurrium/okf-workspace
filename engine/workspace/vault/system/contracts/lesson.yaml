@@ -1,0 +1,11 @@
+contract_version: 3
+artifact: Lesson
+authority: markdown
+paths:
+  - learning/courses/<course>/lessons/YYYY-MM-DD-<slug>.md
+required_fields: [lesson_at]
+field_types:
+  lesson_at: temporal
+regions:
+  required_human: [notes]
+  required_ai: [organized-lesson]

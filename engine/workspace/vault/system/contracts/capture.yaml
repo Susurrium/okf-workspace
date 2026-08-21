@@ -1,0 +1,18 @@
+contract_version: 3
+artifact: Capture
+authority: markdown
+paths:
+  - inbox/captures/YYYY/MM/YYYY-MM-DD-HHMMSS-<slug>.md
+  - archive/captures/YYYY/MM/YYYY-MM-DD-HHMMSS-<slug>.md
+required_fields: [capture_status]
+workspace_write_fields: [ingested_via]
+field_types:
+  capture_status: string
+  ingested_via: string
+  resource: string
+  processed_into: vault_path_list
+  course: vault_path
+  project: vault_path
+states:
+  capture_status: [open, processed, discarded]
+  ingested_via: [web-clip, file-import, feed, direct-entry]

@@ -1,0 +1,6 @@
+contract_version: 3
+artifact: Reflection
+authority: markdown
+paths:
+  - life/reflections/YYYY-MM-DD-<slug>.md
+required_fields: []

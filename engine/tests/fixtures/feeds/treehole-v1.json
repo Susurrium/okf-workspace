@@ -1,0 +1,23 @@
+{
+  "schema_version": "treehole-batch-preview.v1",
+  "snapshot_id": "2026-08-17-1700",
+  "stat_date": "2026-08-17",
+  "checkpoint": "17:00",
+  "quality": "good",
+  "items": [
+    {
+      "pid": 12345,
+      "text": "校园讲座报名通知，包含截止时间和完整申请步骤。",
+      "timestamp": 1786957200,
+      "best_rank": 2,
+      "peak_score": 91.5,
+      "reply_count": 18,
+      "favorite_count": 7,
+      "like_count": 26,
+      "captured_comments": 2,
+      "post_media": [
+        {"download_path": "treehole-media/12345/poster.jpg"}
+      ]
+    }
+  ]
+}

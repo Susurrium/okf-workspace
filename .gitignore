@@ -1,0 +1,45 @@
+.venv/
+node_modules/
+dist/
+coverage/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+.coverage
+.context/
+.tmp/
+.env*
+!.env.example
+!.env.*.example
+*.log
+*.sqlite*
+
+# Runtime data belongs outside the source repository.
+OKF-Brain/
+OKF-Brain-State/
+OKF-Brain-Originals/
+
+# Generated Obsidian plugin artifacts.
+main.js
+styles.generated.css
+
+# Deterministic document fixtures keep only their source files in Git.
+engine/tests/fixtures/documents/legacy-build/
+engine/tests/fixtures/documents/rendered-*/
+
+# Workspace Kit contains only structure and managed resources, never user data.
+/engine/workspace/vault/actions/**
+/engine/workspace/vault/.agents/**
+/engine/workspace/vault/.claudian/**
+/engine/workspace/vault/archive/**
+/engine/workspace/vault/feeds/**
+/engine/workspace/vault/inbox/**
+/engine/workspace/vault/knowledge/**
+/engine/workspace/vault/learning/**
+/engine/workspace/vault/life/**
+/engine/workspace/vault/projects/**
+/engine/workspace/vault/sources/**
+
+# Obsidian plugin runtime settings are deployed, never source-controlled.
+/dashboard/data.json
