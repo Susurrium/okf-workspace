@@ -3022,17 +3022,18 @@ function aiDailyMetadata(item: FeedDigestItem): string {
     .join(" · ");
 }
 
-function treeholeMetadata(item: FeedDigestItem): string {
+export function treeholeMetadata(item: FeedDigestItem): string {
   const labels: Record<string, string> = {
     best_rank: "最高排名",
-    reply_count: "回复",
-    like_count: "点赞",
-    favorite_count: "收藏",
     peak_score: "热度",
+    reply_count: "回复",
+    favorite_count: "收藏",
+    like_count: "点赞",
   };
-  const metrics = Object.entries(item.metrics)
-    .filter(([key]) => key in labels)
-    .map(([key, value]) => `${labels[key]} ${value}`);
+  const order = ["best_rank", "peak_score", "reply_count", "favorite_count", "like_count"];
+  const metrics = order
+    .filter((key) => Object.prototype.hasOwnProperty.call(item.metrics, key))
+    .map((key) => `${labels[key]} ${item.metrics[key]}`);
   if (item.comment_count) metrics.push(`评论 ${item.comment_count}`);
   if (item.media_count) metrics.push(`媒体 ${item.media_count}`);
   if (item.published_at) metrics.push(item.published_at);

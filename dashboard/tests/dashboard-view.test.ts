@@ -5,6 +5,7 @@ import {
   OkfDashboardView,
   OKF_DASHBOARD_VIEW,
   resolveDashboardLearningSources,
+  treeholeMetadata,
 } from "../src/plugin/dashboard-view.js";
 import { normalizeDashboardUiState } from "../src/plugin/dashboard-ui-state.js";
 
@@ -60,5 +61,24 @@ describe("real Dashboard View source handoff", () => {
       "sources/text/web/topic.md",
       "sources/extracts/web/legacy-topic.md",
     ]);
+  });
+
+  it("shows TreeHole favorites before likes regardless of payload key order", () => {
+    const metadata = treeholeMetadata({
+      item_id: "treehole:8466293",
+      block_id: "treehole-8466293",
+      title: "TreeHole #8466293",
+      summary: "",
+      source: "TreeHole",
+      metrics: {
+        like_count: 3,
+        reply_count: 15,
+        favorite_count: 43,
+      },
+      comment_count: 0,
+      media_count: 0,
+    });
+
+    expect(metadata).toBe("回复 15 · 收藏 43 · 点赞 3");
   });
 });
