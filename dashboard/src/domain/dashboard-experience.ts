@@ -1,6 +1,9 @@
 import type {
+  CourseSummary,
   ConversionRecord,
+  LearningScopeEntryCounts,
   NoteSummary,
+  ProjectSummary,
   SemanticOperationRecord,
   TaskItem,
 } from "../api/types.js";
@@ -104,11 +107,43 @@ export type DashboardLearningRowAction =
 export type DashboardLearningContext = "course" | "project" | "independent";
 export type DashboardLearningScope = "all" | DashboardLearningContext;
 
-export interface DashboardLearningScopeCounts {
-  all: number;
-  course: number;
-  project: number;
-  independent: number;
+export type DashboardLearningScopeCounts = LearningScopeEntryCounts;
+
+export type DashboardObjectMetricKey =
+  | "pending-captures"
+  | "study-guides"
+  | "sources"
+  | "lessons"
+  | "learning-entries";
+
+/** A stable, display-ready count. Zeroes are intentionally retained for comparable rows. */
+export interface DashboardObjectMetric {
+  key: DashboardObjectMetricKey;
+  label: "待整理" | "Study Guide" | "来源" | "Lesson" | "学习入口";
+  count: number;
+}
+
+/** Project metrics always use Capture -> Study Guide -> Source order. */
+export function dashboardProjectMetrics(
+  project: Pick<ProjectSummary, "pending_captures" | "related_learning" | "related_materials">,
+): DashboardObjectMetric[] {
+  return [
+    metric("pending-captures", "待整理", project.pending_captures.length),
+    metric("study-guides", "Study Guide", project.related_learning.length),
+    metric("sources", "来源", project.related_materials.length),
+  ];
+}
+
+/** Course metrics extend the shared order with Course-only Lessons. */
+export function dashboardCourseMetrics(
+  course: Pick<CourseSummary, "pending_captures" | "guide_count" | "related_sources" | "lesson_count">,
+): DashboardObjectMetric[] {
+  return [
+    metric("pending-captures", "待整理", course.pending_captures.length),
+    metric("study-guides", "Study Guide", course.guide_count),
+    metric("sources", "来源", course.related_sources.length),
+    metric("lessons", "Lesson", course.lesson_count),
+  ];
 }
 
 /**
@@ -156,8 +191,12 @@ export function filterDashboardLearningScope(
   });
 }
 
-/** Counts each note once in `all`; a dual-linked note also contributes to both relation scopes. */
-export function dashboardLearningScopeCounts(
+/**
+ * Counts Learning queue entries. Each Study Guide is one entry; each still-deferred
+ * Source use is one entry. A dual-linked entry contributes to both relation scopes
+ * while remaining one entry in `all`.
+ */
+export function dashboardLearningScopeEntryCounts(
   notes: readonly NoteSummary[],
 ): DashboardLearningScopeCounts {
   return {
@@ -168,13 +207,42 @@ export function dashboardLearningScopeCounts(
   };
 }
 
-/** Counts a top-level scope or one concrete Course/Project relation. */
-export function countDashboardLearningScope(
+/** Backwards-compatible name; new UI should prefer the explicit `EntryCounts` form. */
+export function dashboardLearningScopeCounts(
+  notes: readonly NoteSummary[],
+): DashboardLearningScopeCounts {
+  return dashboardLearningScopeEntryCounts(notes);
+}
+
+/** Counts entries in a top-level scope or one concrete Course/Project relation. */
+export function countDashboardLearningScopeEntries(
   notes: readonly NoteSummary[],
   scope: DashboardLearningScope,
   relationPath?: string,
 ): number {
   return filterDashboardLearningScope(notes, scope, relationPath).length;
+}
+
+/** Backwards-compatible name for callers that have not adopted the explicit terminology. */
+export function countDashboardLearningScope(
+  notes: readonly NoteSummary[],
+  scope: DashboardLearningScope,
+  relationPath?: string,
+): number {
+  return countDashboardLearningScopeEntries(notes, scope, relationPath);
+}
+
+/** A single structured metric for a scope selector or a concrete Course/Project row. */
+export function dashboardLearningScopeMetric(
+  notes: readonly NoteSummary[],
+  scope: DashboardLearningScope,
+  relationPath?: string,
+): DashboardObjectMetric {
+  return metric(
+    "learning-entries",
+    "学习入口",
+    countDashboardLearningScopeEntries(notes, scope, relationPath),
+  );
 }
 
 export function filterDashboardLearningNotes(
@@ -410,6 +478,14 @@ function normalizePath(value: string): string {
 
 function compareText(left: string, right: string): number {
   return left === right ? 0 : left < right ? -1 : 1;
+}
+
+function metric(
+  key: DashboardObjectMetricKey,
+  label: DashboardObjectMetric["label"],
+  count: number,
+): DashboardObjectMetric {
+  return { key, label, count };
 }
 
 function ownershipKey(owner: DashboardPageOwnership): string {

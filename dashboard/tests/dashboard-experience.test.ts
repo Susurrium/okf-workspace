@@ -11,10 +11,15 @@ import {
   canCompleteDashboardStudy,
   classifyDashboardPage,
   countDashboardLearningScope,
+  countDashboardLearningScopeEntries,
   countTodayAttention,
+  dashboardCourseMetrics,
   dashboardLearningContexts,
   dashboardLearningRowAction,
+  dashboardLearningScopeEntryCounts,
   dashboardLearningScopeCounts,
+  dashboardLearningScopeMetric,
+  dashboardProjectMetrics,
   filterDashboardLearningNotes,
   filterDashboardLearningScope,
   selectDashboardContinueItems,
@@ -329,6 +334,12 @@ describe("Dashboard experience selectors", () => {
       project: 2,
       independent: 1,
     });
+    expect(dashboardLearningScopeEntryCounts(notes)).toEqual({
+      all: 4,
+      course: 2,
+      project: 2,
+      independent: 1,
+    });
     expect(countDashboardLearningScope(
       notes,
       "course",
@@ -339,6 +350,16 @@ describe("Dashboard experience selectors", () => {
       "project",
       "/projects/workspace/project.md",
     )).toBe(2);
+    expect(countDashboardLearningScopeEntries(
+      notes,
+      "project",
+      "/projects/workspace/project.md",
+    )).toBe(2);
+    expect(dashboardLearningScopeMetric(
+      notes,
+      "project",
+      "/projects/workspace/project.md",
+    )).toEqual({ key: "learning-entries", label: "学习入口", count: 2 });
     expect(filterDashboardLearningScope(notes, "all")).toEqual([
       course,
       project,
@@ -363,6 +384,30 @@ describe("Dashboard experience selectors", () => {
       .toEqual([courseUse]);
     expect(filterDashboardLearningScope([courseUse, projectUse], "project"))
       .toEqual([projectUse]);
+  });
+
+  it("provides fixed, zero-preserving Course and Project metrics with shared terminology", () => {
+    expect(dashboardProjectMetrics({
+      pending_captures: [],
+      related_learning: [],
+      related_materials: [],
+    })).toEqual([
+      { key: "pending-captures", label: "待整理", count: 0 },
+      { key: "study-guides", label: "Study Guide", count: 0 },
+      { key: "sources", label: "来源", count: 0 },
+    ]);
+
+    expect(dashboardCourseMetrics({
+      pending_captures: [note("inbox/captures/course.md", "Capture")],
+      guide_count: 2,
+      related_sources: [note("sources/records/course.md", "Source")],
+      lesson_count: 3,
+    })).toEqual([
+      { key: "pending-captures", label: "待整理", count: 1 },
+      { key: "study-guides", label: "Study Guide", count: 2 },
+      { key: "sources", label: "来源", count: 1 },
+      { key: "lessons", label: "Lesson", count: 3 },
+    ]);
   });
 });
 

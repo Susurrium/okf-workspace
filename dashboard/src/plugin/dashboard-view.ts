@@ -1,9 +1,11 @@
-import { ItemView, Menu, Notice, TFile, WorkspaceLeaf, type App } from "obsidian";
+import { ItemView, Notice, TFile, WorkspaceLeaf, type App } from "obsidian";
 
 import { LocalApi } from "../api/client.js";
 import type {
   ConversionRecord,
+  CourseSummary,
   NoteSummary,
+  ProjectSummary,
   SemanticOperationRecord,
   SystemItem,
   SystemStatus,
@@ -24,10 +26,14 @@ import {
   countTodayAttention,
   dashboardLearningContexts,
   dashboardLearningRowAction,
+  dashboardLearningScopeMetric,
   dashboardLearningScopeCounts,
+  dashboardCourseMetrics,
+  dashboardProjectMetrics,
   filterDashboardLearningScope,
   selectDashboardContinueItems,
   type DashboardLearningContext,
+  type DashboardObjectMetric,
 } from "../domain/dashboard-experience.js";
 import { aiDailyPreviewStreamTitle } from "../domain/ai-daily-preview.js";
 import {
@@ -44,6 +50,11 @@ import { DASHBOARD_VERSION } from "../version.js";
 import type OkfBrainPlugin from "./main.js";
 import type { CodexHandoffRequest } from "./claudian-bridge.js";
 import { VaultDashboardReader, type InboxProjection } from "./vault-dashboard.js";
+import {
+  AnchoredActionPanel,
+  type AnchoredActionPanelAction,
+  type AnchoredActionPanelOptions,
+} from "../ui/anchored-action-panel.js";
 
 export const OKF_DASHBOARD_VIEW = "okf-workspace-dashboard";
 export type DashboardSection =
@@ -77,12 +88,11 @@ const PAGE_COPY: Readonly<Record<Section, { title: string; description: string }
   system: { title: "System", description: "只处理异常、后台任务和高级维护。" },
 };
 
-export const PROJECT_MENU_LABELS = [
-  "项目日志…",
+export const PROJECT_ACTION_PANEL_LABELS = [
   "记录待整理想法",
   "添加资料",
+  "打开项目日志",
   "在 Claudian 中整理项目",
-  "更改 Project 状态…",
 ] as const;
 
 /** Resolves the concrete Vault files a Study Guide hands to Codex. */
@@ -101,6 +111,10 @@ export async function resolveDashboardLearningSources(
     }
   };
   const frontmatter = app.metadataCache.getFileCache(note)?.frontmatter;
+  // A pending Source is itself the Learning row; its paired Source Text must
+  // be handed to Claudian just as explicitly as it is for an existing Guide.
+  add(frontmatter?.text);
+  add(frontmatter?.extract);
   const sources = frontmatter?.sources;
   if (Array.isArray(sources)) {
     for (const source of sources) {
@@ -138,6 +152,7 @@ export class OkfDashboardView extends ItemView {
   private readonly pageScroll = new Map<Section, number>();
   private readonly feedScroll: Partial<Record<FeedKind, number>> = {};
   private readonly feedScrollPersistTimers: Partial<Record<FeedKind, number>> = {};
+  private readonly actionPanels = new Set<AnchoredActionPanel>();
   private readonly vaultReader: VaultDashboardReader;
   private systemCache: SystemStatus | undefined;
   private renderVersion = 0;
@@ -220,6 +235,7 @@ export class OkfDashboardView extends ItemView {
   }
 
   public async onClose(): Promise<void> {
+    this.destroyActionPanels();
     this.contentEl.removeEventListener("scroll", this.handlePageScroll);
     this.contentEl.removeEventListener("pointerdown", this.markDashboardInteraction);
     this.contentEl.removeEventListener("keydown", this.markDashboardInteraction);
@@ -265,6 +281,7 @@ export class OkfDashboardView extends ItemView {
       this.plugin.updateDashboardPageUiState(this.section, { scrollTop: root.scrollTop });
     }
     const previousScroll = this.pageScroll.get(this.section) ?? 0;
+    this.destroyActionPanels();
     root.empty();
     root.addClass("okf-dashboard");
     const topbar = root.createDiv({ cls: "okf-dashboard__topbar" });
@@ -798,25 +815,70 @@ export class OkfDashboardView extends ItemView {
 
   private scheduleExternalRefresh(): void {
     if (this.refreshTimer !== undefined) window.clearTimeout(this.refreshTimer);
-    const focused = document.activeElement;
+    const focused = this.contentEl.ownerDocument?.activeElement;
     const editing = focused instanceof HTMLElement &&
       this.contentEl.contains(focused) &&
       (focused.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(focused.tagName));
+    const actionPanelOpen = [...this.actionPanels].some((panel) => panel.isOpen);
     const recentlyInteracting = Date.now() - this.lastInteractionAt < 1_200;
     const recentlyRendered = Date.now() - this.lastRenderAt < 350;
-    const delay = editing || recentlyInteracting ? 1_200 : recentlyRendered ? 350 : 180;
+    const delay = editing || actionPanelOpen || recentlyInteracting ? 1_200 : recentlyRendered ? 350 : 180;
     this.refreshTimer = window.setTimeout(() => {
       this.refreshTimer = undefined;
-      const active = document.activeElement;
+      const active = this.contentEl.ownerDocument?.activeElement;
       const stillEditing = active instanceof HTMLElement &&
         this.contentEl.contains(active) &&
         (active.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(active.tagName));
-      if (stillEditing || Date.now() - this.lastInteractionAt < 1_200) {
+      if (
+        stillEditing ||
+        [...this.actionPanels].some((panel) => panel.isOpen) ||
+        Date.now() - this.lastInteractionAt < 1_200
+      ) {
         this.scheduleExternalRefresh();
         return;
       }
       void this.render(true);
     }, delay);
+  }
+
+  private destroyActionPanels(): void {
+    for (const panel of this.actionPanels) panel.destroy();
+    this.actionPanels.clear();
+  }
+
+  private attachActionPanel(
+    trigger: HTMLButtonElement,
+    options: AnchoredActionPanelOptions,
+  ): void {
+    // The lightweight Vitest Obsidian runtime intentionally has no browser
+    // document. The component itself has dedicated DOM-level tests.
+    if (!trigger.ownerDocument?.defaultView) return;
+    const panel = new AnchoredActionPanel(trigger, {
+      ...options,
+      responsiveContainer: options.responsiveContainer ?? this.contentEl,
+      onOpen: () => {
+        this.lastInteractionAt = Date.now();
+        options.onOpen?.();
+      },
+      onActionError: options.onActionError ?? ((error: unknown) => {
+        new Notice(error instanceof Error ? error.message : "操作失败", 10_000);
+      }),
+    });
+    this.actionPanels.add(panel);
+  }
+
+  private renderMetrics(parent: HTMLElement, metrics: readonly DashboardObjectMetric[]): void {
+    const strip = parent.createEl("span", {
+      cls: "okf-work-item__metrics",
+      attr: { "aria-label": "关联内容统计" },
+    });
+    for (const metric of metrics) {
+      strip.createSpan({
+        cls: `okf-work-item__metric${metric.count === 0 ? " is-zero" : ""}`,
+        text: `${metric.label} ${metric.count}`,
+        attr: { "data-metric": metric.key },
+      });
+    }
   }
 
   private renderFeedLoading(parent: HTMLElement): void {
@@ -1332,43 +1394,94 @@ export class OkfDashboardView extends ItemView {
     parent: HTMLElement,
     note: NoteSummary,
     operation?: SemanticOperationRecord,
+    includeOperations = false,
   ): void {
-    const actions = parent.createDiv({ cls: "okf-dashboard__actions" });
+    const actions = parent.createDiv({ cls: "okf-work-item__actions" });
+    const active = operation && isSemanticOperationActive(operation.status);
     if (operation && isSemanticOperationActive(operation.status)) {
-      const progress = actions.createEl("button", { text: semanticStageLabel(operation) });
+      const progress = actions.createEl("button", {
+        text: semanticStageLabel(operation),
+        cls: "okf-dashboard__ghost-action okf-work-item__primary-action",
+      });
       progress.disabled = true;
-      return;
-    }
-    if (operation && isSemanticOperationRetryable(operation.status)) {
-      const retry = actions.createEl("button", { text: "重新生成" });
+    } else if (operation && isSemanticOperationRetryable(operation.status)) {
+      const retry = actions.createEl("button", {
+        text: "重新生成",
+        cls: "mod-cta okf-dashboard__primary-action okf-work-item__primary-action",
+      });
       retry.addEventListener("click", () => {
         void this.runButtonAction(retry, async () => {
           const retried = await this.api().retrySemanticOperation(operation.operation_id);
           this.plugin.watchSemanticOperation(retried.operation_id);
         }, true, "已重新加入后台任务");
       });
-      return;
-    }
-    if (operation?.status === "completed") {
-      const completed = actions.createEl("button", { text: "已完成，正在刷新结果" });
+    } else if (operation?.status === "completed") {
+      const completed = actions.createEl("button", {
+        text: "正在刷新",
+        cls: "okf-dashboard__ghost-action okf-work-item__primary-action",
+      });
       completed.disabled = true;
-      return;
+    } else {
+      const intent = note.purpose === "wiki" ? "wiki" : "learn";
+      const generate = actions.createEl("button", {
+        text: intent === "wiki" ? "生成 Wiki" : "生成学习材料",
+        cls: "mod-cta okf-dashboard__primary-action okf-work-item__primary-action",
+      });
+      generate.addEventListener("click", () => {
+        void this.runButtonAction(generate, async () => {
+          const result = await this.api().routeImportedSource(note.path, {
+            intent,
+            generate: true,
+            ...materialContextFromNote(note),
+          });
+          if (result.semantic_operation) {
+            this.plugin.watchSemanticOperation(result.semantic_operation.operation_id);
+          }
+        }, true, "已加入后台生成任务");
+      });
     }
-    const intent = note.purpose === "wiki" ? "wiki" : "learn";
-    const generate = actions.createEl("button", {
-      text: intent === "wiki" ? "生成 Wiki" : "生成学习材料",
+    if (!includeOperations || operation?.status === "completed") return;
+    const panelActions: AnchoredActionPanelAction[] = [];
+    if (active && !["publishing", "indexing"].includes(operation.stage ?? "")) {
+      panelActions.push({
+        id: "cancel",
+        title: "取消后台生成",
+        description: "停止尚未进入发布阶段的后台任务",
+        tone: "danger",
+        onSelect: () => this.cancelSemanticOperation(operation.operation_id),
+      });
+    } else if (!active) {
+      panelActions.push({
+        id: "claudian-write",
+        title: "与 Claudian 一起生成",
+        description: "携带来源文件，在 Claudian 中补充要求后再开始",
+        onSelect: async () => {
+          const sources = await this.learningSources(note.path);
+          await this.copyPrompt(
+            "读取明确来源，生成第一版辅助学习材料；先让我补充具体要求。",
+            {
+              contextPaths: [...new Set([note.path, ...sources])],
+              actionMode: "write",
+              skill: "prepare-study-guide",
+            },
+          );
+        },
+      });
+    }
+    if (!panelActions.length) return;
+    const trigger = actions.createEl("button", {
+      text: "操作 ▾",
+      cls: "okf-dashboard__ghost-action okf-work-item__operation-trigger",
+      attr: { type: "button", "aria-label": `${note.title} 的操作` },
     });
-    generate.addEventListener("click", () => {
-      void this.runButtonAction(generate, async () => {
-        const result = await this.api().routeImportedSource(note.path, {
-          intent,
-          generate: true,
-          ...materialContextFromNote(note),
-        });
-        if (result.semantic_operation) {
-          this.plugin.watchSemanticOperation(result.semantic_operation.operation_id);
-        }
-      }, true, "已加入后台生成任务");
+    this.attachActionPanel(trigger, {
+      label: `操作 · ${note.title}`,
+      renderHeader: (container) => this.renderPanelHeader(
+        container,
+        note.title,
+        learningWorkItemStatusLabel(note, operation),
+      ),
+      actions: panelActions,
     });
   }
 
@@ -1429,7 +1542,7 @@ export class OkfDashboardView extends ItemView {
       ...data.courses.map((item) => [dashboardPath(item.path), item.title] as const),
       ...data.projects.map((item) => [dashboardPath(item.path), item.title] as const),
     ]);
-    const scopeCounts = dashboardLearningScopeCounts(allLearningNotes);
+    const scopeCounts = data.scope_entry_counts ?? dashboardLearningScopeCounts(allLearningNotes);
     const selectedCourse = this.learningContext === "course" && this.learningRelationPath
       ? data.courses.find((item) => dashboardPath(item.path) === dashboardPath(this.learningRelationPath))
       : undefined;
@@ -1590,17 +1703,19 @@ export class OkfDashboardView extends ItemView {
       list,
       "全部课程相关材料",
       `${courses.length} Course`,
-      filterDashboardLearningScope(notes, "course").length,
+      [dashboardLearningScopeMetric(notes, "course")],
       !selectedPath,
       () => this.setLearningScope("course"),
     );
     for (const item of courses) {
-      const count = filterDashboardLearningScope(notes, "course", item.path).length;
       this.learningScopeEntity(
         list,
         item.title,
-        `${item.lesson_count} Lesson`,
-        count,
+        courseStatusLabel(item.course_status),
+        [
+          ...dashboardCourseMetrics(item),
+          dashboardLearningScopeMetric(notes, "course", item.path),
+        ],
         dashboardPath(selectedPath ?? "") === dashboardPath(item.path),
         () => this.setLearningScope("course", item.path),
         () => void this.openPath(item.path),
@@ -1631,21 +1746,19 @@ export class OkfDashboardView extends ItemView {
       list,
       "全部项目相关材料",
       `${projects.length} Project`,
-      filterDashboardLearningScope(notes, "project").length,
+      [dashboardLearningScopeMetric(notes, "project")],
       !selectedPath,
       () => this.setLearningScope("project"),
     );
     for (const item of projects) {
-      const count = filterDashboardLearningScope(notes, "project", item.path).length;
       this.learningScopeEntity(
         list,
         item.title,
-        item.project_status === "paused"
-          ? "Paused"
-          : item.project_status === "completed"
-            ? "Completed"
-            : "Active",
-        count,
+        projectStatusLabel(projectLifecycleStatus(item)),
+        [
+          ...dashboardProjectMetrics(item),
+          dashboardLearningScopeMetric(notes, "project", item.path),
+        ],
         dashboardPath(selectedPath ?? "") === dashboardPath(item.path),
         () => this.setLearningScope("project", item.path),
         () => void this.openPath(item.path),
@@ -1657,7 +1770,7 @@ export class OkfDashboardView extends ItemView {
     parent: HTMLElement,
     title: string,
     meta: string,
-    count: number,
+    metrics: readonly DashboardObjectMetric[],
     selected: boolean,
     onSelect: () => void,
     onOpen?: () => void,
@@ -1672,7 +1785,7 @@ export class OkfDashboardView extends ItemView {
     const copy = select.createSpan({ cls: "okf-learning-entity__copy" });
     copy.createSpan({ cls: "okf-learning-entity__title", text: title });
     copy.createSpan({ cls: "okf-learning-entity__meta", text: meta });
-    select.createEl("strong", { text: String(count) });
+    this.renderMetrics(copy, metrics);
     select.addEventListener("click", onSelect);
     if (onOpen) {
       const open = row.createEl("button", {
@@ -1703,53 +1816,233 @@ export class OkfDashboardView extends ItemView {
 
   private renderSelectedCourse(
     parent: HTMLElement,
-    course: Awaited<ReturnType<VaultDashboardReader["learning"]>>["courses"][number],
+    course: CourseSummary,
   ): void {
-    const banner = parent.createDiv({ cls: "okf-learning-scope-banner" });
-    const copy = banner.createDiv({ cls: "okf-learning-scope-banner__copy" });
-    copy.createEl("strong", { text: course.title });
-    copy.createDiv({
-      cls: "okf-dashboard__muted",
+    const row = parent.createEl("article", {
+      cls: "okf-work-item okf-work-item--context okf-course-work-item",
+    });
+    const main = row.createDiv({ cls: "okf-work-item__main" });
+    const identity = main.createDiv({ cls: "okf-work-item__identity" });
+    const title = identity.createEl("button", {
+      text: course.title,
+      cls: "okf-dashboard__row-title",
+      attr: { type: "button" },
+    });
+    title.addEventListener("click", () => void this.openPath(course.path));
+    identity.createSpan({
+      cls: "okf-work-item__status",
+      text: courseStatusLabel(course.course_status),
+    });
+    main.createDiv({
+      cls: "okf-work-item__summary",
       text: [
-        course.current_progress || "尚未记录课程进度",
-        `${course.guide_count} Guide / ${course.lesson_count} Lesson`,
+        course.current_progress ? `当前进度：${compactText(course.current_progress, 120)}` : "尚未记录课程进度",
         course.latest_lesson ? `最近 Lesson：${course.latest_lesson.title}` : "",
       ].filter(Boolean).join(" · "),
     });
-    const actions = banner.createDiv({ cls: "okf-dashboard__actions" });
-    const open = actions.createEl("button", { text: "打开 Course", cls: "okf-dashboard__secondary-action" });
-    open.addEventListener("click", () => void this.openPath(course.path));
-    const lesson = actions.createEl("button", { text: "新建 Lesson", cls: "okf-dashboard__ghost-action" });
-    lesson.addEventListener("click", () => this.plugin.promptLessonForCourse(course.path));
-    const capture = actions.createEl("button", { text: "记录课程想法", cls: "okf-dashboard__ghost-action" });
-    capture.addEventListener("click", () => this.plugin.promptCapture({ course: course.path }));
+    this.renderMetrics(main, dashboardCourseMetrics(course));
+
+    const actions = row.createDiv({ cls: "okf-work-item__actions" });
+    const primary = actions.createEl("button", {
+      text: "新建 Lesson",
+      cls: "okf-dashboard__secondary-action okf-work-item__primary-action",
+      attr: { type: "button" },
+    });
+    primary.addEventListener("click", () => this.plugin.promptLessonForCourse(course.path));
+    const trigger = actions.createEl("button", {
+      text: "操作 ▾",
+      cls: "okf-dashboard__ghost-action okf-work-item__operation-trigger",
+      attr: { type: "button", "aria-label": `${course.title} 的操作` },
+    });
     const slug = course.path.split("/")[2];
-    if (slug) {
-      const add = actions.createEl("button", { text: "添加资料", cls: "okf-dashboard__ghost-action" });
-      add.addEventListener("click", () => this.plugin.promptDocumentImport({ course: slug }));
-    }
+    const panelActions: AnchoredActionPanelAction[] = [
+      {
+        id: "capture",
+        title: "记录课程想法",
+        description: "保存到 Inbox，并自动关联这门 Course",
+        onSelect: () => this.plugin.promptCapture({ course: course.path }),
+      },
+      ...(slug ? [{
+        id: "import",
+        title: "添加资料",
+        description: "导入文档并自动关联这门 Course",
+        onSelect: () => this.plugin.promptDocumentImport({ course: slug }),
+      } satisfies AnchoredActionPanelAction] : []),
+      {
+        id: "open",
+        title: "打开课程主页",
+        description: "在原生 Markdown 视图中查看与编辑",
+        onSelect: () => this.openPath(course.path),
+      },
+    ];
+    this.attachActionPanel(trigger, {
+      label: `操作 · ${course.title}`,
+      renderHeader: (container) => this.renderPanelHeader(
+        container,
+        course.title,
+        courseStatusLabel(course.course_status),
+      ),
+      actions: panelActions,
+    });
   }
 
   private renderSelectedProject(
     parent: HTMLElement,
-    project: Awaited<ReturnType<VaultDashboardReader["learning"]>>["projects"][number],
+    project: ProjectSummary,
   ): void {
-    const banner = parent.createDiv({ cls: "okf-learning-scope-banner" });
-    const copy = banner.createDiv({ cls: "okf-learning-scope-banner__copy" });
-    copy.createEl("strong", { text: project.title });
-    copy.createDiv({
-      cls: "okf-dashboard__muted",
-      text: project.next_action ? `项目下一步：${compactText(project.next_action, 120)}` : "项目尚未填写下一步。",
+    this.renderProjectWorkItem(parent, project, true);
+  }
+
+  private renderProjectWorkItem(
+    parent: HTMLElement,
+    project: ProjectSummary,
+    context = false,
+  ): void {
+    const status = projectLifecycleStatus(project);
+    const row = parent.createEl("article", {
+      cls: `okf-work-item okf-project-row${context ? " okf-work-item--context" : ""}`,
     });
-    const actions = banner.createDiv({ cls: "okf-dashboard__actions" });
-    const open = actions.createEl("button", { text: "打开 Project", cls: "okf-dashboard__secondary-action" });
-    open.addEventListener("click", () => void this.openPath(project.path));
-    const capture = actions.createEl("button", { text: "记录项目想法", cls: "okf-dashboard__ghost-action" });
-    capture.addEventListener("click", () => this.plugin.promptCapture({ project: project.path }));
+    row.setAttr("data-status", status);
+    const main = row.createDiv({ cls: "okf-work-item__main" });
+    const identity = main.createDiv({ cls: "okf-work-item__identity" });
+    const title = identity.createEl("button", {
+      text: project.title,
+      cls: "okf-dashboard__row-title",
+      attr: { type: "button", "aria-label": `打开 ${project.title}` },
+    });
+    title.addEventListener("click", () => void this.openPath(project.path));
+    identity.createSpan({
+      cls: `okf-work-item__status is-${status}`,
+      text: projectStatusLabel(status),
+    });
+    main.createDiv({
+      cls: "okf-work-item__summary",
+      text: [
+        project.next_action ? `下一步：${compactText(project.next_action, 120)}` : "尚未设置下一步",
+        relativeMoment(project.modified_at),
+      ].filter(Boolean).join(" · "),
+    });
+    this.renderMetrics(main, dashboardProjectMetrics(project));
+
+    const actions = row.createDiv({ cls: "okf-work-item__actions" });
+    const primary = actions.createEl("button", {
+      text: status === "active" ? "记录进展" : status === "paused" ? "恢复推进" : "重新开启",
+      cls: "okf-dashboard__secondary-action okf-work-item__primary-action",
+      attr: { type: "button" },
+    });
+    if (status === "active") {
+      primary.addEventListener("click", () => this.plugin.promptProjectProgress(project.path));
+    } else {
+      primary.addEventListener("click", () => {
+        void this.changeProjectStatus(project.path, "active");
+      });
+    }
+    const trigger = actions.createEl("button", {
+      text: "操作 ▾",
+      cls: "okf-dashboard__ghost-action okf-work-item__operation-trigger",
+      attr: {
+        type: "button",
+        "aria-label": `${project.title} 的操作`,
+      },
+    });
+    this.attachProjectActionPanel(trigger, project, status);
+  }
+
+  private attachProjectActionPanel(
+    trigger: HTMLButtonElement,
+    project: ProjectSummary,
+    status: ProjectLifecycleStatus,
+  ): void {
     const slug = project.path.split("/")[1];
-    if (slug) {
-      const add = actions.createEl("button", { text: "添加资料", cls: "okf-dashboard__ghost-action" });
-      add.addEventListener("click", () => this.plugin.promptDocumentImport({ project: slug }));
+    const projectDirectory = project.path.split("/").slice(0, -1).join("/");
+    const logPath = project.log_path || `${projectDirectory}/log.md`;
+    const actions: AnchoredActionPanelAction[] = [
+      {
+        id: "capture",
+        title: PROJECT_ACTION_PANEL_LABELS[0],
+        description: "保存到 Inbox，并自动关联这个 Project",
+        onSelect: () => this.plugin.promptCapture({ project: project.path }),
+      },
+      ...(slug ? [{
+        id: "import",
+        title: PROJECT_ACTION_PANEL_LABELS[1],
+        description: "导入资料并自动关联这个 Project",
+        onSelect: () => this.plugin.promptDocumentImport({ project: slug }),
+      } satisfies AnchoredActionPanelAction] : []),
+      {
+        id: "log",
+        title: PROJECT_ACTION_PANEL_LABELS[2],
+        description: "直接在原生 Markdown 日志中查看与编辑",
+        onSelect: () => this.openPath(logPath),
+      },
+      {
+        id: "claudian",
+        title: PROJECT_ACTION_PANEL_LABELS[3],
+        description: "读取项目主页和日志，梳理状态、阻塞与下一步",
+        onSelect: () => this.copyPrompt(
+          "根据已有项目主页和日志，梳理当前状态、关键点与重要选择、阻塞和下一步。",
+          {
+            contextPaths: [project.path, logPath],
+            actionMode: "write",
+            skill: "capture-project-progress",
+          },
+        ),
+      },
+    ];
+    this.attachActionPanel(trigger, {
+      label: `操作 · ${project.title}`,
+      renderHeader: (container) => this.renderPanelHeader(
+        container,
+        project.title,
+        projectStatusLabel(status),
+      ),
+      actions,
+      renderFooter: (container, context) => {
+        const copy = container.ownerDocument.createElement("span");
+        copy.className = "okf-action-panel__footer-label";
+        copy.textContent = `项目状态：${projectStatusLabel(status)}`;
+        container.appendChild(copy);
+        const controls = container.ownerDocument.createElement("div");
+        controls.className = "okf-action-panel__footer-actions";
+        container.appendChild(controls);
+        for (const item of projectStatusActions(status)) {
+          const button = container.ownerDocument.createElement("button");
+          button.type = "button";
+          button.className = "okf-dashboard__ghost-action";
+          button.textContent = item.label;
+          button.addEventListener("click", () => {
+            context.close();
+            void this.changeProjectStatus(project.path, item.status);
+          });
+          controls.appendChild(button);
+        }
+      },
+    });
+  }
+
+  private renderPanelHeader(container: HTMLElement, title: string, status: string): void {
+    const copy = container.ownerDocument.createElement("div");
+    copy.className = "okf-action-panel__header-copy";
+    const heading = container.ownerDocument.createElement("strong");
+    heading.textContent = title;
+    copy.appendChild(heading);
+    const badge = container.ownerDocument.createElement("span");
+    badge.className = "okf-action-panel__status";
+    badge.textContent = status;
+    copy.appendChild(badge);
+    container.appendChild(copy);
+  }
+
+  private async changeProjectStatus(
+    path: string,
+    status: ProjectLifecycleStatus,
+  ): Promise<void> {
+    try {
+      await this.plugin.setProjectStatus(path, status);
+      new Notice(`Project 已更新为${projectStatusLabel(status)}`);
+      await this.render(true);
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : "无法更新 Project 状态", 10_000);
     }
   }
 
@@ -1766,16 +2059,24 @@ export class OkfDashboardView extends ItemView {
     }
     const list = parent.createDiv({ cls: "okf-dashboard__compact-list okf-learning-note-list" });
     for (const note of notes) {
-      const card = list.createDiv({ cls: "okf-dashboard__compact-row okf-dashboard__compact-row--stacked okf-learning-note" });
-      const main = card.createDiv({ cls: "okf-dashboard__row-main" });
-      const open = main.createEl("button", {
+      const operation = this.semanticOperationForNote(note, operations);
+      const card = list.createEl("article", {
+        cls: "okf-work-item okf-learning-note okf-learning-work-item",
+      });
+      const main = card.createDiv({ cls: "okf-work-item__main" });
+      const identity = main.createDiv({ cls: "okf-work-item__identity" });
+      const open = identity.createEl("button", {
         text: note.title,
         cls: "okf-dashboard__row-title",
         attr: { type: "button" },
       });
       open.addEventListener("click", () => void this.openPath(note.path));
+      identity.createSpan({
+        cls: `okf-work-item__status is-${learningWorkItemStatus(note, operation)}`,
+        text: learningWorkItemStatusLabel(note, operation),
+      });
       main.createDiv({
-        cls: "okf-dashboard__row-meta",
+        cls: "okf-work-item__summary",
         text: [
           learningContextLabel(note, relationTitles),
           relativeMoment(note.modified_at),
@@ -1783,12 +2084,16 @@ export class OkfDashboardView extends ItemView {
           .filter(Boolean)
           .join(" · "),
       });
-      const operation = this.semanticOperationForNote(note, operations);
+      this.renderMetrics(main, [{
+        key: "sources",
+        label: "来源",
+        count: note.note_type === "Source" ? 1 : (note.source_paths?.length ?? 0),
+      }]);
       const action = dashboardLearningRowAction(note);
       if (action === "study-guide") {
         this.learningQueueActions(card, note, operation);
       } else if (action === "pending-source") {
-        this.pendingGenerationActions(card, note, operation);
+        this.pendingGenerationActions(card, note, operation, true);
       }
     }
   }
@@ -1799,21 +2104,22 @@ export class OkfDashboardView extends ItemView {
     operation?: SemanticOperationRecord,
   ): void {
     const active = operation && isSemanticOperationActive(operation.status);
-    const primary = parent.createDiv({ cls: "okf-dashboard__row-actions okf-learning-note__primary" });
-    const action = primary.createEl("button", {
-      cls: "okf-dashboard__row-action",
+    const cluster = parent.createDiv({ cls: "okf-work-item__actions" });
+    const action = cluster.createEl("button", {
+      cls: "okf-work-item__primary-action",
       attr: { type: "button" },
     });
     if (active) {
       action.setText(semanticStageLabel(operation));
+      action.addClass("okf-dashboard__ghost-action");
       action.disabled = true;
     } else if (note.studied_at) {
       action.setText("打开");
-      action.addClass("mod-cta", "okf-dashboard__primary-action");
+      action.addClass("okf-dashboard__secondary-action");
       action.addEventListener("click", () => void this.openPath(note.path));
     } else if (note.material_ready) {
       action.setText("打开");
-      action.addClass("mod-cta", "okf-dashboard__primary-action");
+      action.addClass("okf-dashboard__secondary-action");
       action.addEventListener("click", () => void this.openPath(note.path));
     } else if (operation && isSemanticOperationRetryable(operation.status)) {
       action.setText("重新生成");
@@ -1826,6 +2132,7 @@ export class OkfDashboardView extends ItemView {
       });
     } else if (operation?.status === "completed") {
       action.setText("正在刷新");
+      action.addClass("okf-dashboard__ghost-action");
       action.disabled = true;
     } else {
       action.setText("生成");
@@ -1852,31 +2159,25 @@ export class OkfDashboardView extends ItemView {
       (active && ["publishing", "indexing"].includes(operation.stage ?? "")) ||
       (operation?.status === "completed" && !note.material_ready)
     ) return;
-    const details = parent.createEl("details", { cls: "okf-dashboard__row-details" });
-    details.createEl("summary", { text: "更多" });
-    const more = details.createDiv({ cls: "okf-dashboard__actions" });
+    const panelActions: AnchoredActionPanelAction[] = [];
     if (active) {
-      const cancel = more.createEl("button", { text: "取消后台生成", cls: "okf-dashboard__ghost-action" });
-      cancel.addEventListener("click", () => {
-        void this.runButtonAction(
-          cancel,
-          () => this.api().cancelSemanticOperation(operation.operation_id),
-          true,
-          "已请求停止后台任务",
-        );
+      panelActions.push({
+        id: "cancel",
+        title: "取消后台生成",
+        description: "停止尚未进入发布阶段的后台任务",
+        tone: "danger",
+        onSelect: () => this.cancelSemanticOperation(operation.operation_id),
       });
-      return;
-    }
-    if (active) return;
-
-    const interactive = more.createEl("button", {
-      text: note.material_ready ? "用 Claudian 完善" : "与 Claudian 一起生成",
-      cls: "okf-dashboard__ghost-action",
-    });
-    interactive.addEventListener("click", () => {
-      interactive.disabled = true;
-      void this.learningSources(note.path)
-        .then((sources) => this.copyPrompt(
+    } else {
+      panelActions.push({
+        id: "claudian-write",
+        title: note.material_ready ? "用 Claudian 完善" : "与 Claudian 一起生成",
+        description: note.material_ready
+          ? "携带 Study Guide 和来源继续编辑"
+          : "在 Claudian 中补充要求后再开始生成",
+        onSelect: async () => {
+          const sources = await this.learningSources(note.path);
+          await this.copyPrompt(
           note.material_ready
             ? "读取现有辅助学习材料和来源，根据我接下来补充的要求继续完善这篇学习材料。"
             : "读取目标笔记和明确来源，生成第一版辅助学习材料；先让我补充具体要求。",
@@ -1885,48 +2186,59 @@ export class OkfDashboardView extends ItemView {
             actionMode: "write",
             skill: note.material_ready ? "update-study-guide" : "prepare-study-guide",
           },
-        ))
-        .catch((error: unknown) => {
-          new Notice(error instanceof Error ? error.message : "无法打开 Claudian", 10_000);
-        })
-        .finally(() => {
-          interactive.disabled = false;
+          );
+        },
+      });
+      if (note.material_ready) {
+        panelActions.push({
+          id: "claudian-read",
+          title: "用 Claudian 讨论",
+          description: "结合这篇 Study Guide 继续提问和学习",
+          onSelect: () => this.copyPrompt("结合这篇 Study Guide 和相关 Wiki 帮助我继续学习和解答问题。", {
+            contextPaths: [note.path],
+            actionMode: "read",
+          }),
         });
+      }
+      if (canCompleteDashboardStudy(note, operation)) {
+        panelActions.push({
+          id: "study-status",
+          title: note.studied_at ? "取消完成" : "标记完成",
+          description: note.studied_at ? "恢复到可学习状态" : "记录这份材料已经学完",
+          onSelect: async () => {
+            await this.plugin.setStudyCompleted(note.path, !note.studied_at);
+            await this.render(true);
+          },
+        });
+      }
+      if (note.studied_at) {
+        panelActions.push({
+          id: "wiki",
+          title: "沉淀 Wiki",
+          description: "把已完成的学习成果整理为长期知识",
+          onSelect: () => this.copyPrompt("从已经完成的学习成果中生成或更新长期 Wiki，并维护必要的关联。", {
+            contextPaths: [note.path],
+            actionMode: "write",
+            skill: "distill-wiki",
+          }),
+        });
+      }
+    }
+    if (!panelActions.length) return;
+    const trigger = cluster.createEl("button", {
+      text: "操作 ▾",
+      cls: "okf-dashboard__ghost-action okf-work-item__operation-trigger",
+      attr: { type: "button", "aria-label": `${note.title} 的操作` },
     });
-    if (note.material_ready) {
-      const discuss = more.createEl("button", { text: "用 Claudian 讨论", cls: "okf-dashboard__ghost-action" });
-      discuss.addEventListener("click", () => {
-        void this.copyPrompt("结合这篇 Study Guide 和相关 Wiki 帮助我继续学习和解答问题。", {
-          contextPaths: [note.path],
-          actionMode: "read",
-        });
-      });
-    }
-    if (canCompleteDashboardStudy(note, operation)) {
-      const studied = more.createEl("button", {
-        text: note.studied_at ? "取消完成" : "标记完成",
-        cls: "okf-dashboard__ghost-action",
-      });
-      studied.addEventListener("click", () => {
-        studied.disabled = true;
-        void this.plugin.setStudyCompleted(note.path, !note.studied_at)
-          .then(() => this.render(true))
-          .catch((error: unknown) => {
-            new Notice(error instanceof Error ? error.message : "更新失败");
-            studied.disabled = false;
-          });
-      });
-    }
-    if (note.studied_at) {
-      const wiki = more.createEl("button", { text: "沉淀 Wiki", cls: "okf-dashboard__ghost-action" });
-      wiki.addEventListener("click", () => {
-        void this.copyPrompt("从已经完成的学习成果中生成或更新长期 Wiki，并维护必要的关联。", {
-          contextPaths: [note.path],
-          actionMode: "write",
-          skill: "distill-wiki",
-        });
-      });
-    }
+    this.attachActionPanel(trigger, {
+      label: `操作 · ${note.title}`,
+      renderHeader: (container) => this.renderPanelHeader(
+        container,
+        note.title,
+        learningWorkItemStatusLabel(note, operation),
+      ),
+      actions: panelActions,
+    });
   }
 
   private async renderProjects(container: HTMLElement): Promise<void> {
@@ -1953,9 +2265,9 @@ export class OkfDashboardView extends ItemView {
       completed: data.projects.filter((project) => project.project_status === "completed"),
     };
     for (const option of [
-      { value: "active" as const, label: "Active" },
-      { value: "paused" as const, label: "Paused" },
-      { value: "completed" as const, label: "Completed" },
+      { value: "active" as const, label: "进行中" },
+      { value: "paused" as const, label: "已暂停" },
+      { value: "completed" as const, label: "已完成" },
     ]) {
       const selected = this.projectsTab === option.value;
       const button = tabs.createEl("button", {
@@ -1980,83 +2292,7 @@ export class OkfDashboardView extends ItemView {
     }
     const list = container.createDiv({ cls: "okf-dashboard__compact-list okf-project-list" });
     for (const project of selected) {
-      const linkedLearning = project.related_learning;
-      const relatedMaterials = project.related_materials;
-      const row = list.createEl("article", {
-        cls: "okf-dashboard__compact-row okf-project-row",
-      });
-      const main = row.createDiv({ cls: "okf-dashboard__row-main" });
-      const title = main.createEl("button", {
-        text: project.title,
-        cls: "okf-dashboard__row-title",
-        attr: { type: "button" },
-      });
-      title.addEventListener("click", () => void this.openPath(project.path));
-      main.createDiv({
-        cls: "okf-dashboard__row-meta",
-        text: [
-          project.next_action ? `下一步：${compactText(project.next_action, 120)}` : "尚未设置下一步",
-          relativeMoment(project.modified_at),
-        ].filter(Boolean).join(" · "),
-      });
-      const counts = [
-        project.pending_captures.length ? `待整理 ${project.pending_captures.length}` : "",
-        linkedLearning.length ? `学习 ${linkedLearning.length}` : "",
-        relatedMaterials.length ? `资料 ${relatedMaterials.length}` : "",
-      ].filter(Boolean);
-      if (counts.length) {
-        main.createDiv({ cls: "okf-project-row__counts", text: counts.join(" · ") });
-      }
-      const rowActions = row.createDiv({ cls: "okf-dashboard__row-actions" });
-      const open = rowActions.createEl("button", {
-        text: "打开",
-        cls: "mod-cta okf-dashboard__primary-action okf-dashboard__row-action",
-        attr: { type: "button" },
-      });
-      open.addEventListener("click", () => void this.openPath(project.path));
-      const menuButton = rowActions.createEl("button", {
-        text: "…",
-        cls: "okf-dashboard__ghost-action okf-dashboard__row-action okf-project-row__menu-trigger",
-        attr: { type: "button", "aria-label": `${project.title} 的更多操作` },
-      });
-      const currentStatus = project.project_status === "paused" || project.project_status === "completed"
-        ? project.project_status
-        : "active";
-      menuButton.addEventListener("click", (event) => {
-        const menu = new Menu();
-        menu.addItem((item) => item
-          .setTitle(PROJECT_MENU_LABELS[0])
-          .setIcon("notebook-pen")
-          .onClick(() => this.plugin.promptProjectProgress(project.path)));
-        menu.addItem((item) => item
-          .setTitle(PROJECT_MENU_LABELS[1])
-          .setIcon("inbox")
-          .onClick(() => this.plugin.promptCapture({ project: project.path })));
-        const slug = project.path.split("/")[1];
-        if (slug) {
-          menu.addItem((item) => item
-            .setTitle(PROJECT_MENU_LABELS[2])
-            .setIcon("file-plus")
-            .onClick(() => this.plugin.promptDocumentImport({ project: slug })));
-        }
-        const projectDirectory = project.path.split("/").slice(0, -1).join("/");
-        menu.addItem((item) => item
-          .setTitle(PROJECT_MENU_LABELS[3])
-          .setIcon("bot")
-          .onClick(() => {
-            void this.copyPrompt("根据已有项目主页和日志，梳理当前状态、关键点与重要选择、阻塞和下一步。", {
-              contextPaths: [project.path, `${projectDirectory}/log.md`],
-              actionMode: "write",
-              skill: "capture-project-progress",
-            });
-          }));
-        menu.addSeparator();
-        menu.addItem((item) => item
-          .setTitle(PROJECT_MENU_LABELS[4])
-          .setIcon("circle-dot")
-          .onClick(() => this.plugin.promptProjectStatus(project.path, currentStatus)));
-        menu.showAtMouseEvent(event);
-      });
+      this.renderProjectWorkItem(list, project);
     }
   }
 
@@ -2801,6 +3037,13 @@ export class OkfDashboardView extends ItemView {
     }
   }
 
+  private async cancelSemanticOperation(operationId: string): Promise<void> {
+    await this.plugin.ensureLocalServiceAvailable();
+    await this.api().cancelSemanticOperation(operationId);
+    new Notice("已请求停止后台任务");
+    await this.render(true);
+  }
+
   private async openDaily(data: { daily: { path: string; exists: boolean } }): Promise<void> {
     if (data.daily.exists) {
       await this.openPath(data.daily.path);
@@ -2870,10 +3113,70 @@ function learningContextLabel(
   }).join(" · ");
 }
 
+export type ProjectLifecycleStatus = "active" | "paused" | "completed";
+export interface ProjectStatusAction {
+  status: ProjectLifecycleStatus;
+  label: string;
+}
+type LearningWorkItemStatus = "pending" | "generating" | "failed" | "refreshing" | "ready" | "completed";
+
+function projectLifecycleStatus(project: Pick<NoteSummary, "project_status">): ProjectLifecycleStatus {
+  if (project.project_status === "paused" || project.project_status === "completed") {
+    return project.project_status;
+  }
+  return "active";
+}
+
+function projectStatusLabel(status: ProjectLifecycleStatus): string {
+  if (status === "paused") return "已暂停";
+  if (status === "completed") return "已完成";
+  return "进行中";
+}
+
+function projectStatusActionLabel(
+  current: ProjectLifecycleStatus,
+  target: ProjectLifecycleStatus,
+): string {
+  if (target === "active") return current === "completed" ? "重新开启" : "恢复推进";
+  if (target === "paused") return "暂停项目";
+  return "标记完成";
+}
+
+export function projectStatusActions(status: ProjectLifecycleStatus): ProjectStatusAction[] {
+  return (["active", "paused", "completed"] as const)
+    .filter((target) => target !== status)
+    .map((target) => ({ status: target, label: projectStatusActionLabel(status, target) }));
+}
+
+function learningWorkItemStatus(
+  note: NoteSummary,
+  operation?: SemanticOperationRecord,
+): LearningWorkItemStatus {
+  if (operation && isSemanticOperationActive(operation.status)) return "generating";
+  if (operation && isSemanticOperationRetryable(operation.status)) return "failed";
+  if (operation?.status === "completed" && !note.material_ready) return "refreshing";
+  if (note.studied_at) return "completed";
+  if (note.material_ready) return "ready";
+  return "pending";
+}
+
+function learningWorkItemStatusLabel(
+  note: NoteSummary,
+  operation?: SemanticOperationRecord,
+): string {
+  const status = learningWorkItemStatus(note, operation);
+  if (status === "generating") return "生成中";
+  if (status === "failed") return "生成失败";
+  if (status === "refreshing") return "正在刷新";
+  if (status === "ready") return "可学习";
+  if (status === "completed") return "已完成";
+  return "待生成";
+}
+
 function courseStatusLabel(status: string | null | undefined): string {
-  if (status === "paused") return "Paused";
-  if (status === "completed") return "Completed";
-  return "Active";
+  if (status === "paused") return "已暂停";
+  if (status === "completed") return "已完成";
+  return "进行中";
 }
 
 export function systemStatusLabel(status: string): string {

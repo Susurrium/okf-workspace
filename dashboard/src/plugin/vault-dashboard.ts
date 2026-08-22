@@ -9,7 +9,11 @@ import type {
   SourceUse,
   TaskItem,
 } from "../api/types.js";
-import { compareNotesByRecency } from "../domain/dashboard-experience.js";
+import {
+  compareNotesByRecency,
+  dashboardLearningScopeEntryCounts,
+  filterDashboardLearningScope,
+} from "../domain/dashboard-experience.js";
 import { isIngestedVia } from "../domain/inbox-work-queue.js";
 
 const USER_ROOTS = new Set(["inbox", "learning", "projects", "knowledge", "life", "sources"]);
@@ -278,6 +282,13 @@ function sourceUsesProject(source: NoteSummary, projectPath: string): boolean {
   return sameVaultPath(source.project, projectPath);
 }
 
+function sourceUsesCourse(source: NoteSummary, coursePath: string): boolean {
+  if (source.uses?.length) {
+    return source.uses.some((use) => sameVaultPath(use.course, coursePath));
+  }
+  return sameVaultPath(source.course, coursePath);
+}
+
 export class VaultDashboardReader {
   public constructor(private readonly app: App) {}
 
@@ -341,18 +352,26 @@ export class VaultDashboardReader {
   public async learning(): Promise<LearningProjection> {
     const summaries = (await this.scan()).map((note) => note.summary);
     const studyGuides = summaries.filter((note) => note.note_type === "Study Guide");
+    const pendingGuides = this.pendingLearningFrom(summaries);
+    const readyGuides = studyGuides
+      .filter((note) => !note.studied_at && note.material_ready)
+      .sort(compareNotesByRecency);
+    const completedGuides = studyGuides
+      .filter((note) => Boolean(note.studied_at))
+      .sort(compareNotesByRecency);
     const [courses, projects] = await Promise.all([
       this.coursesFrom(summaries, false),
       this.projectsFrom(summaries, false),
     ]);
     return {
-      pending_guides: this.pendingLearningFrom(summaries),
-      ready_guides: studyGuides
-        .filter((note) => !note.studied_at && note.material_ready)
-        .sort(compareNotesByRecency),
-      completed_guides: studyGuides
-        .filter((note) => Boolean(note.studied_at))
-        .sort(compareNotesByRecency),
+      pending_guides: pendingGuides,
+      ready_guides: readyGuides,
+      completed_guides: completedGuides,
+      scope_entry_counts: dashboardLearningScopeEntryCounts([
+        ...pendingGuides,
+        ...readyGuides,
+        ...completedGuides,
+      ]),
       courses,
       projects,
     };
@@ -476,14 +495,15 @@ export class VaultDashboardReader {
         (!activeOnly || !note.course_status || note.course_status === "active"),
     );
     const values = await Promise.all(courses.map(async (course): Promise<CourseSummary> => {
-      const root = course.path.split("/").slice(0, -1).join("/");
-      const lessons = notes.filter(
-        (note) => note.note_type === "Lesson" &&
-          (sameVaultPath(note.course, course.path) || note.path.startsWith(`${root}/lessons/`)),
+      const lessons = filterDashboardLearningScope(
+        notes.filter((note) => note.note_type === "Lesson"),
+        "course",
+        course.path,
       ).sort(compareNotesByRecency);
-      const guides = notes.filter(
-        (note) => note.note_type === "Study Guide" &&
-          (sameVaultPath(note.course, course.path) || note.path.startsWith(`${root}/guides/`)),
+      const guides = filterDashboardLearningScope(
+        notes.filter((note) => note.note_type === "Study Guide"),
+        "course",
+        course.path,
       );
       const body = splitMarkdown(await this.readPath(course.path)).body;
       return {
@@ -492,6 +512,9 @@ export class VaultDashboardReader {
         guide_count: guides.length,
         lesson_count: lessons.length,
         ...(lessons[0] ? { latest_lesson: lessons[0] } : {}),
+        related_sources: notes.filter(
+          (note) => note.note_type === "Source" && sourceUsesCourse(note, course.path),
+        ),
         pending_captures: notes.filter(
           (note) => isPendingCapture(note) && sameVaultPath(note.course, course.path),
         ),

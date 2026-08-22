@@ -40,7 +40,9 @@ export interface ProjectSummary extends NoteSummary {
   log_path: string;
   decisions: string[];
   outputs: string[];
+  /** Study Guide notes linked to this Project; never Sources or project assets. */
   related_learning: NoteSummary[];
+  /** Source notes linked to this Project; never Study Guides, Decisions, or Outputs. */
   related_materials: NoteSummary[];
   pending_captures: NoteSummary[];
 }
@@ -50,13 +52,24 @@ export interface CourseSummary extends NoteSummary {
   guide_count: number;
   lesson_count: number;
   latest_lesson?: NoteSummary;
+  /** Source notes linked to this Course, independent of their workflow purpose. */
+  related_sources: NoteSummary[];
   pending_captures: NoteSummary[];
+}
+
+/** Counts Learning queue entries, not all notes or all related Sources in the Vault. */
+export interface LearningScopeEntryCounts {
+  all: number;
+  course: number;
+  project: number;
+  independent: number;
 }
 
 export interface LearningProjection {
   pending_guides: NoteSummary[];
   ready_guides: NoteSummary[];
   completed_guides: NoteSummary[];
+  scope_entry_counts: LearningScopeEntryCounts;
   courses: CourseSummary[];
   projects: ProjectSummary[];
 }

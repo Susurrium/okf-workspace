@@ -61,6 +61,15 @@ describe("VaultDashboardReader", () => {
         ),
       ],
       [
+        "sources/records/course-source.md",
+        note(
+          "Source",
+          "课程资料",
+          "purpose: reference\ncourse: /learning/courses/cs61a/course.md\ningested_via: file-import",
+          "已经归入课程的参考资料。",
+        ),
+      ],
+      [
         "projects/okf/decisions/keep-dashboard-local.md",
         note(
           "Decision",
@@ -129,6 +138,9 @@ describe("VaultDashboardReader", () => {
         current_progress: "完成递归，下一步学习树。",
         guide_count: 1,
         lesson_count: 1,
+        related_sources: [
+          expect.objectContaining({ path: "sources/records/course-source.md", note_type: "Source" }),
+        ],
         pending_captures: [expect.objectContaining({ path: "inbox/captures/course-idea.md" })],
       }),
     );
@@ -154,6 +166,9 @@ describe("VaultDashboardReader", () => {
     expect(learning.courses[0]).toEqual(expect.objectContaining({
       title: "CS61A",
       guide_count: 1,
+      related_sources: [
+        expect.objectContaining({ path: "sources/records/course-source.md", note_type: "Source" }),
+      ],
     }));
     expect(learning.projects[0]).toEqual(expect.objectContaining({
       title: "个人知识工作区",
@@ -172,6 +187,12 @@ describe("VaultDashboardReader", () => {
     expect(learning.pending_guides).toEqual([
       expect.objectContaining({ title: "稍后学习网页", ingested_via: "web-clip" }),
     ]);
+    expect(learning.scope_entry_counts).toEqual({
+      all: 2,
+      course: 1,
+      project: 1,
+      independent: 1,
+    });
 
     const inbox = await reader.inbox();
     expect(inbox.captures[0]).toEqual(expect.objectContaining({
@@ -233,6 +254,12 @@ describe("VaultDashboardReader", () => {
         project: "/projects/project-b/project.md",
       }),
     ]);
+    expect((await reader.learning()).scope_entry_counts).toEqual({
+      all: 2,
+      course: 1,
+      project: 1,
+      independent: 0,
+    });
     expect((await reader.knowledge()).pending_wiki).toEqual([
       expect.objectContaining({
         purpose: "wiki",
@@ -244,6 +271,81 @@ describe("VaultDashboardReader", () => {
       pending_study_count: 2,
       pending_wiki_count: 1,
     }));
+  });
+
+  it("keeps Course and Project statistics type-safe and applies explicit Course links first", async () => {
+    const markdown = new Map<string, string>([
+      ["learning/courses/a/course.md", note("Course", "Course A", "course_status: active", "")],
+      ["learning/courses/b/course.md", note("Course", "Course B", "course_status: active", "")],
+      [
+        "learning/courses/a/guides/moved.md",
+        note(
+          "Study Guide",
+          "Moved Guide",
+          "course: /learning/courses/b/course.md\nproject: /projects/p/project.md",
+          "",
+        ),
+      ],
+      [
+        "learning/courses/a/lessons/moved.md",
+        note("Lesson", "Moved Lesson", "course: /learning/courses/b/course.md", ""),
+      ],
+      ["projects/p/project.md", note("Project", "Project P", "project_status: active", "")],
+      [
+        "sources/records/shared.md",
+        note(
+          "Source",
+          "Shared Source",
+          [
+            "uses:",
+            "  - purpose: reference",
+            "    course: /learning/courses/a/course.md",
+            "  - purpose: study",
+            "    course: /learning/courses/a/course.md",
+            "  - purpose: reference",
+            "    project: /projects/p/project.md",
+          ].join("\n"),
+          "",
+        ),
+      ],
+      [
+        "projects/p/decisions/not-learning.md",
+        note("Decision", "Not Learning", "project: /projects/p/project.md", ""),
+      ],
+    ]);
+    const files = [...markdown.keys()]
+      .map((path) => new (TFile as unknown as new (path: string) => TFile)(path));
+    const vault = {
+      getMarkdownFiles: () => files,
+      getFiles: () => files,
+      getAbstractFileByPath: (path: string) => files.find((file) => file.path === path) ?? null,
+      cachedRead: async (file: TFile) => markdown.get(file.path) ?? "",
+    };
+
+    const learning = await new VaultDashboardReader({ vault } as unknown as App).learning();
+    const courseA = learning.courses.find((course) => course.title === "Course A");
+    const courseB = learning.courses.find((course) => course.title === "Course B");
+    const project = learning.projects[0];
+
+    expect(courseA).toEqual(expect.objectContaining({
+      guide_count: 0,
+      lesson_count: 0,
+      related_sources: [
+        expect.objectContaining({ path: "sources/records/shared.md", note_type: "Source" }),
+      ],
+    }));
+    expect(courseB).toEqual(expect.objectContaining({
+      guide_count: 1,
+      lesson_count: 1,
+      latest_lesson: expect.objectContaining({ path: "learning/courses/a/lessons/moved.md" }),
+      related_sources: [],
+    }));
+    expect(project?.related_learning).toEqual([
+      expect.objectContaining({ path: "learning/courses/a/guides/moved.md", note_type: "Study Guide" }),
+    ]);
+    expect(project?.related_materials).toEqual([
+      expect.objectContaining({ path: "sources/records/shared.md", note_type: "Source" }),
+    ]);
   });
 
   it("keeps Today recent study ready-only and deterministically newest-first", async () => {
