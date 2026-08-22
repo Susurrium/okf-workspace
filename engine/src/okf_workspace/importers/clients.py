@@ -16,6 +16,8 @@ from .archive import normalize_zip
 from .models import ParserExport, ParserName
 
 MAX_RESULT_BYTES = 512 * 1024 * 1024
+MARKITDOWN_ASSET_PROFILE = "fallback-assets-v2"
+MARKITDOWN_LEGACY_PROFILE = "fallback-text-v1"
 
 
 class ParserClientError(RuntimeError):
@@ -266,14 +268,27 @@ class MarkItDownClient(_AsyncClient):
             "engine_version",
             "MarkItDown health",
         )
+        result_schema = health_payload.get("result_schema")
+        profile = (
+            MARKITDOWN_ASSET_PROFILE
+            if result_schema == "markitdown-result/v3"
+            else MARKITDOWN_LEGACY_PROFILE
+        )
+        build_id_value = health_payload.get("engine_build_id")
+        build_identity = (
+            build_id_value.strip()
+            if isinstance(build_id_value, str) and build_id_value.strip()
+            else version
+        )
+        build_key = hashlib.sha256(build_identity.encode("utf-8")).hexdigest()[:16]
         digest = hashlib.sha256(source.read_bytes()).hexdigest()
         media_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
         headers = {
             **self.request_headers,
-            "Idempotency-Key": f"okf-markitdown-{digest}",
+            "Idempotency-Key": f"okf-markitdown-{profile}-{build_key}-{digest}",
             "X-Source-SHA256": digest,
             "X-Filename": source.name,
-            "X-MarkItDown-Profile": "fallback-text-v1",
+            "X-MarkItDown-Profile": profile,
             "Content-Type": media_type,
         }
         with source.open("rb") as handle:

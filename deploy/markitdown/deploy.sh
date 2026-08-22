@@ -225,7 +225,15 @@ if ! python3 ./verify.py \
   stop_unverified_release
   echo "The unverified MarkItDown containers and loopback proxy were stopped." >&2
   if [[ -f .last-known-good-release ]]; then
-    echo "Deployment failed. A prior image is available through: bash rollback.sh" >&2
+    repository_root="$(cd -- "${script_dir}/../.." && pwd -P)"
+    release_store="$(dirname -- "$(dirname -- "${repository_root}")")"
+    if [[ -L "${release_store}/current" && -L "${release_store}/previous" \
+      && "$(realpath -e -- "${release_store}/current")" == "${repository_root}" ]]; then
+      echo "Deployment failed. Restore the retained bundle and image through:" >&2
+      echo "  bash ${script_dir}/rollback-release-bundle.sh --release-store ${release_store}" >&2
+    else
+      echo "Deployment failed. A prior same-bundle image is available through: bash rollback.sh" >&2
+    fi
   fi
   exit 1
 fi

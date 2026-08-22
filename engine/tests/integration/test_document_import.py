@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -156,6 +157,87 @@ def test_failed_qc_keeps_export_but_does_not_publish_fake_success(
 
     assert list((tmp_path / "state/conversions").glob("*/export/document.md"))
     assert not list((vault / "sources/records/documents").glob("manual-*.md"))
+
+
+def test_source_text_without_parser_heading_gets_one_readable_h1(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    parser = FakeParser(
+        ParserName.MARKITDOWN,
+        ParserExport(
+            markdown=(
+                "This converted document has useful readable content, but its parser returned "
+                "no Markdown heading.\n"
+            ),
+            assets={},
+            parser=ParserName.MARKITDOWN,
+            parser_version="fixture-1",
+        ),
+    )
+    importer = DocumentImporter(
+        vault=vault,
+        originals=tmp_path / "originals",
+        state=tmp_path / "state",
+        clients={ParserName.MARKITDOWN: parser},
+    )
+
+    result = importer.import_document(
+        ImportRequest(
+            source=make_pdf(tmp_path),
+            intent=ImportIntent.SOURCE,
+            quality=ImportQuality.QUICK,
+            parser=ParserName.MARKITDOWN,
+        )
+    )
+
+    source_text = read_document(cast(Path, result.source_text))
+    assert source_text.body.lstrip().startswith("# manual - 完整正文\n\n")
+    assert source_text.body.lstrip().count("\n# ") == 0
+
+
+def test_markitdown_hashed_asset_is_published_and_linked_from_source_text(
+    tmp_path: Path,
+) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    image = b"PNG fixture bytes"
+    digest = hashlib.sha256(image).hexdigest()
+    asset_path = f"images/{digest}.png"
+    parser = FakeParser(
+        ParserName.MARKITDOWN,
+        ParserExport(
+            markdown=(
+                "# Illustrated manual\n\n"
+                "This converted body is readable and includes an image.\n\n"
+                f"![figure]({asset_path})\n"
+            ),
+            assets={asset_path: image},
+            parser=ParserName.MARKITDOWN,
+            parser_version="0.1.6",
+            expected_image_references=1,
+            output_image_references=1,
+            bundle_schema="markitdown-result/v3",
+            profile="fallback-assets-v2",
+        ),
+    )
+    importer = DocumentImporter(
+        vault=vault,
+        originals=tmp_path / "originals",
+        state=tmp_path / "state",
+        clients={ParserName.MARKITDOWN: parser},
+    )
+
+    result = importer.import_document(
+        ImportRequest(
+            source=make_pdf(tmp_path),
+            intent=ImportIntent.SOURCE,
+            quality=ImportQuality.HIGH,
+            parser=ParserName.MARKITDOWN,
+        )
+    )
+
+    published = vault / "sources" / "assets" / cast(Path, result.source).stem / asset_path
+    assert published.read_bytes() == image
+    source_text = read_document(cast(Path, result.source_text))
+    assert f"](/{published.relative_to(vault).as_posix()})" in source_text.body
 
 
 def test_high_quality_import_rejects_truncated_embedded_images(tmp_path: Path) -> None:

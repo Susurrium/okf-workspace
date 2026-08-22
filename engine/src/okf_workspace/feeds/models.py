@@ -30,6 +30,9 @@ class FeedComment:
     author: str | None = None
     is_original_poster: bool = False
     published_at: str | None = None
+    reply_to_cid: int | None = None
+    reply_to_author: str | None = None
+    reply_to_text: str | None = None
     media: tuple[str, ...] = ()
 
 

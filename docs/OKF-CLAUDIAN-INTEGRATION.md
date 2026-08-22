@@ -33,7 +33,8 @@ Claudian 故障不会阻止 Dashboard 打开、原生 Markdown 阅读或 Engine 
 - 流式输出、思考与工具消息、错误、取消和审批；
 - 多会话、恢复、标题与会话持久化；
 - 文件、图片、附件和外部上下文；
-- 模型、推理强度和 sandbox 选择。
+- 模型、推理强度和 sandbox 选择；
+- 可见发送按钮；流式生成期间提供“停止”，复用 Codex cancel/interrupt，不伪装成可恢复的暂停。
 
 没有使用 shell stdin、伪终端或 DOM 注入来模拟聊天，因此不会重现旧内嵌终端的输入、颜色和重登后补发问题。
 
@@ -60,7 +61,13 @@ okfBridge.handoff({
 });
 ```
 
-Claudian 校验 Vault 相对路径与模式，打开或创建 Codex 会话，把文件显示为可移除的上下文 chip，并把任务预填到输入框。默认不自动发送，用户确认后 Codex 才执行。
+Claudian 校验 Vault 相对路径与模式，打开或创建并主动显示 Codex 会话，把文件显示为可移除的
+上下文 chip，并把任务预填到输入框。已有 Claudian 位于右侧栏但被日历等标签遮住时，交接也会
+先显示该 leaf 再聚焦输入框。默认不自动发送，用户确认后 Codex 才执行。
+
+上下文路径按规范 Vault 路径去重。Source 与 Source Text 可能具有相同 basename，但分别代表
+来源身份卡与完整正文，因此两者都要保留；chip 使用 YAML `type/title` 或父目录标识角色，不再
+只显示两个看似相同的文件名。
 
 Bridge 始终选择 Codex。当前活动页若是 Claude，会新建 Codex 会话；Codex 未启用或没有可用模型时明确报错，不回退到 Claude，也不复用 Anthropic 登录状态。
 

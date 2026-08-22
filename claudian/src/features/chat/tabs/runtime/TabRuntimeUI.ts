@@ -1,4 +1,4 @@
-import { Notice } from 'obsidian';
+import { Notice, setIcon } from 'obsidian';
 
 import {
   getProviderSettingsSnapshotWithModel,
@@ -191,7 +191,10 @@ function buildInputToolbar(
   options: TabRuntimeConstructionContext,
   runtimeRef: PublishedTabRuntimeRef,
   onUserModified: () => void,
-): ReturnType<typeof createInputToolbar> {
+): ReturnType<typeof createInputToolbar> & Pick<
+  TabUIComponents,
+  'sendButtonEl' | 'stopButtonEl'
+> {
   const { dom } = shell;
   const { plugin } = options;
 
@@ -423,7 +426,27 @@ function buildInputToolbar(
     'tab input toolbar layout',
     () => toolbarComponents.layoutController.destroy(),
   );
-  return toolbarComponents;
+  const composerActionsEl = inputToolbar.createDiv({ cls: 'claudian-composer-actions' });
+  const stopButtonEl = composerActionsEl.createEl('button', {
+    cls: 'claudian-composer-action claudian-composer-stop claudian-hidden',
+    attr: {
+      type: 'button',
+      title: 'Stop response',
+      'aria-label': 'Stop response',
+      'aria-hidden': 'true',
+    },
+  });
+  setIcon(stopButtonEl, 'square');
+  const sendButtonEl = composerActionsEl.createEl('button', {
+    cls: 'claudian-composer-action claudian-composer-send',
+    attr: {
+      type: 'button',
+      title: 'Send message',
+      'aria-label': 'Send message',
+    },
+  });
+  setIcon(sendButtonEl, 'send-horizontal');
+  return { ...toolbarComponents, sendButtonEl, stopButtonEl };
 }
 
 export function buildTabRuntimeUI(
@@ -479,6 +502,8 @@ export function buildTabRuntimeUI(
     ...instructionComponents,
     contextUsageMeter: toolbar.contextUsageMeter,
     navigationSidebar,
+    sendButtonEl: toolbar.sendButtonEl,
+    stopButtonEl: toolbar.stopButtonEl,
   };
 
   ui.externalContextSelector.setOnChange(() => {

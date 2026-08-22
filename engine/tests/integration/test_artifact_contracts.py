@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import cast
 
 from okf_workspace.okf.contracts import load_contract_catalog
+from okf_workspace.okf.frontmatter import OkfDocument, write_document
 from okf_workspace.okf.templates import initialize_vault
 from okf_workspace.retrieval.scanner import iter_markdown
 
@@ -32,6 +33,19 @@ FINAL_ARTIFACTS = {
 def test_vault_installs_shared_contracts_templates_and_native_views(tmp_path: Path) -> None:
     vault = initialize_vault(tmp_path / "vault")
 
+    write_document(
+        vault / "archive/legacy.md",
+        OkfDocument(
+            {
+                "type": "Wiki",
+                "title": "Legacy archive",
+                "created_at": "2026-08-20T12:00:00+08:00",
+                "description": "not a default retrieval source",
+            },
+            "# Legacy archive\n",
+        ),
+    )
+
     assert (vault / "system/contracts/daily.yaml").is_file()
     assert (vault / "system/templates/canonical/daily.md").is_file()
     assert (vault / "system/templates/canonical/review.md").is_file()
@@ -52,19 +66,25 @@ def test_vault_installs_shared_contracts_templates_and_native_views(tmp_path: Pa
     assert clipper["schemaVersion"] == "0.1.0"
     assert clipper["path"] == 'inbox/captures/{{time|date:"YYYY"}}/{{time|date:"MM"}}'
     assert "ingested_via" in str(clipper["properties"])
+    assert "capture_status" not in str(clipper["properties"])
+    assert clipper["triggers"] == ["https://", "http://"]
     assert '{{"' not in str(clipper["noteContentFormat"])
 
     indexed = {path.relative_to(vault).as_posix() for path in iter_markdown(vault)}
     assert "system/templates/canonical/daily.md" not in indexed
     assert "system/views/Tasks.md" not in indexed
     assert "index.md" not in indexed
+    assert "archive/legacy.md" not in indexed
 
 
 def test_core_daily_and_templater_use_separate_template_roots(tmp_path: Path) -> None:
     vault = initialize_vault(tmp_path / "vault")
+    app_settings = json.loads((vault / ".obsidian/app.json").read_text(encoding="utf-8"))
     daily = (vault / ".obsidian/daily-notes.json").read_text(encoding="utf-8")
     templater = (vault / ".obsidian/templates.json").read_text(encoding="utf-8")
 
+    assert app_settings["showInlineTitle"] is False
+    assert app_settings["propertiesInDocument"] == "hidden"
     assert "system/templates/core/Daily" in daily
     assert "system/templates/interactive" in templater
 
@@ -84,7 +104,7 @@ def test_profile_v3_has_one_fixed_contract_per_final_artifact(tmp_path: Path) ->
     assert catalog.artifacts["Study Guide"].required_human_regions == ("notes",)
     assert catalog.artifacts["Lesson"].required_ai_regions == ("organized-lesson",)
     assert catalog.artifacts["Wiki"].required_fields == ("description",)
-    assert catalog.artifacts["Capture"].required_fields == ("capture_status",)
+    assert catalog.artifacts["Capture"].required_fields == ()
     assert catalog.artifacts["Capture"].workspace_write_fields == ("ingested_via",)
     assert catalog.artifacts["Capture"].field_types["resource"] == "string"
     assert catalog.artifacts["Capture"].field_types["course"] == "vault_path"

@@ -63,6 +63,11 @@ class ParserExport:
     parser: ParserName
     parser_version: str
     degraded_from: ParserName | None = None
+    warnings: tuple[str, ...] = ()
+    expected_image_references: int | None = None
+    output_image_references: int | None = None
+    bundle_schema: str | None = None
+    profile: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

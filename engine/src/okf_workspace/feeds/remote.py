@@ -22,6 +22,9 @@ class _CapturedComment(TypedDict):
     author: str | None
     is_original_poster: bool
     published_at: str | None
+    reply_to_cid: int | None
+    reply_to_author: str | None
+    reply_to_text: str | None
 
 
 _SSH_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}$")
@@ -168,6 +171,14 @@ def treehole_capture_context(
                 timestamp = raw_values.get("timestamp")
                 cid_value = item.get("cid")
                 author_value = raw_values.get("name_tag")
+                parent_value = raw_values.get("comment_id")
+                quote = raw_values.get("quote")
+                quote_values: Mapping[str, object] = (
+                    cast(Mapping[str, object], quote) if isinstance(quote, dict) else {}
+                )
+                quote_cid = quote_values.get("cid")
+                quote_author = quote_values.get("name_tag")
+                quote_text = quote_values.get("text")
                 comments[pid].append(
                     {
                         "text": text.strip(),
@@ -178,6 +189,24 @@ def treehole_capture_context(
                             datetime.fromtimestamp(timestamp, UTC).isoformat()
                             if isinstance(timestamp, (int, float))
                             and not isinstance(timestamp, bool)
+                            else None
+                        ),
+                        "reply_to_cid": (
+                            parent_value
+                            if isinstance(parent_value, int)
+                            and not isinstance(parent_value, bool)
+                            else quote_cid
+                            if isinstance(quote_cid, int) and not isinstance(quote_cid, bool)
+                            else None
+                        ),
+                        "reply_to_author": (
+                            quote_author.strip()
+                            if isinstance(quote_author, str) and quote_author.strip()
+                            else None
+                        ),
+                        "reply_to_text": (
+                            quote_text.strip()
+                            if isinstance(quote_text, str) and quote_text.strip()
                             else None
                         ),
                     }
@@ -216,6 +245,9 @@ def treehole_capture_context(
                     author=value["author"],
                     is_original_poster=value["is_original_poster"],
                     published_at=value["published_at"],
+                    reply_to_cid=value["reply_to_cid"],
+                    reply_to_author=value["reply_to_author"],
+                    reply_to_text=value["reply_to_text"],
                     media=tuple(
                         dict.fromkeys(
                             comment_media.get(value["cid"] if value["cid"] is not None else -1, [])

@@ -32,7 +32,7 @@ def settings(tmp_path: Path, token: str) -> Settings:
         orphan_ttl_seconds=60,
         worker_stale_seconds=15,
         engine_version="0.1.6",
-        engine_build_id="markitdown-0.1.6-py31213-v3",
+        engine_build_id="markitdown-0.1.6-py31213-assets-v3",
     )
 
 

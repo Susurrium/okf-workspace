@@ -20,7 +20,7 @@ def _embedded_image_complete(value: str) -> bool:
 
 def inspect_export(export: ParserExport, *, strict_assets: bool = False) -> QCReport:
     markdown = export.markdown.strip()
-    warnings: list[str] = []
+    warnings = list(export.warnings)
     errors: list[str] = []
     checks: dict[str, bool] = {}
 
@@ -50,6 +50,17 @@ def inspect_export(export: ParserExport, *, strict_assets: bool = False) -> QCRe
         message = "embedded image data is truncated or only a placeholder"
         (errors if strict_assets else warnings).append(message)
 
+    expected_images = export.expected_image_references
+    output_images = export.output_image_references
+    images_preserved = not (
+        expected_images is not None and (output_images is None or output_images < expected_images)
+    )
+    checks["source_image_references_preserved"] = images_preserved
+    if not images_preserved and expected_images is not None:
+        missing_count = expected_images - (output_images or 0)
+        message = f"parser omitted {missing_count} image reference(s) from the source document"
+        (errors if strict_assets else warnings).append(message)
+
     visible = sum(character.isalnum() for character in markdown)
     replacement_ratio = markdown.count("\ufffd") / max(1, len(markdown))
     ocr_usable = visible >= 20 and replacement_ratio < 0.03
@@ -65,6 +76,6 @@ def inspect_export(export: ParserExport, *, strict_assets: bool = False) -> QCRe
     return QCReport(
         passed=not errors,
         checks=checks,
-        warnings=tuple(warnings),
+        warnings=tuple(dict.fromkeys(warnings)),
         errors=tuple(errors),
     )

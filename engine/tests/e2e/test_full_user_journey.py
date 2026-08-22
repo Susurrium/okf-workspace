@@ -70,9 +70,9 @@ def test_generated_vault_supports_the_full_daily_organize_project_feed_and_searc
     assert len(cast(list[object], life["notes"])) == expected["life"]["note_count"]
 
     capture = cast(list[dict[str, object]], inbox["captures"])[0]
-    target, archived = process_capture(vault, str(capture["path"]), destination="reflection")
+    target = process_capture(vault, str(capture["path"]), destination="reflection")
     assert target.relative_to(vault).as_posix().startswith("life/reflections/")
-    assert "但现在还不确定" in read_document(archived).body
+    assert "但现在还不确定" in read_document(target).body
     assert dashboard_view(vault, "inbox")["captures"] == []
 
     NoteService(vault).append_project_log("workspace", "完成一次端到端操作。")

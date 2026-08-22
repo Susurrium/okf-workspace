@@ -10,6 +10,7 @@ Set-StrictMode -Version Latest
 
 $vaultRoot = [System.IO.Path]::GetFullPath($Vault)
 $repository = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $repository 'deploy\windows\common.ps1')
 $sourceRoot = if ($ClaudianRepository.Trim()) {
     [System.IO.Path]::GetFullPath($ClaudianRepository)
 } else {
@@ -52,13 +53,27 @@ if ($manifest.id -ne 'okf-claudian') {
     throw "Unexpected plugin id: $($manifest.id)"
 }
 
+# Historical development builds copied this fork into a folder named
+# `claudian`, but their manifest id was still `okf-claudian`. Validate that
+# exact provenance before making any Vault change. A folder name, or the
+# upstream `claudian` manifest id, is not ownership evidence.
+$ownedLegacyPluginIds = [System.Collections.Generic.List[string]]::new()
+foreach ($legacyId in @('claudian')) {
+    $owned = Confirm-OkfRetiredPluginDirectoryOwnership `
+        -Vault $vaultRoot `
+        -DirectoryName $legacyId `
+        -AllowedManifestIds @('okf-claudian')
+    if ($owned) { $ownedLegacyPluginIds.Add($legacyId) | Out-Null }
+}
+
 $pluginTarget = [System.IO.Path]::GetFullPath(
     (Join-Path $vaultRoot '.obsidian\plugins\okf-claudian')
 )
-New-Item -ItemType Directory -Force -Path $pluginTarget | Out-Null
+Install-OkfPluginAtomic `
+    -Source $sourceRoot `
+    -Target $pluginTarget `
+    -ExpectedId 'okf-claudian' | Out-Null
 foreach ($artifactName in $artifactNames) {
-    Copy-Item -LiteralPath (Join-Path $sourceRoot $artifactName) `
-        -Destination (Join-Path $pluginTarget $artifactName) -Force
     $sourceHash = (Get-FileHash -LiteralPath (Join-Path $sourceRoot $artifactName) -Algorithm SHA256).Hash
     $targetHash = (Get-FileHash -LiteralPath (Join-Path $pluginTarget $artifactName) -Algorithm SHA256).Hash
     if ($sourceHash -ne $targetHash) { throw "Artifact verification failed: $artifactName" }
@@ -90,29 +105,27 @@ $codexConfig = [hashtable]$providerConfigs['codex']
 if (-not $claudeConfig.ContainsKey('enabled')) { $claudeConfig['enabled'] = $false }
 if (-not $codexConfig.ContainsKey('enabled')) { $codexConfig['enabled'] = $true }
 if (-not $codexConfig.ContainsKey('safeMode')) { $codexConfig['safeMode'] = 'workspace-write' }
-$settings | ConvertTo-Json -Depth 20 |
-    Set-Content -LiteralPath $settingsPath -Encoding UTF8 -NoNewline
+Write-OkfJson -Path $settingsPath -Value $settings
 
 $communityPluginsPath = Join-Path $vaultRoot '.obsidian\community-plugins.json'
 $enabled = [System.Collections.Generic.List[string]]::new()
 if (Test-Path -LiteralPath $communityPluginsPath -PathType Leaf) {
     foreach ($id in @(Get-Content -LiteralPath $communityPluginsPath -Raw -Encoding UTF8 | ConvertFrom-Json)) {
-        if ($id -is [string] -and $id -ne 'claudian' -and -not $enabled.Contains($id)) {
+        if ($id -is [string] -and
+            -not $ownedLegacyPluginIds.Contains($id) -and
+            -not $enabled.Contains($id)) {
             $enabled.Add($id)
         }
     }
 }
 if (-not $enabled.Contains('okf-claudian')) { $enabled.Add('okf-claudian') }
-$enabled.ToArray() | ConvertTo-Json -Depth 2 |
-    Set-Content -LiteralPath $communityPluginsPath -Encoding UTF8 -NoNewline
+Write-OkfJson -Path $communityPluginsPath -Value $enabled.ToArray()
 
-foreach ($legacyId in @('claudian')) {
-    $legacyPlugin = [System.IO.Path]::GetFullPath(
-        (Join-Path $vaultRoot ".obsidian\plugins\$legacyId")
-    )
-    if (Test-Path -LiteralPath $legacyPlugin -PathType Container) {
-        Remove-Item -LiteralPath $legacyPlugin -Recurse -Force
-    }
+foreach ($legacyId in $ownedLegacyPluginIds) {
+    Remove-OkfRetiredPluginDirectory `
+        -Vault $vaultRoot `
+        -DirectoryName $legacyId `
+        -AllowedManifestIds @('okf-claudian') | Out-Null
 }
 
 [pscustomobject]@{

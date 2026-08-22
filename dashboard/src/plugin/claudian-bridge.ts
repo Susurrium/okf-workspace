@@ -37,7 +37,7 @@ interface AppWithPlugins extends App {
 
 const PLUGIN_ID = "okf-claudian";
 
-/** Stable, public boundary between Dashboard and the embedded Codex UI. */
+/** Stable, public boundary between Dashboard and the embedded Claudian UI. */
 export class ClaudianBridgeAdapter {
   public constructor(private readonly app: App) {}
 
@@ -57,7 +57,7 @@ export class ClaudianBridgeAdapter {
     const bridge = this.bridge();
     if (!bridge) {
       throw new Error(
-        "Codex 面板未启用或版本不兼容；请启用 okf-claudian 后重新加载 Obsidian。",
+        "Claudian 面板未启用或版本不兼容；请启用 okf-claudian 后重新加载 Obsidian。",
       );
     }
     return bridge;

@@ -1,15 +1,25 @@
-"""Explicitly process a Capture while preserving its original text."""
+"""Route short-lived Inbox Captures into one durable destination."""
 
 from __future__ import annotations
 
+import logging
 import os
+import tempfile
+import threading
+import time
+import uuid
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from okf_workspace.git import create_checkpoint
-from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
+from okf_workspace.git import GitCheckpointError, create_checkpoint
+from okf_workspace.okf.frontmatter import OkfDocument, read_document
 from okf_workspace.okf.paths import resolve_bundle_path
+from okf_workspace.okf.relations import normalize_context_reference
+from okf_workspace.sources import restore_file_bytes
 
 from .create import NoteService
 
@@ -21,19 +31,116 @@ CaptureDestination = Literal[
     "project-log",
 ]
 
+LOGGER = logging.getLogger(__name__)
+_CAPTURE_WRITE_LOCK = threading.RLock()
+_CAPTURE_LOCK = Path(".trash") / ".okf-capture-transaction.lock"
+_CAPTURE_LOCK_TIMEOUT_SECONDS = 30.0
 
-def _capture_archive_path(vault: Path, source: Path) -> Path:
-    parts = source.relative_to(vault).parts
-    year = parts[-3] if len(parts) >= 3 else f"{datetime.now():%Y}"
-    month = parts[-2] if len(parts) >= 2 else f"{datetime.now():%m}"
-    return vault / "archive" / "captures" / year / month / source.name
+
+@dataclass(frozen=True, slots=True)
+class _ProjectLogMutation:
+    target: Path
+    before: bytes
+    after: bytes
+    marker_id: str
+
+
+def _write_bytes_atomic(path: Path, content: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+@contextmanager
+def _vault_capture_transaction_lock(vault: Path) -> Generator[None]:
+    """Serialize a complete Capture transaction across local API/CLI processes."""
+
+    lock_path = vault.resolve() / _CAPTURE_LOCK
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + _CAPTURE_LOCK_TIMEOUT_SECONDS
+    with lock_path.open("a+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        while True:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(
+                        "another Capture transaction is still running after 30s"
+                    ) from exc
+                time.sleep(0.1)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _capture_source_path(vault: Path, relative: str) -> Path:
+    source = resolve_bundle_path(vault.resolve(), relative)
+    inbox = (vault.resolve() / "inbox" / "captures").resolve()
+    if not source.is_relative_to(inbox):
+        raise ValueError("only an Inbox Capture can use the Capture workflow")
+    return source
+
+
+def _post_checkpoint(vault: Path, message: str) -> None:
+    try:
+        create_checkpoint(vault, message)
+    except GitCheckpointError as exc:
+        # The Markdown mutation is already durable. A best-effort recovery
+        # checkpoint must never turn that successful action into a retryable 500.
+        LOGGER.warning("Capture action completed but Git checkpoint failed: %s", exc)
+
+
+def _pending_capture(vault: Path, relative: str) -> tuple[Path, OkfDocument]:
+    source = _capture_source_path(vault, relative)
+    document = read_document(source)
+    legacy_status = document.frontmatter.get("capture_status")
+    if document.type != "Capture" or legacy_status not in {None, "open"}:
+        raise ValueError(f"not a pending Capture: {relative}")
+    return source, document
+
+
+def _context_slug(vault: Path, field: Literal["course", "project"], value: str) -> str:
+    reference = normalize_context_reference(vault, field, value)
+    parts = Path(reference.removeprefix("/")).parts
+    return parts[2] if field == "course" else parts[1]
 
 
 def recommend_capture_destination(vault: Path, relative: str) -> dict[str, str]:
-    source = resolve_bundle_path(vault.resolve(), relative)
-    document = read_document(source)
-    if document.type != "Capture":
-        raise ValueError(f"not a Capture: {relative}")
+    _, document = _pending_capture(vault, relative)
     if document.frontmatter.get("ingested_via") == "web-clip":
         raise ValueError("Web Capture must be published as Source + Source Text")
     text = f"{document.frontmatter.get('title', '')}\n{document.body}"
@@ -53,11 +160,123 @@ def recommend_capture_destination(vault: Path, relative: str) -> dict[str, str]:
     }
 
 
-def _content(document_body: str) -> str:
+def _content(document_body: str, title: str) -> str:
     lines = document_body.strip().splitlines()
     if lines and lines[0].startswith("# "):
         lines = lines[1:]
+    while lines and not lines[0].strip():
+        lines = lines[1:]
+    if lines and lines[0].strip() == title.strip():
+        lines = lines[1:]
     return "\n".join(lines).strip()
+
+
+def _delete_capture(source: Path) -> None:
+    source.unlink()
+
+
+def _trash_target(vault: Path, source: Path) -> Path:
+    relative = source.relative_to(vault)
+    target = vault / ".trash" / relative
+    suffix = 1
+    while target.exists():
+        suffix += 1
+        target = target.with_stem(f"{source.stem}-{suffix}")
+    return target
+
+
+def _move_to_trash(vault: Path, source: Path) -> Path:
+    target = _trash_target(vault, source)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(source, target)
+    return target
+
+
+def _project_log_markers(identity: str) -> tuple[str, str]:
+    return (
+        f'<!-- okf:capture-transaction:start id="{identity}" -->',
+        f'<!-- okf:capture-transaction:end id="{identity}" -->',
+    )
+
+
+def _render_project_log_append(text: str, heading: str, entry: str) -> str:
+    """Render the same human log shape as NoteService, before one atomic replace."""
+
+    if heading in text:
+        return text.replace(heading, f"{heading}\n\n- {entry.strip()}", 1)
+    first_line, _, remainder = text.partition("\n")
+    prefix = first_line if first_line.startswith("# ") else "# 项目日志"
+    existing = remainder.lstrip() if first_line.startswith("# ") else text.lstrip()
+    intro, separator, history = existing.partition("\n")
+    if intro.startswith("该文件按时间记录"):
+        tail = history.lstrip() if separator else ""
+        rendered = f"{prefix}\n\n{intro}\n\n{heading}\n\n- {entry.strip()}"
+        return f"{rendered}\n\n{tail}" if tail else rendered
+    rendered = f"{prefix}\n\n{heading}\n\n- {entry.strip()}"
+    return f"{rendered}\n\n{existing}" if existing else rendered
+
+
+def _append_marked_project_log(
+    target: Path,
+    entry: str,
+) -> _ProjectLogMutation:
+    before = target.read_bytes()
+    marker_id = uuid.uuid4().hex
+    start, end = _project_log_markers(marker_id)
+    heading = f"## {datetime.now().astimezone().date()}"
+    marked_entry = f"{start}{entry.strip()}{end}"
+    after = _render_project_log_append(before.decode("utf-8"), heading, marked_entry).encode(
+        "utf-8"
+    )
+    _write_bytes_atomic(target, after)
+    return _ProjectLogMutation(target, before, after, marker_id)
+
+
+def _remove_marked_project_entry(text: str, marker_id: str) -> str:
+    start, end = _project_log_markers(marker_id)
+    start_at = text.find(start)
+    end_at = text.find(end, start_at + len(start)) if start_at >= 0 else -1
+    if start_at < 0 or end_at < 0:
+        return text
+    line_start = text.rfind("\n", 0, start_at) + 1
+    prefix = text[line_start:start_at]
+    if prefix.strip() == "-":
+        start_at = line_start
+    end_at += len(end)
+    if text[end_at : end_at + 2] == "\r\n":
+        end_at += 2
+    elif text[end_at : end_at + 1] == "\n":
+        end_at += 1
+    return text[:start_at] + text[end_at:]
+
+
+def _rollback_project_log_mutation(mutation: _ProjectLogMutation) -> None:
+    """Undo only this append while preserving unrelated edits made meanwhile."""
+
+    current = mutation.target.read_bytes()
+    if current == mutation.after:
+        _write_bytes_atomic(mutation.target, mutation.before)
+        return
+    rendered = current.decode("utf-8")
+    updated = _remove_marked_project_entry(rendered, mutation.marker_id)
+    if updated == rendered:
+        raise RuntimeError("cannot safely locate this Capture's Project Log entry")
+    _write_bytes_atomic(mutation.target, updated.encode("utf-8"))
+
+
+def _finalize_project_log_mutation(mutation: _ProjectLogMutation) -> None:
+    """Remove transaction markers after the Capture has been consumed."""
+
+    current = mutation.target.read_text(encoding="utf-8")
+    start, end = _project_log_markers(mutation.marker_id)
+    has_start = start in current
+    has_end = end in current
+    if not has_start and not has_end:
+        return
+    if has_start != has_end:
+        raise RuntimeError("incomplete Capture transaction marker in Project Log")
+    updated = current.replace(start, "", 1).replace(end, "", 1)
+    _write_bytes_atomic(mutation.target, updated.encode("utf-8"))
 
 
 def process_capture(
@@ -68,48 +287,69 @@ def process_capture(
     title: str | None = None,
     project: str | None = None,
     course: str | None = None,
-) -> tuple[Path, Path]:
+) -> Path:
+    """Publish and consume one Capture as a serialized Vault transaction."""
+
     vault = vault.resolve()
-    source = resolve_bundle_path(vault, relative)
-    document = read_document(source)
-    if document.type != "Capture":
-        raise ValueError(f"not a Capture: {relative}")
-    if document.frontmatter.get("capture_status") != "open":
-        raise ValueError(f"Capture is already processed: {relative}")
+    with _CAPTURE_WRITE_LOCK, _vault_capture_transaction_lock(vault):
+        return _process_capture_locked(
+            vault,
+            relative,
+            destination=destination,
+            title=title,
+            project=project,
+            course=course,
+        )
+
+
+def _process_capture_locked(
+    vault: Path,
+    relative: str,
+    *,
+    destination: CaptureDestination,
+    title: str | None = None,
+    project: str | None = None,
+    course: str | None = None,
+) -> Path:
+    """Create one durable target, then remove the successfully consumed Capture.
+
+    The Capture remains untouched whenever target creation fails. If deleting the
+    Capture itself fails, the target write is rolled back so the Inbox never shows a
+    misleading duplicate.
+    """
+
+    vault = vault.resolve()
+    source, document = _pending_capture(vault, relative)
     if document.frontmatter.get("ingested_via") == "web-clip":
         raise ValueError("Web Capture must be published as Source + Source Text")
+
     original_title = document.frontmatter.get("title")
-    resolved_title = title or (original_title if isinstance(original_title, str) else source.stem)
-    body = _content(document.body)
-    archived = _capture_archive_path(vault, source)
-    archived_relative = archived.relative_to(vault).as_posix()
+    resolved_title = title or (
+        original_title
+        if isinstance(original_title, str) and original_title.strip()
+        else source.stem
+    )
+    body = _content(document.body, resolved_title)
     captured_course = document.frontmatter.get("course")
     captured_project = document.frontmatter.get("project")
-    context_course = course or (
-        captured_course if isinstance(captured_course, str) else None
-    )
-    context_project = project or (
-        captured_project if isinstance(captured_project, str) else None
-    )
-    if destination == "project-log" and not project:
+    context_course = course or (captured_course if isinstance(captured_course, str) else None)
+    context_project = project or (captured_project if isinstance(captured_project, str) else None)
+    if destination == "project-log" and context_project is None:
         raise ValueError("--project is required for project-log")
-    if destination == "lesson" and not course:
+    if destination == "lesson" and context_course is None:
         raise ValueError("--course is required for lesson")
+
     service = NoteService(vault)
     create_checkpoint(vault, "checkpoint before organizing Capture")
+    previous_target: bytes | None = None
+    project_log_mutation: _ProjectLogMutation | None = None
 
     if destination == "reflection":
         target = service.create_reflection(resolved_title, body)
-        target_document = read_document(target)
-        target_document.frontmatter["sources"] = [
-            {"id": "capture", "resource": f"/{archived_relative}"}
-        ]
-        write_document(target, target_document)
     elif destination == "wiki":
         target = service.create_wiki(
             resolved_title,
             body,
-            sources=[archived_relative],
             course=context_course,
             project=context_project,
         )
@@ -117,96 +357,85 @@ def process_capture(
         target = service.create_study_guide(
             resolved_title,
             body,
-            sources=[archived_relative],
             course=context_course,
             project=context_project,
         )
     elif destination == "lesson":
-        assert course is not None
+        assert context_course is not None
         target = service.create_lesson(
-            course,
+            _context_slug(vault, "course", context_course),
             resolved_title,
             human_notes=body,
         )
     else:
-        assert project is not None
-        target = service.append_project_log(
-            project,
-            f"{resolved_title}\n\n{body}\n\n来源：[Capture](/{archived_relative})",
-        )
+        assert context_project is not None
+        project_slug = _context_slug(vault, "project", context_project)
+        target = vault / "projects" / project_slug / "log.md"
+        entry = resolved_title if not body else f"{resolved_title}\n\n{body}"
+        project_log_mutation = _append_marked_project_log(target, entry)
 
-    target_relative = target.relative_to(vault).as_posix()
-    document.frontmatter["capture_status"] = "processed"
-    document.frontmatter["processed_into"] = [f"/{target_relative}"]
-    write_document(source, document)
-
-    archived.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(source, archived)
-    create_checkpoint(vault, f"organize: Capture to {destination}")
-    return target, archived
+    try:
+        _delete_capture(source)
+    except Exception:
+        try:
+            if project_log_mutation is not None:
+                _rollback_project_log_mutation(project_log_mutation)
+            else:
+                restore_file_bytes(target, previous_target)
+        except Exception as recovery_error:
+            raise RuntimeError("Capture target rollback failed") from recovery_error
+        raise
+    if project_log_mutation is not None:
+        try:
+            _finalize_project_log_mutation(project_log_mutation)
+        except Exception as exc:
+            LOGGER.warning(
+                "Capture was committed but Project Log marker cleanup failed: %s",
+                exc,
+            )
+    _post_checkpoint(vault, f"organize: Capture to {destination}")
+    return target
 
 
 def discard_capture(vault: Path, relative: str) -> Path:
-    """Archive an explicitly discarded Capture without deleting its original text."""
+    """Remove a pending Capture from Inbox via Obsidian's local trash."""
+
     vault = vault.resolve()
-    source = resolve_bundle_path(vault, relative)
-    document = read_document(source)
-    if document.type != "Capture" or document.frontmatter.get("capture_status") != "open":
-        raise ValueError(f"not an open Capture: {relative}")
-    archived = _capture_archive_path(vault, source)
+    with _CAPTURE_WRITE_LOCK, _vault_capture_transaction_lock(vault):
+        return _discard_capture_locked(vault, relative)
+
+
+def _discard_capture_locked(vault: Path, relative: str) -> Path:
+    vault = vault.resolve()
+    source, _ = _pending_capture(vault, relative)
     create_checkpoint(vault, "checkpoint before discarding Capture")
-    document.frontmatter["capture_status"] = "discarded"
-    write_document(source, document)
-    archived.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(source, archived)
-    create_checkpoint(vault, "capture: archive discarded note")
-    return archived
+    _move_to_trash(vault, source)
+    _post_checkpoint(vault, "capture: discard note")
+    return source
 
 
 def batch_discard_captures(vault: Path, relatives: list[str]) -> tuple[Path, ...]:
-    """Mark selected open Captures discarded and archive them as one recoverable operation."""
+    """Delete selected pending Captures as one validated operation."""
+
     vault = vault.resolve()
-    sources: list[tuple[Path, OkfDocument]] = []
-    for relative in dict.fromkeys(relatives):
-        source = resolve_bundle_path(vault, relative)
-        document = read_document(source)
-        if document.type != "Capture" or document.frontmatter.get("capture_status") != "open":
-            raise ValueError(f"not an open Capture: {relative}")
-        sources.append((source, document))
+    with _CAPTURE_WRITE_LOCK, _vault_capture_transaction_lock(vault):
+        return _batch_discard_captures_locked(vault, relatives)
+
+
+def _batch_discard_captures_locked(vault: Path, relatives: list[str]) -> tuple[Path, ...]:
+    vault = vault.resolve()
+    sources = [_pending_capture(vault, relative)[0] for relative in dict.fromkeys(relatives)]
     if not sources:
         return ()
     create_checkpoint(vault, "checkpoint before batch discarding Captures")
-    archived_paths: list[Path] = []
-    for source, loaded in sources:
-        document = loaded
-        document.frontmatter["capture_status"] = "discarded"
-        write_document(source, document)
-        archived = _capture_archive_path(vault, source)
-        archived.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(source, archived)
-        archived_paths.append(archived)
-    create_checkpoint(vault, "capture: batch archive discarded notes")
-    return tuple(archived_paths)
-
-
-def archive_processed_captures(vault: Path, relatives: list[str]) -> tuple[Path, ...]:
-    """Archive processed Captures that still remain in Inbox after manual edits or imports."""
-    vault = vault.resolve()
-    sources: list[Path] = []
-    for relative in dict.fromkeys(relatives):
-        source = resolve_bundle_path(vault, relative)
-        document = read_document(source)
-        if document.type != "Capture" or document.frontmatter.get("capture_status") != "processed":
-            raise ValueError(f"not a processed Capture: {relative}")
-        sources.append(source)
-    if not sources:
-        return ()
-    create_checkpoint(vault, "checkpoint before archiving processed Captures")
-    archived_paths: list[Path] = []
-    for source in sources:
-        archived = _capture_archive_path(vault, source)
-        archived.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(source, archived)
-        archived_paths.append(archived)
-    create_checkpoint(vault, "capture: archive processed notes")
-    return tuple(archived_paths)
+    moved: list[tuple[Path, Path]] = []
+    try:
+        for source in sources:
+            moved.append((source, _move_to_trash(vault, source)))
+    except Exception:
+        for source, trashed in reversed(moved):
+            source.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(trashed, source)
+        raise
+    _post_checkpoint(vault, "capture: batch discard notes")
+    return tuple(sources)

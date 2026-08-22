@@ -209,7 +209,8 @@ def _publish_web_capture(
     if not capture.is_relative_to(vault / "inbox" / "captures"):
         raise ValueError("only an Inbox Capture can be published")
     document = read_document(capture)
-    if document.type != "Capture" or document.frontmatter.get("capture_status") != "open":
+    legacy_status = document.frontmatter.get("capture_status")
+    if document.type != "Capture" or legacy_status not in {None, "open"}:
         raise ValueError("only an open Capture can be published")
     if document.frontmatter.get("ingested_via") != WEB_CLIP:
         raise ValueError("only a Capture with ingested_via: web-clip uses this workflow")

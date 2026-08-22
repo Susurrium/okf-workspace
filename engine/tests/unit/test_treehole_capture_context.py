@@ -19,6 +19,12 @@ def test_treehole_capture_context_preserves_comment_identity_and_media(
             "name_tag": "Alice",
             "is_lz": 1,
             "timestamp": 1786804657,
+            "comment_id": 39015700,
+            "quote": {
+                "cid": 39015700,
+                "name_tag": "Bob",
+                "text": "被回复的评论",
+            },
         },
     }
     media = {
@@ -53,5 +59,8 @@ def test_treehole_capture_context_preserves_comment_identity_and_media(
     assert captured.author == "Alice"
     assert captured.is_original_poster is True
     assert captured.published_at == "2026-08-15T14:37:37+00:00"
+    assert captured.reply_to_cid == 39015700
+    assert captured.reply_to_author == "Bob"
+    assert captured.reply_to_text == "被回复的评论"
     assert captured.media == ("data:image/jpeg;base64,Y29tbWVudA==",)
     assert post_media[8456471] == ("data:image/png;base64,cG9zdA==",)

@@ -45,7 +45,10 @@ def test_worker_runs_real_markitdown_child_and_commits_only_verified_result(
     assert completed is not None
     assert completed.status == "completed"
     assert completed.page_count == 1
-    assert completed.warnings == ("empty_markdown",)
+    assert completed.warnings == (
+        "pdf_text_only_images_not_extracted",
+        "empty_markdown",
+    )
     assert not input_path.exists()
     result_path = worker_settings.results_dir / f"{task_id}.zip"
     with zipfile.ZipFile(result_path) as archive:

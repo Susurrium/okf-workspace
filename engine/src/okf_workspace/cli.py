@@ -80,6 +80,23 @@ def _configure_windows_utf8_output() -> None:
             reconfigure(encoding="utf-8", errors="backslashreplace")
 
 
+def _print_json(payload: object, *, stringify_unknown: bool = False) -> None:
+    """Write code-page-neutral JSON for native PowerShell pipelines.
+
+    Windows PowerShell 5.1 can decode redirected native-process output with the
+    active console code page even when the process itself writes UTF-8. Escaping
+    non-ASCII characters keeps the transport ASCII-only; JSON consumers restore
+    the original Unicode values when they parse it.
+    """
+    rendered = json.dumps(
+        payload,
+        ensure_ascii=True,
+        indent=2,
+        default=str if stringify_unknown else None,
+    )
+    print(rendered)
+
+
 def _import_intent(value: str) -> ImportIntent:
     aliases = {"source-only": "source", "triage": "later"}
     return ImportIntent(aliases.get(value, value))
@@ -440,29 +457,25 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "migrate":
             changes = migrate_current_layout(args.vault, default_template_root(), args.state)
-            print(json.dumps({"changes": changes}, ensure_ascii=False, indent=2))
+            _print_json({"changes": changes})
             return 0
         if args.command == "validate":
             report = validate_bundle(args.vault, profile=not args.standard)
             if args.json_output:
-                print(
-                    json.dumps(
-                        {
-                            "valid": report.valid,
-                            "files_checked": report.files_checked,
-                            "issues": [
-                                {
-                                    "path": issue.path,
-                                    "code": issue.code,
-                                    "message": issue.message,
-                                    "severity": issue.severity,
-                                }
-                                for issue in report.issues
-                            ],
-                        },
-                        ensure_ascii=False,
-                        indent=2,
-                    )
+                _print_json(
+                    {
+                        "valid": report.valid,
+                        "files_checked": report.files_checked,
+                        "issues": [
+                            {
+                                "path": issue.path,
+                                "code": issue.code,
+                                "message": issue.message,
+                                "severity": issue.severity,
+                            }
+                            for issue in report.issues
+                        ],
+                    }
                 )
             else:
                 print(
@@ -483,7 +496,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "today":
             snapshot = build_today_snapshot(args.vault, args.date)
-            print(json.dumps(asdict(snapshot), ensure_ascii=False, indent=2, default=str))
+            _print_json(asdict(snapshot), stringify_unknown=True)
             return 0
         if args.command == "fixtures":
             print(generate_fixture_vault(args.output))
@@ -508,12 +521,12 @@ def main(argv: list[str] | None = None) -> int:
                     "actionable": status["actionable"],
                 }
             )
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            _print_json(payload)
             return 0
         if args.command == "backup" and args.backup_command == "verify-restore":
             verification = verify_restored_data(args.vault, args.originals)
             if args.json_output:
-                print(json.dumps(asdict(verification), ensure_ascii=False, indent=2))
+                _print_json(asdict(verification))
             else:
                 print(
                     f"{'VALID' if verification.valid else 'INVALID'}: "
@@ -549,7 +562,7 @@ def main(argv: list[str] | None = None) -> int:
                     progress=show_progress,
                 )
                 index_result["vector_model"] = embedder.model_id
-            print(json.dumps(index_result, ensure_ascii=False, indent=2))
+            _print_json(index_result)
             return 0
         if args.command in {"search", "context"}:
             _, searcher = _search_stack(
@@ -575,19 +588,15 @@ def main(argv: list[str] | None = None) -> int:
                     contexts=contexts,
                 )
                 if args.json_output:
-                    print(
-                        json.dumps(
-                            {
-                                "query": args.query,
-                                "scope": args.scope,
-                                "retrieval": "hybrid" if args.vector else "lexical",
-                                "actual_reads": [asdict(item) for item in contexts],
-                                "trace": str(trace),
-                            },
-                            ensure_ascii=False,
-                            indent=2,
-                            default=str,
-                        )
+                    _print_json(
+                        {
+                            "query": args.query,
+                            "scope": args.scope,
+                            "retrieval": "hybrid" if args.vector else "lexical",
+                            "actual_reads": [asdict(item) for item in contexts],
+                            "trace": str(trace),
+                        },
+                        stringify_unknown=True,
                     )
                 else:
                     for item in contexts:
@@ -600,13 +609,7 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"trace: {trace}")
                 return 0
             if args.json_output:
-                print(
-                    json.dumps(
-                        [asdict(hit) for hit in hits],
-                        ensure_ascii=False,
-                        indent=2,
-                    )
-                )
+                _print_json([asdict(hit) for hit in hits])
             else:
                 for hit in hits:
                     reasons = ", ".join(hit.retrieval_reasons)
@@ -640,23 +643,19 @@ def main(argv: list[str] | None = None) -> int:
                 contexts=list(answer_result.contexts),
             )
             if args.json_output:
-                print(
-                    json.dumps(
-                        {
-                            "answer": answer_result.answer,
-                            "actual_reads": [asdict(item) for item in answer_result.contexts],
-                            "trace": str(trace),
-                        },
-                        ensure_ascii=False,
-                        indent=2,
-                        default=str,
-                    )
+                _print_json(
+                    {
+                        "answer": answer_result.answer,
+                        "actual_reads": [asdict(item) for item in answer_result.contexts],
+                        "trace": str(trace),
+                    },
+                    stringify_unknown=True,
                 )
             else:
                 print(answer_result.answer)
             return 0
         if args.command == "organize":
-            target, archived = process_capture(
+            target = process_capture(
                 args.vault,
                 args.path,
                 destination=cast(CaptureDestination, args.destination),
@@ -664,15 +663,11 @@ def main(argv: list[str] | None = None) -> int:
                 project=args.project,
                 course=args.course,
             )
-            print(
-                json.dumps(
-                    {
-                        "created_or_updated": str(target),
-                        "capture_archived": str(archived),
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
+            _print_json(
+                {
+                    "created_or_updated": str(target),
+                    "capture_deleted": str(args.path),
+                }
             )
             return 0
         if args.command == "test" and args.test_command == "retrieval":
@@ -695,7 +690,7 @@ def main(argv: list[str] | None = None) -> int:
                     encoding="utf-8",
                     newline="\n",
                 )
-            print(rendered)
+            _print_json(evaluation, stringify_unknown=True)
             evaluations = cast(list[dict[str, object]], evaluation["evaluations"])
             selected = evaluations[-1]
             selected_passed = selected["passed"] == selected["total"]
@@ -717,7 +712,7 @@ def main(argv: list[str] | None = None) -> int:
             }
             if args.report:
                 write_report(args.report, payload)
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            _print_json(payload)
             return 0 if report.passed else 1
         if args.command == "test" and args.test_command == "all":
             report = run_acceptance_suite(
@@ -726,7 +721,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             if args.report:
                 write_report(args.report, report)
-            print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+            _print_json(report, stringify_unknown=True)
             return 0 if report["passed"] is True else 1
         if args.command == "import":
             importer = DocumentImporter(
@@ -744,14 +739,7 @@ def main(argv: list[str] | None = None) -> int:
                     project=args.project,
                 )
             )
-            print(
-                json.dumps(
-                    asdict(import_result),
-                    ensure_ascii=False,
-                    indent=2,
-                    default=str,
-                )
-            )
+            _print_json(asdict(import_result), stringify_unknown=True)
             return 0
         if args.command == "conversion" and args.conversion_command == "retry":
             importer = DocumentImporter(
@@ -763,14 +751,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.conversion_id,
                 parser=ParserName(args.parser) if args.parser else None,
             )
-            print(
-                json.dumps(
-                    asdict(retry_result),
-                    ensure_ascii=False,
-                    indent=2,
-                    default=str,
-                )
-            )
+            _print_json(asdict(retry_result), stringify_unknown=True)
             return 0
         if args.command == "feed":
             kind_value = getattr(args, "kind", None)
@@ -795,7 +776,7 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     editions = [treehole_from_v1(payload)]
                 paths = [cache.put(edition) for edition in editions]
-                print(json.dumps([str(path) for path in paths], ensure_ascii=False, indent=2))
+                _print_json([str(path) for path in paths])
                 return 0
             if args.feed_command == "list" and feed_kind is not None:
                 summaries = [
@@ -808,7 +789,7 @@ def main(argv: list[str] | None = None) -> int:
                     }
                     for edition in cache.list_editions(feed_kind)
                 ]
-                print(json.dumps(summaries, ensure_ascii=False, indent=2))
+                _print_json(summaries)
                 return 0
             if args.feed_command == "open" and feed_kind is not None:
                 edition = cache.get(feed_kind, args.edition_id)
@@ -820,7 +801,7 @@ def main(argv: list[str] | None = None) -> int:
                     item,
                     DecisionAction(args.action),
                 )
-                print(json.dumps(asdict(decision), ensure_ascii=False, indent=2))
+                _print_json(asdict(decision))
                 return 0
             if args.feed_command == "sync":
                 syncer = FeedSyncer(args.state)
@@ -829,15 +810,11 @@ def main(argv: list[str] | None = None) -> int:
                     if args.kind == "all"
                     else {FeedKind(args.kind): syncer.sync(FeedKind(args.kind))}
                 )
-                print(
-                    json.dumps(
-                        {
-                            feed.value: [edition.edition_id for edition in editions]
-                            for feed, editions in synchronized.items()
-                        },
-                        ensure_ascii=False,
-                        indent=2,
-                    )
+                _print_json(
+                    {
+                        feed.value: [edition.edition_id for edition in editions]
+                        for feed, editions in synchronized.items()
+                    }
                 )
                 return 0
     except (FileExistsError, FileNotFoundError, RuntimeError, ValueError) as exc:

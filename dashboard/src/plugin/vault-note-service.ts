@@ -124,15 +124,19 @@ export class VaultNoteService {
     this.assertCaptureRelationTargets(normalizedRelation);
     const now = new Date();
     const stamp = `${localDate(now)}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
-    const base = `inbox/captures/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${stamp}-${slugify(title)}`;
+    const base = `inbox/captures/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${stamp}-${slugify(title).slice(0, 72)}`;
     const path = this.availablePath(base);
+    const normalizedContent = content.trim();
+    const [firstLine = "", ...remainingLines] = normalizedContent.split(/\r?\n/u);
+    const bodyContent = firstLine.trim() === title.trim()
+      ? remainingLines.join("\n").trim()
+      : normalizedContent;
     const body = await this.renderBody(
       "capture",
-      { title, content: content.trim() },
-      `# ${title}\n\n${content.trim()}`,
+      { title, content: bodyContent },
+      [`# ${title}`, bodyContent].filter(Boolean).join("\n\n"),
     );
     const fields: Record<string, string> = {
-      capture_status: "open",
       ingested_via: "direct-entry",
     };
     if (normalizedRelation.course) fields.course = normalizedRelation.course;
@@ -224,7 +228,7 @@ export class VaultNoteService {
   }
 
   public async createReflection(title: string, content: string): Promise<{ path: string }> {
-    const base = `life/reflections/${localDate()}-${slugify(title)}`;
+    const base = `life/reflections/${slugify(title)}`;
     const path = this.availablePath(base);
     const body = await this.renderBody(
       "reflection",
@@ -239,17 +243,17 @@ export class VaultNoteService {
   public async createReview(
     period: ReviewPeriod,
     value = new Date(),
-  ): Promise<{ path: string }> {
+  ): Promise<{ path: string; created: boolean }> {
     const review = reviewDescriptor(period, value);
     const path = `life/reviews/${period}/${review.key}.md`;
-    if (this.app.vault.getAbstractFileByPath(path) instanceof TFile) return { path };
+    if (this.app.vault.getAbstractFileByPath(path) instanceof TFile) return { path, created: false };
     const body = await this.renderBody(
       "review",
       { title: review.title, period_range: review.range },
       `# ${review.title}\n\n> 复盘范围：${review.range}\n\n## 本期回看\n\n## 做得好的\n\n## 阻力与偏差\n\n## 学到与改变\n\n## 下一周期\n\n## 补充记录\n\n<!-- ai:auto:start name="organized-review" -->\n<!-- ai:auto:end name="organized-review" -->`,
     );
     await this.create(path, document("Review", review.title, body, {}));
-    return { path };
+    return { path, created: true };
   }
 
   public async createCourse(title: string, requestedSlug?: string): Promise<{ path: string }> {
@@ -322,10 +326,14 @@ export class VaultNoteService {
     if (!(file instanceof TFile)) throw new Error(`项目日志不存在：${path}`);
     const heading = `## ${localDate()}`;
     const entry = content.trim();
+    if (!entry) throw new Error("项目日志内容不能为空");
+    const now = new Date();
+    const stamp = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const line = `**${stamp}** ${entry.replace(/\r?\n/gu, "\n  ")}`;
     const current = await this.app.vault.read(file);
     const updated = current.includes(heading)
-      ? current.replace(heading, `${heading}\n\n- ${entry}`)
-      : this.prependProjectLogEntry(current, heading, entry);
+      ? current.replace(heading, `${heading}\n\n- ${line}`)
+      : this.prependProjectLogEntry(current, heading, line);
     await this.app.vault.modify(file, updated);
     return { path };
   }
@@ -333,8 +341,8 @@ export class VaultNoteService {
   public async createDecision(
     project: string,
     title: string,
-    context: string,
-    decision: string,
+    context = "",
+    decision = "",
   ): Promise<{ path: string }> {
     const slug = slugify(project);
     const projectPath = `projects/${slug}/project.md`;

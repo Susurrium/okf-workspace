@@ -66,6 +66,11 @@ def _comment(value: object) -> FeedComment:
         author=str(payload["author"]) if payload.get("author") else None,
         is_original_poster=bool(payload.get("is_original_poster", False)),
         published_at=(str(payload["published_at"]) if payload.get("published_at") else None),
+        reply_to_cid=_optional_int(payload.get("reply_to_cid")),
+        reply_to_author=(
+            str(payload["reply_to_author"]) if payload.get("reply_to_author") else None
+        ),
+        reply_to_text=(str(payload["reply_to_text"]) if payload.get("reply_to_text") else None),
         media=tuple(str(item) for item in cast(list[object], media) if isinstance(item, str))
         if isinstance(media, list)
         else (),

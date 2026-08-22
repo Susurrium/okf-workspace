@@ -57,6 +57,7 @@ export class TextPromptModal extends Modal {
   }
 
   public onOpen(): void {
+    this.modalEl.addClass("okf-workflow-modal");
     this.titleEl.setText(this.title);
     new Setting(this.contentEl).addTextArea((area) => {
       area.setPlaceholder(this.placeholder);
@@ -104,6 +105,7 @@ export class FieldsPromptModal extends Modal {
   }
 
   public onOpen(): void {
+    this.modalEl.addClass("okf-workflow-modal");
     this.titleEl.setText(this.title);
     for (const field of this.fields) {
       if (field.initialValue) this.values[field.key] = field.initialValue;
@@ -158,5 +160,70 @@ export class FieldsPromptModal extends Modal {
 
   public onClose(): void {
     this.contentEl.empty();
+  }
+}
+
+/** A Project Log is useful both as a native note and as a zero-friction append target. */
+export class ProjectLogModal extends Modal {
+  private value = "";
+  private submitting = false;
+
+  public constructor(
+    app: App,
+    private readonly onSubmit: (value: string) => Promise<void>,
+  ) {
+    super(app);
+  }
+
+  public onOpen(): void {
+    this.modalEl.addClass("okf-workflow-modal", "okf-project-log-modal");
+    this.titleEl.setText("项目日志");
+    let submit: HTMLButtonElement | undefined;
+    const updateLabel = (): void => {
+      submit?.setText(this.value.trim() ? "追加到项目日志" : "打开项目日志");
+    };
+    new Setting(this.contentEl)
+      .setName("记录（可留空）")
+      .setDesc("留空会直接打开原生 log.md；填写后只追加一次，不生成中间笔记。")
+      .addTextArea((area) => {
+        area.setPlaceholder("进展、问题、发现、决定或下一步……");
+        area.inputEl.rows = 6;
+        area.onChange((value) => {
+          this.value = value;
+          updateLabel();
+        });
+        area.inputEl.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" || !event.ctrlKey) return;
+          event.preventDefault();
+          void this.submit(submit);
+        });
+        area.inputEl.focus();
+      });
+    new Setting(this.contentEl)
+      .setDesc("Ctrl + Enter 执行")
+      .addButton((button) => {
+        submit = button.buttonEl;
+        button.setCta().onClick(() => void this.submit(submit));
+        updateLabel();
+      });
+  }
+
+  public onClose(): void {
+    this.contentEl.empty();
+  }
+
+  private async submit(button: HTMLButtonElement | undefined): Promise<void> {
+    if (this.submitting) return;
+    this.submitting = true;
+    if (button) button.disabled = true;
+    try {
+      await this.onSubmit(this.value.trim());
+      this.close();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : "操作失败", 10_000);
+    } finally {
+      this.submitting = false;
+      if (button) button.disabled = false;
+    }
   }
 }

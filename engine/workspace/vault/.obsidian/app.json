@@ -3,5 +3,7 @@
   "newFileFolderPath": "inbox/captures",
   "attachmentFolderPath": "sources/assets",
   "alwaysUpdateLinks": true,
-  "showUnsupportedFiles": true
+  "showUnsupportedFiles": true,
+  "showInlineTitle": false,
+  "propertiesInDocument": "hidden"
 }

@@ -15,6 +15,8 @@ def iter_markdown(vault: Path) -> Iterator[Path]:
         relative = path.relative_to(root)
         if any(part in SKIPPED_DIRECTORIES for part in relative.parts):
             continue
+        if relative.parts and relative.parts[0] == "archive":
+            continue
         if relative.as_posix() == "AGENTS.md":
             continue
         if (

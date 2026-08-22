@@ -63,10 +63,13 @@ def test_livez_is_public_but_health_requires_auth(
     payload = response.json()
     assert payload["healthy"] is True
     assert payload["engine_version"] == "0.1.6"
-    assert payload["engine_build_id"] == "markitdown-0.1.6-py31213-v3"
-    assert payload["capabilities"]["pdf"] is True
-    assert payload["capabilities"]["pptx"] is True
-    assert payload["capabilities"]["docx"] is True
+    assert payload["engine_build_id"] == "markitdown-0.1.6-py31213-assets-v3"
+    assert payload["result_schema"] == "markitdown-result/v3"
+    assert payload["default_profile"] == "fallback-assets-v2"
+    assert payload["supported_profiles"] == ["fallback-assets-v2", "fallback-text-v1"]
+    assert payload["capabilities"]["formats"]["pdf"]["assets"] is False
+    assert payload["capabilities"]["formats"]["pptx"]["assets"] == "embedded"
+    assert payload["capabilities"]["formats"]["docx"]["assets"] == "embedded"
     assert payload["capabilities"]["network_access"] is False
     assert payload["storage_healthy"] is True
     assert payload["spool_limit_bytes"] == settings.max_spool_bytes

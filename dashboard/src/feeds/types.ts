@@ -15,6 +15,9 @@ export interface FeedComment {
   author?: string;
   is_original_poster: boolean;
   published_at?: string;
+  reply_to_cid?: number;
+  reply_to_author?: string;
+  reply_to_text?: string;
   media: string[];
 }
 

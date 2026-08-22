@@ -145,6 +145,8 @@ def scan_notes(
             continue
         if any(part in _SKIP for part in relative_path.parts):
             continue
+        if relative_path.parts and relative_path.parts[0] == "archive":
+            continue
         if relative_path.as_posix() == "AGENTS.md":
             continue
         if (
@@ -186,7 +188,18 @@ def scan_notes(
                 ai_unverified=_ai_unverified(dict(document.frontmatter)),
                 project_status=_string(document.frontmatter.get("project_status")),
                 course_status=_string(document.frontmatter.get("course_status")),
-                capture_status=_string(document.frontmatter.get("capture_status")),
+                # Capture has no durable state machine. Its presence in Inbox means
+                # pending; this projection keeps the legacy response shape for UI
+                # clients while the Markdown omits capture_status.
+                capture_status=(
+                    _string(document.frontmatter.get("capture_status"))
+                    or (
+                        "open"
+                        if document.type == "Capture"
+                        and relative_path.parts[:2] == ("inbox", "captures")
+                        else None
+                    )
+                ),
                 purpose=_string(document.frontmatter.get("purpose")),
                 ingested_via=_string(document.frontmatter.get("ingested_via")),
                 resource=_string(document.frontmatter.get("resource")),

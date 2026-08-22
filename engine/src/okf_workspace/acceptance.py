@@ -464,12 +464,12 @@ def run_one_session_uat(root: Path) -> OneSessionUATReport:
 
         capture = service.create_capture("UAT mobile capture", "今天意识到长期系统需要低摩擦。")
         capture_relative = capture.relative_to(vault).as_posix()
-        reflection, archived = process_capture(
+        reflection = process_capture(
             vault,
             capture_relative,
             destination="reflection",
         )
-        steps["capture_to_reflection"] = reflection.is_file() and archived.is_file()
+        steps["capture_to_reflection"] = reflection.is_file() and not capture.exists()
         undo_last_checkpoint(vault)
         steps["undo_multi_file_write"] = capture.is_file() and not reflection.exists()
 

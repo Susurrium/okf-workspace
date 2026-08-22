@@ -16,7 +16,7 @@ from okf_workspace.feeds.models import FeedEdition, FeedItem, FeedKind
 from okf_workspace.importers import DocumentImporter
 from okf_workspace.importers.models import ParserExport, ParserName
 from okf_workspace.notes import NoteService
-from okf_workspace.okf.frontmatter import read_document, write_document
+from okf_workspace.okf.frontmatter import read_document
 
 FEED_FIXTURES = Path(__file__).parents[1] / "fixtures" / "feeds"
 
@@ -118,7 +118,25 @@ def test_loopback_api_auth_today_capture_catalog_and_status_update(
     }
     discarded = client.post(f"/captures/{capture_path}/discard", headers=headers)
     assert discarded.status_code == 200
+    assert discarded.json()["capture_deleted"] == capture_path
     assert client.get("/dashboard/inbox", headers=headers).json()["captures"] == []
+
+    organized_capture = client.post(
+        "/captures",
+        headers=headers,
+        json={"title": "API 整理", "content": "只在目标保留一次。"},
+    ).json()["path"]
+    organized = client.post(
+        "/ai/organize",
+        headers=headers,
+        json={"path": organized_capture, "destination": "reflection"},
+    )
+    assert organized.status_code == 200
+    assert organized.json() == {
+        "created_or_updated": "life/reflections/API-整理.md",
+        "capture_deleted": organized_capture,
+    }
+    assert not (vault / organized_capture).exists()
 
     batch_paths = []
     for index in range(2):
@@ -135,21 +153,7 @@ def test_loopback_api_auth_today_capture_catalog_and_status_update(
     )
     assert batch.status_code == 200
     assert batch.json()["count"] == 2
-
-    processed = NoteService(vault).create_capture("已处理待归档", "手工迁移留下的记录")
-    processed_document = read_document(processed)
-    processed_document.frontmatter["capture_status"] = "processed"
-    write_document(processed, processed_document)
-    archived_processed = client.post(
-        "/captures/batch",
-        headers=headers,
-        json={
-            "action": "archive-processed",
-            "paths": [processed.relative_to(vault).as_posix()],
-        },
-    )
-    assert archived_processed.status_code == 200
-    assert archived_processed.json()["count"] == 1
+    assert batch.json()["deleted"] == batch_paths
 
     reflection = client.post(
         "/reflections",

@@ -138,7 +138,11 @@ def today_view(vault: Path, state: Path, target_date: date | None = None) -> dic
     cache = FeedCache(state)
     daily = f"life/daily/{value:%Y}/{value:%m}/{value}.md"
     open_captures = [
-        note for note in notes if note.note_type == "Capture" and note.capture_status == "open"
+        note
+        for note in notes
+        if note.note_type == "Capture"
+        and note.path.startswith("inbox/captures/")
+        and note.capture_status == "open"
     ]
     undecided_sources = [
         note for note in notes if note.note_type == "Source" and note.purpose == "undecided"

@@ -42,6 +42,15 @@ def _description(content: str, fallback: str) -> str:
     return (visible or fallback).strip()[:200]
 
 
+def _without_repeated_title(title: str, content: str) -> str:
+    """Keep a title-derived first line from appearing again below the H1."""
+
+    lines = content.strip().splitlines()
+    if lines and lines[0].strip() == title.strip():
+        lines = lines[1:]
+    return "\n".join(lines).strip()
+
+
 class NoteService:
     def __init__(self, vault: Path, *, clock: Clock = _system_clock) -> None:
         self.vault = vault.resolve()
@@ -87,15 +96,20 @@ class NoteService:
         filename = f"{moment:%Y-%m-%d-%H%M%S}-{slugify(title)}.md"
         relative = Path("inbox") / "captures" / f"{moment:%Y}" / f"{moment:%m}" / filename
         fields: dict[str, Any] = {
-            "capture_status": "open",
             "ingested_via": DIRECT_ENTRY,
             **explicit_context_fields(self.vault, course=course, project=project),
         }
+        body_content = _without_repeated_title(title, content)
         return self._create(
             relative,
             note_type="Capture",
             title=title,
-            body=render_artifact_body(self.vault, "capture", title=title, content=content.strip()),
+            body=render_artifact_body(
+                self.vault,
+                "capture",
+                title=title,
+                content=body_content,
+            ),
             fields=fields,
         )
 
@@ -142,16 +156,26 @@ class NoteService:
         return path
 
     def create_reflection(self, title: str, content: str) -> Path:
-        moment = self.clock()
-        relative = Path("life") / "reflections" / f"{moment:%Y-%m-%d}-{slugify(title)}.md"
-        return self._create(
-            relative,
-            note_type="Reflection",
+        slug = slugify(title)
+        body = render_artifact_body(
+            self.vault,
+            "reflection",
             title=title,
-            body=render_artifact_body(
-                self.vault, "reflection", title=title, content=content.strip()
-            ),
+            content=_without_repeated_title(title, content),
         )
+        suffix = 1
+        while True:
+            filename = f"{slug}.md" if suffix == 1 else f"{slug}-{suffix}.md"
+            relative = Path("life") / "reflections" / filename
+            try:
+                return self._create(
+                    relative,
+                    note_type="Reflection",
+                    title=title,
+                    body=body,
+                )
+            except FileExistsError:
+                suffix += 1
 
     def create_review(
         self,

@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import json
 import shutil
+from datetime import datetime
 from pathlib import Path
+
+import pytest
 
 from okf_workspace.config import default_template_root
 from okf_workspace.migration import migrate_current_layout
+from okf_workspace.notes import NoteService
 from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
+from okf_workspace.okf.paths import slugify
 from okf_workspace.okf.templates import VAULT_DYNAMIC_DIRECTORIES, initialize_vault
 from okf_workspace.okf.validator import validate_bundle
 
@@ -70,7 +75,6 @@ def test_migration_repairs_missing_standard_directories_without_restoring_conten
 ) -> None:
     vault = initialize_vault(tmp_path / "vault")
     removed_top_levels = (
-        "archive",
         "feeds",
         "inbox",
         "knowledge",
@@ -441,14 +445,107 @@ def test_migration_normalizes_ingestion_channels_and_removes_legacy_fields(
     inferred_capture_fields = read_document(inferred_capture).frontmatter
     daily_fields = read_document(daily).frontmatter
     assert capture_fields["ingested_via"] == "web-clip"
+    assert "capture_status" not in capture_fields
     assert source_fields["ingested_via"] == "file-import"
     assert "origin" not in unknown_fields and "ingested_via" not in unknown_fields
     assert inferred_file_fields["ingested_via"] == "file-import"
     assert inferred_capture_fields["ingested_via"] == "direct-entry"
+    assert "capture_status" not in inferred_capture_fields
     assert "origin" not in capture_fields and "origin" not in source_fields
     assert "origin" not in daily_fields and "ingested_via" not in daily_fields
     assert validate_bundle(vault).valid
     assert migrate_current_layout(vault, default_template_root()) == ()
+
+
+def test_migration_retires_only_legacy_capture_archive_copies(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    reflection = NoteService(vault).create_reflection("已整理想法", "正文只保留在这里。")
+    archived_root = vault / "archive/captures/2026/08"
+    processed = archived_root / "2026-08-20-120000-processed.md"
+    pending = archived_root / "2026-08-20-120100-pending.md"
+    unrelated = vault / "archive/reference.md"
+    write_document(
+        processed,
+        OkfDocument(
+            {
+                "type": "Capture",
+                "title": "已整理想法",
+                "created_at": "2026-08-20T12:00:00+08:00",
+                "capture_status": "processed",
+                "processed_into": [f"/{reflection.relative_to(vault).as_posix()}"],
+            },
+            "# 已整理想法\n\n正文只保留在这里。\n",
+        ),
+    )
+    write_document(
+        pending,
+        OkfDocument(
+            {
+                "type": "Capture",
+                "title": "尚未处理",
+                "created_at": "2026-08-20T12:01:00+08:00",
+                "capture_status": "open",
+            },
+            "# 尚未处理\n",
+        ),
+    )
+    write_document(
+        unrelated,
+        OkfDocument(
+            {
+                "type": "Wiki",
+                "title": "Archive 中的非 Capture",
+                "created_at": "2026-08-20T12:02:00+08:00",
+                "description": "必须保留",
+            },
+            "# Archive 中的非 Capture\n",
+        ),
+    )
+    reflection_document = read_document(reflection)
+    reflection_document.frontmatter["sources"] = [
+        {"resource": f"/{processed.relative_to(vault).as_posix()}"}
+    ]
+    write_document(reflection, reflection_document)
+
+    changes = migrate_current_layout(vault, default_template_root())
+
+    assert not processed.exists()
+    restored = vault / "inbox/captures/2026/08" / pending.name
+    assert restored.is_file()
+    assert "capture_status" not in read_document(restored).frontmatter
+    assert "sources" not in read_document(reflection).frontmatter
+    assert unrelated.is_file()
+    assert any("removed retired Capture copy" in change for change in changes)
+    assert migrate_current_layout(vault, default_template_root()) == ()
+
+
+def test_migration_does_not_consume_archived_capture_for_unsafe_processed_target(
+    tmp_path: Path,
+) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    outside = tmp_path / "outside.md"
+    outside.write_text("must not authorize Capture deletion\n", encoding="utf-8")
+    archived = vault / "archive/captures/2026/08/unsafe.md"
+    write_document(
+        archived,
+        OkfDocument(
+            {
+                "type": "Capture",
+                "title": "Unsafe legacy target",
+                "created_at": "2026-08-20T12:00:00+08:00",
+                "capture_status": "processed",
+                "processed_into": ["../../outside.md", "not-a-valid-target"],
+            },
+            "# Unsafe legacy target\n\nThis content must remain recoverable.\n",
+        ),
+    )
+
+    migrate_current_layout(vault, default_template_root())
+
+    restored = vault / "inbox/captures/2026/08/unsafe.md"
+    assert restored.is_file()
+    assert "processed_into" not in read_document(restored).frontmatter
+    assert outside.read_text(encoding="utf-8") == "must not authorize Capture deletion\n"
 
 
 def test_migration_manages_only_web_clipper_integration_directory(tmp_path: Path) -> None:
@@ -465,6 +562,207 @@ def test_migration_manages_only_web_clipper_integration_directory(tmp_path: Path
     assert custom.read_text(encoding="utf-8") == '{"keep": true}\n'
     assert not stale.exists()
     assert (vault / "system/integrations/web-clipper/workspace-web-capture.json").is_file()
+
+
+def test_migration_normalizes_official_default_web_clippings_without_losing_content(
+    tmp_path: Path,
+) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    clipping = vault / "Clippings/Example article.md"
+    original_body = (
+        "\n## Selected text\n\nKeep this paragraph and ![remote](https://example.com/a.png).\n"
+    )
+    default_fields = {
+        "title": "Example article",
+        "source": "https://example.com/article?ref=clipper",
+        "author": ["[[Example Author]]"],
+        "published": "2026-08-20",
+        "created": "2026-08-22",
+        "description": "A useful page",
+        "tags": ["clippings", "research"],
+        "site_name": "Example",
+    }
+    write_document(
+        clipping,
+        OkfDocument(default_fields, original_body),
+    )
+    video = vault / "Clippings/Example video.md"
+    video_body = (
+        '\n<iframe src="https://player.example.com/video"></iframe>\n\n## Transcript\n\nWords.\n'
+    )
+    write_document(
+        video,
+        OkfDocument(
+            {
+                **default_fields,
+                "title": "Example video",
+                "source": "https://example.com/video",
+            },
+            video_body,
+        ),
+    )
+
+    changes = migrate_current_layout(vault, default_template_root())
+
+    migrated_paths = list((vault / "inbox/captures/2026/08").glob("*-Example-article.md"))
+    assert len(migrated_paths) == 1
+    migrated = read_document(migrated_paths[0])
+    assert migrated.frontmatter["type"] == "Capture"
+    assert migrated.frontmatter["title"] == "Example article"
+    assert str(migrated.frontmatter["created_at"]).startswith("2026-08-22T")
+    assert migrated.frontmatter["ingested_via"] == "web-clip"
+    assert migrated.frontmatter["resource"] == "https://example.com/article?ref=clipper"
+    assert migrated.frontmatter["author"] == ["[[Example Author]]"]
+    assert migrated.frontmatter["published"] == "2026-08-20"
+    assert migrated.frontmatter["description"] == "A useful page"
+    assert migrated.frontmatter["tags"] == ["clippings", "research"]
+    assert migrated.frontmatter["site_name"] == "Example"
+    assert "source" not in migrated.frontmatter
+    assert "created" not in migrated.frontmatter
+    assert "capture_status" not in migrated.frontmatter
+    assert migrated.body == "\n# Example article\n" + original_body
+    migrated_video_paths = list((vault / "inbox/captures/2026/08").glob("*-Example-video.md"))
+    assert len(migrated_video_paths) == 1
+    assert read_document(migrated_video_paths[0]).body == "\n# Example video\n" + video_body
+    assert not clipping.exists()
+    assert not video.exists()
+    assert not (vault / "Clippings").exists()
+    assert any(
+        change.startswith("Clippings/Example article.md -> inbox/captures/") for change in changes
+    )
+    assert migrate_current_layout(vault, default_template_root()) == ()
+
+
+def test_default_web_clipping_migration_is_selective_and_never_overwrites(
+    tmp_path: Path,
+) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    clipping = vault / "Clippings/Conflict.md"
+    default_fields = {
+        "title": "Conflict",
+        "source": "https://example.com/conflict",
+        "author": None,
+        "published": None,
+        "created": "2026-08-22",
+        "description": "",
+        "tags": ["clippings"],
+    }
+    write_document(clipping, OkfDocument(default_fields, "\nOriginal clipping body.\n"))
+    moment = (
+        datetime.fromtimestamp(clipping.stat().st_mtime)
+        .astimezone()
+        .replace(
+            year=2026,
+            month=8,
+            day=22,
+        )
+    )
+    filename = f"{moment:%Y-%m-%d-%H%M%S}-{slugify('Conflict')}.md"
+    occupied = vault / "inbox/captures/2026/08" / filename
+    write_document(
+        occupied,
+        OkfDocument(
+            {
+                "type": "Capture",
+                "title": "Existing capture",
+                "created_at": moment.isoformat(timespec="seconds"),
+                "ingested_via": "direct-entry",
+            },
+            "\nMust not be overwritten.\n",
+        ),
+    )
+    manual = vault / "Clippings/Manual.md"
+    write_document(
+        manual,
+        OkfDocument({**default_fields, "title": "Manual", "tags": ["personal"]}, "\nKeep.\n"),
+    )
+    nested = vault / "Clippings/nested/Nested.md"
+    write_document(
+        nested,
+        OkfDocument({**default_fields, "title": "Nested"}, "\nKeep nested.\n"),
+    )
+
+    migrate_current_layout(vault, default_template_root())
+
+    assert read_document(occupied).frontmatter["title"] == "Existing capture"
+    alternatives = list(occupied.parent.glob(f"{occupied.stem}-legacy-*.md"))
+    assert len(alternatives) == 1
+    assert read_document(alternatives[0]).frontmatter["resource"] == "https://example.com/conflict"
+    assert not clipping.exists()
+    assert manual.is_file()
+    assert nested.is_file()
+
+
+def test_migration_adds_only_missing_source_text_h1_and_is_idempotent(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    missing = vault / "sources/text/web/missing.md"
+    original_body = "\nLead paragraph.\n\n## Details\n\nKeep all of this.\n"
+    fields = {
+        "type": "Source Text",
+        "title": "Missing visible title",
+        "created_at": "2026-08-22T12:00:00+08:00",
+        "parser": "obsidian-web-clipper",
+        "sources": [{"resource": "/sources/records/web/missing.md"}],
+    }
+    write_document(missing, OkfDocument(fields, original_body))
+    complete = vault / "sources/text/web/complete.md"
+    write_document(
+        complete,
+        OkfDocument({**fields, "title": "Already complete"}, "\n# Existing H1\n\nBody.\n"),
+    )
+    complete_before = complete.read_bytes()
+    other = vault / "sources/text/web/other.md"
+    write_document(
+        other,
+        OkfDocument({**fields, "type": "Wiki", "title": "Not Source Text"}, "\nNo H1.\n"),
+    )
+    other_body = read_document(other).body
+
+    changes = migrate_current_layout(vault, default_template_root())
+
+    repaired = read_document(missing)
+    assert repaired.body == "\n# Missing visible title\n" + original_body
+    assert any(change.endswith("missing.md (added missing Source Text H1)") for change in changes)
+    assert complete.read_bytes() == complete_before
+    assert read_document(other).body == other_body
+    assert migrate_current_layout(vault, default_template_root()) == ()
+
+
+def test_migration_hides_duplicate_editor_title_surfaces_without_losing_preferences(
+    tmp_path: Path,
+) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    app_path = vault / ".obsidian/app.json"
+    app_path.write_text(
+        json.dumps(
+            {
+                "showInlineTitle": True,
+                "propertiesInDocument": "visible",
+                "readableLineLength": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    changes = migrate_current_layout(vault, default_template_root())
+
+    settings = json.loads(app_path.read_text(encoding="utf-8"))
+    assert settings["showInlineTitle"] is False
+    assert settings["propertiesInDocument"] == "hidden"
+    assert settings["readableLineLength"] is False
+    assert ".obsidian/app.json" in changes
+
+
+def test_migration_never_overwrites_invalid_obsidian_app_settings(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    app_path = vault / ".obsidian/app.json"
+    original = b'{"showInlineTitle": false,\n'
+    app_path.write_bytes(original)
+
+    with pytest.raises(ValueError, match="Cannot migrate invalid JSON"):
+        migrate_current_layout(vault, default_template_root())
+
+    assert app_path.read_bytes() == original
 
 
 def test_migration_syncs_managed_workspace_policies(tmp_path: Path) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -64,5 +65,8 @@ def test_cli_rebuild_search_and_context_reopen_real_markdown(
         == 0
     )
     context = capsys.readouterr().out
-    assert '"actual_reads"' in context
-    assert "当前 nonce：FIXTURE-NONCE-20260817" in context
+    context_payload = json.loads(context)
+    assert any(
+        "当前 nonce：FIXTURE-NONCE-20260817" in item["actual_text"]
+        for item in context_payload["actual_reads"]
+    )

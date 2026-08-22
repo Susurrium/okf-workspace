@@ -4,10 +4,13 @@ import { describe, expect, it } from "vitest";
 import {
   OkfDashboardView,
   OKF_DASHBOARD_VIEW,
+  PROJECT_MENU_LABELS,
   resolveDashboardLearningSources,
+  systemStatusLabel,
   treeholeMetadata,
 } from "../src/plugin/dashboard-view.js";
 import { normalizeDashboardUiState } from "../src/plugin/dashboard-ui-state.js";
+import { Menu, TestElement } from "./obsidian-runtime.js";
 
 describe("real Dashboard View source handoff", () => {
   it("constructs the registered runtime View rather than a legacy page model", () => {
@@ -80,5 +83,75 @@ describe("real Dashboard View source handoff", () => {
     });
 
     expect(metadata).toBe("回复 15 · 收藏 43 · 点赞 3");
+  });
+
+  it("translates implementation health states into human-facing System labels", () => {
+    expect(systemStatusLabel("configured")).toBe("已配置");
+    expect(systemStatusLabel("ok")).toBe("正常");
+    expect(systemStatusLabel("deferred")).toBe("稍后配置");
+    expect(systemStatusLabel("failed")).toBe("失败");
+  });
+
+  it("keeps the Project overflow menu short and action-oriented", () => {
+    expect(PROJECT_MENU_LABELS).toEqual([
+      "项目日志…",
+      "记录待整理想法",
+      "添加资料",
+      "在 Claudian 中整理项目",
+      "更改 Project 状态…",
+    ]);
+    expect(PROJECT_MENU_LABELS).not.toContain("记录关键点");
+  });
+
+  it("renders each Project row with only Open and overflow actions", async () => {
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const plugin = {
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      promptProject: () => undefined,
+      promptDocumentImport: () => undefined,
+      promptProjectProgress: () => undefined,
+      promptCapture: () => undefined,
+      promptProjectStatus: () => undefined,
+      updateDashboardPageUiState: () => undefined,
+      openVaultPath: async () => undefined,
+    };
+    const view = new OkfDashboardView(leaf, plugin as never);
+    const runtime = view as unknown as {
+      vaultReader: { projects: () => Promise<unknown> };
+      renderProjects: (container: HTMLElement) => Promise<void>;
+    };
+    Object.defineProperty(runtime, "vaultReader", {
+      value: {
+        projects: async () => ({
+          projects: [{
+            path: "projects/workspace/project.md",
+            title: "个人知识工作区",
+            note_type: "Project",
+            status: "stable",
+            stale: false,
+            excerpt: "",
+            project_status: "active",
+            current_state: "",
+            next_action: "完成导入验收",
+            recent_log: "",
+            log_path: "projects/workspace/log.md",
+            decisions: [],
+            outputs: [],
+            related_learning: [],
+            related_materials: [],
+            pending_captures: [],
+          }],
+        }),
+      },
+    });
+    const container = new TestElement();
+
+    await runtime.renderProjects(container as unknown as HTMLElement);
+
+    const row = container.descendants("okf-project-row")[0];
+    const actions = row?.descendants("okf-dashboard__row-actions")[0];
+    expect(actions?.children.map((child) => child.textContent)).toEqual(["打开", "…"]);
+    actions?.children[1]?.click();
+    expect(Menu.lastShownTitles).toEqual(PROJECT_MENU_LABELS);
   });
 });

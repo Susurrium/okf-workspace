@@ -1163,6 +1163,20 @@ describe('ClaudianPlugin', () => {
       expect(mockApp.workspace.revealLeaf).toHaveBeenCalledWith(mockLeaf);
     });
 
+    it('reveals an existing hidden view before an OKF handoff uses it', async () => {
+      const ensureExternalChatProvider = jest.fn().mockResolvedValue(undefined);
+      const existingView = { ensureExternalChatProvider };
+
+      await plugin.onload();
+      jest.spyOn(plugin, 'getView').mockReturnValue(existingView as any);
+      jest.spyOn(plugin, 'activateView').mockResolvedValue(undefined);
+
+      await plugin.okfBridge.open();
+
+      expect(plugin.activateView).toHaveBeenCalledTimes(1);
+      expect(ensureExternalChatProvider).toHaveBeenCalledWith('codex');
+    });
+
     it('should create new leaf in right sidebar by default if view does not exist', async () => {
       const mockRightLeaf = {
         setViewState: jest.fn().mockResolvedValue(undefined),

@@ -3,12 +3,14 @@
 from typing import Final
 
 BACKEND_NAME: Final = "markitdown"
-DEFAULT_PROFILE: Final = "fallback-text-v1"
-RESULT_SCHEMA: Final = "markitdown-result/v2"
+DEFAULT_PROFILE: Final = "fallback-assets-v2"
+LEGACY_PROFILE: Final = "fallback-text-v1"
+SUPPORTED_PROFILES: Final = frozenset({DEFAULT_PROFILE, LEGACY_PROFILE})
+RESULT_SCHEMA: Final = "markitdown-result/v3"
+LEGACY_RESULT_SCHEMA: Final = "markitdown-result/v2"
 
 RESULT_CAPABILITIES: Final = {
     "page_map": False,
-    "assets": False,
     "ocr": False,
     "formulas": False,
     "tables": "best_effort",
@@ -16,11 +18,11 @@ RESULT_CAPABILITIES: Final = {
 }
 
 HEALTH_CAPABILITIES: Final = {
-    "pdf": True,
-    "pptx": True,
-    "docx": True,
-    "assets": False,
-    "ocr": False,
+    "formats": {
+        "pdf": {"markdown": True, "assets": False, "ocr": False},
+        "pptx": {"markdown": True, "assets": "embedded", "ocr": False},
+        "docx": {"markdown": True, "assets": "embedded", "ocr": False},
+    },
     "network_access": False,
 }
 

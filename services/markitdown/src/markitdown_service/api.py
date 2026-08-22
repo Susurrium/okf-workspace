@@ -20,8 +20,15 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, 
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.requests import ClientDisconnect
 
+from . import __version__
 from .config import Settings
-from .constants import BACKEND_NAME, DEFAULT_PROFILE, HEALTH_CAPABILITIES, RESULT_SCHEMA
+from .constants import (
+    BACKEND_NAME,
+    DEFAULT_PROFILE,
+    HEALTH_CAPABILITIES,
+    RESULT_SCHEMA,
+    SUPPORTED_PROFILES,
+)
 from .storage import JobRecord, JobStore, QueueFullError
 
 SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
@@ -184,7 +191,7 @@ def create_app(configured_settings: Settings | None = None) -> FastAPI:
 
     application = FastAPI(
         title="Obsidian MarkItDown Fallback Service",
-        version="1.2.0",
+        version=__version__,
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
@@ -218,6 +225,8 @@ def create_app(configured_settings: Settings | None = None) -> FastAPI:
             "engine_build_id": settings.engine_build_id,
             "release_manifest_sha256": settings.release_manifest_sha256,
             "result_schema": RESULT_SCHEMA,
+            "default_profile": DEFAULT_PROFILE,
+            "supported_profiles": sorted(SUPPORTED_PROFILES),
             "worker_heartbeat": _iso8601(heartbeat),
             "queue_depth": store.queue_depth(),
             "spool_bytes": storage.spool_bytes,
@@ -259,7 +268,7 @@ def create_app(configured_settings: Settings | None = None) -> FastAPI:
         if not source_sha256 or not SHA256_PATTERN.fullmatch(source_sha256):
             raise HTTPException(status_code=400, detail="invalid or missing X-Source-SHA256")
         source_sha256 = source_sha256.lower()
-        if profile != DEFAULT_PROFILE:
+        if profile not in SUPPORTED_PROFILES:
             raise HTTPException(status_code=422, detail="unsupported MarkItDown profile")
         if content_length is not None:
             try:

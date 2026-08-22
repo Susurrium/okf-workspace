@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -10,6 +11,19 @@ from pathlib import Path
 from typing import cast
 
 from .models import OriginalRecord, ParserExport, ParserName, QCReport
+
+
+def _io_path(path: Path) -> Path:
+    """Return a Windows extended-length path for deeply nested hashed assets."""
+
+    if os.name != "nt":
+        return path
+    value = str(path.resolve())
+    if value.startswith("\\\\?\\"):
+        return path
+    if value.startswith("\\\\"):
+        return Path(f"\\\\?\\UNC\\{value[2:]}")
+    return Path(f"\\\\?\\{value}")
 
 
 def write_export_contract(
@@ -30,11 +44,11 @@ def write_export_contract(
     asset_root = directory / "assets"
     asset_paths: list[str] = []
     for relative, data in sorted(export.assets.items()):
-        target = asset_root.joinpath(*Path(relative).parts)
+        target = _io_path(asset_root.joinpath(*Path(relative).parts))
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         asset_paths.append((Path("assets") / relative).as_posix())
-    manifest = {
+    manifest: dict[str, object] = {
         "conversion_id": conversion_id,
         "source_sha256": original.sha256,
         "source_filename": original.filename,
@@ -46,6 +60,16 @@ def write_export_contract(
     }
     if export.degraded_from is not None:
         manifest["degraded_from"] = export.degraded_from.value
+    if export.warnings:
+        manifest["parser_warnings"] = list(export.warnings)
+    if export.expected_image_references is not None:
+        manifest["expected_image_references"] = export.expected_image_references
+    if export.output_image_references is not None:
+        manifest["output_image_references"] = export.output_image_references
+    if export.bundle_schema is not None:
+        manifest["parser_bundle_schema"] = export.bundle_schema
+    if export.profile is not None:
+        manifest["parser_profile"] = export.profile
     (directory / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
@@ -83,7 +107,7 @@ def load_export_contract(directory: Path) -> tuple[ParserExport, QCReport]:
         for value in cast(list[object], asset_values):
             if not isinstance(value, str):
                 continue
-            asset_path = directory.joinpath(*Path(value).parts)
+            asset_path = _io_path(directory.joinpath(*Path(value).parts))
             relative = Path(value).relative_to("assets").as_posix()
             assets[relative] = asset_path.read_bytes()
     checks_value = qc_payload.get("checks")
@@ -98,6 +122,11 @@ def load_export_contract(directory: Path) -> tuple[ParserExport, QCReport]:
     warnings_value = qc_payload.get("warnings")
     errors_value = qc_payload.get("errors")
     degraded = manifest.get("degraded_from")
+    parser_warnings = manifest.get("parser_warnings")
+    expected_images = manifest.get("expected_image_references")
+    output_images = manifest.get("output_image_references")
+    bundle_schema = manifest.get("parser_bundle_schema")
+    parser_profile = manifest.get("parser_profile")
     return (
         ParserExport(
             markdown=directory.joinpath(markdown_name).read_text(encoding="utf-8"),
@@ -105,6 +134,17 @@ def load_export_contract(directory: Path) -> tuple[ParserExport, QCReport]:
             parser=ParserName(str(manifest["parser"])),
             parser_version=str(manifest.get("parser_version", "unknown")),
             degraded_from=ParserName(str(degraded)) if isinstance(degraded, str) else None,
+            warnings=tuple(str(value) for value in cast(list[object], parser_warnings))
+            if isinstance(parser_warnings, list)
+            else (),
+            expected_image_references=expected_images
+            if isinstance(expected_images, int) and not isinstance(expected_images, bool)
+            else None,
+            output_image_references=output_images
+            if isinstance(output_images, int) and not isinstance(output_images, bool)
+            else None,
+            bundle_schema=bundle_schema if isinstance(bundle_schema, str) else None,
+            profile=parser_profile if isinstance(parser_profile, str) else None,
         ),
         QCReport(
             passed=bool(qc_payload.get("passed")),

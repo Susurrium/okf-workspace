@@ -67,6 +67,9 @@ export class FileContextManager {
         this.ownedContextTray = resolvedContextTray;
       }
       this.chipsView = new FileChipsView(resolvedContextTray, {
+        describeFile: (filePath, fallbackLabel) => (
+          this.describeFile(filePath, fallbackLabel)
+        ),
         onRemoveAttachment: (filePath) => {
           if (filePath === this.currentNotePath) {
             this.currentNotePath = null;
@@ -310,6 +313,24 @@ export class FileContextManager {
       this.currentNotePath,
     );
     this.callbacks.onChipsChanged?.();
+  }
+
+  private describeFile(filePath: string, fallbackLabel: string): string {
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const segments = normalizedPath.split('/').filter(Boolean);
+    const filename = segments.at(-1) || filePath;
+    const file = this.app.vault.getAbstractFileByPath(normalizedPath);
+    if (file instanceof TFile) {
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const type = typeof frontmatter?.type === 'string' ? frontmatter.type.trim() : '';
+      const title = typeof frontmatter?.title === 'string' ? frontmatter.title.trim() : '';
+      if (type) {
+        const subject = title || filename.replace(/\.md$/i, '');
+        return `${type} · ${subject}`;
+      }
+    }
+
+    return fallbackLabel || filename;
   }
 
   private handleFileRenamed(

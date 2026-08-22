@@ -1,6 +1,6 @@
 {
   "name": "okf-claudian",
-  "version": "2.1.4-okf.1",
+  "version": "2.1.4-okf.2",
   "private": true,
   "description": "OKF Claudian - Codex embedded in an OKF Workspace Vault",
   "main": "main.js",
@@ -16,7 +16,7 @@
     "lint": "eslint \"{src,tests}/**/*.ts\"",
     "lint:fix": "npm run lint -- --fix",
     "test": "node scripts/run-tests.js",
-    "test:workspace": "node scripts/run-jest.js --runInBand --no-cache tests/unit/integrations/okf/OkfBridge.test.ts tests/unit/integrations/okf/OkfPromptPolicy.test.ts tests/unit/features/chat/ExternalChatHandoff.test.ts tests/unit/providers/codex/runtime/CodexCliResolver.test.ts tests/unit/providers/codex/execution/CodexExecutionBackend.test.ts tests/unit/core/providers/conversationModel.test.ts tests/unit/features/chat/ClaudianView.test.ts tests/unit/features/chat/tabs/TabManager.test.ts tests/unit/features/settings/ClaudianSettings.display.test.ts tests/unit/features/settings/ClaudianSettings.test.ts && node --test scripts/check-architecture-boundaries.test.mjs scripts/check-eslint-config.test.mjs scripts/check-release-version.test.mjs",
+    "test:workspace": "node scripts/run-jest.js --runInBand --no-cache tests/integration/main.test.ts tests/unit/integrations/okf/OkfBridge.test.ts tests/unit/integrations/okf/OkfPromptPolicy.test.ts tests/unit/features/chat/ExternalChatHandoff.test.ts tests/unit/providers/codex/runtime/CodexCliResolver.test.ts tests/unit/providers/codex/execution/CodexExecutionBackend.test.ts tests/unit/core/providers/conversationModel.test.ts tests/unit/features/chat/ClaudianView.test.ts tests/unit/features/chat/tabs/TabManager.test.ts tests/unit/features/chat/tabs/TabRuntimeFactory.test.ts tests/unit/features/chat/ui/FileContextManager.test.ts tests/unit/features/settings/ClaudianSettings.display.test.ts tests/unit/features/settings/ClaudianSettings.test.ts && node --test scripts/check-architecture-boundaries.test.mjs scripts/check-eslint-config.test.mjs scripts/check-release-version.test.mjs",
     "test:unit": "node scripts/run-jest.js",
     "test:architecture": "node --test scripts/check-architecture-boundaries.test.mjs",
     "test:watch": "node scripts/run-jest.js --watch",

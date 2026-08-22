@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 from ruamel.yaml import YAML
 
 
@@ -21,6 +22,41 @@ def _run_powershell(command: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
+    )
+
+
+def _write_claudian_build(source: Path) -> None:
+    source.mkdir()
+    (source / "main.js").write_text("// compiled\n", encoding="utf-8")
+    (source / "styles.css").write_text("/* compiled */\n", encoding="utf-8")
+    (source / "manifest.json").write_text(
+        json.dumps({"id": "okf-claudian", "version": "test"}), encoding="utf-8"
+    )
+
+
+def _install_claudian(
+    root: Path,
+    vault: Path,
+    source: Path,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            "pwsh",
+            "-NoProfile",
+            "-File",
+            str(root / "scripts" / "install-okf-claudian.ps1"),
+            "-Vault",
+            str(vault),
+            "-ClaudianRepository",
+            str(source),
+            "-SkipBuild",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -46,6 +82,7 @@ def test_windows_scripts_parse_and_server_compose_contains_no_committed_secrets(
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
     )
     assert completed.returncode == 0, completed.stderr or completed.stdout
 
@@ -105,6 +142,8 @@ def test_dashboard_persists_only_external_token_file_path() -> None:
     assert "realclaudian" not in claudian_installer
     assert "realclaudian" not in uninstaller
     assert "foreach ($legacyId in @('claudian'))" in claudian_installer
+    assert "-AllowedManifestIds @('okf-claudian')" in claudian_installer
+    assert "if ($ownedLegacyClaudian) { $removedPluginIds += 'claudian' }" in uninstaller
     assert manifest["isDesktopOnly"] is True
 
 
@@ -269,6 +308,42 @@ def test_uninstall_validates_every_owned_path_before_mutating(tmp_path: Path) ->
     assert all(path.is_dir() for path in paths.values())
 
 
+def test_uninstall_refuses_unowned_legacy_claudian_before_mutating(tmp_path: Path) -> None:
+    root = Path(__file__).parents[3]
+    uninstaller = root / "deploy" / "windows" / "uninstall.ps1"
+    vault = tmp_path / "vault"
+    legacy = vault / ".obsidian" / "plugins" / "claudian"
+    legacy.mkdir(parents=True)
+    legacy_marker = legacy / "keep.txt"
+    legacy_marker.write_text("upstream plugin\n", encoding="utf-8")
+    (legacy / "manifest.json").write_text(
+        json.dumps({"id": "claudian", "version": "user"}),
+        encoding="utf-8",
+    )
+    official = vault / ".obsidian" / "plugins" / "realclaudian"
+    official.mkdir()
+    official_marker = official / "keep.txt"
+    official_marker.write_text("official plugin\n", encoding="utf-8")
+    community_plugins = vault / ".obsidian" / "community-plugins.json"
+    community_plugins.write_text(
+        json.dumps(["realclaudian", "claudian", "okf-claudian"]),
+        encoding="utf-8",
+    )
+    community_before = community_plugins.read_bytes()
+    config = tmp_path / "deployment.json"
+    config.write_text(json.dumps({"vault": str(vault)}), encoding="utf-8")
+
+    completed = _run_powershell(
+        f"& {_powershell_quote(uninstaller)} -Config {_powershell_quote(config)}"
+    )
+
+    assert completed.returncode != 0
+    assert "manifest id 'claudian'" in (completed.stderr + completed.stdout)
+    assert legacy_marker.read_text(encoding="utf-8") == "upstream plugin\n"
+    assert official_marker.read_text(encoding="utf-8") == "official plugin\n"
+    assert community_plugins.read_bytes() == community_before
+
+
 def _install_skills(root: Path, vault: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
@@ -283,6 +358,7 @@ def _install_skills(root: Path, vault: Path) -> subprocess.CompletedProcess[str]
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -304,6 +380,7 @@ def test_quick_dashboard_installer_rejects_a_mistyped_vault_before_build(
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
     )
     assert completed.returncode != 0
     assert "Vault does not exist" in (completed.stderr + completed.stdout)
@@ -321,6 +398,9 @@ def test_claudian_installer_preserves_the_official_upstream_plugin(tmp_path: Pat
     upstream_marker = upstream / "keep.txt"
     upstream_marker.write_text("official plugin\n", encoding="utf-8")
     (mistaken_legacy / "remove.txt").write_text("old OKF copy\n", encoding="utf-8")
+    (mistaken_legacy / "manifest.json").write_text(
+        json.dumps({"id": "okf-claudian", "version": "legacy"}), encoding="utf-8"
+    )
     community_plugins = vault / ".obsidian" / "community-plugins.json"
     community_plugins.write_text(
         json.dumps(["realclaudian", "claudian", "another-plugin"]), encoding="utf-8"
@@ -343,30 +423,9 @@ def test_claudian_installer_preserves_the_official_upstream_plugin(tmp_path: Pat
     )
 
     source = tmp_path / "claudian-build"
-    source.mkdir()
-    (source / "main.js").write_text("// compiled\n", encoding="utf-8")
-    (source / "styles.css").write_text("/* compiled */\n", encoding="utf-8")
-    (source / "manifest.json").write_text(
-        json.dumps({"id": "okf-claudian", "version": "test"}), encoding="utf-8"
-    )
+    _write_claudian_build(source)
 
-    completed = subprocess.run(
-        [
-            "pwsh",
-            "-NoProfile",
-            "-File",
-            str(root / "scripts" / "install-okf-claudian.ps1"),
-            "-Vault",
-            str(vault),
-            "-ClaudianRepository",
-            str(source),
-            "-SkipBuild",
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
+    completed = _install_claudian(root, vault, source)
     assert completed.returncode == 0, completed.stderr or completed.stdout
     enabled = json.loads(community_plugins.read_text(encoding="utf-8-sig"))
     assert enabled == ["realclaudian", "another-plugin", "okf-claudian"]
@@ -377,6 +436,51 @@ def test_claudian_installer_preserves_the_official_upstream_plugin(tmp_path: Pat
     assert preserved_settings["systemPromptMode"] == "full"
     assert preserved_settings["providerConfigs"]["claude"]["enabled"] is True
     assert preserved_settings["providerConfigs"]["codex"]["safeMode"] == "read-only"
+
+
+@pytest.mark.parametrize(
+    "legacy_manifest_id",
+    [None, "claudian", "user-plugin"],
+    ids=["missing-manifest", "upstream-identity", "unrelated-identity"],
+)
+def test_claudian_installer_rejects_unowned_legacy_before_writing(
+    tmp_path: Path,
+    legacy_manifest_id: str | None,
+) -> None:
+    root = Path(__file__).parents[3]
+    vault = tmp_path / "vault"
+    legacy = vault / ".obsidian" / "plugins" / "claudian"
+    legacy.mkdir(parents=True)
+    legacy_marker = legacy / "keep.txt"
+    legacy_marker.write_text("not owned by OKF\n", encoding="utf-8")
+    if legacy_manifest_id is not None:
+        (legacy / "manifest.json").write_text(
+            json.dumps({"id": legacy_manifest_id, "version": "user"}),
+            encoding="utf-8",
+        )
+
+    official = vault / ".obsidian" / "plugins" / "realclaudian"
+    official.mkdir()
+    official_marker = official / "keep.txt"
+    official_marker.write_text("official plugin\n", encoding="utf-8")
+    community_plugins = vault / ".obsidian" / "community-plugins.json"
+    community_plugins.write_text(
+        json.dumps(["realclaudian", "claudian", "another-plugin"]),
+        encoding="utf-8",
+    )
+    community_before = community_plugins.read_bytes()
+
+    source = tmp_path / "claudian-build"
+    _write_claudian_build(source)
+    completed = _install_claudian(root, vault, source)
+
+    assert completed.returncode != 0
+    assert "Refusing to remove retired plugin" in (completed.stderr + completed.stdout)
+    assert legacy_marker.read_text(encoding="utf-8") == "not owned by OKF\n"
+    assert official_marker.read_text(encoding="utf-8") == "official plugin\n"
+    assert community_plugins.read_bytes() == community_before
+    assert not (vault / ".obsidian" / "plugins" / "okf-claudian").exists()
+    assert not (vault / ".claudian").exists()
 
 
 def test_skill_installer_owns_only_manifested_skills(tmp_path: Path) -> None:

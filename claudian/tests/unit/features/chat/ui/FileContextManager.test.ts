@@ -218,6 +218,107 @@ describe('FileContextManager', () => {
     manager.destroy();
   });
 
+  it('labels frontmatter-backed context chips by their distinct roles', () => {
+    const sourcePath = 'sources/records/documents/example.md';
+    const sourceTextPath = 'sources/text/documents/example.md';
+    const app = createMockApp({
+      files: [sourcePath, sourceTextPath],
+      fileCacheByPath: new Map([
+        [sourcePath, { frontmatter: { type: 'Source', title: 'Example document' } }],
+        [sourceTextPath, { frontmatter: { type: 'Source Text', title: 'Example document' } }],
+      ]),
+    });
+    const manager = new FileContextManager(
+      app,
+      containerEl as any,
+      inputEl,
+      createMockCallbacks()
+    );
+
+    manager.setAttachedFiles([sourcePath, sourceTextPath]);
+
+    const labels = findAllByClass(containerEl, 'claudian-context-chip-label')
+      .map(label => label.textContent);
+    expect(labels).toEqual([
+      'Source · Example document',
+      'Source Text · Example document',
+    ]);
+
+    manager.destroy();
+  });
+
+  it('adds the shortest parent name when unrelated files share a basename', () => {
+    const firstPath = 'courses/alpha/notes.md';
+    const secondPath = 'projects/beta/notes.md';
+    const app = createMockApp({ files: [firstPath, secondPath] });
+    const manager = new FileContextManager(
+      app,
+      containerEl as any,
+      inputEl,
+      createMockCallbacks()
+    );
+
+    manager.setAttachedFiles([firstPath, secondPath]);
+
+    const labels = findAllByClass(containerEl, 'claudian-context-chip-label')
+      .map(label => label.textContent);
+    expect(labels).toEqual(['alpha / notes.md', 'beta / notes.md']);
+
+    manager.destroy();
+  });
+
+  it('uses enough parent path to distinguish a Source pair before metadata is cached', () => {
+    const sourcePath = 'sources/records/documents/example.md';
+    const sourceTextPath = 'sources/text/documents/example.md';
+    const app = createMockApp({ files: [sourcePath, sourceTextPath] });
+    const manager = new FileContextManager(
+      app,
+      containerEl as any,
+      inputEl,
+      createMockCallbacks()
+    );
+
+    manager.setAttachedFiles([sourcePath, sourceTextPath]);
+
+    const labels = findAllByClass(containerEl, 'claudian-context-chip-label')
+      .map(label => label.textContent);
+    expect(labels).toEqual([
+      'records / documents / example.md',
+      'text / documents / example.md',
+    ]);
+
+    manager.destroy();
+  });
+
+  it('disambiguates duplicate metadata labels with the shortest useful path', () => {
+    const firstPath = 'knowledge/wiki/first.md';
+    const secondPath = 'knowledge/reference/second.md';
+    const app = createMockApp({
+      files: [firstPath, secondPath],
+      fileCacheByPath: new Map([
+        [firstPath, { frontmatter: { type: 'Wiki', title: 'Same title' } }],
+        [secondPath, { frontmatter: { type: 'Wiki', title: 'Same title' } }],
+      ]),
+    });
+    const manager = new FileContextManager(
+      app,
+      containerEl as any,
+      inputEl,
+      createMockCallbacks()
+    );
+
+    manager.setAttachedFiles([firstPath, secondPath]);
+
+    const labels = findAllByClass(containerEl, 'claudian-context-chip-label')
+      .map(label => label.textContent);
+    expect(labels).toEqual([
+      'Wiki · Same title · first.md',
+      'Wiki · Same title · second.md',
+    ]);
+
+    manager.destroy();
+  });
+
   it('auto-attaches active file unless excluded by tag', () => {
     const fileCacheByPath = new Map<string, any>([
       ['notes/private.md', { frontmatter: { tags: ['private'] } }],

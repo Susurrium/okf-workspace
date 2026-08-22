@@ -54,7 +54,7 @@ Dashboard 分为“读取面”和“命令面”：
 | `POST /courses`、`POST /class-notes`、`POST /projects` | 创建课程、课堂笔记和项目 |
 | `POST /projects/{slug}/log` | 追加项目进展 |
 | `POST /ai/ask` | 检索、读取真实章节并返回 `actual_reads` |
-| `POST /ai/organize` | 处理普通人工 Capture 并归档原文；Web Capture 必须走发布接口 |
+| `POST /ai/organize` | 把普通人工 Capture 的正文写入一个长期目标，成功后删除 Capture；Web Capture 必须走发布接口 |
 | `POST /ai/class/organize` | 只更新课堂 AI 受管区域 |
 | `POST /ai/projects/{slug}/summarize` | 读取 project/log 并刷新项目概览 |
 | `POST /ai/learning/plan`、`POST /ai/self-test` | 显式学习动作 |

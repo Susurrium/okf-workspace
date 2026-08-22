@@ -48,6 +48,7 @@ describe("VaultNoteService", () => {
     );
     markdown.set(projectTemplatePath, "# {{title}}\n\nSHARED ARTIFACT CONTRACT\n");
     const capture = await notes.createCapture("一个待处理想法", "稍后整理这条内容。");
+    const oneLineCapture = await notes.createCapture("不会重复的单行", "不会重复的单行");
     const daily = await notes.createDaily();
     await notes.appendDailyCapture("这条内容属于今天，而不是 Inbox。");
     const weeklyReview = await notes.createReview("weekly", new Date(2026, 7, 17, 12));
@@ -55,6 +56,8 @@ describe("VaultNoteService", () => {
     const yearlyReview = await notes.createReview("yearly", new Date(2026, 7, 17, 12));
     const boundaryReview = await notes.createReview("weekly", new Date(2021, 0, 1, 12));
     const project = await notes.createProject("测试项目", "test-project");
+    await notes.appendProjectLog("test-project", "完成第一步\n继续第二步");
+    const reflection = await notes.createReflection("一次语义标题反思", "");
     const course = await notes.createCourse("测试课程", "test-course");
     const linkedCapture = await notes.createCapture(
       "项目课程想法",
@@ -81,21 +84,30 @@ describe("VaultNoteService", () => {
     });
 
     expect(capture.path).toMatch(/^inbox\/captures\/\d{4}\/\d{2}\//u);
-    expect(markdown.get(capture.path)).toContain('capture_status: "open"');
+    expect(markdown.get(oneLineCapture.path)?.match(/不会重复的单行/gu)).toHaveLength(2);
+    expect(markdown.get(oneLineCapture.path)?.match(/^#\s+/gmu)).toHaveLength(1);
+    expect(markdown.get(capture.path)).not.toContain("capture_status:");
     expect(markdown.get(capture.path)).toContain('ingested_via: "direct-entry"');
     expect(project.path).toBe("projects/test-project/project.md");
     expect(markdown.get(project.path)).toContain('project_status: "active"');
     expect(markdown.get(project.path)).toContain("SHARED ARTIFACT CONTRACT");
     expect(markdown.get("projects/test-project/log.md")).toContain("测试项目 · 项目日志");
+    expect(markdown.get("projects/test-project/log.md")).toMatch(/- \*\*\d{2}:\d{2}\*\* 完成第一步\n  继续第二步/u);
     expect(markdown.get(daily.path)).toContain("这条内容属于今天，而不是 Inbox。");
     expect(weeklyReview.path).toBe("life/reviews/weekly/2026-W34.md");
     expect(monthlyReview.path).toBe("life/reviews/monthly/2026-08.md");
     expect(yearlyReview.path).toBe("life/reviews/yearly/2026.md");
     expect(boundaryReview.path).toBe("life/reviews/weekly/2020-W53.md");
+    expect(weeklyReview.created).toBe(true);
     expect(markdown.get(weeklyReview.path)).toContain('type: "Review"');
     expect(markdown.get(weeklyReview.path)).toContain("复盘范围：2026-08-17 — 2026-08-23");
     expect(markdown.get(boundaryReview.path)).toContain("复盘范围：2020-12-28 — 2021-01-03");
-    expect(await notes.createReview("weekly", new Date(2026, 7, 19, 12))).toEqual(weeklyReview);
+    expect(await notes.createReview("weekly", new Date(2026, 7, 19, 12))).toEqual({
+      path: weeklyReview.path,
+      created: false,
+    });
+    expect(reflection.path).toBe("life/reflections/一次语义标题反思.md");
+    expect(markdown.get(reflection.path)?.match(/^#\s+/gmu)).toHaveLength(1);
     expect(markdown.get(linkedCapture.path)).toContain(
       'course: "/learning/courses/test-course/course.md"',
     );
@@ -115,7 +127,7 @@ describe("VaultNoteService", () => {
     expect(folders.has("projects/test-project/decisions")).toBe(false);
     expect(folders.has("projects/test-project/outputs")).toBe(false);
     const today = await new VaultDashboardReader(app).today();
-    expect(today.open_inbox_count).toBe(2);
+    expect(today.open_inbox_count).toBe(3);
     expect(today.active_projects).toEqual([
       expect.objectContaining({ title: "测试项目", project_status: "active" }),
     ]);

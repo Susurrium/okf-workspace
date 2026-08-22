@@ -70,7 +70,6 @@ from okf_workspace.importers.publish import route_existing_import
 from okf_workspace.importers.state import ConversionStore
 from okf_workspace.notes import NoteService
 from okf_workspace.notes.captures import (
-    archive_processed_captures,
     batch_discard_captures,
     discard_capture,
     process_capture,
@@ -105,7 +104,7 @@ class CaptureRequest(BaseModel):
 
 
 class CaptureBatchRequest(BaseModel):
-    action: Literal["archive-processed", "discard"]
+    action: Literal["discard"]
     paths: list[str] = Field(min_length=1, max_length=200)
 
 
@@ -579,7 +578,8 @@ def create_app(
 
     @app.post("/ai/organize", dependencies=protected)
     def organize(request: OrganizeRequest) -> dict[str, str]:
-        target, archived = process_capture(
+        capture = resolve_bundle_path(configured.vault, request.path)
+        target = process_capture(
             configured.vault,
             request.path,
             destination=request.destination,
@@ -589,7 +589,7 @@ def create_app(
         )
         return {
             "created_or_updated": _relative(target, configured.vault),
-            "capture_archived": _relative(archived, configured.vault),
+            "capture_deleted": _relative(capture, configured.vault),
         }
 
     def explicit_ai() -> ExplicitAIWorkflows:
@@ -638,20 +638,16 @@ def create_app(
 
     @app.post("/captures/{capture_path:path}/discard", dependencies=protected)
     def discard(capture_path: str) -> dict[str, str]:
-        archived = discard_capture(configured.vault, capture_path)
-        return {"capture_archived": _relative(archived, configured.vault)}
+        deleted = discard_capture(configured.vault, capture_path)
+        return {"capture_deleted": _relative(deleted, configured.vault)}
 
     @app.post("/captures/batch", dependencies=protected)
     def batch_captures(request: CaptureBatchRequest) -> dict[str, object]:
-        archived = (
-            archive_processed_captures(configured.vault, request.paths)
-            if request.action == "archive-processed"
-            else batch_discard_captures(configured.vault, request.paths)
-        )
+        deleted = batch_discard_captures(configured.vault, request.paths)
         return {
             "action": request.action,
-            "count": len(archived),
-            "archived": [_relative(path, configured.vault) for path in archived],
+            "count": len(deleted),
+            "deleted": [_relative(path, configured.vault) for path in deleted],
         }
 
     @app.post("/captures/publish-web", dependencies=protected)

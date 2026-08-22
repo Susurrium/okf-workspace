@@ -87,14 +87,14 @@ export class LocalApi {
       | "lesson"
       | "project-log",
     options: { title?: string; project?: string; course?: string } = {},
-  ): Promise<{ created_or_updated: string; capture_archived: string }> {
+  ): Promise<{ created_or_updated: string; capture_deleted: string }> {
     return this.request("/ai/organize", {
       method: "POST",
       body: JSON.stringify({ path, destination, ...options }),
     }, 180_000);
   }
 
-  public discardCapture(path: string): Promise<{ capture_archived: string }> {
+  public discardCapture(path: string): Promise<{ capture_deleted: string }> {
     const encoded = path.split("/").map(encodeURIComponent).join("/");
     return this.request(`/captures/${encoded}/discard`, { method: "POST" });
   }
@@ -114,9 +114,9 @@ export class LocalApi {
   }
 
   public batchCaptures(
-    action: "archive-processed" | "discard",
+    action: "discard",
     paths: string[],
-  ): Promise<{ action: string; count: number; archived: string[] }> {
+  ): Promise<{ action: "discard"; count: number; deleted: string[] }> {
     return this.request("/captures/batch", {
       method: "POST",
       body: JSON.stringify({ action, paths }),

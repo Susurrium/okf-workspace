@@ -148,7 +148,7 @@ def test_capture_context_follows_study_guide_and_wiki_without_copying_files(
         project="deploy",
     )
 
-    guide, archived = process_capture(
+    guide = process_capture(
         vault,
         capture.relative_to(vault).as_posix(),
         destination="study-guide",
@@ -157,13 +157,12 @@ def test_capture_context_follows_study_guide_and_wiki_without_copying_files(
     assert guide.relative_to(vault).as_posix().startswith("learning/courses/systems/guides/")
     assert guide_fields["course"] == f"/{course.relative_to(vault).as_posix()}"
     assert guide_fields["project"] == f"/{project.relative_to(vault).as_posix()}"
-    assert guide_fields["sources"] == [
-        {"resource": f"/{archived.relative_to(vault).as_posix()}"}
-    ]
+    assert "sources" not in guide_fields
+    assert not capture.exists()
     assert len(list(vault.rglob(f"{guide.name}"))) == 1
 
     wiki_capture = notes.create_capture("部署参考", "形成以后查用的说明。", project="deploy")
-    wiki, _ = process_capture(
+    wiki = process_capture(
         vault,
         wiki_capture.relative_to(vault).as_posix(),
         destination="wiki",

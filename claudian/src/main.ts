@@ -406,11 +406,8 @@ export default class ClaudianPlugin extends Plugin {
   }
 
   private async ensureViewOpen(): Promise<ClaudianView | null> {
-    const existingView = this.getView();
-    if (existingView) {
-      return existingView;
-    }
-
+    // Revealing matters even when the view already exists: a right-sidebar
+    // Claudian leaf may be hidden behind Calendar or another tab.
     await this.activateView();
     return this.getView();
   }

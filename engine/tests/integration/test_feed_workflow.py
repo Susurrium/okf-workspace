@@ -97,7 +97,15 @@ def test_treehole_edition_preserves_metrics_media_and_folded_comments(vault: Pat
                 author="Alice",
                 published_at="2026-08-17T08:00:00+08:00",
             ),
-            FeedComment(text="第二条评论", cid=102, author="Bob", is_original_poster=True),
+            FeedComment(
+                text="第二条评论",
+                cid=102,
+                author="Bob",
+                is_original_poster=True,
+                reply_to_cid=101,
+                reply_to_author="Alice",
+                reply_to_text="第一条评论",
+            ),
         ),
     )
     edition = FeedEdition(
@@ -117,7 +125,9 @@ def test_treehole_edition_preserves_metrics_media_and_folded_comments(vault: Pat
     assert "> [!comments]- 已抓取评论 (2 条，默认折叠)" in rendered
     assert "**1. Alice · 2026-08-17 08:00 · CID 101**" in rendered
     assert "**2. Bob · 洞主 · CID 102**" in rendered
+    assert "↳ 回复 1. Alice (CID 101)：" in rendered
     assert "^treehole-123" in rendered
+    assert rendered.index("^treehole-123") < rendered.index("> [!comments]-")
 
 
 def test_treehole_data_uri_is_materialized_as_excluded_asset(vault: Path) -> None:
@@ -169,7 +179,13 @@ def test_existing_treehole_note_refreshes_only_generated_comments(vault: Path) -
         "> [!comments]- 已抓取评论 (1 条，默认折叠)",
         "> [!note]- 评论 (共 1 条，默认折叠)",
     )
-    path.write_text(content + "\n我的阅读批注。\n", encoding="utf-8")
+    # Simulate a legacy Digest: its navigation/decision anchor followed the
+    # whole comment thread, which made Dashboard jumps land at the bottom.
+    content = content.replace("^treehole-123\n\n", "")
+    path.write_text(
+        content.rstrip() + "\n\n^treehole-123\n\n我的阅读批注。\n",
+        encoding="utf-8",
+    )
     updated_item = FeedItem(
         item_id=old_item.item_id,
         feed=old_item.feed,
@@ -196,6 +212,7 @@ def test_existing_treehole_note_refreshes_only_generated_comments(vault: Path) -
     assert "**1. Alice · CID 9**" in rendered
     assert "新评论" in rendered
     assert "旧评论" not in rendered
+    assert rendered.index("^treehole-123") < rendered.index("> [!comments]-")
     assert rendered.endswith("我的阅读批注。\n")
 
 
@@ -299,6 +316,8 @@ def test_treehole_comment_refresh_stays_inside_each_item_section(vault: Path) ->
     assert "洞正文 2" in rendered
     assert "^treehole-1" in rendered
     assert "^treehole-2" in rendered
+    assert rendered.index("^treehole-1") < rendered.index("新评论一")
+    assert rendered.index("^treehole-2") < rendered.index("新评论二")
     assert "新评论一" in rendered
     assert "新评论二" in rendered
     assert "第一条的人工批注。" in rendered
@@ -334,7 +353,17 @@ def test_retained_treehole_archive_enriches_historical_cache(tmp_path: Path) -> 
                 {
                     "pid": 8456471,
                     "cid": 39015797,
-                    "raw": {"text": "结构化评论", "name_tag": "Alice", "is_lz": 1},
+                    "raw": {
+                        "text": "结构化评论",
+                        "name_tag": "Alice",
+                        "is_lz": 1,
+                        "comment_id": 39015700,
+                        "quote": {
+                            "cid": 39015700,
+                            "name_tag": "Bob",
+                            "text": "上游保留的父评论",
+                        },
+                    },
                 },
                 ensure_ascii=False,
             ),
@@ -348,6 +377,9 @@ def test_retained_treehole_archive_enriches_historical_cache(tmp_path: Path) -> 
     assert comment.author == "Alice"
     assert comment.cid == 39015797
     assert comment.is_original_poster is True
+    assert comment.reply_to_cid == 39015700
+    assert comment.reply_to_author == "Bob"
+    assert comment.reply_to_text == "上游保留的父评论"
 
 
 def test_human_decisions_only_materialize_the_selected_outcome(vault: Path, tmp_path: Path) -> None:

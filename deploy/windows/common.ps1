@@ -328,6 +328,68 @@ function Install-OkfPluginAtomic {
         -ExpectedId $ExpectedId
 }
 
+function Confirm-OkfRetiredPluginDirectoryOwnership {
+    param(
+        [Parameter(Mandatory)][string]$Vault,
+        [Parameter(Mandatory)][string]$DirectoryName,
+        [Parameter(Mandatory)][string[]]$AllowedManifestIds
+    )
+
+    $vaultPath = Resolve-OkfPath $Vault
+    $pluginsRoot = Join-Path $vaultPath '.obsidian\plugins'
+    $target = Assert-OkfChildPath `
+        -Parent $pluginsRoot `
+        -Child (Join-Path $pluginsRoot $DirectoryName)
+    if (-not (Test-Path -LiteralPath $target)) { return $false }
+    if (-not (Test-Path -LiteralPath $target -PathType Container)) {
+        throw "Retired plugin path is not a directory: $target"
+    }
+    $targetItem = Get-Item -LiteralPath $target -Force
+    if (($targetItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Refusing retired plugin cleanup through a reparse point: $target"
+    }
+    $manifestPath = Join-Path $target 'manifest.json'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw "Refusing to remove retired plugin without a manifest: $target"
+    }
+    $manifestItem = Get-Item -LiteralPath $manifestPath -Force
+    if (($manifestItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Refusing retired plugin cleanup with a linked manifest: $manifestPath"
+    }
+    try {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    } catch {
+        throw "Retired plugin manifest is invalid JSON: $manifestPath"
+    }
+    $manifestId = [string]$manifest.id
+    if ($AllowedManifestIds -cnotcontains $manifestId) {
+        throw "Refusing to remove retired plugin directory with manifest id '$manifestId': $target"
+    }
+    return $true
+}
+
+function Remove-OkfRetiredPluginDirectory {
+    param(
+        [Parameter(Mandatory)][string]$Vault,
+        [Parameter(Mandatory)][string]$DirectoryName,
+        [Parameter(Mandatory)][string[]]$AllowedManifestIds
+    )
+
+    $owned = Confirm-OkfRetiredPluginDirectoryOwnership `
+        -Vault $Vault `
+        -DirectoryName $DirectoryName `
+        -AllowedManifestIds $AllowedManifestIds
+    if (-not $owned) { return $false }
+
+    $vaultPath = Resolve-OkfPath $Vault
+    $pluginsRoot = Join-Path $vaultPath '.obsidian\plugins'
+    $target = Assert-OkfChildPath `
+        -Parent $pluginsRoot `
+        -Child (Join-Path $pluginsRoot $DirectoryName)
+    Remove-Item -LiteralPath $target -Recurse -Force
+    return $true
+}
+
 function Install-OkfDashboardPluginAtomic {
     param(
         [Parameter(Mandatory)][string]$DashboardRoot,

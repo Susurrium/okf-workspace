@@ -12,7 +12,7 @@ import threading
 import time
 import zipfile
 from contextlib import suppress
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .config import Settings
@@ -226,16 +226,73 @@ class Worker:
             for chunk in iter(lambda: result_handle.read(1024 * 1024), b""):
                 result_digest.update(chunk)
         with zipfile.ZipFile(path) as archive:
-            if set(archive.namelist()) != {"manifest.json", "document.md"}:
-                raise ValueError("unexpected result entries")
+            names = archive.namelist()
+            if len(names) != len(set(names)):
+                raise ValueError("duplicate result entries")
+            for name in names:
+                safe = PurePosixPath(name)
+                if safe.is_absolute() or any(part in {"", ".", ".."} for part in safe.parts):
+                    raise ValueError("unsafe result entry")
             manifest_info = archive.getinfo("manifest.json")
             markdown_info = archive.getinfo("document.md")
-            if manifest_info.file_size > 64 * 1024:
+            if manifest_info.file_size > 8 * 1024 * 1024:
                 raise ValueError("oversized manifest")
             if markdown_info.file_size > self.settings.max_result_bytes:
                 raise ValueError("oversized markdown")
             manifest = json.loads(archive.read("manifest.json"))
+            if not isinstance(manifest, dict):
+                raise ValueError("invalid result manifest")
             markdown = archive.read("document.md")
+            output = manifest.get("output")
+            if not isinstance(output, dict):
+                raise ValueError("invalid result output")
+            assets_value = output.get("assets")
+            if not isinstance(assets_value, list):
+                raise ValueError("missing result asset manifest")
+            expected_entries = {"manifest.json", "document.md"}
+            expanded_bytes = len(markdown) + manifest_info.file_size
+            for value in assets_value:
+                if not isinstance(value, dict):
+                    raise ValueError("invalid asset manifest entry")
+                asset_path = value.get("path")
+                asset_sha256 = value.get("sha256")
+                mime_type = value.get("mime_type")
+                size_bytes = value.get("size_bytes")
+                if (
+                    not isinstance(asset_path, str)
+                    or not isinstance(asset_sha256, str)
+                    or not isinstance(mime_type, str)
+                    or not isinstance(size_bytes, int)
+                    or isinstance(size_bytes, bool)
+                ):
+                    raise ValueError("incomplete asset manifest entry")
+                safe = PurePosixPath(asset_path)
+                if (
+                    safe.parts[:1] != ("images",)
+                    or len(safe.parts) != 2
+                    or safe.stem != asset_sha256
+                    or len(asset_sha256) != 64
+                    or any(character not in "0123456789abcdef" for character in asset_sha256)
+                    or not mime_type.startswith("image/")
+                    or mime_type.casefold() == "image/svg+xml"
+                    or safe.suffix.casefold() == ".svg"
+                    or size_bytes <= 0
+                ):
+                    raise ValueError("invalid result asset identity")
+                if asset_path in expected_entries:
+                    raise ValueError("duplicate result asset manifest entry")
+                asset_info = archive.getinfo(asset_path)
+                if asset_info.file_size != size_bytes:
+                    raise ValueError("result asset declared size mismatch")
+                expanded_bytes += size_bytes
+                if expanded_bytes > self.settings.max_result_bytes:
+                    raise ValueError("oversized expanded result")
+                asset = archive.read(asset_path)
+                if len(asset) != size_bytes or hashlib.sha256(asset).hexdigest() != asset_sha256:
+                    raise ValueError("result asset integrity mismatch")
+                expected_entries.add(asset_path)
+            if set(names) != expected_entries:
+                raise ValueError("unexpected result entries")
         if manifest["schema"] != RESULT_SCHEMA:
             raise ValueError("result schema mismatch")
         if manifest["source_sha256"] != expected_job.source_sha256:

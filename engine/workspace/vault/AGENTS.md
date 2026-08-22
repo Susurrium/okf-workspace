@@ -19,6 +19,7 @@
 
 ## 工作流
 
+- `inbox/captures/` 中存在的 Capture 就是待处理输入，不另写状态。成功整理到一个长期目标后删除 Capture，不复制到 `archive/`，也不让目标反向引用临时 Capture；丢弃时使用 Obsidian 本地回收站。Web Capture 必须先发布成 Source + Source Text。
 - 从 Source Text 或资料生成第一版 Study Guide：`$prepare-study-guide`。
 - 把学习对话中的重要结论合并回现有 Study Guide：`$update-study-guide`。
 - 从资料或学习成果创建、更新、合并或拆分 Wiki：`$distill-wiki`。

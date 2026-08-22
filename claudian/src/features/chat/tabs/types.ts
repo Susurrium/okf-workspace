@@ -129,6 +129,8 @@ export interface TabUIComponents {
   readonly contextUsageMeter: ContextUsageMeter;
   readonly statusPanel: StatusPanel;
   readonly navigationSidebar: NavigationSidebar;
+  readonly sendButtonEl: HTMLButtonElement;
+  readonly stopButtonEl: HTMLButtonElement;
 }
 
 /**

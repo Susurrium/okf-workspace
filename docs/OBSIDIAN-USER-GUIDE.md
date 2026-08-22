@@ -12,20 +12,35 @@
 
 | 场景 | 位置与做法 |
 |---|---|
-| 灵感、课程或项目想法、暂不确定归属 | Today 点“快速记录”，写入 `inbox/captures/YYYY/MM/`。可以选择已有 Course 或 Project，也可以不选；之后统一在 Inbox 整理。 |
+| 灵感、课程或项目想法、暂不确定归属 | Today 点“快速记录”。第一层直接选择“保存到 Inbox / 关联 Course 后保存 / 关联 Project 后保存”；需要关联时第二层选择具体对象并立即保存。它始终先形成待整理 Capture。 |
 | 日记正文 | Today 点“创建/继续写今日日记”或 Chinese Calendar，打开 `life/daily/YYYY/MM/` 中当天的 Daily。 |
-| 一句话追加到今天 | 调用“记到今日日记”，直接追加到 Daily 的“随手记录”区域，不经过 Inbox。 |
-| 独立感想 | 建立 `Reflection`，直接放 `life/reflections/`，不必经过 Inbox。 |
+| 记到今天 | 调用“记到今日日记”，创建或打开当天的原生 Daily，并定位到“随手记录”；内容直接在 Obsidian 中写，不经过 Dashboard 输入框或 Inbox。 |
+| 独立感想 | 调用新建 Reflection，给出标题后直接打开 `life/reflections/` 中的原生 Markdown 正文。 |
 | 课堂记录 | 先选择已有 Course，再创建 `Lesson` 到课程的 `lessons/`。人工原文写在 notes 区。 |
 | 项目当前状态 | `projects/<project>/project.md`。 |
-| 项目过程 | 追加到 `projects/<project>/log.md`；它是纯 Markdown 时间日志，不使用 YAML。 |
-| 重要项目决定 | 建立 `Decision` 到项目的 `decisions/`。 |
+| 项目过程 | Project 的“项目日志…”中留空会直接打开原生 `log.md`；填写内容才按时间追加一次。它是纯 Markdown 时间日志，不使用 YAML。 |
+| 正式项目决定 | 使用命令“新建 Decision”，只输入标题后打开项目 `decisions/` 下的原生笔记。它是低频正式记录，不占 Project 列表的高频操作位。 |
 | 长期知识 | `knowledge/wiki/` 的 Wiki；多个 Wiki 需要主题导航时再维护 `knowledge/maps/` 的 Wiki Map。 |
 
 日记、Lesson、Study Guide 等受管笔记把个人原文与 AI 可替换区分开。后台只改自己的 `ai:auto` 区域；希望永久保留的个人补充写在普通或 `human:notes` 区。
 
 “快速记录”和“今日日记”不是同一个入口：前者是通用 Capture，适合尚未整理的灵感，
 即使选择了 Course/Project 也仍留在 Inbox；后者属于当天的生活记录，不进入待处理队列。
+
+### 为什么一篇笔记看起来只有一个标题
+
+同一篇受管笔记有三个不同职责的标题信息，但正常阅读时只显示正文 H1：
+
+```text
+life/reflections/重新设计项目入口.md   ← 稳定文件路径
+YAML title: 重新设计项目入口           ← Dashboard、搜索和程序读取
+# 重新设计项目入口                     ← Markdown 正文中的人类标题
+```
+
+Obsidian 的 Inline Title 和正文 Properties 已默认隐藏，因此不会再把文件名、Properties 与 H1
+连续显示三遍。文件名不再机械附加日期；只有 Daily、Review、Lesson、Decision 等“日期本身就是
+身份或排序依据”的记录保留日期。YAML `title` 与 H1 内容相同并不是两份正文：前者是结构化数据，
+后者保证文件离开 Obsidian 后仍是完整、可读的 Markdown。
 
 ## 3. 日记与生活
 
@@ -74,6 +89,11 @@ Source 的 `resource/kind/text` 只描述来源身份与正文位置。你的用
 
 转换进度和错误只在 Runtime State；目标笔记只在真正生成成功后发布。完成通知和 Dashboard 卡片都提供打开链接。
 
+MarkItDown 的能力按格式明确区分：DOCX/PPTX 中可识别的内嵌 PNG、JPEG 等图片会提取为
+哈希命名附件并写入 Source Text；PDF 的快速 MarkItDown 路径是文本模式，不承诺提取图片或
+扫描 OCR。需要保留 PDF/PPTX 的复杂版式、公式和图片时继续选择默认 MinerU。无法安全发布的
+特殊图片格式或外链图片会给出明确警告，不再静默生成不存在的 `.jpg` 链接。
+
 ## 5. 网页剪藏
 
 浏览器安装官方 Obsidian Web Clipper 后，导入 Vault 中的
@@ -87,9 +107,9 @@ Source 的 `resource/kind/text` 只描述来源身份与正文位置。你的用
 - 稍后学习：在 `uses[]` 增加 `purpose: study`，不创建空白 Guide；
 - 生成 Wiki：发布后排队生成 Wiki；
 - 仅作参考：在 `uses[]` 增加 `purpose: reference`，不调用 AI；
-- 丢弃：保留到 Capture archive。
+- 丢弃：移入 Obsidian 本地回收站，不建立 Capture archive。
 
-不做选择就保持 open Capture，这本身就是“稍后决定”，不需要额外按钮或状态。
+不做选择就继续保留这篇 Capture；文件仍在 Inbox 本身就是“待处理”，不需要额外状态。
 同一 URL 会忽略 fragment 和常见跟踪参数进行去重；重复选区/高亮合并到 Source
 Text。图片先用远程链接快速发布，再在后台安全下载到 `sources/assets/`；失败不阻塞。
 完整配置见 [Web Clipper 接入](WEB-CLIPPER.md)。
@@ -144,9 +164,12 @@ okf context "你的问题" --scope auto --json
 ## 9. 项目流程
 
 1. 创建 Project，填写目标、约束和初始计划。
-2. 执行期间随时讨论问题；需要记录时说“使用 `$capture-project-progress` 整理以上进度”。
-3. Skill 增量追加 `log.md`，必要时更新 `project.md` 的当前状态；真正重要且可复用的选择拆成 Decision。
-4. 项目中出现学习需求可调用 Study Guide Skills，出现长期知识可调用 Wiki Skills。
+2. 每个 Project 行只保留“打开”和“…”两个动作，避免把不同层级的按钮铺成一排。
+3. “…”菜单的常用工作流只有：项目日志、记录待整理想法、添加资料、在 Claudian 中整理项目；
+   项目状态单独放在分隔线后的低频区域。
+4. 执行期间随时讨论问题；需要整理本轮进展时说“使用 `$capture-project-progress` 整理以上进度”。
+5. Skill 增量追加 `log.md`，必要时更新 `project.md` 的当前状态；真正需要独立追溯的正式选择再建 Decision。
+6. 项目中出现学习需求可调用 Study Guide Skills，出现长期知识可调用 Wiki Skills。
 
 项目不建立重型状态机。`project.md` 是当前快照，`log.md` 是持久的过程记录，日常使用不依赖 Git。如果你需要额外的本地版本恢复，可以主动启用 Vault Git checkpoint。
 
@@ -157,7 +180,9 @@ okf context "你的问题" --scope auto --json
 - QuickAdd 可绑定高频 Dashboard/插件命令；不复制路径和 YAML 逻辑。
 - Dataview、Tasks、Recent Files 直接读取 Vault，适合查询和阅读增强，无需与 Dashboard 建立双向状态同步。
 - Chinese Calendar 与 Core Daily Notes 指向同一 Daily 模板和路径，不产生两套日记。
-- Claudian 只提供 Obsidian 内可见 Codex 会话、上下文附件和交接界面；任务方法来自 Workspace Skills。
+- Claudian 只提供 Obsidian 内可见 Codex 会话、上下文附件和交接界面；任务方法来自 Workspace Skills。Dashboard 交接会主动显示已有但被日历等侧栏标签遮住的 Claudian。
+- Claudian 的相关文件 chip 会显示“Source / Source Text”等角色，而不是只显示相同 basename；两者分别是来源身份卡和完整正文，不是重复附件。
+- 输入框有可见发送按钮；生成过程中另显示“停止”。停止是取消当前流式生成，不是可恢复的暂停。
 
 ## 11. System 与多设备
 

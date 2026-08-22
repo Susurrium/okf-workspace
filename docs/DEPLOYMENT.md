@@ -46,6 +46,20 @@ cd E:\code\okf-workspace
 安装器不会创建登录常驻 API 任务。Dashboard 插件在 Obsidian 加载后启动自己持有的本地
 Engine 子进程，Obsidian 退出后服务随之停止。
 
+### PowerShell 中读取 CLI JSON
+
+CLI 的机器可读 JSON 在标准输出中保持为单一 JSON 文档；进度和错误写到标准错误。为兼容
+PowerShell 7 与 Windows PowerShell 5.1 的不同原生进程编码规则，非 ASCII 字符在线路上会
+写成标准 JSON `\uXXXX` 转义。`ConvertFrom-Json` 解析后得到的仍是原始中文，不是数据丢失。
+
+```powershell
+$report = okf doctor --verbose | Out-String | ConvertFrom-Json
+$report.actionable
+```
+
+这个命令不依赖当前活动代码页；无需运行 `chcp 65001`，也不要先用文本替换修补输出。
+需要保存原始 JSON 时可直接重定向，随后按 JSON 读取。
+
 安装开始前会先验证 Vault、Originals 与 Runtime State：三者必须是绝对解析后彼此独立、
 不相同也不互相嵌套的目录，且不能指向磁盘根目录或源码仓库根目录。每个受管目录都会写入
 同一安装身份的 `.okf-workspace-owner.json`；这既允许三个目录位于不同磁盘或父目录，也让
@@ -122,7 +136,8 @@ Engine Skills 部署到 `.agents/skills/`，并由 `.okf-managed-skills.json` �
 7. 重启 Obsidian，确认只有一个本地服务且退出后终止；
 8. 运行 validator/doctor，确认新数据无坏链、重复 Source 或悬空任务。
 
-不需要两周观察期。历史测试笔记和迁移前 Runtime State 不作为发布门槛。
+不需要两周观察期，也不要求把所有历史 UAT 内容迁移成正式内容；但会让 validator
+失败、产生坏链或悬空任务的测试残留，必须在本轮验收前删除、修复或重新转换。
 
 ## 7. 卸载
 

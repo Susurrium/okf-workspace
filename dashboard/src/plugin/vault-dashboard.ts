@@ -86,6 +86,12 @@ function sameVaultPath(left: string | null | undefined, right: string): boolean 
   return normalize(left) === normalize(right);
 }
 
+function isPendingCapture(note: NoteSummary): boolean {
+  return note.note_type === "Capture" &&
+    note.path.startsWith("inbox/captures/") &&
+    note.capture_status !== "processed";
+}
+
 function sourcePaths(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
@@ -308,9 +314,7 @@ export class VaultDashboardReader {
         )
         .sort(compareNotesByRecency)
         .slice(0, 8),
-      open_inbox_count: summaries.filter(
-        (note) => note.note_type === "Capture" && note.capture_status === "open",
-      ).length,
+      open_inbox_count: summaries.filter(isPendingCapture).length,
       pending_study_count: pendingStudy.length,
       pending_wiki_count: pendingWiki.length,
       stale_knowledge: summaries.filter(
@@ -328,7 +332,7 @@ export class VaultDashboardReader {
       );
     const sources = summaries.filter((note) => note.note_type === "Source");
     return {
-      captures: notes.filter((note) => note.capture_status === "open"),
+      captures: notes.filter(isPendingCapture),
       processed_captures: notes.filter((note) => note.capture_status === "processed"),
       pending_imports: sources.flatMap((note) => sourceUseProjections(note, "undecided")),
     };
@@ -489,8 +493,7 @@ export class VaultDashboardReader {
         lesson_count: lessons.length,
         ...(lessons[0] ? { latest_lesson: lessons[0] } : {}),
         pending_captures: notes.filter(
-          (note) => note.note_type === "Capture" && note.capture_status === "open" &&
-            sameVaultPath(note.course, course.path),
+          (note) => isPendingCapture(note) && sameVaultPath(note.course, course.path),
         ),
       };
     }));
@@ -539,8 +542,7 @@ export class VaultDashboardReader {
           (note) => note.note_type === "Source" && sourceUsesProject(note, project.path),
         ),
         pending_captures: notes.filter(
-          (note) => note.note_type === "Capture" && note.capture_status === "open" &&
-            sameVaultPath(note.project, project.path),
+          (note) => isPendingCapture(note) && sameVaultPath(note.project, project.path),
         ),
       };
     }));

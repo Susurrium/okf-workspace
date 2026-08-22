@@ -46,6 +46,6 @@ describe("ClaudianBridgeAdapter", () => {
     const adapter = new ClaudianBridgeAdapter(app);
 
     expect(adapter.isAvailable()).toBe(false);
-    await expect(adapter.handoff({ prompt: "test" })).rejects.toThrow("Codex 面板");
+    await expect(adapter.handoff({ prompt: "test" })).rejects.toThrow("Claudian 面板");
   });
 });

@@ -400,6 +400,37 @@ describe('Tab provider execution ownership', () => {
     expect(coordinatorInstances).toHaveLength(1);
   });
 
+  it('provides visible send and streaming stop controls', async () => {
+    const tab = await createTestTab({
+      plugin: createPlugin(),
+      containerEl: createMockEl() as any,
+    });
+    const sendMessage = jest
+      .spyOn(tab.controllers.inputController, 'sendMessage')
+      .mockResolvedValue(undefined);
+    const cancelStreaming = jest
+      .spyOn(tab.controllers.inputController, 'cancelStreaming')
+      .mockImplementation(() => undefined);
+    const sendButton = tab.dom.inputWrapper.querySelector('.claudian-composer-send');
+    const stopButton = tab.dom.inputWrapper.querySelector('.claudian-composer-stop');
+
+    expect(sendButton).not.toBeNull();
+    expect(sendButton?.getAttribute('aria-label')).toBe('Send message');
+    expect(stopButton).not.toBeNull();
+    expect(stopButton?.hasClass('claudian-hidden')).toBe(true);
+
+    sendButton?.click();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+
+    tab.state.isStreaming = true;
+    expect(stopButton?.hasClass('claudian-hidden')).toBe(false);
+    stopButton?.click();
+    expect(cancelStreaming).toHaveBeenCalledTimes(1);
+
+    tab.state.isStreaming = false;
+    expect(stopButton?.hasClass('claudian-hidden')).toBe(true);
+  });
+
   it('lets later navigation override bottom auto-scroll intent', async () => {
     const plugin = createPlugin();
     plugin.settings.keyboardNavigation = {

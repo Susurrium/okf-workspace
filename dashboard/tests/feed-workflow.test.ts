@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { aiDailyPreviewStreamTitle } from "../src/domain/ai-daily-preview.js";
+import { feedItemMappings } from "../src/feeds/mappings.js";
 import { HttpFeedApi } from "../src/feeds/service.js";
 import {
   FEED_DECISION_ACTIONS,
@@ -8,6 +9,15 @@ import {
 } from "../src/ui/ai-daily-inline-decision.js";
 
 describe("Dashboard Feed workflow", () => {
+  it("reads canonical Digest item mappings and keeps legacy compatibility", () => {
+    const canonical = [{ id: "treehole:123", block_id: "treehole-123" }];
+    const legacy = [{ id: "daily:1", block_id: "feed-abcdef123456" }];
+
+    expect(feedItemMappings({ items: canonical })).toEqual(canonical);
+    expect(feedItemMappings({ feed_items: legacy })).toEqual(legacy);
+    expect(feedItemMappings({ items: [{ id: "missing-block" }] })).toEqual([]);
+  });
+
   it("uses the current AI Daily stream labels", () => {
     expect(aiDailyPreviewStreamTitle("news")).toBe("AI 资讯");
     expect(aiDailyPreviewStreamTitle("hotspot")).toBe("中国热点");

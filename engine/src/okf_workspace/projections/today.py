@@ -29,7 +29,11 @@ def build_today_snapshot(vault: Path, target_date: date | None = None) -> TodayS
     open_captures = 0
     for path in (vault / "inbox" / "captures").rglob("*.md"):
         try:
-            if read_document(path).frontmatter.get("capture_status") == "open":
+            document = read_document(path)
+            if (
+                document.type == "Capture"
+                and document.frontmatter.get("capture_status") in {None, "open"}
+            ):
                 open_captures += 1
         except FrontmatterError:
             continue

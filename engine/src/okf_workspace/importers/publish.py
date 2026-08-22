@@ -22,6 +22,13 @@ def _title(export: ParserExport, original: OriginalRecord) -> str:
     return match.group(1).strip() if match else Path(original.filename).stem
 
 
+def _ensure_h1(markdown: str, title: str) -> str:
+    body = markdown.strip()
+    if _HEADING.search(body):
+        return body + "\n"
+    return f"# {title}\n\n{body}\n"
+
+
 def _copy_assets(
     vault: Path,
     slug: str,
@@ -153,7 +160,11 @@ def publish_import(
         text_fields["assets"] = [f"/{asset}" for asset in assets]
     else:
         text_fields.pop("assets", None)
-    text_document.body = markdown
+    text_title = text_fields.get("title")
+    text_document.body = _ensure_h1(
+        markdown,
+        text_title if isinstance(text_title, str) and text_title.strip() else title,
+    )
     publisher.publish_pair(
         source,
         source_text,

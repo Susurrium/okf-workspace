@@ -71,9 +71,7 @@ def _read_tokens(path: Path) -> tuple[str, ...]:
         raise ConfigurationError(f"cannot read API token file: {path}") from exc
 
     tokens = tuple(
-        stripped
-        for line in lines
-        if (stripped := line.strip()) and not stripped.startswith("#")
+        stripped for line in lines if (stripped := line.strip()) and not stripped.startswith("#")
     )
     if not tokens:
         raise ConfigurationError("API token file contains no tokens")
@@ -190,12 +188,8 @@ class Settings:
             raise ConfigurationError(
                 "runtime build ID does not match the identity baked into the image"
             )
-        release_manifest_sha256 = os.getenv(
-            "MARKITDOWN_RELEASE_MANIFEST_SHA256", ""
-        ).strip()
-        image_release_sha256 = os.getenv(
-            "MARKITDOWN_IMAGE_RELEASE_MANIFEST_SHA256", ""
-        ).strip()
+        release_manifest_sha256 = os.getenv("MARKITDOWN_RELEASE_MANIFEST_SHA256", "").strip()
+        image_release_sha256 = os.getenv("MARKITDOWN_IMAGE_RELEASE_MANIFEST_SHA256", "").strip()
         if re.fullmatch(r"[0-9a-f]{64}", release_manifest_sha256) is None:
             raise ConfigurationError("MARKITDOWN_RELEASE_MANIFEST_SHA256 must be lowercase SHA-256")
         if image_release_sha256 != release_manifest_sha256:
@@ -222,15 +216,9 @@ class Settings:
             max_pages=_positive_int("MARKITDOWN_MAX_PAGES", 500),
             max_active_tasks=_positive_int("MARKITDOWN_MAX_ACTIVE_TASKS", 3),
             max_concurrent_uploads=_positive_int("MARKITDOWN_MAX_CONCURRENT_UPLOADS", 1),
-            max_spool_bytes=_positive_int(
-                "MARKITDOWN_MAX_SPOOL_BYTES", 2 * 1024 * 1024 * 1024
-            ),
-            min_free_bytes=_positive_int(
-                "MARKITDOWN_MIN_FREE_BYTES", 2 * 1024 * 1024 * 1024
-            ),
-            conversion_timeout_seconds=_positive_int(
-                "MARKITDOWN_CONVERSION_TIMEOUT_SECONDS", 600
-            ),
+            max_spool_bytes=_positive_int("MARKITDOWN_MAX_SPOOL_BYTES", 2 * 1024 * 1024 * 1024),
+            min_free_bytes=_positive_int("MARKITDOWN_MIN_FREE_BYTES", 2 * 1024 * 1024 * 1024),
+            conversion_timeout_seconds=_positive_int("MARKITDOWN_CONVERSION_TIMEOUT_SECONDS", 600),
             success_ttl_seconds=_positive_int("MARKITDOWN_SUCCESS_TTL_SECONDS", 7200),
             failure_ttl_seconds=_positive_int("MARKITDOWN_FAILURE_TTL_SECONDS", 86400),
             tombstone_ttl_seconds=_positive_int("MARKITDOWN_TOMBSTONE_TTL_SECONDS", 86400),
@@ -244,8 +232,7 @@ class Settings:
         )
         if settings.max_concurrent_uploads > settings.max_active_tasks:
             raise ConfigurationError(
-                "MARKITDOWN_MAX_CONCURRENT_UPLOADS must not exceed "
-                "MARKITDOWN_MAX_ACTIVE_TASKS"
+                "MARKITDOWN_MAX_CONCURRENT_UPLOADS must not exceed MARKITDOWN_MAX_ACTIVE_TASKS"
             )
         if settings.max_spool_bytes < settings.max_upload_bytes + settings.max_result_bytes:
             raise ConfigurationError(

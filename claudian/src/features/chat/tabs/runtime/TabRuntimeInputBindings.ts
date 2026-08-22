@@ -109,6 +109,24 @@ export function buildTabRuntimeInputBindings(
     () => dom.inputEl.removeEventListener('input', inputHandler),
   );
 
+  const sendClickHandler = (): void => {
+    void controllers.inputController.sendMessage();
+  };
+  ui.sendButtonEl.addEventListener('click', sendClickHandler);
+  options.registerCleanup(
+    'tab composer send binding',
+    () => ui.sendButtonEl.removeEventListener('click', sendClickHandler),
+  );
+
+  const stopClickHandler = (): void => {
+    controllers.inputController.cancelStreaming();
+  };
+  ui.stopButtonEl.addEventListener('click', stopClickHandler);
+  options.registerCleanup(
+    'tab composer stop binding',
+    () => ui.stopButtonEl.removeEventListener('click', stopClickHandler),
+  );
+
   const scrollThreshold = 20;
   const reEnableDelay = 150;
   let reEnableTimeout: number | null = null;

@@ -30,7 +30,6 @@ _STATIC_FILES = (
 )
 _STATIC_DIRECTORIES = ("system",)
 VAULT_DYNAMIC_DIRECTORIES = (
-    Path("archive/captures"),
     Path("feeds/ai-daily"),
     Path("feeds/treehole"),
     Path("inbox/captures"),

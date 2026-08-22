@@ -4,9 +4,14 @@ import { readFileSync } from "node:fs";
 import { LocalApi } from "../api/client.js";
 import {
   relationVaultPath,
+  routeCaptureUsingLinkedContext,
   type CaptureRelation,
 } from "../domain/capture-context.js";
 import { isSemanticOperationActive } from "../domain/semantic-operation-state.js";
+import {
+  convertedDocumentTarget,
+  semanticCompletionTitle,
+} from "../domain/workflow-notifications.js";
 import type {
   ConversionRecord,
   SemanticOperationRecord,
@@ -19,6 +24,7 @@ import type {
   FeedDecisionResult,
   FeedKind,
 } from "../feeds/types.js";
+import { feedItemMappings } from "../feeds/mappings.js";
 import { HttpDocumentImportApi } from "../imports/service.js";
 import type {
   DocumentImportOptions,
@@ -38,7 +44,7 @@ import {
 import { IndexSyncCoordinator } from "./index-sync.js";
 import { feedLivePreviewExtension } from "./live-preview.js";
 import { LocalServiceManager } from "./local-service.js";
-import { ChoiceModal, FieldsPromptModal, TextPromptModal } from "./prompts.js";
+import { ChoiceModal, FieldsPromptModal, ProjectLogModal, TextPromptModal } from "./prompts.js";
 import { QuickCaptureModal } from "./quick-capture-modal.js";
 import { SemanticOperationMonitor } from "./semantic-monitor.js";
 import { VaultDashboardReader } from "./vault-dashboard.js";
@@ -263,7 +269,7 @@ export default class OkfBrainPlugin extends Plugin {
   private async openQuickCapture(initial: CaptureRelation): Promise<void> {
     const contexts = await this.notes().captureContexts();
     new QuickCaptureModal(this.app, contexts, initial, async (value, relation) => {
-      const title = value.split(/\r?\n/u)[0]?.slice(0, 40) || "随手记录";
+      const title = value.split(/\r?\n/u)[0]?.trim() || "随手记录";
       const result = await this.notes().createCapture(title, value, relation);
       const notice = new Notice("", 15_000);
       notice.noticeEl.empty();
@@ -298,24 +304,15 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public promptDailyCapture(): void {
-    new TextPromptModal(
-      this.app,
-      "记到今日日记",
-      "一句话、一个念头，或今天刚发生的事……",
-      "立即保存",
-      async (value) => {
-        const result = await this.notes().appendDailyCapture(value);
-        const notice = new Notice("", 12_000);
-        notice.noticeEl.empty();
-        notice.noticeEl.createEl("strong", { text: "已写入今日日记" });
-        const open = notice.noticeEl.createEl("button", { text: "打开日记" });
-        open.addEventListener("click", () => {
-          notice.hide();
-          void this.openVaultPath(result.path);
-        });
-        this.refreshDashboardViews();
-      },
-    ).open();
+    void this.openDailyForWriting().catch((error: unknown) => {
+      new Notice(error instanceof Error ? error.message : "无法打开今日日记", 10_000);
+    });
+  }
+
+  public async openDailyForWriting(): Promise<void> {
+    const result = await this.notes().createDaily();
+    await this.openVaultHeading(result.path, "随手记录");
+    this.refreshDashboardViews();
   }
 
   public promptActionMenu(): void {
@@ -323,7 +320,7 @@ export default class OkfBrainPlugin extends Plugin {
       this.app,
       [
         { value: "daily", label: "继续写今日日记", description: "打开今天的 Daily" },
-        { value: "jot", label: "快速记一笔", description: "一句话立即写入今天，不等待 AI" },
+        { value: "jot", label: "打开随手记录", description: "定位到今日日记的原生 Markdown 编辑区" },
         {
           value: "capture",
           label: "快速记录",
@@ -333,7 +330,7 @@ export default class OkfBrainPlugin extends Plugin {
         { value: "course", label: "新建 Course", description: "创建课程主页" },
         { value: "project", label: "新建 Project", description: "创建项目主页与日志" },
         { value: "import", label: "导入资料", description: "PDF、Word 或 PowerPoint" },
-        { value: "ask", label: "问我的笔记", description: "让 Codex 读取相关 OKF 笔记后回答" },
+        { value: "ask", label: "问我的笔记", description: "在 Claudian 中读取相关 OKF 笔记后回答" },
       ] as const,
       "Dashboard 快捷动作",
       async (choice) => {
@@ -401,7 +398,7 @@ export default class OkfBrainPlugin extends Plugin {
     prompt: string,
     options: Omit<CodexHandoffRequest, "prompt"> = {},
   ): Promise<void> {
-    if (!this.claudianBridge) throw new Error("Codex Bridge 尚未初始化");
+    if (!this.claudianBridge) throw new Error("Claudian Bridge 尚未初始化");
     const result = await this.claudianBridge.handoff({
       prompt,
       actionMode: "read",
@@ -411,8 +408,8 @@ export default class OkfBrainPlugin extends Plugin {
     });
     new Notice(
       result.sent
-        ? "任务已提交给 Codex"
-        : `任务已在 Codex 面板中准备好${result.contextCount ? ` · ${result.contextCount} 个上下文文件` : ""}`,
+        ? "任务已在 Claudian 中提交"
+        : `任务已在 Claudian 中准备好${result.contextCount ? ` · ${result.contextCount} 个上下文文件` : ""}`,
       6_000,
     );
   }
@@ -422,7 +419,7 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public async openCodexConsole(): Promise<void> {
-    if (!this.claudianBridge) throw new Error("Codex Bridge 尚未初始化");
+    if (!this.claudianBridge) throw new Error("Claudian Bridge 尚未初始化");
     await this.claudianBridge.open();
   }
 
@@ -439,7 +436,7 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public promptAsk(): void {
-    new TextPromptModal(this.app, "问我的笔记", "输入问题", "在 Codex 中准备", async (value) => {
+    new TextPromptModal(this.app, "问我的笔记", "输入问题", "在 Claudian 中准备", async (value) => {
       const active = this.app.workspace.getActiveFile();
       await this.openCodexPrompt(value, {
         actionMode: "read",
@@ -457,19 +454,12 @@ export default class OkfBrainPlugin extends Plugin {
       "新建反思",
       [
         { key: "title", label: "标题", placeholder: "这篇反思想讨论什么？" },
-        {
-          key: "content",
-          label: "正文",
-          placeholder: "直接写你的想法，之后仍可在 Markdown 中修改",
-          multiline: true,
-          required: false,
-        },
       ],
       "创建并打开",
       async (values) => {
         const result = await this.notes().createReflection(
           values.title ?? "反思",
-          values.content ?? "",
+          "",
         );
         await this.openVaultPath(result.path);
       },
@@ -499,6 +489,7 @@ export default class OkfBrainPlugin extends Plugin {
       "选择 Review 周期",
       async (period) => {
         const result = await this.notes().createReview(period);
+        new Notice(result.created ? "已创建本期 Review" : "已打开已有 Review", 6_000);
         await this.openVaultPath(result.path);
       },
     ).open();
@@ -550,20 +541,13 @@ export default class OkfBrainPlugin extends Plugin {
       "新建课堂笔记",
       [
         { key: "title", label: "本节课标题", placeholder: "回归分析" },
-        {
-          key: "content",
-          label: "课堂原始记录",
-          placeholder: "允许不完整、缩写或听错；AI 整理不会覆盖这里",
-          multiline: true,
-          required: false,
-        },
       ],
       "创建并打开",
       async (values) => {
         const result = await this.notes().createLesson(
           course,
           values.title ?? "课堂笔记",
-          values.content ?? "",
+          "",
         );
         await this.openVaultPath(result.path);
       },
@@ -593,16 +577,24 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public promptProjectProgress(projectPath: string): void {
-    new TextPromptModal(
+    new ProjectLogModal(
       this.app,
-      "记录项目进展",
-      "这次完成了什么、下一步是什么？",
-      "记录",
       async (value) => {
         const slug = projectPath.split("/")[1];
         if (!slug) throw new Error("项目路径无效");
-        await this.notes().appendProjectLog(slug, value);
-        new Notice("项目进展已记录");
+        if (!value) {
+          await this.openVaultPath(`projects/${slug}/log.md`);
+          return;
+        }
+        const result = await this.notes().appendProjectLog(slug, value);
+        const notice = new Notice("", 12_000);
+        notice.noticeEl.empty();
+        notice.noticeEl.createEl("strong", { text: "已追加到项目日志" });
+        const open = notice.noticeEl.createEl("button", { text: "打开日志" });
+        open.addEventListener("click", () => {
+          notice.hide();
+          void this.openVaultPath(result.path);
+        });
         this.refreshDashboardViews();
       },
     ).open();
@@ -611,36 +603,43 @@ export default class OkfBrainPlugin extends Plugin {
   public promptProjectDecision(projectPath: string): void {
     new FieldsPromptModal(
       this.app,
-      "记录关键决定",
+      "新建正式 Decision",
       [
-        { key: "title", label: "决定标题", placeholder: "采用 Markdown 作为唯一权威" },
-        {
-          key: "context",
-          label: "背景",
-          placeholder: "为什么需要做这个决定？",
-          multiline: true,
-        },
-        {
-          key: "decision",
-          label: "最终决定",
-          placeholder: "明确写下选择以及适用范围",
-          multiline: true,
-        },
+        { key: "title", label: "标题", placeholder: "采用 Markdown 作为唯一权威" },
       ],
-      "创建决定并打开",
+      "创建并打开",
       async (values) => {
         const slug = projectPath.split("/")[1];
         if (!slug) throw new Error("项目路径无效");
         const result = await this.notes().createDecision(
           slug,
           values.title ?? "项目决定",
-          values.context ?? "",
-          values.decision ?? "",
         );
         await this.openVaultPath(result.path);
         this.refreshDashboardViews();
       },
     ).open();
+  }
+
+  public promptNewDecision(): void {
+    this.selectProject("选择 Decision 所属 Project", (project) => {
+      this.promptProjectDecision(`projects/${project}/project.md`);
+    });
+  }
+
+  public promptProjectStatus(
+    projectPath: string,
+    current: "active" | "paused" | "completed",
+  ): void {
+    const options = ([
+      { value: "active", label: "Active", description: "继续推进这个 Project" },
+      { value: "paused", label: "Paused", description: "暂时停止，但保留后续入口" },
+      { value: "completed", label: "Completed", description: "Project 已达到完成条件" },
+    ] as const).filter((option) => option.value !== current);
+    new ChoiceModal(this.app, options, "更改 Project 状态", async (status) => {
+      await this.setProjectStatus(projectPath, status);
+      new Notice(`Project 状态已更新为 ${status}`);
+    }).open();
   }
 
   public promptWikiFromSources(): void {
@@ -723,26 +722,11 @@ export default class OkfBrainPlugin extends Plugin {
       });
     };
     const linked = this.captureRelationSlug(capturePath, "project");
-    if (!linked) {
-      this.selectProject("选择要写入的项目", organize);
-      return;
-    }
-    new ChoiceModal(
-      this.app,
-      [
-        {
-          value: "linked",
-          label: `使用已关联 Project · ${linked}`,
-          description: "沿用快速记录时选择的项目",
-        },
-        { value: "other", label: "选择其他 Project", description: "更改这次整理的目标" },
-      ] as const,
-      "Capture 已有关联项目",
-      async (choice) => {
-        if (choice === "linked") organize(linked);
-        else this.selectProject("选择要写入的项目", organize);
-      },
-    ).open();
+    routeCaptureUsingLinkedContext(
+      linked,
+      (onSelect) => this.selectProject("选择要写入的项目", onSelect),
+      organize,
+    );
   }
 
   public promptCaptureLesson(capturePath: string): void {
@@ -755,26 +739,11 @@ export default class OkfBrainPlugin extends Plugin {
       });
     };
     const linked = this.captureRelationSlug(capturePath, "course");
-    if (!linked) {
-      this.selectCourse("选择课堂笔记所属课程", organize);
-      return;
-    }
-    new ChoiceModal(
-      this.app,
-      [
-        {
-          value: "linked",
-          label: `使用已关联 Course · ${linked}`,
-          description: "沿用快速记录时选择的课程",
-        },
-        { value: "other", label: "选择其他 Course", description: "更改这次整理的目标" },
-      ] as const,
-      "Capture 已有关联课程",
-      async (choice) => {
-        if (choice === "linked") organize(linked);
-        else this.selectCourse("选择课堂笔记所属课程", organize);
-      },
-    ).open();
+    routeCaptureUsingLinkedContext(
+      linked,
+      (onSelect) => this.selectCourse("选择课堂笔记所属课程", onSelect),
+      organize,
+    );
   }
 
   private captureRelationSlug(capturePath: string, kind: "course" | "project"): string | undefined {
@@ -1137,7 +1106,7 @@ export default class OkfBrainPlugin extends Plugin {
       if (transitions.length || visibleStageChanged) this.refreshDashboardViews();
       for (const { operation } of transitions) {
         if (["completed", "failed", "cancelled", "orphaned"].includes(operation.status)) {
-          this.notifySemanticResult(operation);
+          void this.notifySemanticResult(operation);
         }
       }
     } catch {
@@ -1147,15 +1116,16 @@ export default class OkfBrainPlugin extends Plugin {
     }
   }
 
-  private notifySemanticResult(operation: SemanticOperationRecord): void {
+  private async notifySemanticResult(operation: SemanticOperationRecord): Promise<void> {
     const isWiki = operation.kind === "generate-wiki";
     const completed = operation.status === "completed";
     const interrupted = operation.status === "orphaned";
+    const title = await this.vaultTitle(operation.target);
     const notice = new Notice("", 30_000);
     notice.noticeEl.empty();
     notice.noticeEl.createEl("strong", {
       text: completed
-        ? (isWiki ? "Wiki 已生成完成" : "学习材料已生成完成")
+        ? semanticCompletionTitle(operation.kind, title)
         : interrupted
           ? "后台任务已中断"
           : `后台任务${operation.status === "failed" ? "失败" : "已取消"}`,
@@ -1236,7 +1206,7 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   private notifyDocumentImport(record: import("../api/types.js").ConversionRecord): void {
-    const target = record.outputs.routed_target ?? record.outputs.source_text ?? record.outputs.source;
+    const target = convertedDocumentTarget(record.outputs);
     const operationId = record.outputs.semantic_operation_id;
     if (operationId) this.watchSemanticOperation(operationId);
     const notice = new Notice("", 30_000);
@@ -1282,7 +1252,7 @@ export default class OkfBrainPlugin extends Plugin {
     });
     this.addCommand({
       id: "append-today-daily",
-      name: "记到今日日记",
+      name: "打开今日日记的随手记录",
       callback: () => this.promptDailyCapture(),
     });
     this.addCommand({
@@ -1316,18 +1286,23 @@ export default class OkfBrainPlugin extends Plugin {
       callback: () => this.promptProject(),
     });
     this.addCommand({
+      id: "new-formal-decision",
+      name: "新建正式 Decision",
+      callback: () => this.promptNewDecision(),
+    });
+    this.addCommand({
       id: "ask-notes",
       name: "问我的笔记",
       callback: () => this.promptAsk(),
     });
     this.addCommand({
       id: "create-knowledge-from-sources",
-      name: "在 Codex 中生成 Wiki",
+      name: "在 Claudian 中生成 Wiki",
       callback: () => this.promptWikiFromSources(),
     });
     this.addCommand({
       id: "rewrite-current-section",
-      name: "在 Codex 中修改当前章节",
+      name: "在 Claudian 中修改当前章节",
       callback: () => this.promptRewriteCurrentSection(),
     });
     this.addCommand({
@@ -1484,13 +1459,13 @@ export default class OkfBrainPlugin extends Plugin {
         this.refreshDashboardViews();
         return;
       }
-      const path = result.routed_target ?? result.source_text ?? result.source;
+      const path = convertedDocumentTarget(result);
       if (result.semantic_operation) {
         this.watchSemanticOperation(result.semantic_operation.operation_id);
       }
       new Notice(
         result.semantic_operation
-          ? `转换完成；Codex 已进入后台生成：${path}`
+          ? `转换完成；Codex 后台任务已开始：${path}`
           : "导入完成：" + path,
         10_000,
       );
@@ -1508,10 +1483,10 @@ export default class OkfBrainPlugin extends Plugin {
       if (!(file instanceof TFile)) return;
       const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
       const feed = frontmatter?.feed;
-      const items = frontmatter?.feed_items;
-      if ((feed !== "ai-daily" && feed !== "treehole") || !Array.isArray(items)) return;
+      const items = feedItemMappings(frontmatter);
+      if ((feed !== "ai-daily" && feed !== "treehole") || !items.length) return;
       const section = context.getSectionInfo(element)?.text ?? "";
-      for (const mapping of items as { id: string; block_id: string }[]) {
+      for (const mapping of items) {
         if (!section.includes("^" + mapping.block_id)) continue;
         const status = element.createDiv({
           cls: "okf-feed-recommendation",
@@ -1751,6 +1726,20 @@ export default class OkfBrainPlugin extends Plugin {
     return `${feed}:${itemId}`;
   }
 
+  private async vaultTitle(path: string): Promise<string> {
+    const normalized = path.replace(/\\/gu, "/").replace(/^\/+|\/+$/gu, "");
+    const file = this.app.vault.getAbstractFileByPath(normalized);
+    if (file instanceof TFile) {
+      const title = this.app.metadataCache.getFileCache(file)?.frontmatter?.title;
+      if (typeof title === "string" && title.trim()) return title.trim();
+      const markdown = await this.app.vault.cachedRead(file);
+      const heading = /^#\s+(.+)$/mu.exec(markdown)?.[1]?.trim();
+      if (heading) return heading;
+      return file.basename;
+    }
+    return normalized.split("/").at(-1)?.replace(/\.md$/iu, "") || normalized;
+  }
+
   public async openVaultPath(path: string, blockId?: string): Promise<void> {
     const normalized = path.replace(/\\/gu, "/").replace(/^\/+|\/+$/gu, "");
     for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -1766,6 +1755,19 @@ export default class OkfBrainPlugin extends Plugin {
       await new Promise<void>((resolve) => window.setTimeout(resolve, 100));
     }
     new Notice("文件已创建，但 Obsidian 尚未显示；可在文件区打开：" + normalized, 10_000);
+  }
+
+  private async openVaultHeading(path: string, heading: string): Promise<void> {
+    const normalized = path.replace(/\\/gu, "/").replace(/^\/+|\/+$/gu, "");
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const file = this.app.vault.getAbstractFileByPath(normalized);
+      if (file instanceof TFile) {
+        await this.app.workspace.openLinkText(`${normalized}#${heading}`, "", false);
+        return;
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 100));
+    }
+    new Notice("今日日记已创建，但 Obsidian 尚未显示：" + normalized, 10_000);
   }
 
   public async ensureLocalServiceAvailable(): Promise<void> {

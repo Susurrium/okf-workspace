@@ -4,8 +4,8 @@
 PDF/PPTX/DOCX 到 Markdown 的文本优先转换计算；源文档、下载后的结果 ZIP、转换账本、QC 结果和最终
 Obsidian 笔记仍以客户端本地副本为准。
 
-> 本仓库当前服务版本为 `1.2.0`，结果协议为 `markitdown-result/v2`，
-> build 为 `markitdown-0.1.6-py31213-v3`。实际服务器版本必须通过健康接口确认；
+> 本仓库当前服务版本为 `1.3.0`，结果协议为 `markitdown-result/v3`，
+> build 为 `markitdown-0.1.6-py31213-assets-v3`。实际服务器版本必须通过健康接口确认；
 > 本文不把历史开发环境状态当作部署事实。
 > 新服务器部署仍必须先确认 SSH alias、Tailnet HTTPS FQDN、数据根、预期挂载点和
 > `findmnt` 返回的 filesystem source。本文不记录 Token。
@@ -43,7 +43,8 @@ MarkItDown 是文本优先的备用解析器，不是 MinerU 的等价替代品�
 - 适合有数字文本层的普通 PDF 和结构化 PPTX；
 - 二进制旧 PPT 必须由 Windows 客户端先转换并验证为派生 PPTX；
 - 不提供 OCR；
-- 不提取嵌入图片资产；
+- PDF 不提取图片资产；DOCX/PPTX 会提取常规内嵌位图并改写为内容哈希附件；
+- 不安全的 SVG 和无法可靠识别的图片格式不会发布，而会形成明确的缺图 warning；
 - 不提供页级内容映射；
 - 公式、复杂表格、双栏布局和阅读顺序只做尽力转换；
 - 客户端必须继续执行严格规范化、QC 和人工复核；
@@ -91,41 +92,34 @@ Socket；其目标地址在每次受控启动后重新验证并生成，不硬�
 
 ## 4. 完整部署快照目录布局
 
-服务器上的部署快照根固定为：
+每个 bundle 安装到以其 manifest SHA-256 命名的独立目录。`current` 和 `previous` 只是由安装器
+原子替换的指针；升级绝不把新 tar 解压到正在使用的 release tree：
 
 ```text
-/opt/markitdown-backup/
-├── release-metadata.json
-├── release-manifest.sha256
-├── deploy/
-│   └── markitdown/
-│       ├── compose.yaml
-│       ├── .env.example
-│       ├── .env                     # prepare-runtime.sh 以 0600 原子生成，不入 Git
-│       ├── README.md
-│       ├── preflight.sh             # 只读预检
-│       ├── prepare-runtime.sh       # 显式创建目录、安装 Token、生成 .env
-│       ├── deploy.sh                # 保存完整上一健康版本、构建、Canary 验收
-│       ├── start.sh                 # 启动前重复全部挂载与身份守卫
-│       ├── configure-loopback-proxy.sh # 动态验证 API 地址并原子配置回环 TCP 代理
-│       ├── install-systemd.sh       # 安装带 RequiresMountsFor 的开机单元
-│       ├── rollback.sh              # 仅按完整上一健康快照回滚
-│       ├── generate-canary.py       # 生成固定文本真实 PDF
-│       ├── verify.py                # 协议身份和真实 PDF 验证器
-│       ├── verify-compose.py        # 渲染后的 Compose 安全拓扑门禁
-│       ├── verify-release.sh        # 逐文件 SHA-256 与快照闭集校验
-│       ├── verify-runtime-topology.py # 容器、网络和端口运行态门禁
-│       ├── smoke-test.sh
-│       └── status.sh
-└── services/
-    └── markitdown/
-        ├── Dockerfile
-        ├── README.md
-        ├── requirements.lock
-        ├── uv.lock
-        ├── pyproject.toml
-        └── src/
+/opt/markitdown-releases/
+├── current -> releases/<当前 bundle manifest SHA-256>/
+├── previous -> releases/<上一 bundle manifest SHA-256>/  # 或首次迁移时的旧绝对目录
+├── rollback-records/                                      # 被替换的回滚审计记录
+└── releases/
+    ├── <当前 bundle manifest SHA-256>/
+    │   ├── release-metadata.json
+    │   ├── release-manifest.sha256
+    │   ├── deploy/markitdown/
+    │   │   ├── .env                    # 0600；运行配置，不在 manifest 中
+    │   │   ├── .current-release*       # 0600；已验收运行身份
+    │   │   ├── .last-known-good*       # 0600；上一健康运行身份
+    │   │   ├── install-release-bundle.sh
+    │   │   ├── rollback-release-bundle.sh
+    │   │   ├── release_bundle.py
+    │   │   ├── deploy.sh / rollback.sh / start.sh
+    │   │   └── 其余部署与验证文件
+    │   └── services/markitdown/
+    └── <上一 bundle manifest SHA-256>/   # 完整保留，不覆盖
 ```
+
+从旧布局第一次升级时，已有 `/opt/markitdown-backup` 保持原样并成为 `previous`；安装器不会移动、
+覆盖或删除它。以后所有人工操作都从 `/opt/markitdown-releases/current` 进入。systemd 单元固定到
+实际版本目录，而不是依赖可变符号链接；只有新版本通过 Canary 后，`deploy.sh` 才替换该单元。
 
 服务端 Token 不放在仓库中，固定候选位置是：
 
@@ -135,11 +129,11 @@ Socket；其目标地址在每次受控启动后重新验证并生成，不硬�
 
 必须部署打包工具生成的**完整部署快照**，不能只上传 `deploy/markitdown`。该快照是生产部署所需
 文件的白名单集合，不等于工作站上的整个开发仓库。`compose.yaml` 位于
-`/opt/markitdown-backup/deploy/markitdown`，其中构建上下文
+`/opt/markitdown-releases/current/deploy/markitdown`，其中构建上下文
 `../../services/markitdown` 需要访问同一快照内的服务源码。所有 Compose 命令都应先进入：
 
 ```bash
-cd /opt/markitdown-backup/deploy/markitdown
+cd /opt/markitdown-releases/current/deploy/markitdown
 ```
 
 如果从其他目录直接运行 Compose，`.env` 和构建上下文更容易产生歧义，因此不纳入
@@ -206,54 +200,45 @@ cd E:\code\okf-workspace
 工具只打包服务源码、锁文件和 MarkItDown 部署文件，不包含 `.env`、Token、Vault、测试缓存或
 本地账本。包内 `release-manifest.sha256` 固定每个文件，包外同名 `.sha256` 固定整个 tar.gz；
 输出还给出 release manifest SHA-256。该值在新部署中同时作为当前 bundle 和运行镜像的初始身份。
+`release-metadata.json` 还固定 service `1.3.0`、build
+`markitdown-0.1.6-py31213-assets-v3`、schema `markitdown-result/v3` 和默认 profile
+`fallback-assets-v2`，部署前应把这些值与 `.env`、compose 和 health 逐项对齐。
 
-通过 SSH/SCP 上传 tar.gz 及其 `.sha256` 后，先在部署用户的独立暂存目录验证整包哈希和成员。
-以下是**首次安装**的有序模板；`ARCHIVE_NAME`、部署用户、部署组和暂存目录必须先替换为实际值：
+通过 SSH/SCP 上传 tar.gz、同名 `.sha256`，以及固定 revision 中的
+`install-release-bundle.sh`、`release_bundle.py`。工作站先记录两个引导文件的 SHA-256，服务器
+必须逐一核对；引导文件与 tar 必须来自同一 revision。以下是**首次安装**模板，所有占位符必须先
+替换为实际值：
 
 ```bash
 cd /absolute/staging/markitdown-release
 sha256sum --check --strict --warn ARCHIVE_NAME.tar.gz.sha256
-tar --list --verbose --gzip --file ARCHIVE_NAME.tar.gz
+sha256sum install-release-bundle.sh release_bundle.py
+sudo bash ./install-release-bundle.sh \
+  --archive /absolute/staging/markitdown-release/ARCHIVE_NAME.tar.gz \
+  --checksum /absolute/staging/markitdown-release/ARCHIVE_NAME.tar.gz.sha256
 ```
 
-此时停止并人工确认成员只有 `deploy/`、`services/`、`release-metadata.json` 和
-`release-manifest.sha256`，且没有绝对路径、`..`、设备文件或符号链接。确认后再执行第二段；
-`set -e` 会使目标目录已存在等任何失败立即停止该 shell：
-
-```bash
-set -euo pipefail
-cd /absolute/staging/markitdown-release
-test ! -e /opt/markitdown-backup
-sudo install -d -o MARKITDOWN_DEPLOY_USER -g MARKITDOWN_DEPLOY_GROUP -m 0755 \
-  /opt/markitdown-backup
-tar --extract --gzip --file ARCHIVE_NAME.tar.gz \
-  --directory /opt/markitdown-backup \
-  --no-same-owner --no-same-permissions
-
-cd /opt/markitdown-backup
-bash deploy/markitdown/verify-release.sh /opt/markitdown-backup
-```
-
-`sha256sum` 必须先固定压缩包，成员检查必须先于解压，快照内逐文件校验必须在初始化运行目录
-之前通过。`verify-release.sh` 还执行闭集校验：拒绝任何符号链接，以及除 `.env`、当前/上一健康
-版本记录等固定运行记录外的未清单文件。初次部署要求目标目录不存在；若已存在应立即停止，不得
-通过覆盖文件来伪装升级。
-升级应遵守第 16 节的受控发布流程。不要从不固定的远程默认分支直接构建生产镜像。
+安装器先严格核对包外 SHA-256，再逐项解析 tar；它拒绝绝对路径、`..`、重复成员、符号/硬链接、
+设备文件、FIFO、白名单外根目录、超量成员和超大展开体积。文件只会解压到 release store 内的唯一
+暂存目录；包内逐文件与闭集校验通过后，才把目录原子改名为 manifest SHA-256。目标版本已存在时
+只允许复验或幂等返回，绝不覆盖。不要用通用 `tar -xf` 直接覆盖 release tree，也不要从未固定的
+远程默认分支构建生产镜像。
 
 部署后验证快照拓扑：
 
 ```bash
-cd /opt/markitdown-backup
+cd /opt/markitdown-releases/current
 test -f deploy/markitdown/compose.yaml
 test -f deploy/markitdown/.env.example
 test -f services/markitdown/Dockerfile
 test -f services/markitdown/requirements.lock
 realpath deploy/markitdown/../../services/markitdown
-bash deploy/markitdown/verify-release.sh /opt/markitdown-backup
+bash deploy/markitdown/verify-release.sh "$(pwd -P)"
 ```
 
-`realpath` 必须得到 `/opt/markitdown-backup/services/markitdown`。若该目录不存在，Compose
-构建上下文不完整，不能继续。
+`realpath` 必须指向 `current` 所在的同一个实际版本目录下的 `services/markitdown`。若不是，
+Compose 构建上下文不完整，不能继续。首次安装此时还没有 `.env`，继续执行第 7 节；升级则严格
+按第 16 节进行。
 
 ## 7. 第三阶段：显式初始化运行目录、`.env` 和 Token
 
@@ -266,7 +251,7 @@ bash deploy/markitdown/verify-release.sh /opt/markitdown-backup
 
 ```bash
 chmod 0600 /absolute/staging/markitdown-client.token
-cd /opt/markitdown-backup/deploy/markitdown
+cd /opt/markitdown-releases/current/deploy/markitdown
 sudo bash ./prepare-runtime.sh \
   --data-root /srv/markitdown-data \
   --token-file /etc/obsidian-markitdown/api-tokens.txt \
@@ -298,8 +283,8 @@ sudo bash ./prepare-runtime.sh \
 生成后的关键配置应为：
 
 ```dotenv
-MARKITDOWN_IMAGE=obsidian-markitdown-service:1.2.0
-MARKITDOWN_ENGINE_BUILD_ID=markitdown-0.1.6-py31213-v3
+MARKITDOWN_IMAGE=obsidian-markitdown-service:1.3.0
+MARKITDOWN_ENGINE_BUILD_ID=markitdown-0.1.6-py31213-assets-v3
 MARKITDOWN_BUNDLE_MANIFEST_SHA256=<当前release-manifest.sha256文件的SHA-256>
 MARKITDOWN_RELEASE_MANIFEST_SHA256=<运行镜像烘焙的release-manifest SHA-256>
 MARKITDOWN_UID=10002
@@ -325,7 +310,7 @@ MARKITDOWN_TAILNET_FQDN=<专用节点>.<tailnet>.ts.net
 
 | 项目 | 默认值 |
 |---|---:|
-| 最大上传 PDF/PPTX | 64 MiB |
+| 最大上传 PDF/PPTX/DOCX | 64 MiB |
 | 最大结果 ZIP | 128 MiB |
 | 最大页数/幻灯片数 | 500 |
 | 活动任务上限 | 3（单 Worker，通常为 1 个处理、2 个等待） |
@@ -338,7 +323,7 @@ MARKITDOWN_TAILNET_FQDN=<专用节点>.<tailnet>.ts.net
 | 成功结果 TTL | 2 小时 |
 | 失败任务 TTL | 24 小时 |
 
-不要用取消内存、单元数或上传限制来掩盖 OOM；应使用代表性 PDF/PPTX 压测后调整输入上限或升级
+不要用取消内存、单元数或上传限制来掩盖 OOM；应使用代表性 PDF/PPTX/DOCX 压测后调整输入上限或升级
 服务器资源。
 
 ## 8. 第四阶段：渲染配置、构建与回环启动
@@ -347,7 +332,7 @@ MARKITDOWN_TAILNET_FQDN=<专用节点>.<tailnet>.ts.net
 Compose 渲染、端口绑定、磁盘空间、规范路径、Token 权限和运行目录所有权：
 
 ```bash
-cd /opt/markitdown-backup/deploy/markitdown
+cd /opt/markitdown-releases/current/deploy/markitdown
 sudo bash ./preflight.sh \
   --data-root /srv/markitdown-data \
   --token-file /etc/obsidian-markitdown/api-tokens.txt \
@@ -387,7 +372,7 @@ health。随后安装并启用 `obsidian-markitdown.service`。该 systemd 单�
 
 仍应人工确认：
 
-- build context 指向 `/opt/markitdown-backup/services/markitdown`；
+- build context 指向 `/opt/markitdown-releases/current/services/markitdown`；
 - state/spool 指向 `/srv/markitdown-data`；
 - API 没有 Compose `ports`，其唯一网络为 `internal: true` 的 `api-internal`；
 - `obsidian-markitdown-proxy.socket` 只监听 `127.0.0.1:18010`，代理目标是经运行态门禁确认的 API IPv4；
@@ -506,7 +491,7 @@ Bearer Token；两层必须同时保留。至少验证：
 |---|---:|---|
 | `GET /livez` | 否 | 只证明 API 进程存活 |
 | `GET /v1/health` | 是 | 返回 Worker heartbeat、版本、build ID、队列和固定能力 |
-| `POST /v1/tasks` | 是 | 原始 PDF 或 PPTX 流式上传；新建返回 202，幂等命中返回 200 |
+| `POST /v1/tasks` | 是 | 原始 PDF、PPTX 或 DOCX 流式上传；新建返回 202，幂等命中返回 200 |
 | `GET /v1/tasks/{id}` | 是 | 查询 `pending/processing/completed/failed/cancelled/expired` |
 | `GET /v1/tasks/{id}/status` | 是 | 状态接口兼容别名 |
 | `GET /v1/tasks/{id}/result` | 是 | 等待中返回 202，成功后返回 ZIP，过期返回 410 |
@@ -523,26 +508,28 @@ Content-Type: application/pdf
 Idempotency-Key: <16-200 safe ASCII characters>
 X-Source-SHA256: <64 hexadecimal characters>
 X-Filename: <optional percent-encoded display name>
-X-MarkItDown-Profile: fallback-text-v1
+X-MarkItDown-Profile: fallback-assets-v2
 
-<raw PDF or PPTX bytes>
+<raw PDF, PPTX, or DOCX bytes>
 ```
 
-服务不接受 multipart、URL、服务器文件路径、旧 PPT 或其他文档格式。服务端会流式限制大小：
-PDF 检查 `%PDF-` 魔数；PPTX 检查 OOXML ZIP 结构、路径安全、加密/重复条目、解压总量、
-必需部件、VBA 宏和幻灯片数量；两种格式都会重新计算 SHA-256。`X-Filename` 只用于显示和
+服务不接受 multipart、URL、服务器文件路径、旧 PPT/DOC 或其他文档格式。服务端会流式限制大小：
+PDF 检查 `%PDF-` 魔数；PPTX/DOCX 检查 OOXML ZIP 结构、路径安全、加密/重复条目、解压总量、
+必需部件、VBA 宏和逻辑单元数量；三种格式都会重新计算 SHA-256。`X-Filename` 只用于显示和
 manifest，不作为磁盘路径。
 
-相同 `Idempotency-Key` 与相同源哈希/profile 会返回原任务；同一键绑定不同输入时返回 409。成功结果
-TTL 过期后，该键可以安全创建新任务。
+客户端把 profile、health 返回的 build ID 摘要和源哈希共同写入 `Idempotency-Key`。同一键与
+相同源哈希/profile 会返回原任务；同一键绑定不同输入时返回 409。新 build 会获得新的幂等身份，
+不会误取升级前的缓存；成功结果 TTL 过期后，该键也可以安全创建新任务。
 
 ### 11.3 结果 ZIP
 
-结果严格只包含：
+PDF 结果严格只包含前两项；DOCX/PPTX 有安全可发布的内嵌位图时还会包含内容寻址附件：
 
 ```text
 manifest.json
 document.md
+images/<完整SHA-256>.<扩展名>  # 可选；同一图片只保存一次
 ```
 
 manifest 会绑定：
@@ -550,13 +537,16 @@ manifest 会绑定：
 - 源文档 SHA-256；
 - Markdown SHA-256 和字节数；
 - MarkItDown、service 和 build 版本；
-- `fallback-text-v1`；
+- `fallback-assets-v2`；
 - `source_format=pdf|pptx|docx`；
 - `unit_kind=page|slide|document`、逻辑单元数和输入字节数；
-- 明确的能力缺失声明。
+- OOXML 图片 relationship/reference 数量和实际输出引用数量；
+- 每个附件的相对路径、SHA-256、MIME 和字节数；
+- PDF text-only、外链图片、危险 SVG 或缺图等明确 warning。
 
-服务不伪造 MinerU 的图片目录、页映射或 `content_list.json`。客户端下载 ZIP 后仍须检查
-Content-Type、ZIP 魔数、压缩大小、`X-Result-SHA256` 和 manifest。
+服务不会伪造 PDF 图片目录、页映射或 `content_list.json`。DOCX/PPTX 附件只来自原始 OOXML
+关系引用，并会在服务端和客户端分别校验。客户端下载 ZIP 后仍须检查 Content-Type、ZIP 魔数、
+压缩/展开大小、`X-Result-SHA256`、Markdown 哈希以及每个附件的 manifest 元数据。
 
 ## 12. 真实 PDF 冒烟测试
 
@@ -568,7 +558,7 @@ PDF，并把提交、轮询、下载、manifest、哈希和 Markdown 固定文�
 敏感信息的小型 PDF 做补充回归：
 
 ```bash
-cd /opt/markitdown-backup/deploy/markitdown
+cd /opt/markitdown-releases/current/deploy/markitdown
 sudo bash ./smoke-test.sh /path/to/non-sensitive-small.pdf
 ```
 
@@ -595,12 +585,12 @@ OBSIDIAN_PDF_INGEST_MARKITDOWN_TOKEN_FILE=<客户端本地受限Token文件>
 手动直用 MarkItDown 时选择：
 
 ```text
-obsidian-ingest ingest <PDF|PPTX|PPT> --flow learning --parser markitdown
+obsidian-ingest ingest <PDF|PPTX|DOCX|PPT> --flow learning --parser markitdown
 ```
 
 该入口必须完全跳过 MinerU。首次结果通过硬安全检查后仍会进入人工复核；复核完成后再使用本地
 `approve <conversion-id>` 流程发布。`--profile quality` 只属于 MinerU，不能传给手动
-MarkItDown；`auto` 回退后也仍固定使用 `fallback-text-v1`。MarkItDown 即使使用
+MarkItDown；`auto` 回退后也仍固定使用 `fallback-assets-v2`。MarkItDown 即使使用
 `--no-publish` 也会先停在 `review_required`，不会改为 `ready`。服务端不参与 Obsidian 写入。
 
 ## 14. 日常运维
@@ -608,7 +598,7 @@ MarkItDown；`auto` 回退后也仍固定使用 `fallback-text-v1`。MarkItDown 
 ### 14.1 状态检查
 
 ```bash
-cd /opt/markitdown-backup/deploy/markitdown
+cd /opt/markitdown-releases/current/deploy/markitdown
 sudo bash ./status.sh
 sudo docker compose ps
 sudo docker compose logs --tail=100 api
@@ -664,7 +654,7 @@ sudo systemctl is-active obsidian-markitdown-proxy.socket || true
 ```bash
 sudo systemctl start obsidian-markitdown.service
 sudo systemctl --no-pager --full status obsidian-markitdown.service
-cd /opt/markitdown-backup/deploy/markitdown
+cd /opt/markitdown-releases/current/deploy/markitdown
 sudo bash ./status.sh
 ```
 
@@ -689,7 +679,7 @@ SQLite 和 spool。
 应用 Token 文件变化：
 
 ```bash
-cd /opt/markitdown-backup/deploy/markitdown
+cd /opt/markitdown-releases/current/deploy/markitdown
 sudo docker compose up -d --force-recreate api
 sudo docker compose ps api
 ```
@@ -705,42 +695,67 @@ sudo docker compose ps api
 3. 记录当前 Git commit、镜像 ID/digest、`.env` 和 build ID；
 4. 确认客户端已经下载所有仍需保留的结果；
 5. 如果输出可能变化，提升 `MARKITDOWN_ENGINE_BUILD_ID`；
-6. 先构建新镜像，不覆盖旧 digest。
+6. 确认 `/opt/markitdown-releases/current`（或首次迁移时的 `/opt/markitdown-backup`）仍能通过
+   `verify-release.sh`，且 `.current-release*` 与健康容器一致；
+7. 生成新 tar，上传 tar、同名 `.sha256` 以及同一固定 revision 的两个引导文件；不要预先删除
+   任何旧镜像或旧 bundle。
 
-升级命令应从固定 revision 生成并验证过的完整部署快照执行：
+服务器先核对引导文件的已记录 SHA-256，再安装新 bundle：
 
 ```bash
-cd /opt/markitdown-backup/deploy/markitdown
+cd /absolute/staging/markitdown-release
+sha256sum --check --strict --warn ARCHIVE_NAME.tar.gz.sha256
+sha256sum install-release-bundle.sh release_bundle.py
+sudo bash ./install-release-bundle.sh \
+  --archive /absolute/staging/markitdown-release/ARCHIVE_NAME.tar.gz \
+  --checksum /absolute/staging/markitdown-release/ARCHIVE_NAME.tar.gz.sha256
+
+readlink -f /opt/markitdown-releases/current
+readlink -f /opt/markitdown-releases/previous
+cd /opt/markitdown-releases/current/deploy/markitdown
 sudo bash ./deploy.sh
 sudo bash ./status.sh
 sudo bash ./smoke-test.sh /path/to/non-sensitive-small.pdf
 ```
 
+安装器不会写入正在使用的 release tree。它在独立暂存目录完成 tar 安全检查、包内哈希和闭集校验，
+再原子安装为 `releases/<manifest SHA-256>`。若存在健康旧版本，它从新 `.env.example` 取得新镜像、
+Python 基础镜像、build 和双 manifest 身份，同时保留旧 `.env` 中的主机路径、端口、UID/GID、资源
+限制和 TTL；未知旧配置键会使升级停止，不能静默丢弃。旧 `.current-release*` 被复制到新目录，仅用于
+让 `deploy.sh` 精确确认当前健康容器并生成回滚点。最后 `current` 原子指向新 bundle，`previous`
+指向未改动的旧 bundle。此时旧 systemd 单元仍固定在旧实际目录；只有新版本完整验收后才被替换。
+
 `deploy.sh` 自身会自动执行固定文本真实 PDF Canary；`smoke-test.sh` 用代表性 PDF 做额外回归。
 升级后还要检查 health 中的 engine、service、build ID 和 result schema。新 build 必须形成新的
 客户端转换身份，不能复用旧 build 的成功缓存。
 
+客户端仍可读取已经下载的 `markitdown-result/v2` 结果，但升级不会改写已经发布的 Source Text。
+若早期 UAT 导入存在缺失图片、失效图片链接或缺少正文 H1，应保留原件并在 `1.3.0` 部署完成后
+显式重新转换；这属于重新派生，不应通过迁移脚本猜测或修补旧正文。
+
 ### 16.2 回滚
 
-每次从健康版本升级时，`deploy.sh` 都会保存完整上一健康快照：`.last-known-good-release` 记录
+每次从健康版本升级时，`deploy.sh` 都会保存完整上一健康运行快照：`.last-known-good-release` 记录
 rollback tag、不可变镜像 ID、build ID、运行镜像 release manifest、旧 bundle manifest、渲染
 Compose SHA-256 和完整环境文件 SHA-256；`.last-known-good.env` 保存对应的精确 `.env`。两者权限
-均为 `0600`。
+均为 `0600`。bundle 管理器另外完整保留旧 release tree，因此 Compose 或部署脚本发生变化时也能
+用旧 bundle 重现旧配置。
 
-`rollback.sh` **只允许无参数调用**：
+升级失败或验收后决定退回时，调用 bundle 级回滚器：
 
 ```bash
-sudo bash ./rollback.sh
+sudo bash /opt/markitdown-releases/current/deploy/markitdown/rollback-release-bundle.sh
 ```
 
-任何参数都会被拒绝；不能通过命令行指定一个历史镜像绕过完整审计快照。脚本先核对上一健康环境
-SHA-256、环境中的 build/双 manifest、rollback tag 对应的不可变镜像 ID，并使用保存的旧 `.env`
-渲染**当前** Compose。若渲染 SHA-256 不能精确重现记录值，回滚会在改动服务前拒绝，并明确要求
-恢复 manifest 摘要匹配的旧 bundle 后重试。
+回滚器不接受任意镜像或目录。它解析受控的 `current`/`previous` 指针，逐份校验两个 release，且
+要求 `.last-known-good-release` 记录的旧 bundle SHA-256 与 `previous` 完全相等。随后把完整回滚记录
+原子传给旧 bundle，由旧 bundle 自己的 `rollback.sh` 核对环境 SHA-256、不可变镜像 ID、build、双
+manifest 和旧 Compose，使用 `--no-build` 启动旧镜像，并执行真实 PDF Canary。旧服务验证通过后，
+才安装旧 systemd 单元并原子交换 `current`/`previous`；替换前已有的更早回滚记录保存在 release
+store 的 `rollback-records/` 中。若旧版本验证失败，指针不变，并尝试恢复当前已验收版本。
 
-通过后，脚本把回滚环境以 `0600` 安装为 `.env`，用 `--no-build` 启动旧镜像，并自动生成固定文本
-真实 PDF，执行鉴权健康、提交、轮询、下载、manifest/哈希和 Markdown 固定文本检查。成功后才
-以 `0600` 重写 `.current-release` 与 `.current-release.env`；失败会恢复回滚前 `.env`。
+同一个 bundle 内仅回滚运行镜像时，底层 `rollback.sh` 仍只允许无参数调用；跨 bundle 升降级必须
+使用上述 bundle 级回滚器，不能手工改符号链接、复制 `.env` 或把 tar 覆盖到当前目录。
 
 旧 build 在服务器上通过 Canary 后，当前客户端仍可能因 build、schema 或能力身份不匹配而严格
 拒绝它。此时必须配套恢复与旧 build 兼容的客户端，或改用服务端与客户端共同兼容的 release；
@@ -754,6 +769,7 @@ SHA-256、环境中的 build/双 manifest、rollback tag 对应的不可变镜�
 需要备份或记录：
 
 - 固定源 revision 或部署快照 digest；
+- `/opt/markitdown-releases/current` 与 `previous` 指向的两份已验证完整 bundle；
 - Compose 配置，以及权限为 `0600` 的 `.env`、`.current-release*`、`.last-known-good*` 审计记录；
 - 镜像 digest；
 - 当前 engine/service/build 身份；
@@ -778,7 +794,9 @@ SHA-256、环境中的 build/双 manifest、rollback tag 对应的不可变镜�
 - [ ] 用户已确认 `/srv/markitdown-data` 或替代数据根；
 - [ ] 用户已确认预期挂载点，实时 `findmnt` 的 TARGET 和 SOURCE 与记录值精确一致；
 - [ ] 用户已确认 CPU/RAM、sudo 能力及获准访问的 Tailnet 用户、设备或 tag；
-- [ ] `/opt/markitdown-backup` 包含完整 `deploy` 与 `services`；
+- [ ] `/opt/markitdown-releases/current` 指向 manifest SHA-256 命名的完整 `deploy` 与 `services`；
+- [ ] 升级时 `previous` 指向未改动且通过闭集校验的上一 bundle（首次旧布局迁移可指向
+  `/opt/markitdown-backup`）；
 - [ ] Compose 构建上下文正确指向部署快照内服务源码；
 - [ ] tar.gz 包外 SHA-256、包内 release manifest、逐文件与闭集校验均通过并已记录；
 - [ ] `.env` 为 `0600`，且数据根、挂载/source、UID/GID、端口、build ID、bundle manifest 和运行
@@ -802,7 +820,8 @@ SHA-256、环境中的 build/双 manifest、rollback tag 对应的不可变镜�
 - [ ] `quality` 不传给 MarkItDown，`--no-publish` 的 MarkItDown 结果仍停在 `review_required`；
 - [ ] MarkItDown 输出停在人工复核门禁，不自动覆盖已有笔记；
 - [ ] `.current-release*` 与 `.last-known-good*` 的镜像、双 manifest、完整环境和 Compose 审计完整；
-- [ ] 升级、无参数回滚、Token 轮换和灾难恢复记录完整。
+- [ ] bundle 级回滚已验证旧 Compose/镜像/Canary、systemd 单元和 `current`/`previous` 原子交换；
+- [ ] 升级、无参数运行镜像回滚、Token 轮换和灾难恢复记录完整。
 
 在第 1 节全部必填参数得到用户确认且本次执行获得明确授权以前，本手册只作为待执行方案，不授权
 连接或修改任何服务器。

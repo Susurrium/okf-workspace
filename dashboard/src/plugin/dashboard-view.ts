@@ -1,4 +1,4 @@
-import { ItemView, Notice, TFile, WorkspaceLeaf, type App } from "obsidian";
+import { ItemView, Menu, Notice, TFile, WorkspaceLeaf, type App } from "obsidian";
 
 import { LocalApi } from "../api/client.js";
 import type {
@@ -77,6 +77,14 @@ const PAGE_COPY: Readonly<Record<Section, { title: string; description: string }
   system: { title: "System", description: "只处理异常、后台任务和高级维护。" },
 };
 
+export const PROJECT_MENU_LABELS = [
+  "项目日志…",
+  "记录待整理想法",
+  "添加资料",
+  "在 Claudian 中整理项目",
+  "更改 Project 状态…",
+] as const;
+
 /** Resolves the concrete Vault files a Study Guide hands to Codex. */
 export async function resolveDashboardLearningSources(
   app: App,
@@ -127,7 +135,6 @@ export class OkfDashboardView extends ItemView {
   private knowledgeQuery = "";
   private inboxIngestedVia: IngestedViaFilter = "all";
   private readonly selectedCaptures = new Set<string>();
-  private readonly expandedProjectPaths = new Set<string>();
   private readonly pageScroll = new Map<Section, number>();
   private readonly feedScroll: Partial<Record<FeedKind, number>> = {};
   private readonly feedScrollPersistTimers: Partial<Record<FeedKind, number>> = {};
@@ -174,10 +181,6 @@ export class OkfDashboardView extends ItemView {
     const projectsTab = state.pages.projects.tab;
     if (projectsTab === "active" || projectsTab === "paused" || projectsTab === "completed") {
       this.projectsTab = projectsTab;
-    }
-    const expandedProjects = state.pages.projects.filters.expanded;
-    if (typeof expandedProjects === "string") {
-      for (const path of parseStoredPaths(expandedProjects)) this.expandedProjectPaths.add(path);
     }
     const knowledgeFilter = state.pages.knowledge.filters.view;
     if (
@@ -749,29 +752,6 @@ export class OkfDashboardView extends ItemView {
     return row;
   }
 
-  private pendingCaptureLinks(parent: HTMLElement, captures: readonly NoteSummary[]): void {
-    for (const capture of captures.slice(0, 3)) {
-      const open = parent.createEl("button", {
-        text: `待整理：${compactText(capture.title, 36)}`,
-        cls: "okf-dashboard__ghost-action",
-        attr: { type: "button" },
-      });
-      open.addEventListener("click", () => void this.openPath(capture.path));
-    }
-    if (captures.length > 3) {
-      const inbox = parent.createEl("button", {
-        text: `其余 ${captures.length - 3} 条去 Inbox`,
-        cls: "okf-dashboard__ghost-action",
-        attr: { type: "button" },
-      });
-      inbox.addEventListener("click", () => {
-        this.inboxTab = "decision";
-        this.plugin.updateDashboardPageUiState("inbox", { tab: "decision" });
-        this.openSection("inbox");
-      });
-    }
-  }
-
   private openSection(section: Section): void {
     if (this.refreshTimer !== undefined) {
       window.clearTimeout(this.refreshTimer);
@@ -1185,7 +1165,7 @@ export class OkfDashboardView extends ItemView {
           void this.runButtonAction(discardSelected, async () => {
             const result = await this.api().batchCaptures("discard", paths);
             this.selectedCaptures.clear();
-            new Notice(`已归档 ${result.count} 条记录`);
+            new Notice(`已移除 ${result.count} 条记录`);
           }, true);
         });
       }
@@ -1202,31 +1182,6 @@ export class OkfDashboardView extends ItemView {
       if (conversions.length) this.renderInboxConversionStage(container, conversions);
     }
 
-    const processed = projection.processed_captures.filter((note) =>
-      this.inboxIngestedVia === "all" ||
-        (note.ingested_via ?? "unlabeled") === this.inboxIngestedVia,
-    );
-    if (processed.length && this.inboxTab === "progress") {
-      const archived = this.dashboardSection(
-        container,
-        "历史兼容项",
-        "旧流程留下的已处理 Capture；新流程发布后会自动移出 Inbox。",
-        "okf-dashboard__section--low-priority",
-      );
-      const archiveAll = archived.createEl("button", {
-        text: `归档全部 (${processed.length})`,
-        cls: "okf-dashboard__ghost-action",
-      });
-      archiveAll.addEventListener("click", () => {
-        void this.runButtonAction(archiveAll, async () => {
-          const result = await this.api().batchCaptures(
-            "archive-processed",
-            processed.map((note) => note.path),
-          );
-          new Notice(`已归档 ${result.count} 条已处理 Capture`);
-        }, true);
-      });
-    }
   }
 
   private renderInboxDecisionStage(
@@ -1915,7 +1870,7 @@ export class OkfDashboardView extends ItemView {
     if (active) return;
 
     const interactive = more.createEl("button", {
-      text: note.material_ready ? "用 Codex 完善" : "与 Codex 一起生成",
+      text: note.material_ready ? "用 Claudian 完善" : "与 Claudian 一起生成",
       cls: "okf-dashboard__ghost-action",
     });
     interactive.addEventListener("click", () => {
@@ -1932,14 +1887,14 @@ export class OkfDashboardView extends ItemView {
           },
         ))
         .catch((error: unknown) => {
-          new Notice(error instanceof Error ? error.message : "无法打开 Codex 面板", 10_000);
+          new Notice(error instanceof Error ? error.message : "无法打开 Claudian", 10_000);
         })
         .finally(() => {
           interactive.disabled = false;
         });
     });
     if (note.material_ready) {
-      const discuss = more.createEl("button", { text: "用 Codex 讨论", cls: "okf-dashboard__ghost-action" });
+      const discuss = more.createEl("button", { text: "用 Claudian 讨论", cls: "okf-dashboard__ghost-action" });
       discuss.addEventListener("click", () => {
         void this.copyPrompt("结合这篇 Study Guide 和相关 Wiki 帮助我继续学习和解答问题。", {
           contextPaths: [note.path],
@@ -2044,6 +1999,14 @@ export class OkfDashboardView extends ItemView {
           relativeMoment(project.modified_at),
         ].filter(Boolean).join(" · "),
       });
+      const counts = [
+        project.pending_captures.length ? `待整理 ${project.pending_captures.length}` : "",
+        linkedLearning.length ? `学习 ${linkedLearning.length}` : "",
+        relatedMaterials.length ? `资料 ${relatedMaterials.length}` : "",
+      ].filter(Boolean);
+      if (counts.length) {
+        main.createDiv({ cls: "okf-project-row__counts", text: counts.join(" · ") });
+      }
       const rowActions = row.createDiv({ cls: "okf-dashboard__row-actions" });
       const open = rowActions.createEl("button", {
         text: "打开",
@@ -2051,100 +2014,49 @@ export class OkfDashboardView extends ItemView {
         attr: { type: "button" },
       });
       open.addEventListener("click", () => void this.openPath(project.path));
-      const capture = rowActions.createEl("button", {
-        text: "记录想法",
-        cls: "okf-dashboard__secondary-action okf-dashboard__row-action",
-        attr: { type: "button" },
-      });
-      capture.addEventListener("click", () => this.plugin.promptCapture({ project: project.path }));
-      const details = row.createEl("details", { cls: "okf-dashboard__row-details" });
-      details.open = this.expandedProjectPaths.has(project.path);
-      details.addEventListener("toggle", () => {
-        if (details.open) this.expandedProjectPaths.add(project.path);
-        else this.expandedProjectPaths.delete(project.path);
-        this.plugin.updateDashboardPageUiState("projects", {
-          filters: { expanded: JSON.stringify([...this.expandedProjectPaths]) },
-        });
-      });
-      details.createEl("summary", {
-        text: `更多 · 待整理 ${project.pending_captures.length} · 关联学习 ${linkedLearning.length} · 资料 ${relatedMaterials.length} · Decision ${project.decisions.length} · Output ${project.outputs.length}`,
-      });
-      if (project.current_state) {
-        details.createDiv({
-          cls: "okf-dashboard__muted okf-project-row__current-state",
-          text: `当前状态：${compactText(project.current_state, 180)}`,
-        });
-      }
-      details.createDiv({
-        cls: "okf-dashboard__muted okf-project-row__action-note",
-        text: "记录项目想法会保存到 Inbox；快速记录进展只追加日志；整理项目状态会交给 Codex 更新当前状态和下一步。",
-      });
-      const more = details.createDiv({ cls: "okf-dashboard__actions" });
-      this.pendingCaptureLinks(more, project.pending_captures);
-      for (const guide of linkedLearning.slice(0, 3)) {
-        const study = more.createEl("button", {
-          text: `学习：${compactText(guide.title, 36)}`,
-          cls: "okf-dashboard__ghost-action",
-        });
-        study.addEventListener("click", () => void this.openPath(guide.path));
-      }
-      if (linkedLearning.length > 3) {
-        const allLearning = more.createEl("button", {
-          text: "查看此 Project 的全部学习材料",
-          cls: "okf-dashboard__ghost-action",
-        });
-        allLearning.addEventListener("click", () => {
-          this.learningContext = "project";
-          this.learningRelationPath = project.path;
-          this.plugin.updateDashboardPageUiState("learning", {
-            filters: { context: "project", relation: project.path },
-          });
-          this.openSection("learning");
-        });
-      }
-      if (this.projectsTab === "active") {
-        const progress = more.createEl("button", {
-          text: "快速记录进展（追加日志）",
-          cls: "okf-dashboard__secondary-action",
-        });
-        progress.addEventListener("click", () => this.plugin.promptProjectProgress(project.path));
-      }
-      const log = more.createEl("button", { text: "打开项目日志", cls: "okf-dashboard__ghost-action" });
-      log.addEventListener("click", () => void this.openPath(project.log_path));
-      const decision = more.createEl("button", { text: "记录关键决定", cls: "okf-dashboard__ghost-action" });
-      decision.addEventListener("click", () => this.plugin.promptProjectDecision(project.path));
-      const projectDirectory = project.path.split("/").slice(0, -1).join("/");
-      const codex = more.createEl("button", { text: "整理项目状态", cls: "okf-dashboard__ghost-action" });
-      codex.addEventListener("click", () => {
-        void this.copyPrompt("根据已有项目主页和日志，梳理当前状态、关键决定、阻塞和下一步。", {
-          contextPaths: [project.path, `${projectDirectory}/log.md`],
-          actionMode: "write",
-          skill: "capture-project-progress",
-        });
+      const menuButton = rowActions.createEl("button", {
+        text: "…",
+        cls: "okf-dashboard__ghost-action okf-dashboard__row-action okf-project-row__menu-trigger",
+        attr: { type: "button", "aria-label": `${project.title} 的更多操作` },
       });
       const currentStatus = project.project_status === "paused" || project.project_status === "completed"
         ? project.project_status
         : "active";
-      for (const option of projectStatusActions(currentStatus)) {
-        const status = more.createEl("button", { text: option.label, cls: "okf-dashboard__ghost-action" });
-        status.addEventListener("click", () => {
-          status.disabled = true;
-          void this.plugin.setProjectStatus(project.path, option.value)
-            .then(() => {
-              new Notice(option.notice);
-              return this.render(true);
-            })
-            .catch((error: unknown) => {
-              new Notice(error instanceof Error ? error.message : "更新 Project 状态失败");
-              status.disabled = false;
+      menuButton.addEventListener("click", (event) => {
+        const menu = new Menu();
+        menu.addItem((item) => item
+          .setTitle(PROJECT_MENU_LABELS[0])
+          .setIcon("notebook-pen")
+          .onClick(() => this.plugin.promptProjectProgress(project.path)));
+        menu.addItem((item) => item
+          .setTitle(PROJECT_MENU_LABELS[1])
+          .setIcon("inbox")
+          .onClick(() => this.plugin.promptCapture({ project: project.path })));
+        const slug = project.path.split("/")[1];
+        if (slug) {
+          menu.addItem((item) => item
+            .setTitle(PROJECT_MENU_LABELS[2])
+            .setIcon("file-plus")
+            .onClick(() => this.plugin.promptDocumentImport({ project: slug })));
+        }
+        const projectDirectory = project.path.split("/").slice(0, -1).join("/");
+        menu.addItem((item) => item
+          .setTitle(PROJECT_MENU_LABELS[3])
+          .setIcon("bot")
+          .onClick(() => {
+            void this.copyPrompt("根据已有项目主页和日志，梳理当前状态、关键决定、阻塞和下一步。", {
+              contextPaths: [project.path, `${projectDirectory}/log.md`],
+              actionMode: "write",
+              skill: "capture-project-progress",
             });
-        });
-      }
-      const slug = project.path.split("/")[1];
-      if (slug) {
-        const add = more.createEl("button", { text: "添加资料", cls: "okf-dashboard__ghost-action" });
-        add.addEventListener("click", () => this.plugin.promptDocumentImport({ project: slug }));
-      }
+          }));
+        menu.addSeparator();
+        menu.addItem((item) => item
+          .setTitle(PROJECT_MENU_LABELS[4])
+          .setIcon("circle-dot")
+          .onClick(() => this.plugin.promptProjectStatus(project.path, currentStatus)));
+        menu.showAtMouseEvent(event);
+      });
     }
   }
 
@@ -2305,7 +2217,7 @@ export class OkfDashboardView extends ItemView {
           today.disabled = false;
         });
     });
-    const jot = actions.createEl("button", { text: "快速记一笔", cls: "okf-dashboard__secondary-action" });
+    const jot = actions.createEl("button", { text: "打开随手记录", cls: "okf-dashboard__secondary-action" });
     jot.addEventListener("click", () => this.plugin.promptDailyCapture());
     const reflection = actions.createEl("button", { text: "新建 Reflection", cls: "okf-dashboard__ghost-action" });
     reflection.addEventListener("click", () => this.plugin.promptReflection());
@@ -2468,7 +2380,7 @@ export class OkfDashboardView extends ItemView {
     if (this.systemCache) {
       this.renderSystemSnapshot(content, this.systemCache, null, "loading");
       header.setText(
-        `Dashboard ${DASHBOARD_VERSION} · CLI ${this.systemCache.version} · 上次检查 ${this.systemCache.checked_at}`,
+        `Dashboard ${DASHBOARD_VERSION} · CLI ${this.systemCache.version} · 上次检查 ${formatLocalTimestamp(this.systemCache.checked_at)}`,
       );
     } else {
       header.setText(`Dashboard ${DASHBOARD_VERSION} · 正在后台读取系统快照…`);
@@ -2491,12 +2403,12 @@ export class OkfDashboardView extends ItemView {
           latest.status === "fulfilled" ? "confirmed" : "unavailable",
         );
         header.setText(
-          `Dashboard ${DASHBOARD_VERSION} · CLI ${status.value.version} · 检查于 ${status.value.checked_at}`,
+          `Dashboard ${DASHBOARD_VERSION} · CLI ${status.value.version} · 检查于 ${formatLocalTimestamp(status.value.checked_at)}`,
         );
       } else {
         header.setText(
           this.systemCache
-            ? `系统刷新失败，继续显示 ${this.systemCache.checked_at} 的快照`
+            ? `系统刷新失败，继续显示 ${formatLocalTimestamp(this.systemCache.checked_at)} 的快照`
             : "系统诊断暂时不可用；本地笔记功能仍可正常使用",
         );
       }
@@ -2508,22 +2420,30 @@ export class OkfDashboardView extends ItemView {
 
   private renderCodexIntegrationStatus(container: HTMLElement): void {
     const available = this.plugin.isCodexConsoleAvailable();
-    const card = container.createDiv({ cls: "okf-dashboard__card" });
-    card.createEl("h3", { text: "Codex 面板" });
-    card.createDiv({
-      cls: "okf-dashboard__muted",
-      text: available ? "可用 · Codex 原生会话" : "未加载",
+    const card = container.createDiv({
+      cls: "okf-dashboard__system-row",
+      attr: { "data-system-status": available ? "ok" : "warning" },
+    });
+    const identity = card.createDiv({ cls: "okf-dashboard__system-identity" });
+    identity.createEl("h3", { text: "Claudian" });
+    identity.createSpan({
+      cls: `okf-dashboard__status-badge${available ? " is-ok" : " is-warning"}`,
+      text: available ? "可用" : "未加载",
     });
     card.createDiv({
+      cls: "okf-dashboard__system-detail",
       text: available
         ? "Dashboard 可直接交接任务、上下文文件和本轮权限，不经过 Terminal 或剪贴板。"
-        : "启用内嵌 Codex 面板插件并重新加载 Obsidian 后即可使用。",
+        : "启用 Claudian 插件并重新加载 Obsidian 后即可使用。",
     });
     if (available) {
-      const open = card.createEl("button", { text: "打开 Codex" });
+      const open = card.createEl("button", {
+        text: "打开",
+        cls: "okf-dashboard__secondary-action okf-dashboard__system-action",
+      });
       open.addEventListener("click", () => {
         void this.plugin.openCodexConsole().catch((error: unknown) => {
-          new Notice(error instanceof Error ? error.message : "无法打开 Codex 面板", 10_000);
+          new Notice(error instanceof Error ? error.message : "无法打开 Claudian", 10_000);
         });
       });
     }
@@ -2611,24 +2531,34 @@ export class OkfDashboardView extends ItemView {
 
   private systemCard(parent: HTMLElement, item: SystemItem): void {
     const card = parent.createDiv({
-      cls: "okf-dashboard__compact-row okf-dashboard__compact-row--stacked",
+      cls: "okf-dashboard__system-row",
       attr: { "data-system-status": item.status },
     });
-    card.createEl("h3", { text: item.label });
-    card.createDiv({ cls: "okf-dashboard__muted", text: item.status });
-    card.createDiv({ text: item.detail });
+    const identity = card.createDiv({ cls: "okf-dashboard__system-identity" });
+    identity.createEl("h3", { text: item.label });
+    identity.createSpan({
+      cls: `okf-dashboard__status-badge ${systemStatusClass(item.status)}`,
+      text: systemStatusLabel(item.status),
+    });
+    card.createDiv({ cls: "okf-dashboard__system-detail", text: item.detail });
     if (item.item_id === "index" && item.action) {
-      const action = card.createEl("button", { text: "重建索引" });
+      const action = card.createEl("button", {
+        text: "重建索引",
+        cls: "okf-dashboard__secondary-action okf-dashboard__system-action",
+      });
       action.addEventListener("click", () => {
         void this.runButtonAction(action, () => this.api().rebuildIndex(), true);
       });
     } else if (item.item_id === "feeds" && item.action === "立即同步") {
-      const action = card.createEl("button", { text: "立即同步" });
+      const action = card.createEl("button", {
+        text: "立即同步",
+        cls: "okf-dashboard__secondary-action okf-dashboard__system-action",
+      });
       action.addEventListener("click", () => {
         void this.runButtonAction(action, () => this.plugin.syncFeedsNow(), true, "Feed 已同步");
       });
     } else if (item.action) {
-      card.createDiv({ cls: "okf-dashboard__muted", text: item.action });
+      card.createDiv({ cls: "okf-dashboard__muted okf-dashboard__system-action", text: item.action });
     }
   }
 
@@ -2785,7 +2715,7 @@ export class OkfDashboardView extends ItemView {
       await this.plugin.openCodexPrompt(prompt, options);
     } catch (error) {
       new Notice(
-        `无法打开 Codex：${error instanceof Error ? error.message : "Codex 面板不可用"}`,
+        `无法打开 Claudian：${error instanceof Error ? error.message : "Claudian 面板不可用"}`,
         10_000,
       );
     }
@@ -2946,6 +2876,30 @@ function courseStatusLabel(status: string | null | undefined): string {
   return "Active";
 }
 
+export function systemStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    configured: "已配置",
+    available: "可用",
+    current: "最新",
+    ok: "正常",
+    healthy: "正常",
+    deferred: "稍后配置",
+    warning: "需要注意",
+    failed: "失败",
+    unavailable: "不可用",
+  };
+  return labels[status.toLocaleLowerCase()] ?? status;
+}
+
+function systemStatusClass(status: string): string {
+  const normalized = status.toLocaleLowerCase();
+  if (["configured", "available", "current", "ok", "healthy"].includes(normalized)) {
+    return "is-ok";
+  }
+  if (["failed", "unavailable"].includes(normalized)) return "is-error";
+  return "is-warning";
+}
+
 function semanticStageLabel(operation: SemanticOperationRecord): string {
   if (operation.status === "queued") return "已排队，等待 Codex 开始";
   if (operation.status === "orphaned") return "后台生成中断，等待恢复";
@@ -2989,33 +2943,10 @@ function relativeMoment(value: string | null | undefined, now = Date.now()): str
   return new Date(moment).toLocaleDateString();
 }
 
-function parseStoredPaths(value: string): string[] {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function projectStatusActions(
-  status: "active" | "paused" | "completed",
-): { label: string; value: "active" | "paused" | "completed"; notice: string }[] {
-  if (status === "active") {
-    return [
-      { label: "暂停 Project", value: "paused", notice: "Project 已暂停" },
-      { label: "标记完成", value: "completed", notice: "Project 已完成" },
-    ];
-  }
-  if (status === "paused") {
-    return [
-      { label: "恢复 Project", value: "active", notice: "Project 已恢复" },
-      { label: "标记完成", value: "completed", notice: "Project 已完成" },
-    ];
-  }
-  return [{ label: "重新开启", value: "active", notice: "Project 已重新开启" }];
+function formatLocalTimestamp(value: string): string {
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return value;
+  return new Date(time).toLocaleString("zh-CN", { hour12: false });
 }
 
 function aiDailyMetadata(item: FeedDigestItem): string {

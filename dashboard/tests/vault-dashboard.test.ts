@@ -38,7 +38,7 @@ describe("VaultDashboardReader", () => {
         note(
           "Capture",
           "课程灵感",
-          "capture_status: open\ncourse: /learning/courses/cs61a/course.md\ningested_via: direct-entry",
+          "course: /learning/courses/cs61a/course.md\ningested_via: direct-entry",
           "之后整理进课程。",
         ),
       ],
@@ -47,7 +47,7 @@ describe("VaultDashboardReader", () => {
         note(
           "Capture",
           "项目灵感",
-          "capture_status: open\nproject: /projects/okf/project.md\ningested_via: direct-entry",
+          "project: /projects/okf/project.md\ningested_via: direct-entry",
           "之后整理进项目。",
         ),
       ],

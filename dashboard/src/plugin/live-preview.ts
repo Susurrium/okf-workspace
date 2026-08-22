@@ -11,15 +11,11 @@ import {
   FEED_DECISION_ACTIONS,
   feedDecisionFeedback,
 } from "../ui/ai-daily-inline-decision.js";
+import { feedItemMappings, type FeedItemMapping } from "../feeds/mappings.js";
 
 export interface LiveDecisionAdapter {
   decide(feed: FeedKind, itemId: string, action: FeedDecisionAction): Promise<FeedDecisionResult>;
   openPath(path: string): Promise<void>;
-}
-
-interface FeedItemMapping {
-  id: string;
-  block_id: string;
 }
 
 class DecisionWidget extends WidgetType {
@@ -104,9 +100,9 @@ class DecisionWidget extends WidgetType {
     if (!file) return undefined;
     const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
     const feed = frontmatter?.feed;
-    const mappings = frontmatter?.feed_items;
-    if ((feed !== "ai-daily" && feed !== "treehole") || !Array.isArray(mappings)) return undefined;
-    const mapping = (mappings as FeedItemMapping[]).find((candidate) => candidate.block_id === this.blockId);
+    const mappings = feedItemMappings(frontmatter);
+    if ((feed !== "ai-daily" && feed !== "treehole") || !mappings.length) return undefined;
+    const mapping = mappings.find((candidate) => candidate.block_id === this.blockId);
     return mapping ? { ...mapping, feed } : undefined;
   }
 }

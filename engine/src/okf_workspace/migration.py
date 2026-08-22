@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
+import tempfile
 from collections.abc import Mapping, MutableMapping
 from contextlib import suppress
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import cast
+from urllib.parse import urlsplit
 
 from okf_workspace.git import GitCheckpointError, create_checkpoint
 from okf_workspace.ingestion import (
@@ -20,6 +23,7 @@ from okf_workspace.ingestion import (
     normalize_ingested_via,
 )
 from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
+from okf_workspace.okf.paths import resolve_bundle_path, slugify
 from okf_workspace.okf.relations import (
     inherited_context_fields,
     normalize_context_reference,
@@ -34,6 +38,42 @@ from okf_workspace.sources import SourcePublisher
 
 _EMPTY_QUEUE_MARKER = "当前没有待学习项目。"
 _MISSING = object()
+_DEFAULT_WEB_CLIPPER_FIELDS = frozenset(
+    {"title", "source", "author", "published", "created", "description", "tags"}
+)
+_CANONICAL_CAPTURE_FIELDS = frozenset({"type", "created_at", "ingested_via", "resource"})
+
+
+def _read_json_object(path: Path) -> dict[str, object]:
+    if not path.is_file():
+        return {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        message = f"Cannot migrate invalid JSON without risking user settings: {path}"
+        raise ValueError(message) from exc
+    if not isinstance(loaded, dict):
+        raise ValueError(f"Expected a JSON object in Obsidian settings: {path}")
+    loaded_settings = cast(dict[object, object], loaded)
+    return {str(key): value for key, value in loaded_settings.items()}
+
+
+def _write_text_atomic(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _is_learning_queue_placeholder(document: OkfDocument) -> bool:
@@ -55,6 +95,131 @@ def _unique_target(root: Path, relative: Path) -> Path:
         if not candidate.exists():
             return candidate
         number += 1
+
+
+def _default_clipper_created_date(value: object) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError:
+        return None
+
+
+def _is_http_url(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    parsed = urlsplit(value.strip())
+    return parsed.scheme.lower() in {"http", "https"} and bool(parsed.netloc)
+
+
+def _has_default_clipper_tag(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().casefold() == "clippings"
+    if isinstance(value, (list, tuple)):
+        items = cast(list[object] | tuple[object, ...], value)
+        return any(
+            isinstance(item, str) and item.strip().casefold() == "clippings" for item in items
+        )
+    return False
+
+
+def _first_visible_line(body: str) -> str:
+    return next((line.strip() for line in body.splitlines() if line.strip()), "")
+
+
+def _prepend_h1(title: str, body: str) -> str:
+    separator = "\n" if body.startswith("\n") else "\n\n"
+    return f"# {title.strip()}{separator}{body}"
+
+
+def _is_default_web_clipper_document(document: OkfDocument) -> bool:
+    """Match only the official Web Clipper default template's stable signature."""
+
+    fields = document.frontmatter
+    title = fields.get("title")
+    return (
+        _DEFAULT_WEB_CLIPPER_FIELDS.issubset(fields)
+        and _CANONICAL_CAPTURE_FIELDS.isdisjoint(fields)
+        and isinstance(title, str)
+        and bool(title.strip())
+        and _is_http_url(fields.get("source"))
+        and _default_clipper_created_date(fields.get("created")) is not None
+        and _has_default_clipper_tag(fields.get("tags"))
+    )
+
+
+def _migrate_default_web_clippings(root: Path) -> list[str]:
+    """Move exact default Web Clipper notes into the canonical Capture Inbox."""
+
+    directory = root / "Clippings"
+    if not directory.is_dir():
+        return []
+
+    changes: list[str] = []
+    for source in sorted(directory.glob("*.md")):
+        try:
+            document = read_document(source)
+        except (OSError, ValueError):
+            continue
+        if not _is_default_web_clipper_document(document):
+            continue
+
+        title = cast(str, document.frontmatter["title"]).strip()
+        resource = cast(str, document.frontmatter["source"]).strip()
+        created_date = _default_clipper_created_date(document.frontmatter["created"])
+        if created_date is None:  # Kept explicit for type narrowing and defensive safety.
+            continue
+        try:
+            modified = datetime.fromtimestamp(source.stat().st_mtime).astimezone()
+        except OSError:
+            continue
+        created_at = modified.replace(
+            year=created_date.year,
+            month=created_date.month,
+            day=created_date.day,
+        )
+        slug = slugify(title)[:80].rstrip("-_") or "web-clip"
+        filename = f"{created_at:%Y-%m-%d-%H%M%S}-{slug}.md"
+        relative = Path("inbox") / "captures" / f"{created_at:%Y}" / f"{created_at:%m}" / filename
+        target = _unique_target(root, relative)
+
+        preserved = {
+            str(key): value
+            for key, value in document.frontmatter.items()
+            if key not in {"title", "source", "created"}
+        }
+        body = document.body
+        if not re.match(r"^#(?:\s|$)", _first_visible_line(body)):
+            body = _prepend_h1(title, body)
+        migrated = OkfDocument(
+            {
+                "type": "Capture",
+                "title": title,
+                "created_at": created_at.isoformat(timespec="seconds"),
+                "ingested_via": WEB_CLIP,
+                "resource": resource,
+                **preserved,
+            },
+            body,
+        )
+        write_document(target, migrated, create_only=True)
+        try:
+            source.unlink()
+        except OSError:
+            target.unlink(missing_ok=True)
+            raise
+        changes.append(
+            f"{source.relative_to(root).as_posix()} -> {target.relative_to(root).as_posix()}"
+        )
+
+    with suppress(OSError):
+        directory.rmdir()
+    return changes
 
 
 def _description(document: OkfDocument) -> str:
@@ -199,20 +364,27 @@ def _sync_system_resources(root: Path, templates: Path) -> list[str]:
 
     obsidian = root / ".obsidian"
     obsidian.mkdir(parents=True, exist_ok=True)
+    app_target = obsidian / "app.json"
+    app_settings = _read_json_object(app_target)
+    app_settings.update(
+        {
+            "showInlineTitle": False,
+            "propertiesInDocument": "hidden",
+        }
+    )
+    rendered_app = json.dumps(app_settings, ensure_ascii=False, indent=2) + "\n"
+    if not app_target.is_file() or app_target.read_text(encoding="utf-8") != rendered_app:
+        _write_text_atomic(app_target, rendered_app)
+        changes.append(".obsidian/app.json")
+
     for filename in ("daily-notes.json", "templates.json"):
         source = templates / ".obsidian" / filename
         target = obsidian / filename
         wanted = json.loads(source.read_text(encoding="utf-8"))
-        settings: dict[str, object] = {}
-        if target.is_file():
-            with suppress(json.JSONDecodeError):
-                loaded = json.loads(target.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    loaded_settings = cast(dict[object, object], loaded)
-                    settings = {str(key): value for key, value in loaded_settings.items()}
+        settings = _read_json_object(target)
         rendered = json.dumps({**settings, **wanted}, ensure_ascii=False, indent=2) + "\n"
         if not target.is_file() or target.read_text(encoding="utf-8") != rendered:
-            target.write_text(rendered, encoding="utf-8", newline="\n")
+            _write_text_atomic(target, rendered)
             changes.append(f".obsidian/{filename}")
     return changes
 
@@ -1027,6 +1199,32 @@ def _ensure_source_pairs(root: Path) -> list[str]:
     return changes
 
 
+def _ensure_source_text_h1(root: Path) -> list[str]:
+    """Add the missing visible title to legacy Source Text without rewriting its body."""
+
+    changes: list[str] = []
+    directory = root / "sources" / "text"
+    if not directory.is_dir():
+        return changes
+    for path in sorted(directory.rglob("*.md")):
+        try:
+            document = read_document(path)
+        except (OSError, ValueError):
+            continue
+        if document.type != "Source Text":
+            continue
+        first_visible = _first_visible_line(document.body)
+        if not first_visible or re.match(r"^#(?:\s|$)", first_visible):
+            continue
+        title = document.frontmatter.get("title")
+        if not isinstance(title, str) or not title.strip():
+            continue
+        document.body = _prepend_h1(title, document.body)
+        write_document(path, document)
+        changes.append(f"{path.relative_to(root).as_posix()} (added missing Source Text H1)")
+    return changes
+
+
 def _clean_legacy_logs(root: Path) -> list[str]:
     changes: list[str] = []
     legacy_headings = {"# Directory Update Log", "# 目录更新日志"}
@@ -1057,6 +1255,134 @@ def _clean_legacy_logs(root: Path) -> list[str]:
                 updated += f"\n{existing}\n"
             log.write_text(updated, encoding="utf-8", newline="\n")
             changes.append(f"{relative.as_posix()} (renamed legacy project log)")
+    return changes
+
+
+def _capture_targets_exist(root: Path, value: object) -> bool:
+    if not isinstance(value, list):
+        return False
+    for item in cast(list[object], value):
+        if not isinstance(item, str):
+            continue
+        relative = item.strip().replace("\\", "/").removeprefix("/")
+        if not relative:
+            continue
+        try:
+            target = resolve_bundle_path(root.resolve(), relative)
+        except ValueError:
+            continue
+        parts = target.relative_to(root.resolve()).parts
+        durable_destination = (
+            parts[:2] == ("life", "reflections")
+            or parts[:2] == ("knowledge", "wiki")
+            or parts[:2] == ("learning", "guides")
+            or (
+                len(parts) >= 4
+                and parts[:2] == ("learning", "courses")
+                and parts[3] in {"guides", "lessons"}
+            )
+            or (len(parts) == 3 and parts[0] == "projects" and parts[2] == "log.md")
+        )
+        if durable_destination and target.is_file():
+            return True
+    return False
+
+
+def _remove_legacy_capture_links(root: Path) -> list[str]:
+    """Remove references to the retired archive copy after its body was consumed."""
+
+    changes: list[str] = []
+    archived_prefix = "/archive/captures/"
+    source_line = re.compile(r"(?m)^\s*来源：\[Capture\]\(/archive/captures/[^)]+\)\s*\n?")
+    for path in sorted(root.rglob("*.md")):
+        relative = path.relative_to(root).as_posix()
+        if relative.startswith(("system/contracts/", "system/templates/")):
+            continue
+        if any(
+            part in {".agents", ".claudian", ".git", ".obsidian", ".trash"}
+            for part in path.relative_to(root).parts
+        ):
+            continue
+        with suppress(OSError, ValueError):
+            document = read_document(path)
+            changed = False
+            raw_sources = document.frontmatter.get("sources")
+            if isinstance(raw_sources, list):
+                retained: list[object] = []
+                for item in cast(list[object], raw_sources):
+                    resource = (
+                        cast(Mapping[object, object], item).get("resource")
+                        if isinstance(item, Mapping)
+                        else item
+                    )
+                    if isinstance(resource, str) and resource.startswith(archived_prefix):
+                        changed = True
+                        continue
+                    retained.append(cast(object, item))
+                if retained:
+                    document.frontmatter["sources"] = retained
+                elif changed:
+                    document.frontmatter.pop("sources", None)
+            cleaned_body = source_line.sub("", document.body)
+            if cleaned_body != document.body:
+                document.body = cleaned_body
+                changed = True
+            if changed:
+                write_document(path, document)
+                changes.append(f"{relative} (removed retired Capture link)")
+    return changes
+
+
+def _normalize_capture_lifecycle(root: Path) -> list[str]:
+    """Migrate legacy Capture state into the Inbox-by-presence lifecycle."""
+
+    changes: list[str] = []
+    captures: list[tuple[Path, OkfDocument]] = []
+    for path in sorted(root.rglob("*.md")):
+        relative = path.relative_to(root)
+        if any(
+            part in {".agents", ".claudian", ".git", ".obsidian", ".trash"}
+            for part in relative.parts
+        ):
+            continue
+        if relative.as_posix().startswith(("system/contracts/", "system/templates/")):
+            continue
+        with suppress(OSError, ValueError):
+            document = read_document(path)
+            if document.type == "Capture":
+                captures.append((path, document))
+
+    for path, document in captures:
+        relative = path.relative_to(root)
+        rendered = relative.as_posix()
+        status = document.frontmatter.get("capture_status")
+        had_workflow_fields = (
+            "capture_status" in document.frontmatter or "processed_into" in document.frontmatter
+        )
+        target_exists = _capture_targets_exist(
+            root,
+            document.frontmatter.get("processed_into"),
+        )
+        archived = relative.parts[:2] == ("archive", "captures")
+        terminal = status == "discarded" or (status == "processed" and target_exists)
+        if terminal:
+            path.unlink()
+            changes.append(f"{rendered} (removed retired Capture copy)")
+            continue
+
+        document.frontmatter.pop("capture_status", None)
+        document.frontmatter.pop("processed_into", None)
+        if archived:
+            tail = Path(*relative.parts[2:])
+            target = _unique_target(root, Path("inbox/captures") / tail)
+            write_document(target, document, create_only=True)
+            path.unlink()
+            changes.append(f"{rendered} -> {target.relative_to(root).as_posix()}")
+        elif had_workflow_fields:
+            write_document(path, document)
+            changes.append(f"{rendered} (removed legacy Capture state)")
+
+    changes.extend(_remove_legacy_capture_links(root))
     return changes
 
 
@@ -1125,6 +1451,8 @@ def migrate_current_layout(
         agent.write_text(new_agent, encoding="utf-8", newline="\n")
         changes.append("AGENTS.md")
 
+    changes.extend(_migrate_default_web_clippings(root))
+
     knowledge_changes, link_mapping = _migrate_legacy_knowledge(root)
     changes.extend(knowledge_changes)
     changes.extend(_rewrite_links(root, link_mapping))
@@ -1161,7 +1489,9 @@ def migrate_current_layout(
     changes.extend(_rewrite_links(root, profile_links))
     changes.extend(_rewrite_profile_v3_legacy_path_prefixes(root))
     changes.extend(_normalize_profile_v3(root))
+    changes.extend(_normalize_capture_lifecycle(root))
     changes.extend(_ensure_source_pairs(root))
+    changes.extend(_ensure_source_text_h1(root))
     changes.extend(_backfill_study_guide_context(root))
     changes.extend(
         _retire_absent_legacy_operations(

@@ -26,13 +26,27 @@ def test_human_capture_daily_and_reflection_flow(tmp_path: Path) -> None:
         .as_posix()
         .startswith("inbox/captures/2026/08/2026-08-17-143205-")
     )
-    assert reflection.relative_to(vault).as_posix().startswith("life/reflections/2026-08-17-")
+    assert reflection.relative_to(vault).as_posix() == "life/reflections/关于长期主义.md"
     capture_fields = read_document(capture).frontmatter
     assert capture_fields["type"] == "Capture"
     assert capture_fields["ingested_via"] == "direct-entry"
+    assert "capture_status" not in capture_fields
     assert "补充一条真实记录。" in read_document(daily).body
     assert read_document(reflection).frontmatter["type"] == "Reflection"
     assert validate_bundle(vault).valid
+
+
+def test_reflection_uses_semantic_collision_safe_filenames(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    service = NoteService(vault, clock=lambda: NOW)
+
+    first = service.create_reflection("重复主题", "第一次。")
+    second = service.create_reflection("重复主题", "第二次。")
+
+    assert first.relative_to(vault).as_posix() == "life/reflections/重复主题.md"
+    assert second.relative_to(vault).as_posix() == "life/reflections/重复主题-2.md"
+    assert read_document(first).frontmatter["title"] == "重复主题"
+    assert read_document(second).frontmatter["title"] == "重复主题"
 
 
 def test_periodic_reviews_are_human_first_and_idempotent(tmp_path: Path) -> None:

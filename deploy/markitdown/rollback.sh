@@ -82,7 +82,8 @@ old_bundle_rendered_sha256="$(
 )"
 [[ "${old_bundle_rendered_sha256}" == "${rollback_compose_sha256}" ]] || {
   echo "ROLLBACK FAILED: the current bundle cannot reproduce the recorded Compose configuration." >&2
-  echo "Restore the release bundle whose manifest digest is ${rollback_bundle_sha256}, then retry." >&2
+  echo "Use rollback-release-bundle.sh to verify and restore the retained bundle" >&2
+  echo "whose manifest digest is ${rollback_bundle_sha256}." >&2
   exit 1
 }
 

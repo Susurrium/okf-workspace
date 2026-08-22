@@ -8,7 +8,7 @@ from okf_workspace.dashboard.catalog import scan_notes
 from okf_workspace.dashboard.views import dashboard_view, today_view
 from okf_workspace.feeds import FeedCache, FeedEdition, FeedItem, FeedKind
 from okf_workspace.notes import NoteService
-from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
+from okf_workspace.okf.frontmatter import OkfDocument, write_document
 
 
 def test_dashboard_projections_are_live_markdown_views_with_stale_reminders(
@@ -33,10 +33,6 @@ def test_dashboard_projections_are_live_markdown_views_with_stale_reminders(
     output = project.parent / "outputs" / "acceptance.md"
     output.parent.mkdir(parents=True)
     output.write_text("# 验收结果\n", encoding="utf-8")
-    processed_capture = notes.create_capture("已手工处理", "保留到批量归档。")
-    processed_document = read_document(processed_capture)
-    processed_document.frontmatter["capture_status"] = "processed"
-    write_document(processed_capture, processed_document)
     stale = notes.create_wiki(
         "旧 VPN 配置",
         "这个配置需要复核。",
@@ -56,7 +52,6 @@ def test_dashboard_projections_are_live_markdown_views_with_stale_reminders(
     catalog = scan_notes(vault, today=date(2026, 8, 17))
     project_items = cast(list[dict[str, object]], projects["projects"])
     captures = cast(list[dict[str, object]], inbox["captures"])
-    processed = cast(list[dict[str, object]], inbox["processed_captures"])
     stale_knowledge = cast(list[dict[str, object]], today["stale_knowledge"])
 
     assert today["daily"] == {
@@ -68,7 +63,7 @@ def test_dashboard_projections_are_live_markdown_views_with_stale_reminders(
     assert any(item["path"] == project.relative_to(vault).as_posix() for item in project_items)
     assert captures[0]["path"] == capture.relative_to(vault).as_posix()
     assert captures[0]["ingested_via"] == "direct-entry"
-    assert processed[0]["path"] == processed_capture.relative_to(vault).as_posix()
+    assert inbox["processed_captures"] == []
     assert project_items[0]["current_state"] == "本地服务已经部署。"
     assert project_items[0]["next_action"] == "完成生产验收。"
     assert "Dashboard 已接入真实数据" in cast(str, project_items[0]["recent_log"])
@@ -120,6 +115,33 @@ def test_dashboard_catalog_excludes_runtime_instruction_files(vault: Path) -> No
     catalog = scan_notes(vault)
 
     assert all(not note.path.startswith(".agents/") for note in catalog)
+
+
+def test_capture_outside_inbox_is_not_projected_as_pending(vault: Path, tmp_path: Path) -> None:
+    misplaced = vault / "life" / "reflections" / "misplaced.md"
+    write_document(
+        misplaced,
+        OkfDocument(
+            {
+                "type": "Capture",
+                "title": "误放的 Capture",
+                "created_at": "2026-08-20T12:00:00+08:00",
+                "ingested_via": "direct-entry",
+            },
+            "# 误放的 Capture\n",
+        ),
+    )
+
+    catalog = scan_notes(vault)
+    misplaced_summary = next(
+        note for note in catalog if note.path == "life/reflections/misplaced.md"
+    )
+    today = today_view(vault, tmp_path / "state", date(2026, 8, 20))
+    inbox = dashboard_view(vault, "inbox")
+
+    assert misplaced_summary.capture_status is None
+    assert today["open_inbox_count"] == 0
+    assert inbox["captures"] == []
 
 
 def test_today_feed_projection_lists_every_stream_from_latest_ai_daily_issue(

@@ -54,13 +54,6 @@ def _structured_resources(frontmatter: Mapping[str, Any]) -> list[tuple[str, str
         value = frontmatter.get(field)
         if isinstance(value, str):
             resources.append((value, field))
-    processed = frontmatter.get("processed_into")
-    if isinstance(processed, Sequence) and not isinstance(processed, (str, bytes)):
-        resources.extend(
-            (value, "processed-into")
-            for value in cast(Sequence[object], processed)
-            if isinstance(value, str)
-        )
     uses = frontmatter.get("uses")
     if isinstance(uses, Sequence) and not isinstance(uses, (str, bytes)):
         for item in cast(Sequence[object], uses):

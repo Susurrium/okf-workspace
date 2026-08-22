@@ -256,7 +256,7 @@ export type DashboardOwnedSection = DashboardPageOwnership & { notes: NoteSummar
 /** Assigns each semantic note to at most one workflow page. */
 export function classifyDashboardPage(note: NoteSummary): DashboardPageOwnership | undefined {
   if (
-    (note.note_type === "Capture" && note.capture_status === "open") ||
+    (note.note_type === "Capture" && note.capture_status !== "processed") ||
     (note.note_type === "Source" && note.purpose === "undecided")
   ) {
     return { page: "inbox", section: "decision" };

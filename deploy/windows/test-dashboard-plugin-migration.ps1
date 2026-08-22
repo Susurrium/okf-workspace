@@ -216,6 +216,52 @@ try {
         )) `
         -Message 'Enabled plugin ids changed before legacy directory validation completed'
 
+    # Generic retired-plugin cleanup owns only an exact directory with an
+    # explicitly allowed manifest identity.
+    $retiredVault = Join-Path $testRoot 'retired-plugin-vault'
+    $retiredPlugins = Join-Path $retiredVault '.obsidian\plugins'
+    New-TestPlugin -Root (Join-Path $retiredPlugins 'realclaudian') -Id 'realclaudian'
+    New-TestPlugin -Root (Join-Path $retiredPlugins 'claudian') -Id 'okf-claudian'
+    $removed = Remove-OkfRetiredPluginDirectory `
+        -Vault $retiredVault `
+        -DirectoryName 'claudian' `
+        -AllowedManifestIds @('okf-claudian')
+    Assert-Test -Condition $removed -Message 'Known retired Claudian directory was not removed'
+    Assert-Test `
+        -Condition (Test-Path -LiteralPath (Join-Path $retiredPlugins 'realclaudian') -PathType Container) `
+        -Message 'Official realclaudian directory was removed'
+
+    New-TestPlugin -Root (Join-Path $retiredPlugins 'claudian') -Id 'claudian'
+    Assert-Throws `
+        -Action {
+            Remove-OkfRetiredPluginDirectory `
+                -Vault $retiredVault `
+                -DirectoryName 'claudian' `
+                -AllowedManifestIds @('okf-claudian')
+        } `
+        -MessagePattern 'Refusing to remove retired plugin directory'
+    Assert-Test `
+        -Condition (Test-Path -LiteralPath (Join-Path $retiredPlugins 'claudian') -PathType Container) `
+        -Message 'Upstream Claudian identity was removed as a retired OKF copy'
+
+    Remove-Item -LiteralPath (Join-Path $retiredPlugins 'claudian') -Recurse -Force
+    New-Item -ItemType Directory -Path (Join-Path $retiredPlugins 'claudian') | Out-Null
+    Set-Content `
+        -LiteralPath (Join-Path $retiredPlugins 'claudian\keep.txt') `
+        -Value 'unowned' `
+        -NoNewline
+    Assert-Throws `
+        -Action {
+            Remove-OkfRetiredPluginDirectory `
+                -Vault $retiredVault `
+                -DirectoryName 'claudian' `
+                -AllowedManifestIds @('okf-claudian')
+        } `
+        -MessagePattern 'without a manifest'
+    Assert-Test `
+        -Condition (Test-Path -LiteralPath (Join-Path $retiredPlugins 'claudian\keep.txt') -PathType Leaf) `
+        -Message 'Manifestless Claudian directory was removed'
+
     Write-Host 'Dashboard plugin migration tests passed.'
 } finally {
     $resolvedTestRoot = [System.IO.Path]::GetFullPath($testRoot)

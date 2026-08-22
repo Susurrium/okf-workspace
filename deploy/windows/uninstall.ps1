@@ -57,6 +57,14 @@ if ($RemoveData) {
     }
 }
 
+# The historical folder name alone is not proof that OKF owns it. Preflight
+# before stopping tasks or changing plugin configuration so an ambiguous
+# `claudian` directory leaves the whole uninstall untouched.
+$ownedLegacyClaudian = Confirm-OkfRetiredPluginDirectoryOwnership `
+    -Vault ([string]$deployment.vault) `
+    -DirectoryName 'claudian' `
+    -AllowedManifestIds @('okf-claudian')
+
 foreach ($task in @(
     'OKF Workspace Daily Maintenance',
     'OKF Brain Local Service',
@@ -75,8 +83,7 @@ $expectedPluginParent = Join-Path ([string]$deployment.vault) '.obsidian\plugins
 foreach ($pluginId in @(
     'okf-workspace-dashboard',
     'okf-brain-dashboard',
-    'okf-claudian',
-    'claudian'
+    'okf-claudian'
 )) {
     $plugin = Join-Path $expectedPluginParent $pluginId
     if (Test-Path -LiteralPath $plugin) {
@@ -87,6 +94,16 @@ foreach ($pluginId in @(
         }
     }
 }
+if ($ownedLegacyClaudian) {
+    $legacyClaudian = Join-Path $expectedPluginParent 'claudian'
+    if ($PSCmdlet.ShouldProcess($legacyClaudian, 'Remove owned retired Claudian plugin')) {
+        Remove-OkfRetiredPluginDirectory `
+            -Vault ([string]$deployment.vault) `
+            -DirectoryName 'claudian' `
+            -AllowedManifestIds @('okf-claudian') | Out-Null
+        Write-Host "Removed plugin: $legacyClaudian"
+    }
+}
 
 $communityPlugins = Join-Path ([string]$deployment.vault) '.obsidian\community-plugins.json'
 if (Test-Path -LiteralPath $communityPlugins -PathType Leaf) {
@@ -94,9 +111,9 @@ if (Test-Path -LiteralPath $communityPlugins -PathType Leaf) {
     $removedPluginIds = @(
         'okf-workspace-dashboard',
         'okf-brain-dashboard',
-        'okf-claudian',
-        'claudian'
+        'okf-claudian'
     )
+    if ($ownedLegacyClaudian) { $removedPluginIds += 'claudian' }
     $remaining = @($enabled | Where-Object { $_ -notin $removedPluginIds })
     if ($PSCmdlet.ShouldProcess($communityPlugins, 'Disable Workspace Obsidian plugins')) {
         Write-OkfJson -Path $communityPlugins -Value $remaining

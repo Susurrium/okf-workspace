@@ -20,11 +20,6 @@
       "type": "text"
     },
     {
-      "name": "capture_status",
-      "value": "open",
-      "type": "text"
-    },
-    {
       "name": "ingested_via",
       "value": "web-clip",
       "type": "text"
@@ -35,7 +30,10 @@
       "type": "text"
     }
   ],
-  "triggers": [],
+  "triggers": [
+    "https://",
+    "http://"
+  ],
   "noteNameFormat": "{{time|date:\"YYYY-MM-DD-HHmmss\"}}-{{title|safe_name}}",
   "path": "inbox/captures/{{time|date:\"YYYY\"}}/{{time|date:\"MM\"}}"
 }

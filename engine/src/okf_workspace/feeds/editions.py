@@ -12,7 +12,7 @@ from pathlib import Path
 from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
 from okf_workspace.okf.paths import slugify
 
-from .models import FeedEdition, FeedItem, FeedKind
+from .models import FeedComment, FeedEdition, FeedItem, FeedKind
 
 _DATA_IMAGE = re.compile(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$", re.DOTALL)
 _IMAGE_EXTENSIONS = {
@@ -93,10 +93,43 @@ def _format_comment_time(value: str | None) -> str | None:
         return value
 
 
+def _reply_excerpt(value: str | None, *, limit: int = 120) -> str | None:
+    if not value:
+        return None
+    compact = " ".join(value.split())
+    if not compact:
+        return None
+    return compact if len(compact) <= limit else compact[: limit - 1].rstrip() + "…"
+
+
+def _comment_reply_line(
+    comment: FeedComment,
+    positions: dict[int, tuple[int, FeedComment]],
+) -> str | None:
+    if comment.reply_to_cid is None:
+        return None
+    known = positions.get(comment.reply_to_cid)
+    if known is not None:
+        index, parent = known
+        author = parent.author or comment.reply_to_author or "匿名"
+        target = f"{index}. {author}"
+        excerpt = _reply_excerpt(parent.text) or _reply_excerpt(comment.reply_to_text)
+    else:
+        target = comment.reply_to_author or "未抓取的评论"
+        excerpt = _reply_excerpt(comment.reply_to_text)
+    reference = f"回复 {target} (CID {comment.reply_to_cid})"
+    return f"↳ {reference}：「{excerpt}」" if excerpt else f"↳ {reference}"
+
+
 def render_treehole_comments(vault: Path, item: FeedItem) -> str:
     lines = [f"> [!comments]- 已抓取评论 ({len(item.comments)} 条，默认折叠)"]
     if not item.comments:
         return "\n".join([*lines, ">", "> 当前批次没有保存到评论正文。"])
+    positions = {
+        comment.cid: (index, comment)
+        for index, comment in enumerate(item.comments, start=1)
+        if comment.cid is not None
+    }
     for index, comment in enumerate(item.comments, start=1):
         metadata = [f"{index}. {comment.author or '匿名'}"]
         if comment.is_original_poster and comment.author != "洞主":
@@ -107,6 +140,9 @@ def render_treehole_comments(vault: Path, item: FeedItem) -> str:
         if comment.cid is not None:
             metadata.append(f"CID {comment.cid}")
         lines.extend([">", f"> **{' · '.join(metadata)}**", ">"])
+        reply_line = _comment_reply_line(comment, positions)
+        if reply_line:
+            lines.extend([f"> {reply_line}", ">"])
         lines.extend(f"> {line}" if line else ">" for line in comment.text.splitlines() or [""])
         if comment.media:
             comment_item = FeedItem(
@@ -144,9 +180,11 @@ def _treehole_body(vault: Path, edition: FeedEdition) -> str:
         if media:
             sections.append("### 媒体\n")
             sections.extend(f"![]({value})\n" for value in media)
+        # The navigation target and decision widget belong to the item itself,
+        # not to the potentially very long folded comment thread below it.
+        sections.append(f"^{item_block_id(item)}\n")
         if item.comments:
             sections.extend([render_treehole_comments(vault, item), ""])
-        sections.append(f"^{item_block_id(item)}\n")
     return "\n".join(sections)
 
 
@@ -240,7 +278,9 @@ def _refresh_treehole_managed_blocks(
         if not headings:
             continue
         start = headings[-1].start()
-        original_section = updated[start : block.start()]
+        next_heading = re.search(r"(?m)^## .+$", updated[block.end() :])
+        end = block.end() + next_heading.start() if next_heading is not None else len(updated)
+        original_section = updated[start:end]
         section = original_section
         metrics_line = _treehole_metrics_line(item)
         if metrics_line is not None:
@@ -259,7 +299,27 @@ def _refresh_treehole_managed_blocks(
             r"(?:\r?\n>[^\r\n]*)*"
         )
         refreshed = comments.sub(render_treehole_comments(vault, item), section, count=1)
+        refreshed = _move_treehole_anchor_before_comments(
+            refreshed,
+            item_block_id(item),
+        )
         if refreshed != original_section:
-            updated = updated[:start] + refreshed + updated[block.start() :]
+            updated = updated[:start] + refreshed + updated[end:]
     if updated != content:
         target.write_text(updated, encoding="utf-8", newline="\n")
+
+
+def _move_treehole_anchor_before_comments(section: str, block_id: str) -> str:
+    """Normalize legacy sections whose navigation target followed the comments."""
+
+    marker = re.search(rf"(?m)^\^{re.escape(block_id)}[ \t]*$", section)
+    comments = re.search(r"(?m)^> \[!(?:note|comments)\]- ", section)
+    if marker is None or comments is None or marker.start() < comments.start():
+        return section
+    without_marker = section[: marker.start()] + section[marker.end() :]
+    comments = re.search(r"(?m)^> \[!(?:note|comments)\]- ", without_marker)
+    if comments is None:
+        return section
+    prefix = without_marker[: comments.start()].rstrip()
+    suffix = without_marker[comments.start() :].lstrip("\r\n")
+    return f"{prefix}\n\n^{block_id}\n\n{suffix}"

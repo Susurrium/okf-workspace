@@ -38,6 +38,19 @@ created_at: 2026-08-20T12:00:00+08:00
 
 所有更新必须保留不认识的扩展字段，保证 OKF 兼容性。
 
+### 标题与文件名不是四份内容
+
+`title`、文件名和正文 H1 各自承担不同职责：
+
+- 文件名/路径：稳定定位和文件系统导航；
+- YAML `title`：Dashboard、检索、排序和自动化读取的结构化展示名；
+- H1：脱离 Obsidian 后仍完整可读的 Markdown 标题；
+- Obsidian Properties：只是 YAML 的编辑界面，不是第四份数据。
+
+Workspace 默认隐藏 Inline Title 和正文 Properties，因此人类阅读时只看到 H1。新文件不为
+“看起来统一”而普遍添加日期；只有 Daily、Review、Lesson、Decision 等时间就是记录身份或
+排序依据的类型使用日期文件名。`Reflection` 等语义笔记使用标题 slug，并在冲突时加稳定序号。
+
 ## 3. `status` 为什么可选
 
 大多数正常笔记处于稳定可用状态，反复写 `status: stable` 没有信息增益。新文件只有两种情况写 `status`：
@@ -88,7 +101,7 @@ studied_at: 2026-08-20T18:30:00+08:00
 
 | `type` | 默认位置 | 专属语义 |
 |---|---|---|
-| `Capture` | `inbox/captures/YYYY/MM/` | `capture_status: open/processed/discarded`；Workspace 新写入含 `ingested_via`，网页剪藏另含 `resource`。 |
+| `Capture` | `inbox/captures/YYYY/MM/` | 存在于 Inbox 就表示尚未处理；Workspace 新写入含 `ingested_via`，网页剪藏另含 `resource`。成功转入长期目标后删除，明确丢弃时进入 Obsidian 本地回收站；都不建立归档副本。 |
 | `Daily` | `life/daily/YYYY/MM/` | 必填 `date`；含 `linked-activity`、`organized-daily` 区域。 |
 | `Reflection` | `life/reflections/` | 用户自由反思正文。 |
 | `Review` | `life/reviews/` | 阶段复盘；可含 `organized-review`。 |
@@ -120,6 +133,10 @@ Original（Vault 外原件）
       │   └─ purpose: undecided → Inbox 等待人工决定
       └─ Source Text（MinerU、MarkItDown、网页或 Feed 的完整 Markdown）
 ```
+
+Source 与 Source Text 会故意使用相同 basename，因为它们是一对稳定关联的文件，但绝不是
+重复正文：Source 是轻量身份卡和用途入口，Source Text 才保存完整内容。Dashboard/Claudian
+必须用 `type` 与 `title` 显示“来源卡 / 完整正文”等角色，不能只显示 basename 让人误解。
 
 Source 的身份字段不表达课程、项目或处理结果：
 

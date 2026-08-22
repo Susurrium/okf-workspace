@@ -38,7 +38,18 @@ export function buildTabRuntimeShell(
   const dom = buildTabDOM(contentEl);
   const state = new ChatState({
     onStreamingStateChanged: isStreaming => {
-      options.onStreamingChanged?.(runtimeRef.requirePublished(), isStreaming);
+      const runtime = runtimeRef.requirePublished();
+      runtime.ui.stopButtonEl.toggleClass('claudian-hidden', !isStreaming);
+      runtime.ui.stopButtonEl.setAttribute('aria-hidden', String(!isStreaming));
+      runtime.ui.sendButtonEl.setAttribute(
+        'aria-label',
+        isStreaming ? 'Queue message' : 'Send message',
+      );
+      runtime.ui.sendButtonEl.setAttribute(
+        'title',
+        isStreaming ? 'Queue message' : 'Send message',
+      );
+      options.onStreamingChanged?.(runtime, isStreaming);
     },
     onRewindingStateChanged: isRewinding => {
       options.onRewindingChanged?.(runtimeRef.requirePublished(), isRewinding);

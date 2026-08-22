@@ -25,7 +25,7 @@ import type { InboxProjectionData } from "../src/domain/inbox-work-queue.js";
 describe("Dashboard experience selectors", () => {
   it("counts Today attention from decisions, generation, background work, and tasks", () => {
     const inbox: InboxProjectionData = {
-      captures: [note("inbox/captures/idea.md", "Capture", { capture_status: "open" })],
+      captures: [note("inbox/captures/idea.md", "Capture")],
       processed_captures: [],
       pending_imports: [note("sources/records/paper.md", "Source", { purpose: "undecided" })],
     };
@@ -190,7 +190,7 @@ describe("Dashboard experience selectors", () => {
 
   it("assigns notes to one workflow page and omits empty sections", () => {
     const notes = [
-      note("inbox/captures/open.md", "Capture", { capture_status: "open" }),
+      note("inbox/captures/open.md", "Capture"),
       note("inbox/captures/processed.md", "Capture", { capture_status: "processed" }),
       note("sources/records/undecided.md", "Source", { purpose: "undecided" }),
       note("sources/records/study.md", "Source", { purpose: "study" }),

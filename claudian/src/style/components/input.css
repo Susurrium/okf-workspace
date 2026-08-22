@@ -129,6 +129,67 @@
   padding: 4px 6px 6px 6px;
 }
 
+.claudian-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+}
+
+.claudian-input-toolbar > .claudian-composer-actions > button.claudian-composer-action,
+.claudian-input-toolbar > .claudian-composer-actions > button.claudian-composer-action:hover,
+.claudian-input-toolbar > .claudian-composer-actions > button.claudian-composer-action:focus,
+.claudian-input-toolbar > .claudian-composer-actions > button.claudian-composer-action:active {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background-image: none;
+  box-shadow: none;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.claudian-input-toolbar > .claudian-composer-actions > button.claudian-composer-action:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.claudian-input-toolbar > .claudian-composer-actions > button.claudian-composer-send {
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.claudian-input-toolbar > .claudian-composer-actions > button.claudian-composer-send:hover {
+  border-color: var(--interactive-accent-hover);
+  background: var(--interactive-accent-hover);
+}
+
+.claudian-input-toolbar > .claudian-composer-actions > button.claudian-composer-stop {
+  border-color: var(--background-modifier-border);
+  background: var(--background-secondary);
+  color: var(--text-error);
+}
+
+.claudian-input-toolbar > .claudian-composer-actions > button.claudian-composer-stop:hover {
+  border-color: var(--text-error);
+  background: var(--background-modifier-hover);
+}
+
+.claudian-composer-action svg {
+  width: 16px;
+  height: 16px;
+}
+
 /* Hide secondary text when the full toolbar would wrap. */
 .claudian-input-toolbar--compact .claudian-thinking-effort > .claudian-thinking-label-text,
 .claudian-input-toolbar--compact .claudian-context-meter-percent {
