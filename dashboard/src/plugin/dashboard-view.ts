@@ -2044,7 +2044,7 @@ export class OkfDashboardView extends ItemView {
           .setTitle(PROJECT_MENU_LABELS[3])
           .setIcon("bot")
           .onClick(() => {
-            void this.copyPrompt("根据已有项目主页和日志，梳理当前状态、关键决定、阻塞和下一步。", {
+            void this.copyPrompt("根据已有项目主页和日志，梳理当前状态、关键点与重要选择、阻塞和下一步。", {
               contextPaths: [project.path, `${projectDirectory}/log.md`],
               actionMode: "write",
               skill: "capture-project-progress",

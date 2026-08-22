@@ -15,6 +15,8 @@ from okf_workspace.okf.paths import slugify
 from okf_workspace.okf.templates import VAULT_DYNAMIC_DIRECTORIES, initialize_vault
 from okf_workspace.okf.validator import validate_bundle
 
+FIXTURES = Path(__file__).parents[1] / "fixtures"
+
 
 def test_migration_removes_only_empty_legacy_queue_and_updates_agent_policy(tmp_path: Path) -> None:
     vault = initialize_vault(tmp_path / "vault")
@@ -517,6 +519,56 @@ def test_migration_retires_only_legacy_capture_archive_copies(tmp_path: Path) ->
     assert unrelated.is_file()
     assert any("removed retired Capture copy" in change for change in changes)
     assert migrate_current_layout(vault, default_template_root()) == ()
+
+
+def test_migration_cleans_the_real_legacy_capture_project_log_shape(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    project = NoteService(vault).create_project("uat-project", "UAT 测试项目")
+    log = project.with_name("log.md")
+    log.write_text(
+        (FIXTURES / "migration/legacy-project-log-capture.md").read_text(encoding="utf-8"),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    changes = migrate_current_layout(vault, default_template_root())
+
+    rendered = log.read_text(encoding="utf-8")
+    duplicate = "测试项目可能需要增加一个状态检查步骤。"
+    assert rendered.count(duplicate) == 1
+    assert "/archive/captures/" not in rendered
+    assert "来源：[Capture]" not in rendered
+    assert any(
+        change == "projects/uat-project/log.md (removed retired Capture link)"
+        for change in changes
+    )
+    assert migrate_current_layout(vault, default_template_root()) == ()
+
+
+def test_project_log_capture_cleanup_never_guesses_at_user_repetition(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    project = NoteService(vault).create_project("careful", "Careful")
+    log = project.with_name("log.md")
+    repeated = "这句话是用户可能有意重复的。"
+    log.write_text(
+        "# Careful · 项目日志\n\n"
+        "## 2026-08-22\n\n"
+        f"- {repeated}\n\n"
+        f"{repeated}\n\n"
+        "这里还有额外正文，所以不能证明上一行是系统重复。\n\n"
+        "来源：[Capture](/archive/captures/2026/08/legacy.md)\n\n"
+        f"- {repeated}\n\n"
+        f"{repeated}\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    migrate_current_layout(vault, default_template_root())
+
+    rendered = log.read_text(encoding="utf-8")
+    assert rendered.count(repeated) == 4
+    assert "这里还有额外正文" in rendered
+    assert "/archive/captures/" not in rendered
 
 
 def test_migration_does_not_consume_archived_capture_for_unsafe_processed_target(

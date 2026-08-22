@@ -1288,6 +1288,56 @@ def _capture_targets_exist(root: Path, value: object) -> bool:
     return False
 
 
+_LEGACY_CAPTURE_SOURCE = (
+    r"来源：\[Capture\]\(/archive/captures/[^)\r\n]+\)"
+)
+_LEGACY_DUPLICATE_PROJECT_CAPTURE_ENTRY = re.compile(
+    rf"(?m)^(?P<bullet>[ \t]*-[ \t]+(?P<title>[^\r\n]*\S))[ \t]*\r?\n"
+    rf"[ \t]*\r?\n"
+    rf"[ \t]*(?P=title)[ \t]*\r?\n"
+    rf"[ \t]*\r?\n"
+    rf"[ \t]*{_LEGACY_CAPTURE_SOURCE}[ \t]*(?:\r?\n|$)"
+)
+_LEGACY_PROJECT_CAPTURE_SOURCE_BLOCK = re.compile(
+    rf"(?m)^[ \t]*\r?\n[ \t]*{_LEGACY_CAPTURE_SOURCE}[ \t]*(?:\r?\n|$)"
+)
+_LEGACY_PROJECT_CAPTURE_SOURCE_LINE = re.compile(
+    rf"(?m)^[ \t]*{_LEGACY_CAPTURE_SOURCE}[ \t]*(?:\r?\n|$)"
+)
+
+
+def _remove_legacy_project_capture_links(root: Path) -> list[str]:
+    """Clean the exact plain-Markdown shape written by the retired router.
+
+    Project logs intentionally have no frontmatter, so the general artifact cleanup
+    cannot parse them. The duplicate-body rewrite stays deliberately narrow: the
+    bullet title, sole body line, and retired Capture link must be one exact block.
+    Any extra body makes the repetition ambiguous and is therefore preserved.
+    """
+
+    changes: list[str] = []
+    projects = root / "projects"
+    if not projects.is_dir():
+        return changes
+    for path in sorted(projects.glob("*/log.md")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        updated, duplicate_count = _LEGACY_DUPLICATE_PROJECT_CAPTURE_ENTRY.subn(
+            lambda match: f"{match.group('bullet')}\n",
+            text,
+        )
+        updated, block_count = _LEGACY_PROJECT_CAPTURE_SOURCE_BLOCK.subn("", updated)
+        updated, line_count = _LEGACY_PROJECT_CAPTURE_SOURCE_LINE.subn("", updated)
+        if not (duplicate_count or block_count or line_count):
+            continue
+        _write_text_atomic(path, updated)
+        relative = path.relative_to(root).as_posix()
+        changes.append(f"{relative} (removed retired Capture link)")
+    return changes
+
+
 def _remove_legacy_capture_links(root: Path) -> list[str]:
     """Remove references to the retired archive copy after its body was consumed."""
 
@@ -1330,6 +1380,7 @@ def _remove_legacy_capture_links(root: Path) -> list[str]:
             if changed:
                 write_document(path, document)
                 changes.append(f"{relative} (removed retired Capture link)")
+    changes.extend(_remove_legacy_project_capture_links(root))
     return changes
 
 

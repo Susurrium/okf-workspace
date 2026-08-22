@@ -15,6 +15,7 @@ type ContextKind = "course" | "project";
 export class QuickCaptureModal extends Modal {
   private value = "";
   private readonly initial: CaptureRelation;
+  private contextKind: ContextKind | undefined;
   private submitting = false;
   private readonly submitButtons = new Set<HTMLButtonElement>();
 
@@ -52,6 +53,10 @@ export class QuickCaptureModal extends Modal {
     textarea?.addEventListener("keydown", (event) => {
       if (event.key !== "Enter" || !event.ctrlKey) return;
       event.preventDefault();
+      if (this.contextKind) {
+        new Notice(`请先选择具体 ${this.contextKind === "course" ? "Course" : "Project"}`);
+        return;
+      }
       void this.submit(this.initial);
     });
     textarea?.focus();
@@ -99,6 +104,7 @@ export class QuickCaptureModal extends Modal {
   }
 
   private renderPrimaryActions(parent: HTMLElement): void {
+    this.contextKind = undefined;
     parent.empty();
     parent.createDiv({
       cls: "okf-quick-capture-modal__prompt",
@@ -116,6 +122,7 @@ export class QuickCaptureModal extends Modal {
   }
 
   private renderContextPicker(parent: HTMLElement, kind: ContextKind): void {
+    this.contextKind = kind;
     parent.empty();
     const noun = kind === "course" ? "Course" : "Project";
     const heading = parent.createDiv({ cls: "okf-quick-capture-modal__picker-heading" });

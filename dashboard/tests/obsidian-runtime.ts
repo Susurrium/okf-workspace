@@ -24,6 +24,8 @@ export class TestElement {
   public readonly classes = new Set<string>();
   public readonly listeners = new Map<string, ((event: Event) => void)[]>();
   public textContent = "";
+  public value = "";
+  public rows = 0;
   public disabled = false;
   public scrollTop = 0;
   public isConnected = true;
@@ -70,9 +72,15 @@ export class TestElement {
     this.listeners.set(type, listeners);
   }
 
-  public click(): void {
-    for (const callback of this.listeners.get("click") ?? []) callback({} as Event);
+  public dispatch(type: string, event: Partial<Event> = {}): void {
+    for (const callback of this.listeners.get(type) ?? []) callback(event as Event);
   }
+
+  public click(): void {
+    this.dispatch("click");
+  }
+
+  public focus(): void {}
 
   public descendants(className?: string): TestElement[] {
     const nested = this.children.flatMap((child) => [child, ...child.descendants()]);
@@ -90,11 +98,57 @@ export class ItemView {
 }
 
 export class Notice {
+  public static readonly messages: string[] = [];
   public readonly noticeEl = {} as HTMLElement;
 
-  public constructor(_message = "", _timeout = 0) {}
+  public constructor(message = "", _timeout = 0) {
+    if (message) Notice.messages.push(message);
+  }
 
   public hide(): void {}
+}
+
+export class Modal {
+  public readonly modalEl = new TestElement();
+  public readonly titleEl = new TestElement();
+  public readonly contentEl = new TestElement();
+
+  public constructor(public readonly app: unknown) {}
+
+  public open(): void { (this as { onOpen?: () => void }).onOpen?.(); }
+  public close(): void { (this as { onClose?: () => void }).onClose?.(); }
+}
+
+class TextAreaComponent {
+  public readonly inputEl = new TestElement("textarea") as unknown as HTMLTextAreaElement;
+
+  public setPlaceholder(value: string): this {
+    this.inputEl.setAttribute?.("placeholder", value);
+    return this;
+  }
+
+  public onChange(callback: (value: string) => void): this {
+    (this.inputEl as unknown as TestElement).addEventListener("input", () => callback(this.inputEl.value));
+    return this;
+  }
+}
+
+export class Setting {
+  public readonly settingEl: TestElement;
+
+  public constructor(container: HTMLElement) {
+    this.settingEl = (container as unknown as TestElement).createDiv();
+  }
+
+  public setName(_value: string): this { return this; }
+  public setDesc(_value: string): this { return this; }
+
+  public addTextArea(builder: (component: TextAreaComponent) => void): this {
+    const component = new TextAreaComponent();
+    this.settingEl.children.push(component.inputEl as unknown as TestElement);
+    builder(component);
+    return this;
+  }
 }
 
 class MenuItem {
