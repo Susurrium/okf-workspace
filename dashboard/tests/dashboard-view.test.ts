@@ -212,11 +212,11 @@ describe("real Dashboard View source handoff", () => {
 
     const row = container.descendants("okf-project-row")[0];
     const actions = row?.descendants("okf-work-item__actions")[0];
-    expect(actions?.children.map((child) => child.textContent)).toEqual(["记录进展", "操作 ▾"]);
+    expect(actions?.children.map((child) => child.textContent)).toEqual(["记录进展", "其他操作 ▾"]);
     actions?.children[0]?.click();
     expect(promptProjectProgress).toHaveBeenCalledWith("projects/workspace/project.md");
     expect(panels).toHaveLength(1);
-    expect(panels[0]?.label).toBe("操作 · 个人知识工作区");
+    expect(panels[0]?.label).toBe("其他操作 · 个人知识工作区");
     expect(panels[0]?.actions.map((action) => action.title)).toEqual(PROJECT_ACTION_PANEL_LABELS);
     expect(row?.descendants("okf-work-item__metric").map((item) => item.textContent)).toEqual([
       "待整理 0",
@@ -334,10 +334,10 @@ describe("real Dashboard View source handoff", () => {
     ]);
     expect(rows.map((row) => row.descendants("okf-work-item__actions")[0]?.children
       .map((child) => child.textContent))).toEqual([
-      ["生成学习材料", "操作 ▾"],
-      ["生成", "操作 ▾"],
-      ["打开", "操作 ▾"],
-      ["打开", "操作 ▾"],
+      ["生成学习材料", "其他操作 ▾"],
+      ["生成", "其他操作 ▾"],
+      ["打开", "其他操作 ▾"],
+      ["打开", "其他操作 ▾"],
     ]);
     expect(container.descendants("okf-dashboard__row-details")).toHaveLength(0);
     expect(panels.map((panel) => panel.actions.map((action) => action.title))).toEqual([
@@ -370,7 +370,7 @@ describe("real Dashboard View source handoff", () => {
       operation("generating"),
     );
     expect(generating.descendants("okf-work-item__actions")[0]?.children.map((child) => child.textContent))
-      .toEqual(["Codex 正在生成内容", "操作 ▾"]);
+      .toEqual(["Codex 正在生成内容", "其他操作 ▾"]);
     expect(panels[0]?.actions.map((action) => action.title)).toEqual(["取消后台生成"]);
 
     const publishing = new TestElement();

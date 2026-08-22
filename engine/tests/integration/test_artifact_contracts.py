@@ -84,7 +84,7 @@ def test_core_daily_and_templater_use_separate_template_roots(tmp_path: Path) ->
     templater = (vault / ".obsidian/templates.json").read_text(encoding="utf-8")
 
     assert app_settings["showInlineTitle"] is False
-    assert app_settings["propertiesInDocument"] == "hidden"
+    assert app_settings["propertiesInDocument"] == "visible"
     assert "system/templates/core/Daily" in daily
     assert "system/templates/interactive" in templater
 

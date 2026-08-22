@@ -1,7 +1,7 @@
 {
   "id": "okf-workspace-dashboard",
   "name": "Workspace Dashboard",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "minAppVersion": "1.6.0",
   "description": "Human-first personal workspace Dashboard with structured Claudian handoff.",
   "author": "susurrus",

@@ -301,7 +301,7 @@ if (Test-Path -LiteralPath $obsidianAppConfig -PathType Leaf) {
 }
 $obsidianAppSettings['alwaysUpdateLinks'] = $true
 $obsidianAppSettings['showInlineTitle'] = $false
-$obsidianAppSettings['propertiesInDocument'] = 'hidden'
+$obsidianAppSettings['propertiesInDocument'] = 'visible'
 Write-OkfJson -Path $obsidianAppConfig -Value $obsidianAppSettings
 
 $communityPlugins = Join-Path $vaultPath '.obsidian\community-plugins.json'

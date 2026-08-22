@@ -1387,6 +1387,7 @@ button.okf-action-panel__action {
   width: 100%;
   min-height: 48px;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
   padding: 7px 9px;
   border: 0;
@@ -1410,8 +1411,11 @@ button.okf-action-panel__action:focus-visible,
 
 .okf-action-panel__copy {
   display: grid;
+  width: 0;
   min-width: 0;
+  flex: 1 1 auto;
   gap: 2px;
+  text-align: left;
 }
 
 .okf-action-panel__title {
@@ -2193,10 +2197,9 @@ button.okf-action-panel__action:focus-visible,
   white-space: nowrap;
 }
 
-/* The YAML remains authoritative and editable from Obsidian's Properties
-   sidebar/source mode; a note's reading surface shows only its Markdown H1. */
-.workspace-leaf-content[data-type="markdown"] .inline-title,
-.workspace-leaf-content[data-type="markdown"] .metadata-container {
+/* Keep the duplicate inline filename title out of the reading surface.
+   Obsidian's native Properties block remains visible at the top of each note. */
+.workspace-leaf-content[data-type="markdown"] .inline-title {
   display: none;
 }
 

@@ -205,7 +205,7 @@ describe("AnchoredActionPanel", () => {
     const selected = vi.fn();
     const renderedIcon = vi.fn();
     const panel = new AnchoredActionPanel(trigger, {
-      label: "操作 · UAT 测试项目",
+      label: "其他操作 · UAT 测试项目",
       renderHeader: (container) => {
         const title = container.ownerDocument.createElement("strong");
         title.textContent = "UAT 测试项目";
@@ -239,7 +239,7 @@ describe("AnchoredActionPanel", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(root.id).toBe(panel.id);
     expect(root.getAttribute("role")).toBe("dialog");
-    expect(root.getAttribute("aria-label")).toBe("操作 · UAT 测试项目");
+    expect(root.getAttribute("aria-label")).toBe("其他操作 · UAT 测试项目");
     expect(root.querySelectorAll(".okf-action-panel__header")).toHaveLength(1);
     expect(root.querySelectorAll(".okf-action-panel__header")[0]!.textContent).toBe("");
     expect(root.querySelectorAll(".okf-action-panel__header")[0]!.children[0]!.textContent)

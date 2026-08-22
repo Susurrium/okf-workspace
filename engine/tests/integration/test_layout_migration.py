@@ -780,7 +780,7 @@ def test_migration_adds_only_missing_source_text_h1_and_is_idempotent(tmp_path: 
     assert migrate_current_layout(vault, default_template_root()) == ()
 
 
-def test_migration_hides_duplicate_editor_title_surfaces_without_losing_preferences(
+def test_migration_keeps_one_title_and_restores_visible_properties_without_losing_preferences(
     tmp_path: Path,
 ) -> None:
     vault = initialize_vault(tmp_path / "vault")
@@ -789,7 +789,7 @@ def test_migration_hides_duplicate_editor_title_surfaces_without_losing_preferen
         json.dumps(
             {
                 "showInlineTitle": True,
-                "propertiesInDocument": "visible",
+                "propertiesInDocument": "hidden",
                 "readableLineLength": False,
             }
         ),
@@ -800,7 +800,7 @@ def test_migration_hides_duplicate_editor_title_surfaces_without_losing_preferen
 
     settings = json.loads(app_path.read_text(encoding="utf-8"))
     assert settings["showInlineTitle"] is False
-    assert settings["propertiesInDocument"] == "hidden"
+    assert settings["propertiesInDocument"] == "visible"
     assert settings["readableLineLength"] is False
     assert ".obsidian/app.json" in changes
 

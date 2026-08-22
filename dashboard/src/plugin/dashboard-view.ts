@@ -1470,12 +1470,12 @@ export class OkfDashboardView extends ItemView {
     }
     if (!panelActions.length) return;
     const trigger = actions.createEl("button", {
-      text: "操作 ▾",
+      text: "其他操作 ▾",
       cls: "okf-dashboard__ghost-action okf-work-item__operation-trigger",
-      attr: { type: "button", "aria-label": `${note.title} 的操作` },
+      attr: { type: "button", "aria-label": `${note.title} 的其他操作` },
     });
     this.attachActionPanel(trigger, {
-      label: `操作 · ${note.title}`,
+      label: `其他操作 · ${note.title}`,
       renderHeader: (container) => this.renderPanelHeader(
         container,
         note.title,
@@ -1850,9 +1850,9 @@ export class OkfDashboardView extends ItemView {
     });
     primary.addEventListener("click", () => this.plugin.promptLessonForCourse(course.path));
     const trigger = actions.createEl("button", {
-      text: "操作 ▾",
+      text: "其他操作 ▾",
       cls: "okf-dashboard__ghost-action okf-work-item__operation-trigger",
-      attr: { type: "button", "aria-label": `${course.title} 的操作` },
+      attr: { type: "button", "aria-label": `${course.title} 的其他操作` },
     });
     const slug = course.path.split("/")[2];
     const panelActions: AnchoredActionPanelAction[] = [
@@ -1876,7 +1876,7 @@ export class OkfDashboardView extends ItemView {
       },
     ];
     this.attachActionPanel(trigger, {
-      label: `操作 · ${course.title}`,
+      label: `其他操作 · ${course.title}`,
       renderHeader: (container) => this.renderPanelHeader(
         container,
         course.title,
@@ -1938,11 +1938,11 @@ export class OkfDashboardView extends ItemView {
       });
     }
     const trigger = actions.createEl("button", {
-      text: "操作 ▾",
+      text: "其他操作 ▾",
       cls: "okf-dashboard__ghost-action okf-work-item__operation-trigger",
       attr: {
         type: "button",
-        "aria-label": `${project.title} 的操作`,
+        "aria-label": `${project.title} 的其他操作`,
       },
     });
     this.attachProjectActionPanel(trigger, project, status);
@@ -1990,7 +1990,7 @@ export class OkfDashboardView extends ItemView {
       },
     ];
     this.attachActionPanel(trigger, {
-      label: `操作 · ${project.title}`,
+      label: `其他操作 · ${project.title}`,
       renderHeader: (container) => this.renderPanelHeader(
         container,
         project.title,
@@ -2226,12 +2226,12 @@ export class OkfDashboardView extends ItemView {
     }
     if (!panelActions.length) return;
     const trigger = cluster.createEl("button", {
-      text: "操作 ▾",
+      text: "其他操作 ▾",
       cls: "okf-dashboard__ghost-action okf-work-item__operation-trigger",
-      attr: { type: "button", "aria-label": `${note.title} 的操作` },
+      attr: { type: "button", "aria-label": `${note.title} 的其他操作` },
     });
     this.attachActionPanel(trigger, {
-      label: `操作 · ${note.title}`,
+      label: `其他操作 · ${note.title}`,
       renderHeader: (container) => this.renderPanelHeader(
         container,
         note.title,

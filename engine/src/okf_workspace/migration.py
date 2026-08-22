@@ -369,7 +369,7 @@ def _sync_system_resources(root: Path, templates: Path) -> list[str]:
     app_settings.update(
         {
             "showInlineTitle": False,
-            "propertiesInDocument": "hidden",
+            "propertiesInDocument": "visible",
         }
     )
     rendered_app = json.dumps(app_settings, ensure_ascii=False, indent=2) + "\n"

@@ -5,5 +5,5 @@
   "alwaysUpdateLinks": true,
   "showUnsupportedFiles": true,
   "showInlineTitle": false,
-  "propertiesInDocument": "hidden"
+  "propertiesInDocument": "visible"
 }

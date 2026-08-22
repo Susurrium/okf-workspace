@@ -127,6 +127,8 @@ def test_dashboard_persists_only_external_token_file_path() -> None:
     assert "pythonExecutable" in installer
     assert "deploymentConfig" in installer
     assert "serviceLogDirectory" in installer
+    assert "$obsidianAppSettings['propertiesInDocument'] = 'visible'" in installer
+    assert "$obsidianAppSettings['propertiesInDocument'] = 'hidden'" not in installer
     assert "Register-ScheduledTask -TaskName 'OKF Brain Local Service'" not in installer
     assert "Unregister-ScheduledTask -TaskName 'OKF Brain Local Service'" in installer
     assert "if ($explicitState -or -not $data.ContainsKey('baseUrl'))" in quick_installer
