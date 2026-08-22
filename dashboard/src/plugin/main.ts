@@ -26,6 +26,8 @@ import type {
   FeedKind,
   FeedSubscriptionPage,
   FeedSubscriptionPageQuery,
+  FeedSubscriptionSourcePage,
+  FeedSubscriptionSourcePageQuery,
   FeedSyncResult,
 } from "../feeds/types.js";
 import { feedItemMappings } from "../feeds/mappings.js";
@@ -1022,6 +1024,19 @@ export default class OkfBrainPlugin extends Plugin {
       if (!(error instanceof FeedTransportError)) throw error;
       await this.ensureLocalServiceAvailable();
       return api.listSubscriptions(query);
+    }
+  }
+
+  public async loadFeedSubscriptionSources(
+    query: FeedSubscriptionSourcePageQuery = {},
+  ): Promise<FeedSubscriptionSourcePage> {
+    const api = new HttpFeedApi(this.settings.baseUrl, this.settings.token);
+    try {
+      return await api.listSubscriptionSources(query);
+    } catch (error) {
+      if (!(error instanceof FeedTransportError)) throw error;
+      await this.ensureLocalServiceAvailable();
+      return api.listSubscriptionSources(query);
     }
   }
 

@@ -66,11 +66,39 @@ describe("Dashboard Feed workflow", () => {
     vi.stubGlobal("fetch", fetchMock);
     try {
       const api = new HttpFeedApi("http://127.0.0.1:8765", "token");
-      await api.listSubscriptions({ limit: 4, cursor: "opaque+/=" });
+      await api.listSubscriptions({
+        limit: 4,
+        cursor: "opaque+/=",
+        source_id: "source/中文",
+      });
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(fetchMock.mock.calls[0]?.[0]).toBe(
-        "http://127.0.0.1:8765/dashboard/feeds/subscriptions?limit=4&cursor=opaque%2B%2F%3D",
+        "http://127.0.0.1:8765/dashboard/feeds/subscriptions?limit=4&cursor=opaque%2B%2F%3D&source_id=source%2F%E4%B8%AD%E6%96%87",
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("clamps source cards to the Engine limit and encodes search and cursor", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({
+        section: "learning",
+        sources: [],
+        total_sources: 0,
+        matched_sources: 0,
+        next_cursor: null,
+        has_more: false,
+      }), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const api = new HttpFeedApi("http://127.0.0.1:8765", "token");
+      await api.listSubscriptionSources({ limit: 50, cursor: "next+/=", query: "GitHub 周刊" });
+
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "http://127.0.0.1:8765/dashboard/feeds/subscription-sources?limit=8&cursor=next%2B%2F%3D&query=GitHub+%E5%91%A8%E5%88%8A",
       );
     } finally {
       vi.unstubAllGlobals();

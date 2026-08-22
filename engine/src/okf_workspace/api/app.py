@@ -39,7 +39,11 @@ from okf_workspace.ai import (
 )
 from okf_workspace.config import BrainPaths
 from okf_workspace.dashboard.catalog import scan_notes
-from okf_workspace.dashboard.feeds import feed_dashboard, subscription_dashboard
+from okf_workspace.dashboard.feeds import (
+    feed_dashboard,
+    subscription_dashboard,
+    subscription_sources_dashboard,
+)
 from okf_workspace.dashboard.system import system_status
 from okf_workspace.dashboard.views import dashboard_view, today_view
 from okf_workspace.feeds import (
@@ -460,12 +464,30 @@ def create_app(
     def get_feed_subscriptions(
         limit: Annotated[int, Query(ge=1, le=50)] = 20,
         cursor: str | None = None,
+        source_id: Annotated[str | None, Query(max_length=500)] = None,
     ) -> dict[str, object]:
         try:
             return subscription_dashboard(
                 configured.state,
                 limit=limit,
                 cursor=cursor,
+                source_id=source_id,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.get("/dashboard/feeds/subscription-sources", dependencies=protected)
+    def get_feed_subscription_sources(
+        limit: Annotated[int, Query(ge=1, le=8)] = 8,
+        cursor: str | None = None,
+        query: Annotated[str | None, Query(max_length=200)] = None,
+    ) -> dict[str, object]:
+        try:
+            return subscription_sources_dashboard(
+                configured.state,
+                limit=limit,
+                cursor=cursor,
+                query=query,
             )
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error

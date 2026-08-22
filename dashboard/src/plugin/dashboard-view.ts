@@ -46,6 +46,8 @@ import type {
   FeedDigestItem,
   FeedKind,
   FeedSubscriptionPage,
+  FeedSubscriptionSource,
+  FeedSubscriptionSourcePage,
   FeedSyncResult,
   AiDailyStream,
 } from "../feeds/types.js";
@@ -77,6 +79,10 @@ type Section = DashboardSection;
 type TodayPane = "actions" | "reading";
 type LearningContextFilter = "all" | DashboardLearningContext;
 const SUBSCRIPTION_FIRST_PAGE_TTL_MS = 120_000;
+const SUBSCRIPTION_SOURCE_PAGE_SIZE = 8;
+const SUBSCRIPTION_EDITION_PAGE_SIZE = 4;
+const TODAY_FEED_PREVIEW_LIMIT = 5;
+const READING_SOURCE_PREVIEW_LIMIT = 3;
 
 const NAVIGATION: readonly { id: Section; label: string }[] = [
   { id: "today", label: "Today" },
@@ -166,14 +172,47 @@ export class OkfDashboardView extends ItemView {
   private subscriptionEditions: FeedDigestEdition[] = [];
   private subscriptionCursor: string | null = null;
   private subscriptionHasMore = false;
+  private subscriptionTotalEditions: number | null = null;
+  private subscriptionCatalogComplete = true;
   private subscriptionsLoaded = false;
   private subscriptionPagesLoaded = 0;
   private subscriptionLoadedAt = 0;
   private subscriptionProjectionVersion = -1;
+  private subscriptionDetailSourceId = "";
   private subscriptionFirstPageRequest: {
     projectionVersion: number;
-    promise: Promise<void>;
+    sourceId: string;
+    generation: number;
+    promise: Promise<boolean>;
   } | undefined;
+  private subscriptionRequestGeneration = 0;
+  private subscriptionPaginationGeneration = 0;
+  private subscriptionSources: FeedSubscriptionSource[] = [];
+  private subscriptionSourceCursor: string | null = null;
+  private subscriptionSourceHasMore = false;
+  private subscriptionSourceTotal = 0;
+  private subscriptionSourceMatched = 0;
+  private subscriptionSourceCatalogComplete = true;
+  private subscriptionSourceCatalogIndexing = false;
+  private subscriptionSourcesLoaded = false;
+  private subscriptionSourcePagesLoaded = 0;
+  private subscriptionSourcesLoadedAt = 0;
+  private subscriptionSourceProjectionVersion = -1;
+  private subscriptionSourceQuery = "";
+  private subscriptionSourceLoadedQuery = "";
+  private subscriptionSourceFirstPageRequest: {
+    projectionVersion: number;
+    query: string;
+    generation: number;
+    promise: Promise<boolean>;
+  } | undefined;
+  private subscriptionSourceRequestGeneration = 0;
+  private subscriptionSourcePaginationGeneration = 0;
+  private selectedSubscriptionSource: Pick<FeedSubscriptionSource, "source_id" | "source_name"> | undefined;
+  private readingOverviewScroll = 0;
+  private readingSearchTimer: number | undefined;
+  private readingCatalogRetryTimer: number | undefined;
+  private readingSearchRestore: { start: number; end: number } | undefined;
   private readonly actionPanels = new Set<AnchoredActionPanel>();
   private readonly vaultReader: VaultDashboardReader;
   private systemCache: SystemStatus | undefined;
@@ -231,6 +270,10 @@ export class OkfDashboardView extends ItemView {
     }
     const knowledgeQuery = state.pages.knowledge.filters.query;
     if (typeof knowledgeQuery === "string") this.knowledgeQuery = knowledgeQuery;
+    const subscriptionSourceQuery = state.pages.reading.filters.query;
+    if (typeof subscriptionSourceQuery === "string") {
+      this.subscriptionSourceQuery = subscriptionSourceQuery.trim();
+    }
     const ingestion = state.pages.inbox.filters.ingestedVia;
     if (
       typeof ingestion === "string" &&
@@ -272,6 +315,20 @@ export class OkfDashboardView extends ItemView {
       window.clearTimeout(this.refreshTimer);
       this.refreshTimer = undefined;
     }
+    if (this.readingSearchTimer !== undefined) {
+      window.clearTimeout(this.readingSearchTimer);
+      this.readingSearchTimer = undefined;
+    }
+    if (this.readingCatalogRetryTimer !== undefined) {
+      window.clearTimeout(this.readingCatalogRetryTimer);
+      this.readingCatalogRetryTimer = undefined;
+    }
+    this.subscriptionSourceRequestGeneration += 1;
+    this.subscriptionSourcePaginationGeneration += 1;
+    this.subscriptionSourceFirstPageRequest = undefined;
+    this.subscriptionRequestGeneration += 1;
+    this.subscriptionPaginationGeneration += 1;
+    this.subscriptionFirstPageRequest = undefined;
     for (const kind of DASHBOARD_FEEDS) {
       const timer = this.feedScrollPersistTimers[kind];
       if (timer !== undefined) window.clearTimeout(timer);
@@ -598,6 +655,17 @@ export class OkfDashboardView extends ItemView {
       cls: `okf-today-pane okf-today-pane--reading${this.todayPane === "reading" ? " is-mobile-active" : ""}`,
       attr: { "aria-label": "每日更新" },
     });
+    const actionSection = this.dashboardSection(
+      actionPane,
+      "今日行动",
+      "先继续正在推进的内容，再处理需要判断的事项。",
+      "okf-today-action-section",
+    );
+    const systemWarningSlot = actionSection.createDiv({
+      cls: "okf-today-system-slot is-empty",
+      attr: { "aria-live": "polite", "aria-label": "System 提醒" },
+    });
+    const actionGrid = actionSection.createDiv({ cls: "okf-today-action-grid" });
 
     const attentionCounts = countTodayAttention({
       inbox,
@@ -613,7 +681,7 @@ export class OkfDashboardView extends ItemView {
       { recentOpenedPaths: this.plugin.recentDashboardFiles().map((item) => item.path) },
     );
     const continuing = this.dashboardSection(
-      actionPane,
+      actionGrid,
       "继续进行",
       "最近打开和可以接着推进的内容。",
       "okf-dashboard__continue",
@@ -639,11 +707,11 @@ export class OkfDashboardView extends ItemView {
         );
       }
     } else {
-      continuing.createDiv({ cls: "okf-dashboard__empty", text: "目前没有可继续的学习、课程或项目。" });
+      continuing.remove();
     }
 
     const pending = this.dashboardSection(
-      actionPane,
+      actionGrid,
       "待处理",
       "只显示需要你处理或确认的事项。",
       "okf-today-pending",
@@ -652,6 +720,13 @@ export class OkfDashboardView extends ItemView {
       cls: "okf-dashboard__attention-strip is-vertical",
       attr: { "aria-label": "待处理" },
     });
+    this.attentionItem(
+      attention,
+      "异常",
+      attentionCounts.background_failed,
+      () => this.openSection("system"),
+      true,
+    );
     this.attentionItem(attention, "Inbox", attentionCounts.inbox_decisions, () => {
       this.inboxTab = "decision";
       this.plugin.updateDashboardPageUiState("inbox", { tab: "decision" });
@@ -672,27 +747,20 @@ export class OkfDashboardView extends ItemView {
       this.plugin.updateDashboardPageUiState("knowledge", { filters: { view: "pending" } });
       this.openSection("knowledge");
     });
-    this.attentionItem(attention, "后台运行", attentionCounts.background_running, () => {
-      this.taskCenterOpen = true;
-      void this.render(true);
-    });
-    this.attentionItem(
-      attention,
-      "异常",
-      attentionCounts.background_failed,
-      () => this.openSection("system"),
-      true,
-    );
     this.attentionItem(attention, "知识待复核", data.stale_knowledge.length, () => {
       this.knowledgeFilter = "stale";
       this.plugin.updateDashboardPageUiState("knowledge", { filters: { view: "stale" } });
       this.openSection("knowledge");
     });
-    if (!attention.childElementCount) pending.remove();
+    this.attentionItem(attention, "后台运行", attentionCounts.background_running, () => {
+      this.taskCenterOpen = true;
+      void this.render(true);
+    });
+    if (!attention.querySelectorAll<HTMLElement>(".okf-dashboard__attention-item").length) pending.remove();
 
     if (data.tasks.length) {
       const tasks = this.dashboardSection(
-        actionPane,
+        actionGrid,
         "待办",
         `${data.tasks.length} 项未完成；这里显示前 4 项。`,
         "okf-today-tasks",
@@ -713,13 +781,20 @@ export class OkfDashboardView extends ItemView {
       }
     }
 
+    const actionColumnCount = actionGrid.querySelectorAll<HTMLElement>(".okf-dashboard__section").length;
+    actionGrid.addClass(`has-${actionColumnCount}-columns`);
+    if (!actionColumnCount) {
+      actionGrid.createDiv({ cls: "okf-dashboard__empty", text: "今天没有需要继续或处理的行动。" });
+    }
+
     this.renderDailyFeeds(readingPane);
 
     void this.api()
       .systemStatus()
       .then((system) => {
-        if (!system.actionable.length || !actionPane.isConnected) return;
-        const warning = actionPane.createDiv({ cls: "okf-dashboard__inline-alert" });
+        if (!system.actionable.length || !systemWarningSlot.isConnected) return;
+        systemWarningSlot.removeClass("is-empty");
+        const warning = systemWarningSlot.createDiv({ cls: "okf-dashboard__inline-alert" });
         warning.createEl("strong", { text: `System · ${system.actionable.length} 项需要处理` });
         warning.createSpan({ text: " " + system.actionable[0]?.detail });
         const open = warning.createEl("button", { text: "查看", cls: "okf-dashboard__ghost-action" });
@@ -954,8 +1029,7 @@ export class OkfDashboardView extends ItemView {
         cls: "okf-dashboard__muted",
         text: "正在读取最新一期…",
       });
-      const content = panel.createDiv({ cls: "okf-feed-project__scroll" });
-      this.attachFeedScroll(definition.id, content);
+      const content = panel.createDiv({ cls: "okf-feed-project__scroll okf-feed-project__preview" });
       content.createDiv({ cls: "okf-dashboard__muted", text: `正在读取${definition.title}…` });
       return { ...definition, panel, header, meta, content };
     });
@@ -968,9 +1042,6 @@ export class OkfDashboardView extends ItemView {
           ? digest.treehole ?? undefined
           : latestAiDailyEdition(digest, surface.section!);
         surface.content.empty();
-        for (const action of surface.header.querySelectorAll<HTMLElement>(
-          ".okf-feed-project__digest-action",
-        )) action.remove();
         if (!edition) {
           surface.meta.setText("当前没有可读内容");
           surface.content.createDiv({
@@ -980,22 +1051,19 @@ export class OkfDashboardView extends ItemView {
           continue;
         }
         surface.meta.setText(`${formatFeedDate(edition.issued_at)} · ${edition.item_count} 条`);
-        const openDigest = surface.header.createEl("button", {
-          text: "打开本期",
+        this.renderFeedDigestEdition(surface.content, surface.kind, edition, {
+          heading: false,
+          mode: "compact",
+          limit: TODAY_FEED_PREVIEW_LIMIT,
+        });
+        const footer = surface.content.createDiv({ cls: "okf-feed-project__footer" });
+        const openDigest = footer.createEl("button", {
+          text: `查看本期全部 ${edition.item_count} 条`,
           cls: "okf-dashboard__ghost-action okf-feed-project__digest-action",
         });
         openDigest.addEventListener("click", () => {
           this.openFeedDigest(openDigest, surface.kind, edition.digest_id);
         });
-        this.renderFeedDigestEdition(surface.content, surface.kind, edition, {
-          heading: false,
-          mode: "compact",
-        });
-        surface.content.createDiv({
-          cls: "okf-feed-project__footer",
-          text: `已显示本期全部 ${edition.item_count} 条`,
-        });
-        surface.content.scrollTop = this.feedScroll[surface.id] ?? 0;
       }
     };
     const cached = this.plugin.feedDashboardDigestSnapshot();
@@ -1040,12 +1108,33 @@ export class OkfDashboardView extends ItemView {
       );
     });
 
+    if (this.selectedSubscriptionSource) {
+      if (this.subscriptionSourcesNeedRefresh()) {
+        try {
+          await this.refreshSubscriptionSourceFirstPage();
+          const refreshed = this.subscriptionSources.find((candidate) =>
+            candidate.source_id === this.selectedSubscriptionSource?.source_id
+          );
+          if (refreshed) {
+            this.selectedSubscriptionSource = {
+              source_id: refreshed.source_id,
+              source_name: refreshed.source_name,
+            };
+          }
+        } catch (error) {
+          if (!this.subscriptionSourcesLoaded) throw error;
+        }
+      }
+      await this.renderReadingSourceDetail(container, this.selectedSubscriptionSource);
+      return;
+    }
+
     let refreshWarning = "";
-    if (this.subscriptionsNeedRefresh()) {
+    if (this.subscriptionSourcesNeedRefresh()) {
       try {
-        await this.refreshSubscriptionFirstPage();
+        await this.refreshSubscriptionSourceFirstPage();
       } catch (error) {
-        if (!this.subscriptionsLoaded) throw error;
+        if (!this.subscriptionSourcesLoaded) throw error;
         refreshWarning = error instanceof Error ? error.message : "订阅内容刷新失败";
       }
     }
@@ -1055,47 +1144,245 @@ export class OkfDashboardView extends ItemView {
         text: `最新内容暂时无法刷新，正在显示上次加载结果：${refreshWarning}`,
       });
     }
-    if (!this.subscriptionEditions.length) {
+    if (!this.subscriptionSourceCatalogComplete) {
+      container.createDiv({
+        cls: "okf-dashboard__inline-alert",
+        text: this.subscriptionSourceCatalogIndexing
+          ? "正在整理历史订阅；当前来源会在索引完成后自动补全。"
+          : "历史订阅索引尚未完成，系统正在自动重试。",
+      });
+    }
+
+    if (
+      this.subscriptionSourceTotal > SUBSCRIPTION_SOURCE_PAGE_SIZE ||
+      Boolean(this.subscriptionSourceQuery)
+    ) {
+      const search = container.createDiv({ cls: "okf-reading-source-search" });
+      const input = search.createEl("input", {
+        attr: {
+          type: "search",
+          placeholder: "搜索订阅来源",
+          "aria-label": "搜索订阅来源",
+        },
+      });
+      input.value = this.subscriptionSourceQuery;
+      const restore = this.readingSearchRestore;
+      if (restore) {
+        this.readingSearchRestore = undefined;
+        input.focus({ preventScroll: true });
+        input.setSelectionRange(restore.start, restore.end);
+      }
+      input.addEventListener("input", () => {
+        if (this.readingSearchTimer !== undefined) window.clearTimeout(this.readingSearchTimer);
+        const query = input.value.trim();
+        this.readingSearchTimer = window.setTimeout(() => {
+          this.readingSearchTimer = undefined;
+          const start = input.selectionStart ?? input.value.length;
+          const end = input.selectionEnd ?? start;
+          this.changeSubscriptionSourceQuery(query, { start, end });
+        }, 250);
+      });
+      input.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        if (this.readingSearchTimer !== undefined) {
+          window.clearTimeout(this.readingSearchTimer);
+          this.readingSearchTimer = undefined;
+        }
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? start;
+        this.changeSubscriptionSourceQuery(input.value.trim(), { start, end });
+      });
+      const count = this.subscriptionSourceQuery
+        ? `找到 ${this.subscriptionSourceMatched} 个来源`
+        : `共 ${this.subscriptionSourceTotal} 个来源`;
+      search.createSpan({ cls: "okf-dashboard__muted", text: count });
+    }
+
+    if (!this.subscriptionSources.length) {
       container.createDiv({
         cls: "okf-dashboard__empty okf-dashboard__empty--panel",
-        text: "还没有订阅阅读内容。同步后，RSS、周刊与教程更新会显示在这里。",
+        text: this.subscriptionSourceQuery
+          ? `没有找到与“${this.subscriptionSourceQuery}”匹配的订阅来源。`
+          : "还没有订阅阅读内容。同步后，RSS、周刊与教程更新会显示在这里。",
       });
       return;
     }
 
-    const panel = container.createEl("section", {
-      cls: "okf-feed-project okf-feed-project--ai-daily okf-feed-project--reading",
+    const grid = container.createEl("section", {
+      cls: "okf-reading-source-grid",
+      attr: { "aria-label": "订阅来源" },
     });
-    const header = panel.createDiv({ cls: "okf-feed-project__header" });
-    const heading = header.createDiv({ cls: "okf-feed-project__heading" });
-    heading.createEl("h3", { text: "订阅期次" });
-    const total = this.subscriptionEditions.reduce(
-      (sum, edition) => sum + edition.item_count,
-      0,
-    );
-    heading.createDiv({
-      cls: "okf-dashboard__muted",
-      text: `已加载 ${this.subscriptionEditions.length} 期 · ${total} 条`,
-    });
-    const latest = this.subscriptionEditions[0]!;
-    const openLatest = header.createEl("button", {
-      text: "打开最新一期",
-      cls: "okf-dashboard__ghost-action okf-feed-project__digest-action",
-    });
-    openLatest.addEventListener("click", () => {
-      this.openFeedDigest(openLatest, "ai-daily", latest.digest_id);
-    });
-    const content = panel.createDiv({ cls: "okf-feed-project__scroll okf-reading-feed__scroll" });
-    this.attachFeedScroll("ai-daily-learning", content);
-    for (const edition of this.subscriptionEditions) {
-      this.renderFeedDigestEdition(content, "ai-daily", edition, {
-        heading: `${formatFeedDate(edition.issued_at)} · ${edition.item_count} 条`,
-        mode: "full",
+    for (const source of this.subscriptionSources) {
+      this.renderSubscriptionSourceCard(grid, source);
+    }
+
+    const footer = container.createDiv({ cls: "okf-reading-source-footer" });
+    if (this.subscriptionSourceHasMore && this.subscriptionSourceCursor) {
+      const cursor = this.subscriptionSourceCursor;
+      const query = this.subscriptionSourceQuery;
+      const projectionVersion = this.plugin.feedProjectionVersion();
+      const paginationGeneration = this.subscriptionSourcePaginationGeneration;
+      const more = footer.createEl("button", {
+        text: "加载更多来源",
+        cls: "okf-dashboard__secondary-action",
+      });
+      more.addEventListener("click", () => {
+        void this.runButtonAction(more, async () => {
+          const page = await this.plugin.loadFeedSubscriptionSources({
+            limit: SUBSCRIPTION_SOURCE_PAGE_SIZE,
+            cursor,
+            ...(query ? { query } : {}),
+          });
+          if (
+            query !== this.subscriptionSourceQuery ||
+            projectionVersion !== this.plugin.feedProjectionVersion() ||
+            paginationGeneration !== this.subscriptionSourcePaginationGeneration ||
+            this.subscriptionSourceCursor !== cursor
+          ) return;
+          this.appendSubscriptionSourcePage(page);
+          await this.render(true);
+        });
+      });
+    } else {
+      footer.createSpan({
+        cls: "okf-dashboard__muted",
+        text: !this.subscriptionSourceCatalogComplete
+          ? "正在补全更多来源…"
+          : this.subscriptionSourceQuery
+            ? `已显示全部 ${this.subscriptionSourceMatched} 个匹配来源`
+            : `已显示全部 ${this.subscriptionSourceTotal} 个来源`,
       });
     }
-    const footer = content.createDiv({ cls: "okf-feed-project__footer okf-reading-feed__footer" });
+  }
+
+  private renderSubscriptionSourceCard(parent: HTMLElement, source: FeedSubscriptionSource): void {
+    const card = parent.createEl("article", {
+      cls: "okf-reading-source-card",
+      attr: { "data-source-id": source.source_id },
+    });
+    const header = card.createDiv({ cls: "okf-reading-source-card__header" });
+    header.createEl("h3", { text: source.source_name });
+    header.createDiv({
+      cls: "okf-dashboard__muted okf-reading-source-card__meta",
+      text: [
+        formatFeedDate(source.latest_issued_at),
+        `本期 ${source.latest_item_count} 条`,
+        `待判断 ${source.pending_decision_count}`,
+        `历史 ${source.edition_count} 期`,
+      ].join(" · "),
+    });
+    const sections = Object.entries(source.native_section_counts)
+      .filter(([label, count]) => Boolean(label.trim()) && count > 0)
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "zh-CN"));
+    if (sections.length) {
+      const badges = card.createDiv({ cls: "okf-reading-source-card__sections" });
+      for (const [label, count] of sections.slice(0, 3)) {
+        badges.createSpan({ cls: "okf-dashboard__badge", text: `${label} ${count}` });
+      }
+      if (sections.length > 3) {
+        badges.createSpan({ cls: "okf-dashboard__badge", text: `其他 ${sections.length - 3} 类` });
+      }
+    }
+    const edition: FeedDigestEdition = {
+      digest_id: source.latest_digest_id,
+      issued_at: source.latest_issued_at,
+      title: source.source_name,
+      section: "learning",
+      quality: source.quality ?? null,
+      quality_reason: source.quality_reason ?? null,
+      item_count: source.latest_item_count,
+      items: source.preview_items,
+    };
+    const preview = card.createDiv({ cls: "okf-reading-source-card__preview" });
+    this.renderFeedDigestEdition(preview, "ai-daily", edition, {
+      heading: false,
+      mode: "compact",
+      limit: READING_SOURCE_PREVIEW_LIMIT,
+      suppressSourceMetadata: true,
+    });
+    const footer = card.createDiv({ cls: "okf-reading-source-card__footer" });
+    const viewAll = footer.createEl("button", {
+      text: "查看该来源",
+      cls: "okf-dashboard__ghost-action",
+      attr: { type: "button" },
+    });
+    viewAll.addEventListener("click", () => this.openSubscriptionSource(source));
+  }
+
+  private async renderReadingSourceDetail(
+    container: HTMLElement,
+    source: Pick<FeedSubscriptionSource, "source_id" | "source_name">,
+  ): Promise<void> {
+    let refreshWarning = "";
+    if (this.subscriptionsNeedRefresh(source.source_id)) {
+      try {
+        await this.refreshSubscriptionFirstPage();
+      } catch (error) {
+        if (!this.subscriptionsLoaded) throw error;
+        refreshWarning = error instanceof Error ? error.message : "订阅来源刷新失败";
+      }
+    }
+    const detail = container.createEl("section", {
+      cls: "okf-reading-source-detail",
+      attr: { "data-source-id": source.source_id },
+    });
+    const header = detail.createDiv({ cls: "okf-reading-source-detail__header" });
+    const back = header.createEl("button", {
+      text: "← 返回全部来源",
+      cls: "okf-dashboard__ghost-action",
+      attr: { type: "button" },
+    });
+    back.addEventListener("click", () => this.closeSubscriptionSource());
+    const copy = header.createDiv({ cls: "okf-reading-source-detail__copy" });
+    copy.createEl("h3", { text: source.source_name });
+    copy.createDiv({
+      cls: "okf-dashboard__muted",
+      text: this.subscriptionEditions.length
+        ? `已加载 ${this.subscriptionEditions.length} 期`
+        : "正在读取来源历史…",
+    });
+    const latest = this.subscriptionEditions[0];
+    if (latest) {
+      const openLatest = header.createEl("button", {
+        text: "打开最新一期",
+        cls: "okf-dashboard__secondary-action",
+      });
+      openLatest.addEventListener("click", () => {
+        this.openFeedDigest(openLatest, "ai-daily", latest.digest_id);
+      });
+    }
+    if (refreshWarning) {
+      detail.createDiv({
+        cls: "okf-dashboard__inline-alert",
+        text: `最新内容暂时无法刷新，正在显示上次加载结果：${refreshWarning}`,
+      });
+    }
+    if (!this.subscriptionCatalogComplete) {
+      detail.createDiv({
+        cls: "okf-dashboard__inline-alert",
+        text: "正在整理这个来源的历史期次；页面会自动补全更早内容。",
+      });
+    }
+    if (!this.subscriptionEditions.length) {
+      detail.createDiv({ cls: "okf-dashboard__empty", text: "这个来源还没有可读内容。" });
+      return;
+    }
+    const editions = detail.createDiv({ cls: "okf-reading-source-detail__editions" });
+    for (const edition of this.subscriptionEditions) {
+      this.renderFeedDigestEdition(editions, "ai-daily", edition, {
+        heading: `${formatFeedDate(edition.issued_at)} · ${edition.item_count} 条`,
+        mode: "full",
+        suppressSourceMetadata: true,
+      });
+    }
+    const total = this.subscriptionEditions.reduce((sum, edition) => sum + edition.item_count, 0);
+    const footer = detail.createDiv({ cls: "okf-reading-source-detail__footer" });
     if (this.subscriptionHasMore && this.subscriptionCursor) {
       const cursor = this.subscriptionCursor;
+      const sourceId = source.source_id;
+      const projectionVersion = this.plugin.feedProjectionVersion();
+      const paginationGeneration = this.subscriptionPaginationGeneration;
       const more = footer.createEl("button", {
         text: "加载更早内容",
         cls: "okf-dashboard__secondary-action",
@@ -1103,30 +1390,229 @@ export class OkfDashboardView extends ItemView {
       more.addEventListener("click", () => {
         void this.runButtonAction(more, async () => {
           const page = await this.plugin.loadFeedSubscriptions({
-            limit: 4,
+            limit: SUBSCRIPTION_EDITION_PAGE_SIZE,
             cursor,
+            source_id: sourceId,
           });
+          if (
+            this.selectedSubscriptionSource?.source_id !== sourceId ||
+            projectionVersion !== this.plugin.feedProjectionVersion() ||
+            paginationGeneration !== this.subscriptionPaginationGeneration ||
+            this.subscriptionCursor !== cursor
+          ) return;
           this.appendSubscriptionPage(page);
           await this.render(true);
         });
       });
     } else {
-      footer.createSpan({ text: `已显示全部 ${total} 条` });
+      footer.createSpan({
+        cls: "okf-dashboard__muted",
+        text: this.subscriptionCatalogComplete
+          ? `已显示全部 ${total} 条`
+          : "正在补全更早期次…",
+      });
     }
-    content.scrollTop = this.feedScroll["ai-daily-learning"] ?? 0;
   }
 
-  private async refreshSubscriptionFirstPage(): Promise<void> {
-    const projectionVersion = this.plugin.feedProjectionVersion();
-    const inFlight = this.subscriptionFirstPageRequest;
-    if (inFlight?.projectionVersion === projectionVersion) {
-      await inFlight.promise;
-      return;
+  private openSubscriptionSource(source: FeedSubscriptionSource): void {
+    this.readingOverviewScroll = this.contentEl.scrollTop;
+    this.selectedSubscriptionSource = {
+      source_id: source.source_id,
+      source_name: source.source_name,
+    };
+    this.resetSubscriptionDetail(source.source_id);
+    this.pageScroll.set("reading", 0);
+    this.plugin.updateDashboardPageUiState("reading", { scrollTop: 0 });
+    void this.render();
+  }
+
+  private closeSubscriptionSource(): void {
+    this.selectedSubscriptionSource = undefined;
+    this.pageScroll.set("reading", this.readingOverviewScroll);
+    this.plugin.updateDashboardPageUiState("reading", { scrollTop: this.readingOverviewScroll });
+    void this.render();
+  }
+
+  private changeSubscriptionSourceQuery(
+    query: string,
+    restore?: { start: number; end: number },
+  ): void {
+    const queryChanged = query !== this.subscriptionSourceQuery;
+    const retryingUnloadedQuery = !queryChanged && this.subscriptionSourceLoadedQuery !== query;
+    if (!queryChanged && !retryingUnloadedQuery) return;
+    this.readingSearchRestore = restore;
+    if (queryChanged) {
+      this.subscriptionSourceQuery = query;
+      this.readingOverviewScroll = 0;
+      this.pageScroll.set("reading", 0);
+      this.plugin.updateDashboardPageUiState("reading", {
+        scrollTop: 0,
+        filters: { query: query || null },
+      });
     }
-    const promise = this.loadAndCommitSubscriptionFirstPage(projectionVersion);
-    this.subscriptionFirstPageRequest = { projectionVersion, promise };
+    const requestedQuery = query;
+    const originatingRenderVersion = this.renderVersion;
+    void this.refreshSubscriptionSourceFirstPage()
+      .then((committed) => {
+        if (
+          !committed ||
+          this.section !== "reading" ||
+          this.subscriptionSourceQuery !== requestedQuery ||
+          this.renderVersion !== originatingRenderVersion
+        ) return;
+        return this.render();
+      })
+      .catch((error: unknown) => {
+        if (this.subscriptionSourceQuery !== requestedQuery) return;
+        // The existing input stays mounted and focused on failure. Clear only
+        // the deferred post-render focus request; pressing Enter captures a
+        // fresh selection and retries the same unloaded query.
+        this.readingSearchRestore = undefined;
+        const message = error instanceof Error ? error.message : "无法搜索订阅来源";
+        new Notice(`${message}；可按 Enter 重试`, 10_000);
+      });
+  }
+
+  private async refreshSubscriptionSourceFirstPage(): Promise<boolean> {
+    const projectionVersion = this.plugin.feedProjectionVersion();
+    const query = this.subscriptionSourceQuery;
+    const inFlight = this.subscriptionSourceFirstPageRequest;
+    if (inFlight?.projectionVersion === projectionVersion && inFlight.query === query) {
+      return inFlight.promise;
+    }
+    const generation = ++this.subscriptionSourceRequestGeneration;
+    const promise = this.loadAndCommitSubscriptionSourceFirstPage(
+      projectionVersion,
+      query,
+      generation,
+    ).catch((error: unknown) => {
+      if (
+        generation !== this.subscriptionSourceRequestGeneration ||
+        projectionVersion !== this.plugin.feedProjectionVersion() ||
+        query !== this.subscriptionSourceQuery
+      ) return false;
+      throw error;
+    });
+    this.subscriptionSourceFirstPageRequest = {
+      projectionVersion,
+      query,
+      generation,
+      promise,
+    };
     try {
-      await promise;
+      return await promise;
+    } finally {
+      if (this.subscriptionSourceFirstPageRequest?.promise === promise) {
+        this.subscriptionSourceFirstPageRequest = undefined;
+      }
+    }
+  }
+
+  private async loadAndCommitSubscriptionSourceFirstPage(
+    projectionVersion: number,
+    query: string,
+    generation = ++this.subscriptionSourceRequestGeneration,
+  ): Promise<boolean> {
+    const page = await this.plugin.loadFeedSubscriptionSources({
+      limit: SUBSCRIPTION_SOURCE_PAGE_SIZE,
+      ...(query ? { query } : {}),
+    });
+    if (
+      generation !== this.subscriptionSourceRequestGeneration ||
+      projectionVersion !== this.plugin.feedProjectionVersion() ||
+      query !== this.subscriptionSourceQuery
+    ) return false;
+    // A refreshed first page cannot prove that an older cursor still borders
+    // the same source set: sources may have been added, removed, renamed, or
+    // reordered beyond the visible page. Restarting the cursor chain avoids
+    // silently retaining deleted cards or making new tail sources unreachable.
+    this.subscriptionSources = mergeSubscriptionSources([], page.sources);
+    this.subscriptionSourceCursor = page.next_cursor;
+    this.subscriptionSourceHasMore = page.has_more;
+    this.subscriptionSourcePagesLoaded = 1;
+    this.subscriptionSourceTotal = page.total_sources;
+    this.subscriptionSourceMatched = page.matched_sources;
+    this.subscriptionSourceCatalogComplete = page.catalog_complete !== false;
+    this.subscriptionSourceCatalogIndexing = page.catalog_indexing === true;
+    this.subscriptionSourcesLoaded = true;
+    this.subscriptionSourcesLoadedAt = Date.now();
+    this.subscriptionSourceProjectionVersion = projectionVersion;
+    this.subscriptionSourceLoadedQuery = query;
+    this.subscriptionSourcePaginationGeneration += 1;
+    if (!this.subscriptionSourceCatalogComplete) this.scheduleReadingCatalogRetry();
+    return true;
+  }
+
+  private appendSubscriptionSourcePage(page: FeedSubscriptionSourcePage): void {
+    this.subscriptionSources = mergeSubscriptionSources(this.subscriptionSources, page.sources);
+    this.subscriptionSourceCursor = page.next_cursor;
+    this.subscriptionSourceHasMore = page.has_more;
+    this.subscriptionSourceTotal = page.total_sources;
+    this.subscriptionSourceMatched = page.matched_sources;
+    this.subscriptionSourceCatalogComplete = page.catalog_complete !== false;
+    this.subscriptionSourceCatalogIndexing = page.catalog_indexing === true;
+    this.subscriptionSourcePagesLoaded += 1;
+  }
+
+  private subscriptionSourcesNeedRefresh(now = Date.now()): boolean {
+    return !this.subscriptionSourcesLoaded ||
+      this.subscriptionSourceLoadedQuery !== this.subscriptionSourceQuery ||
+      this.subscriptionSourceProjectionVersion !== this.plugin.feedProjectionVersion() ||
+      now - this.subscriptionSourcesLoadedAt >= SUBSCRIPTION_FIRST_PAGE_TTL_MS;
+  }
+
+  private scheduleReadingCatalogRetry(): void {
+    if (this.readingCatalogRetryTimer !== undefined) return;
+    this.readingCatalogRetryTimer = window.setTimeout(() => {
+      this.readingCatalogRetryTimer = undefined;
+      if (this.section !== "reading") return;
+      const detail = this.selectedSubscriptionSource !== undefined;
+      const incomplete = detail
+        ? !this.subscriptionCatalogComplete
+        : !this.subscriptionSourceCatalogComplete;
+      if (!incomplete) return;
+      const focused = this.contentEl.ownerDocument?.activeElement;
+      const editing = focused instanceof HTMLElement &&
+        this.contentEl.contains(focused) &&
+        (focused.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(focused.tagName));
+      if (editing) {
+        this.scheduleReadingCatalogRetry();
+        return;
+      }
+      if (detail) this.subscriptionLoadedAt = 0;
+      else this.subscriptionSourcesLoadedAt = 0;
+      void this.render(true);
+    }, 1_500);
+  }
+
+  private async refreshSubscriptionFirstPage(): Promise<boolean> {
+    const projectionVersion = this.plugin.feedProjectionVersion();
+    const sourceId = this.selectedSubscriptionSource?.source_id ?? "";
+    const inFlight = this.subscriptionFirstPageRequest;
+    if (inFlight?.projectionVersion === projectionVersion && inFlight.sourceId === sourceId) {
+      return inFlight.promise;
+    }
+    const generation = ++this.subscriptionRequestGeneration;
+    const promise = this.loadAndCommitSubscriptionFirstPage(
+      projectionVersion,
+      sourceId,
+      generation,
+    ).catch((error: unknown) => {
+      if (
+        generation !== this.subscriptionRequestGeneration ||
+        projectionVersion !== this.plugin.feedProjectionVersion() ||
+        sourceId !== (this.selectedSubscriptionSource?.source_id ?? "")
+      ) return false;
+      throw error;
+    });
+    this.subscriptionFirstPageRequest = {
+      projectionVersion,
+      sourceId,
+      generation,
+      promise,
+    };
+    try {
+      return await promise;
     } finally {
       if (this.subscriptionFirstPageRequest?.promise === promise) {
         this.subscriptionFirstPageRequest = undefined;
@@ -1134,9 +1620,21 @@ export class OkfDashboardView extends ItemView {
     }
   }
 
-  private async loadAndCommitSubscriptionFirstPage(projectionVersion: number): Promise<void> {
-    const page = await this.plugin.loadFeedSubscriptions({ limit: 4 });
-    if (projectionVersion !== this.plugin.feedProjectionVersion()) return;
+  private async loadAndCommitSubscriptionFirstPage(
+    projectionVersion: number,
+    sourceId = this.selectedSubscriptionSource?.source_id ?? "",
+    generation = ++this.subscriptionRequestGeneration,
+  ): Promise<boolean> {
+    const page = await this.plugin.loadFeedSubscriptions({
+      limit: SUBSCRIPTION_EDITION_PAGE_SIZE,
+      ...(sourceId ? { source_id: sourceId } : {}),
+    });
+    if (
+      generation !== this.subscriptionRequestGeneration ||
+      projectionVersion !== this.plugin.feedProjectionVersion() ||
+      sourceId !== (this.selectedSubscriptionSource?.source_id ?? "") ||
+      (page.source_id !== undefined && page.source_id !== null && page.source_id !== sourceId)
+    ) return false;
     const loadedDigestIds = new Set(this.subscriptionEditions.map((edition) => edition.digest_id));
     const firstPageOverlapsHistory = page.editions.some((edition) =>
       loadedDigestIds.has(edition.digest_id)
@@ -1145,22 +1643,37 @@ export class OkfDashboardView extends ItemView {
     // the already loaded history. If several new editions create a gap, restart
     // pagination from the new first page so no intermediate edition is skipped.
     const preserveLoadedHistory = this.subscriptionPagesLoaded > 1 && firstPageOverlapsHistory;
-    this.subscriptionEditions = preserveLoadedHistory
+    const totalChanged = page.total_editions !== undefined && page.total_editions !== null &&
+      this.subscriptionTotalEditions !== null &&
+      page.total_editions !== this.subscriptionTotalEditions;
+    const preserveContinuousHistory = preserveLoadedHistory && !totalChanged;
+    this.subscriptionEditions = preserveContinuousHistory
       ? mergeSubscriptionEditions(page.editions, this.subscriptionEditions)
       : mergeSubscriptionEditions([], page.editions);
-    if (!preserveLoadedHistory) {
+    if (!preserveContinuousHistory) {
       this.subscriptionCursor = page.next_cursor;
       this.subscriptionHasMore = page.has_more;
       this.subscriptionPagesLoaded = 1;
     }
+    if (page.total_editions !== undefined && page.total_editions !== null) {
+      this.subscriptionTotalEditions = page.total_editions;
+    }
+    this.subscriptionCatalogComplete = page.catalog_complete !== false;
     this.subscriptionsLoaded = true;
     this.subscriptionLoadedAt = Date.now();
     this.subscriptionProjectionVersion = projectionVersion;
+    this.subscriptionDetailSourceId = sourceId;
+    this.subscriptionPaginationGeneration += 1;
+    if (!this.subscriptionCatalogComplete) this.scheduleReadingCatalogRetry();
+    return true;
   }
 
   private async syncFeedsAndRefresh(): Promise<void> {
     const results = await this.plugin.syncFeedsNow();
-    if (this.section === "reading") await this.refreshSubscriptionFirstPage();
+    if (this.section === "reading") {
+      await this.refreshSubscriptionSourceFirstPage();
+      if (this.selectedSubscriptionSource) await this.refreshSubscriptionFirstPage();
+    }
     await this.render(true);
     const failure = feedSyncFailureMessage(results);
     if (failure) throw new Error(failure);
@@ -1170,13 +1683,34 @@ export class OkfDashboardView extends ItemView {
     this.subscriptionEditions = mergeSubscriptionEditions(this.subscriptionEditions, page.editions);
     this.subscriptionCursor = page.next_cursor;
     this.subscriptionHasMore = page.has_more;
+    if (page.total_editions !== undefined && page.total_editions !== null) {
+      this.subscriptionTotalEditions = page.total_editions;
+    }
+    this.subscriptionCatalogComplete = page.catalog_complete !== false;
     this.subscriptionPagesLoaded += 1;
   }
 
-  private subscriptionsNeedRefresh(now = Date.now()): boolean {
+  private subscriptionsNeedRefresh(sourceId: string, now = Date.now()): boolean {
     return !this.subscriptionsLoaded ||
+      this.subscriptionDetailSourceId !== sourceId ||
       this.subscriptionProjectionVersion !== this.plugin.feedProjectionVersion() ||
       now - this.subscriptionLoadedAt >= SUBSCRIPTION_FIRST_PAGE_TTL_MS;
+  }
+
+  private resetSubscriptionDetail(sourceId: string): void {
+    this.subscriptionRequestGeneration += 1;
+    this.subscriptionPaginationGeneration += 1;
+    this.subscriptionFirstPageRequest = undefined;
+    this.subscriptionEditions = [];
+    this.subscriptionCursor = null;
+    this.subscriptionHasMore = false;
+    this.subscriptionTotalEditions = null;
+    this.subscriptionCatalogComplete = true;
+    this.subscriptionsLoaded = false;
+    this.subscriptionPagesLoaded = 0;
+    this.subscriptionLoadedAt = 0;
+    this.subscriptionProjectionVersion = -1;
+    this.subscriptionDetailSourceId = sourceId;
   }
 
   private attachFeedScroll(feed: DashboardFeed, element: HTMLElement): void {
@@ -1219,6 +1753,8 @@ export class OkfDashboardView extends ItemView {
     options: {
       heading?: string | false;
       mode?: "compact" | "full";
+      limit?: number;
+      suppressSourceMetadata?: boolean;
     } = {},
   ): void {
     const mode = options.mode ?? "full";
@@ -1239,8 +1775,19 @@ export class OkfDashboardView extends ItemView {
       });
     }
     const items = section.createDiv({ cls: "okf-feed-digest__items" });
-    for (const [index, item] of edition.items.entries()) {
-      this.renderFeedDigestItem(items, kind, edition, item, index + 1, mode);
+    const visibleItems = options.limit === undefined
+      ? edition.items
+      : edition.items.slice(0, Math.max(0, options.limit));
+    for (const [index, item] of visibleItems.entries()) {
+      this.renderFeedDigestItem(
+        items,
+        kind,
+        edition,
+        item,
+        index + 1,
+        mode,
+        options.suppressSourceMetadata ?? false,
+      );
     }
   }
 
@@ -1251,6 +1798,7 @@ export class OkfDashboardView extends ItemView {
     item: FeedDigestItem,
     index: number,
     mode: "compact" | "full" = "full",
+    suppressSourceMetadata = false,
   ): void {
     const card = parent.createEl("article", {
       cls: `okf-feed-digest__item is-${mode}`,
@@ -1270,7 +1818,9 @@ export class OkfDashboardView extends ItemView {
       text: kind === "treehole" && item.pid ? `#${item.pid} · ${item.title}` : `${index}. ${item.title}`,
     });
     if (item.summary) card.createDiv({ cls: "okf-feed-digest__summary", text: item.summary });
-    const metadata = kind === "treehole" ? treeholeMetadata(item) : aiDailyMetadata(item);
+    const metadata = kind === "treehole"
+      ? treeholeMetadata(item)
+      : aiDailyMetadata(item, suppressSourceMetadata);
     if (metadata) card.createDiv({ cls: "okf-dashboard__muted", text: metadata });
     const decision = feedDecisionLabel(
       this.plugin.feedDecisionSnapshot(kind, item.item_id)?.action ?? item.decision,
@@ -3453,9 +4003,9 @@ function formatLocalTimestamp(value: string): string {
   return new Date(time).toLocaleString("zh-CN", { hour12: false });
 }
 
-function aiDailyMetadata(item: FeedDigestItem): string {
+function aiDailyMetadata(item: FeedDigestItem, suppressSource = false): string {
   const parts = [
-    item.source_name || item.source,
+    suppressSource ? "" : item.source_name || item.source,
     item.native_section,
     item.published_at,
     item.media_count ? `${item.media_count} 个媒体` : "",
@@ -3484,6 +4034,20 @@ export function mergeSubscriptionEditions(
     if (edition.section !== "learning" || seen.has(edition.digest_id)) continue;
     seen.add(edition.digest_id);
     merged.push(edition);
+  }
+  return merged;
+}
+
+export function mergeSubscriptionSources(
+  current: readonly FeedSubscriptionSource[],
+  incoming: readonly FeedSubscriptionSource[],
+): FeedSubscriptionSource[] {
+  const merged = [...current];
+  const seen = new Set(current.map((source) => source.source_id));
+  for (const source of incoming) {
+    if (!source.source_id || seen.has(source.source_id)) continue;
+    seen.add(source.source_id);
+    merged.push(source);
   }
   return merged;
 }

@@ -17,6 +17,7 @@ from typing import cast
 
 import httpx
 
+from okf_workspace.feeds import FeedKind
 from okf_workspace.governance import scan_governance
 from okf_workspace.importers.config import ImportSettings
 
@@ -479,7 +480,12 @@ def system_status(
         )
     )
     producer_config = runtime / "feed-producers.json"
-    feed_files = list((runtime / "feed-cache").glob("**/*.json"))
+    feed_cache = runtime / "feed-cache"
+    feed_files = [
+        path
+        for feed in FeedKind
+        for path in (feed_cache / feed.value).glob("*.json")
+    ]
     latest_feed = max((path.stat().st_mtime for path in feed_files), default=0.0)
     latest_feed_at = datetime.fromtimestamp(latest_feed, UTC) if latest_feed else None
     feed_stale = latest_feed_at is None or (datetime.now(UTC) - latest_feed_at).days >= 2

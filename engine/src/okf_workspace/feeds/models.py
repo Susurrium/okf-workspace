@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+UNATTRIBUTED_SOURCE_ID = "source:unattributed"
+UNATTRIBUTED_SOURCE_NAME = "来源未标注"
+
 
 def _empty_metrics() -> dict[str, float | int | str]:
     return {}
@@ -53,6 +56,18 @@ class FeedItem:
     metrics: dict[str, float | int | str] = field(default_factory=_empty_metrics)
     comments: tuple[FeedComment, ...] = ()
     media: tuple[str, ...] = ()
+
+
+def reading_source_id(item: FeedItem) -> str:
+    """Return the durable Reading identity for one learning item.
+
+    Historical learning payloads did not always identify their subscription
+    source.  They deliberately share one stable sentinel instead of deriving a
+    mutable identity from a URL hostname or display name.
+    """
+
+    source_id = item.source_id.strip() if item.source_id else ""
+    return source_id or UNATTRIBUTED_SOURCE_ID
 
 
 @dataclass(frozen=True, slots=True)

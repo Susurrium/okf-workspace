@@ -93,6 +93,10 @@ export interface FeedDashboardDigest {
 
 export interface FeedSubscriptionPage {
   section: "learning";
+  source_id?: string | null;
+  catalog_complete?: boolean | null;
+  catalog_indexing?: boolean | null;
+  total_editions?: number | null;
   editions: FeedDigestEdition[];
   next_cursor: string | null;
   has_more: boolean;
@@ -101,6 +105,38 @@ export interface FeedSubscriptionPage {
 export interface FeedSubscriptionPageQuery {
   limit?: number;
   cursor?: string;
+  source_id?: string;
+}
+
+export interface FeedSubscriptionSource {
+  source_id: string;
+  source_name: string;
+  latest_issued_at: string;
+  latest_digest_id: string;
+  quality?: string | null;
+  quality_reason?: string | null;
+  latest_item_count: number;
+  pending_decision_count: number;
+  edition_count: number;
+  native_section_counts: Record<string, number>;
+  preview_items: FeedDigestItem[];
+}
+
+export interface FeedSubscriptionSourcePage {
+  section: "learning";
+  catalog_complete?: boolean;
+  catalog_indexing?: boolean;
+  sources: FeedSubscriptionSource[];
+  total_sources: number;
+  matched_sources: number;
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
+export interface FeedSubscriptionSourcePageQuery {
+  limit?: number;
+  cursor?: string;
+  query?: string;
 }
 
 export interface FeedSyncSuccess {

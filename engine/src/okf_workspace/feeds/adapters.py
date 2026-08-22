@@ -19,7 +19,9 @@ _MARKDOWN_LINK = re.compile(r"\[(?P<label>[^]]+)\]\((?P<url>https?://[^)]+)\)")
 _GENERIC_SOURCE_HEADINGS = {"来源", "最新条目"}
 
 
-def _source_identity(source_name: str | None, url: str | None) -> str | None:
+def legacy_source_identity(source_name: str | None, url: str | None) -> str | None:
+    """Reproduce the pre-registry Reading identity for cache migration."""
+
     if source_name:
         digest = hashlib.sha256(source_name.casefold().encode("utf-8")).hexdigest()[:16]
         return f"source:{digest}"
@@ -45,7 +47,12 @@ def _frontmatter_value(markdown: str, key: str) -> str | None:
     return None
 
 
-def ai_daily_markdown_from_v1(markdown: str, *, stream: str) -> FeedEdition:
+def ai_daily_markdown_from_v1(
+    markdown: str,
+    *,
+    stream: str,
+    source_ids_by_name: Mapping[str, str] | None = None,
+) -> FeedEdition:
     """Convert one finalized V1 AI Daily stream Markdown into an edition."""
 
     if stream not in {"hotspot", "news", "learning"}:
@@ -54,6 +61,11 @@ def ai_daily_markdown_from_v1(markdown: str, *, stream: str) -> FeedEdition:
     if not issue_date:
         raise ValueError("AI Daily Markdown has no date")
     title = _frontmatter_value(markdown, "title") or f"AI Daily {issue_date} · {stream}"
+    stable_source_ids = {
+        name.strip().casefold(): source_id.strip()
+        for name, source_id in (source_ids_by_name or {}).items()
+        if name.strip() and source_id.strip()
+    }
     lines = markdown.splitlines()
     starts: list[tuple[int, re.Match[str], str | None, str | None]] = []
     source_name: str | None = None
@@ -120,7 +132,12 @@ def ai_daily_markdown_from_v1(markdown: str, *, stream: str) -> FeedEdition:
                 url=url,
                 published_at=published_at,
                 stream=stream,
-                source_id=_source_identity(source_name, url),
+                source_id=(
+                    stable_source_ids.get(source_name.casefold())
+                    if source_name is not None
+                    else None
+                )
+                or legacy_source_identity(source_name, url),
                 source_name=source_name,
                 native_section=native_section,
                 media=tuple(dict.fromkeys(media)),
@@ -194,7 +211,7 @@ def ai_daily_from_v1(
                     source_id = (
                         str(item["source_id"]).strip()
                         if item.get("source_id")
-                        else _source_identity(source_name, url)
+                        else legacy_source_identity(source_name, url)
                     )
                     items.append(
                         FeedItem(

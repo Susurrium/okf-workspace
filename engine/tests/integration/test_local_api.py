@@ -12,7 +12,13 @@ from fastapi.testclient import TestClient
 from okf_workspace.api import LocalTokenStore, create_app
 from okf_workspace.config import BrainPaths
 from okf_workspace.feeds import FeedCache, FeedDecisionService
-from okf_workspace.feeds.models import FeedEdition, FeedItem, FeedKind
+from okf_workspace.feeds.models import (
+    DecisionAction,
+    DecisionResult,
+    FeedEdition,
+    FeedItem,
+    FeedKind,
+)
 from okf_workspace.importers import DocumentImporter
 from okf_workspace.importers.models import ParserExport, ParserName
 from okf_workspace.notes import NoteService
@@ -79,10 +85,7 @@ def test_system_status_can_force_live_service_probes(
     client, headers, _paths = _client(vault, tmp_path)
 
     assert client.get("/system/status", headers=headers).status_code == 200
-    assert (
-        client.get("/system/status?refresh_services=true", headers=headers).status_code
-        == 200
-    )
+    assert client.get("/system/status?refresh_services=true", headers=headers).status_code == 200
     assert calls == [False, True]
 
 
@@ -484,8 +487,8 @@ def test_feed_dashboard_selects_each_latest_stream_and_pages_subscriptions_stabl
     assert newest_item["native_section"] == "工具"
     assert newest_item["decision"] is None
     legacy_item = first["editions"][1]["items"][0]
-    assert legacy_item["source"] == "learning.example"
-    assert legacy_item["source_id"] == "learning.example"
+    assert legacy_item["source"] == "来源未标注"
+    assert legacy_item["source_id"] == "source:unattributed"
 
     put("learning", "2026-08-22")
     second = client.get(
@@ -511,6 +514,405 @@ def test_feed_dashboard_selects_each_latest_stream_and_pages_subscriptions_stabl
         ).status_code
         == 400
     )
+
+
+def test_reading_source_cards_are_latest_scoped_searchable_and_stably_paged(
+    vault: Path,
+    tmp_path: Path,
+) -> None:
+    client, headers, paths = _client(vault, tmp_path)
+    cache = FeedCache(paths.state)
+
+    def item(
+        edition_id: str,
+        item_id: str,
+        *,
+        source_id: str | None,
+        source_name: str | None,
+        native_section: str | None,
+    ) -> FeedItem:
+        return FeedItem(
+            item_id=item_id,
+            feed=FeedKind.AI_DAILY,
+            edition_id=edition_id,
+            title=f"标题 {item_id}",
+            body=f"摘要 {item_id}",
+            url=f"https://reading.example/{item_id}",
+            stream="learning",
+            source_id=source_id,
+            source_name=source_name,
+            native_section=native_section,
+        )
+
+    def put(
+        issued_at: str,
+        items: tuple[FeedItem, ...],
+        *,
+        quality: str | None = None,
+        quality_reason: str | None = None,
+    ) -> None:
+        edition_id = f"{issued_at}-learning"
+        cache.put(
+            FeedEdition(
+                edition_id=edition_id,
+                feed=FeedKind.AI_DAILY,
+                edition_at=issued_at,
+                title=f"订阅阅读 {issued_at}",
+                stream="learning",
+                items=items,
+                quality=quality,
+                quality_reason=quality_reason,
+            )
+        )
+
+    alpha_id = "2026-08-22-learning"
+    alpha_items = tuple(
+        item(
+            alpha_id,
+            f"alpha:{index}",
+            source_id="source:alpha",
+            source_name="Weekly Alpha",
+            native_section=("工具" if index < 2 else "文章" if index < 4 else None),
+        )
+        for index in range(5)
+    )
+    put(
+        "2026-08-22",
+        (
+            *alpha_items,
+            item(
+                alpha_id,
+                "beta:older",
+                source_id="source:beta",
+                source_name="Beta Digest",
+                native_section="资源",
+            ),
+        ),
+        quality="partial",
+        quality_reason="一个来源暂时不可用",
+    )
+    older_alpha_id = "2026-08-20-learning"
+    put(
+        "2026-08-20",
+        (
+            item(
+                older_alpha_id,
+                "alpha:older",
+                source_id="source:alpha",
+                source_name="Weekly Alpha",
+                native_section="文章",
+            ),
+        ),
+    )
+    beta_id = "2026-08-23-learning"
+    put(
+        "2026-08-23",
+        (
+            item(
+                beta_id,
+                "beta:latest",
+                source_id="source:beta",
+                source_name="Beta Digest",
+                native_section="工具",
+            ),
+        ),
+    )
+    unknown_id = "2026-08-24-learning"
+    put(
+        "2026-08-24",
+        (
+            item(
+                unknown_id,
+                "unknown:latest",
+                source_id=None,
+                source_name="旧数据中的非稳定名称",
+                native_section=None,
+            ),
+        ),
+    )
+    FeedDecisionService(vault, paths.state).store.save(
+        alpha_items[0],
+        DecisionAction.IGNORE,
+        result=DecisionResult(
+            item_id=alpha_items[0].item_id,
+            action=DecisionAction.IGNORE,
+        ),
+    )
+    broken = paths.state / "feed-cache/ai-daily/2099-01-01-learning.json"
+    broken.write_text("{broken", encoding="utf-8")
+
+    first_response = client.get(
+        "/dashboard/feeds/subscription-sources",
+        headers=headers,
+        params={"limit": 2},
+    )
+    assert first_response.status_code == 200
+    first = first_response.json()
+    assert first["catalog_complete"] is True
+    assert first["catalog_indexing"] is False
+    assert first["total_sources"] == 3
+    assert first["matched_sources"] == 3
+    assert [source["source_id"] for source in first["sources"]] == [
+        "source:beta",
+        "source:alpha",
+    ]
+    assert first["has_more"] is True
+    assert isinstance(first["next_cursor"], str)
+    alpha = first["sources"][1]
+    assert alpha["latest_issued_at"] == "2026-08-22"
+    assert alpha["latest_digest_id"] == alpha_id
+    assert alpha["latest_item_count"] == 5
+    assert alpha["pending_decision_count"] == 4
+    assert alpha["edition_count"] == 2
+    assert alpha["native_section_counts"] == {"工具": 2, "文章": 2, "未分类": 1}
+    assert alpha["quality"] == "partial"
+    assert alpha["quality_reason"] == "一个来源暂时不可用"
+    assert len(alpha["preview_items"]) == 3
+    assert all(value["decision"] is None for value in alpha["preview_items"][1:])
+
+    new_id = "2026-08-25-learning"
+    put(
+        "2026-08-25",
+        (
+            item(
+                new_id,
+                "new:latest",
+                source_id="source:new",
+                source_name="New Source",
+                native_section="资源",
+            ),
+        ),
+    )
+    second = client.get(
+        "/dashboard/feeds/subscription-sources",
+        headers=headers,
+        params={"limit": 2, "cursor": first["next_cursor"]},
+    ).json()
+    assert [source["source_id"] for source in second["sources"]] == ["source:unattributed"]
+    assert second["sources"][0]["source_name"] == "来源未标注"
+    assert second["has_more"] is False
+
+    search = client.get(
+        "/dashboard/feeds/subscription-sources",
+        headers=headers,
+        params={"query": "  WEEKLY  "},
+    ).json()
+    assert search["total_sources"] == 4
+    assert search["matched_sources"] == 1
+    assert [source["source_id"] for source in search["sources"]] == ["source:alpha"]
+    assert (
+        client.get(
+            "/dashboard/feeds/subscription-sources",
+            headers=headers,
+            params={"query": "weekly", "cursor": first["next_cursor"]},
+        ).status_code
+        == 400
+    )
+    tampered = ("A" if first["next_cursor"][0] != "A" else "B") + first["next_cursor"][1:]
+    assert (
+        client.get(
+            "/dashboard/feeds/subscription-sources",
+            headers=headers,
+            params={"cursor": tampered},
+        ).status_code
+        == 400
+    )
+    assert (
+        client.get(
+            "/dashboard/feeds/subscription-sources",
+            headers=headers,
+            params={"limit": 9},
+        ).status_code
+        == 422
+    )
+
+
+def test_reading_source_overview_uses_catalog_and_loads_shared_latest_once(
+    vault: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, headers, paths = _client(vault, tmp_path)
+    cache = FeedCache(paths.state)
+    for day in range(1, 21):
+        issued_at = f"2026-07-{day:02d}"
+        edition_id = f"{issued_at}-learning"
+        cache.put(
+            FeedEdition(
+                edition_id=edition_id,
+                feed=FeedKind.AI_DAILY,
+                edition_at=issued_at,
+                title=f"订阅阅读 {issued_at}",
+                stream="learning",
+                items=tuple(
+                    FeedItem(
+                        item_id=f"{source_id}:{issued_at}",
+                        feed=FeedKind.AI_DAILY,
+                        edition_id=edition_id,
+                        title=f"{source_name} {issued_at}",
+                        body="完整摘要",
+                        stream="learning",
+                        source_id=source_id,
+                        source_name=source_name,
+                        native_section="文章",
+                    )
+                    for source_id, source_name in (
+                        ("source:alpha", "Alpha Weekly"),
+                        ("source:beta", "Beta Weekly"),
+                    )
+                ),
+            )
+        )
+
+    def reject_history_scan(
+        self: FeedCache,
+        feed: FeedKind,
+        stream: str,
+    ) -> object:
+        del self, feed, stream
+        raise AssertionError("source overview must not scan historical edition indexes")
+
+    body_reads: list[str] = []
+    original_get = FeedCache.get
+
+    def tracking_get(self: FeedCache, feed: FeedKind, edition_id: str) -> FeedEdition:
+        body_reads.append(edition_id)
+        return original_get(self, feed, edition_id)
+
+    monkeypatch.setattr(FeedCache, "iter_stream_indexes", reject_history_scan)
+    monkeypatch.setattr(FeedCache, "get", tracking_get)
+
+    response = client.get(
+        "/dashboard/feeds/subscription-sources",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_sources"] == 2
+    assert [source["edition_count"] for source in payload["sources"]] == [20, 20]
+    assert body_reads == ["2026-07-20-learning"]
+
+    body_reads.clear()
+    search = client.get(
+        "/dashboard/feeds/subscription-sources",
+        headers=headers,
+        params={"query": "alpha"},
+    )
+    assert search.status_code == 200
+    assert [source["source_id"] for source in search.json()["sources"]] == ["source:alpha"]
+    assert body_reads == ["2026-07-20-learning"]
+
+
+def test_reading_source_detail_filters_items_binds_cursor_and_avoids_unrelated_bodies(
+    vault: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, headers, paths = _client(vault, tmp_path)
+    cache = FeedCache(paths.state)
+
+    def put(
+        issued_at: str,
+        source_ids: tuple[str | None, ...],
+    ) -> None:
+        edition_id = f"{issued_at}-learning"
+        cache.put(
+            FeedEdition(
+                edition_id=edition_id,
+                feed=FeedKind.AI_DAILY,
+                edition_at=issued_at,
+                title=f"订阅阅读 {issued_at}",
+                stream="learning",
+                items=tuple(
+                    FeedItem(
+                        item_id=f"{edition_id}:{index}",
+                        feed=FeedKind.AI_DAILY,
+                        edition_id=edition_id,
+                        title=f"条目 {index}",
+                        body="完整摘要",
+                        stream="learning",
+                        source_id=source_id,
+                        source_name=(f"来源 {source_id}" if source_id else None),
+                    )
+                    for index, source_id in enumerate(source_ids)
+                ),
+            )
+        )
+
+    put("2026-08-24", (None,))
+    put("2026-08-23", ("source:beta",))
+    put("2026-08-22", ("source:alpha", "source:beta", "source:alpha"))
+    put("2026-08-20", ("source:alpha",))
+
+    original_get = FeedCache.get
+    deserialized: list[str] = []
+
+    def tracking_get(self: FeedCache, feed: FeedKind, edition_id: str) -> FeedEdition:
+        deserialized.append(edition_id)
+        return original_get(self, feed, edition_id)
+
+    monkeypatch.setattr(FeedCache, "get", tracking_get)
+    cards = client.get(
+        "/dashboard/feeds/subscription-sources",
+        headers=headers,
+        params={"limit": 2},
+    ).json()
+    assert [source["source_id"] for source in cards["sources"]] == [
+        "source:beta",
+        "source:alpha",
+    ]
+    assert set(deserialized) == {"2026-08-23-learning", "2026-08-22-learning"}
+
+    deserialized.clear()
+    first = client.get(
+        "/dashboard/feeds/subscriptions",
+        headers=headers,
+        params={"source_id": "source:alpha", "limit": 1},
+    ).json()
+    assert [edition["issued_at"] for edition in first["editions"]] == ["2026-08-22"]
+    assert [item["source_id"] for item in first["editions"][0]["items"]] == [
+        "source:alpha",
+        "source:alpha",
+    ]
+    assert first["source_id"] == "source:alpha"
+    assert first["catalog_complete"] is True
+    assert first["catalog_indexing"] is False
+    assert first["total_editions"] == 2
+    assert first["has_more"] is True
+    assert "2026-08-23-learning" not in deserialized
+    assert "2026-08-24-learning" not in deserialized
+
+    put("2026-08-25", ("source:alpha",))
+    deserialized.clear()
+    second = client.get(
+        "/dashboard/feeds/subscriptions",
+        headers=headers,
+        params={
+            "source_id": "source:alpha",
+            "limit": 1,
+            "cursor": first["next_cursor"],
+        },
+    ).json()
+    assert [edition["issued_at"] for edition in second["editions"]] == ["2026-08-20"]
+    assert second["total_editions"] == 3
+    assert second["has_more"] is False
+    assert "2026-08-25-learning" not in deserialized
+    assert (
+        client.get(
+            "/dashboard/feeds/subscriptions",
+            headers=headers,
+            params={"source_id": "source:beta", "cursor": first["next_cursor"]},
+        ).status_code
+        == 400
+    )
+    unknown = client.get(
+        "/dashboard/feeds/subscriptions",
+        headers=headers,
+        params={"source_id": "source:unattributed"},
+    ).json()
+    assert [edition["issued_at"] for edition in unknown["editions"]] == ["2026-08-24"]
+    assert unknown["editions"][0]["items"][0]["source_name"] == "来源未标注"
 
 
 def test_feed_summary_does_not_deserialize_old_large_or_broken_editions(

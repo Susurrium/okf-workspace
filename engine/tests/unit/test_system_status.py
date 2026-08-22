@@ -32,6 +32,9 @@ def test_system_status_reports_backup_time_and_actionable_feed_sync(
         encoding="utf-8",
     )
     (state / "feed-producers.json").write_text("{}", encoding="utf-8")
+    metadata = state / "feed-cache/metadata/ai-daily/2026-08-22-learning.json"
+    metadata.parent.mkdir(parents=True)
+    metadata.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(
         "okf_workspace.dashboard.system.httpx.get",
         _healthy_get,

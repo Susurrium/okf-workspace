@@ -6,7 +6,12 @@ from typing import cast
 
 import pytest
 
+import okf_workspace.feeds.remote as feed_remote
 from okf_workspace.cli import main
+from okf_workspace.dashboard.feeds import (
+    subscription_dashboard,
+    subscription_sources_dashboard,
+)
 from okf_workspace.feeds.adapters import (
     ai_daily_from_v1,
     ai_daily_markdown_from_v1,
@@ -157,6 +162,186 @@ RSS 摘要。
     assert edition.items[21].source_name == "逛逛 GitHub"
     assert edition.items[21].native_section is None
     assert edition.items[21].source_id != edition.items[0].source_id
+
+
+def test_learning_markdown_prefers_producer_source_id() -> None:
+    markdown = """---
+title: AI 学习
+date: 2026-08-22
+---
+# AI 学习
+
+## 阮一峰《科技爱好者周刊》
+
+### 1. [一个条目](https://weekly.example/item)
+
+摘要。
+"""
+
+    edition = ai_daily_markdown_from_v1(
+        markdown,
+        stream="learning",
+        source_ids_by_name={"阮一峰《科技爱好者周刊》": "ruanyf-weekly"},
+    )
+
+    assert edition.items[0].source_id == "ruanyf-weekly"
+
+
+def test_remote_ai_daily_carries_unique_valid_registry_ids(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "documents": [
+            {
+                "stream": "learning",
+                "markdown": "---\ndate: 2026-08-22\n---\n# Learning\n",
+            }
+        ],
+        "sources": [
+            {"source_id": "weekly-source", "source_name": "周刊"},
+            {"source_id": "other-source", "source_name": "冲突来源"},
+            {"source_id": "second-source", "source_name": "冲突来源"},
+            {"source_id": "INVALID ID", "source_name": "无效来源"},
+        ],
+        "registry_errors": ["/opt/seed.yaml: ValueError: bad seed"],
+    }
+    puller = RemoteFeedPuller(tmp_path)
+    def remote_python(_alias: str, _script: str, *, sudo: bool = False) -> str:
+        return json.dumps(payload)
+
+    monkeypatch.setattr(puller, "_python", remote_python)
+
+    documents = puller.ai_daily("producer")
+
+    assert len(documents) == 1
+    assert documents[0][0] == "learning"
+    assert puller.ai_daily_source_ids_by_name == {"周刊": "weekly-source"}
+    assert puller.ai_daily_registry_warnings == (
+        "/opt/seed.yaml: ValueError: bad seed",
+        "source name maps to multiple ids: 冲突来源",
+    )
+
+
+def test_remote_ai_script_reads_seed_and_runtime_source_registries() -> None:
+    seed = "/opt/ai-daily-bridge/config/bridge-sources.yaml"
+    runtime = "/srv/ai-daily/bridge/config/sources.yaml"
+
+    assert (seed, runtime) == feed_remote.AI_DAILY_REGISTRY_PATHS
+
+
+def test_sync_upgrades_legacy_source_id_and_keeps_renamed_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "feed-producers.json").write_text(
+        json.dumps(
+            {
+                "ai-daily": {
+                    "remote_kind": "ai-daily-bridge-v1",
+                    "ssh_alias": "producer",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def learning_markdown(issue_date: str, source_name: str) -> str:
+        return f"""---
+title: AI 学习
+date: {issue_date}
+---
+# AI 学习
+
+## {source_name}
+
+### 1. [{issue_date} 条目](https://weekly.example/{issue_date})
+
+摘要。
+"""
+
+    cache = FeedCache(state)
+    legacy = ai_daily_markdown_from_v1(
+        learning_markdown("2026-08-20", "旧周刊"),
+        stream="learning",
+    )
+    legacy_source_id = legacy.items[0].source_id
+    assert legacy_source_id is not None
+    assert legacy_source_id != "weekly-source"
+    cache.put(legacy)
+
+    current = [learning_markdown("2026-08-21", "旧周刊")]
+
+    def pull_current(
+        _puller: RemoteFeedPuller,
+        alias: str,
+        _script: str,
+        *,
+        sudo: bool = False,
+    ) -> str:
+        assert alias == "producer"
+        assert sudo is True
+        source_name = "新周刊" if "新周刊" in current[0] else "旧周刊"
+        return json.dumps(
+            {
+                "documents": [
+                    {
+                        "stream": "learning",
+                        "markdown": current[0],
+                    }
+                ],
+                "sources": [
+                    {
+                        "source_id": "weekly-source",
+                        "source_name": source_name,
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(RemoteFeedPuller, "_python", pull_current)
+    FeedSyncer(state).sync(FeedKind.AI_DAILY)
+
+    upgraded = cache.get(FeedKind.AI_DAILY, "2026-08-20-learning")
+    assert upgraded.items[0].source_id == "weekly-source"
+
+    same_registry_syncer = FeedSyncer(state)
+
+    def reject_repeated_history_scan(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("an unchanged source registry must not rescan Feed history")
+
+    monkeypatch.setattr(
+        same_registry_syncer.cache,
+        "iter_stream_indexes",
+        reject_repeated_history_scan,
+    )
+    same_registry_syncer.sync(FeedKind.AI_DAILY)
+
+    current[0] = learning_markdown("2026-08-22", "新周刊")
+    FeedSyncer(state).sync(FeedKind.AI_DAILY)
+
+    overview = subscription_sources_dashboard(state)
+    assert overview["total_sources"] == 1
+    sources = overview["sources"]
+    assert isinstance(sources, list)
+    source = cast(dict[str, object], sources[0])
+    assert source["source_id"] == "weekly-source"
+    assert source["source_name"] == "新周刊"
+    assert source["edition_count"] == 3
+
+    detail = subscription_dashboard(state, source_id="weekly-source")
+    editions = detail["editions"]
+    assert isinstance(editions, list)
+    assert [
+        cast(dict[str, object], edition)["digest_id"]
+        for edition in cast(list[object], editions)
+    ] == [
+        "2026-08-22-learning",
+        "2026-08-21-learning",
+        "2026-08-20-learning",
+    ]
 
 
 def test_feed_cli_ingest_list_and_open(vault: Path, tmp_path: Path, capsys: object) -> None:

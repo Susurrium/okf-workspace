@@ -8,6 +8,8 @@ import type {
   FeedKind,
   FeedSubscriptionPage,
   FeedSubscriptionPageQuery,
+  FeedSubscriptionSourcePage,
+  FeedSubscriptionSourcePageQuery,
 } from "./types.js";
 
 export interface OpenedFeedDigest {
@@ -20,6 +22,9 @@ export interface FeedApi {
   getDigest(kind: FeedKind, digestId: string): Promise<FeedDigest>;
   dashboardDigest(): Promise<FeedDashboardDigest>;
   listSubscriptions(query?: FeedSubscriptionPageQuery): Promise<FeedSubscriptionPage>;
+  listSubscriptionSources(
+    query?: FeedSubscriptionSourcePageQuery,
+  ): Promise<FeedSubscriptionSourcePage>;
   openDigest(kind: FeedKind, digestId: string): Promise<OpenedFeedDigest>;
   decide(
     kind: FeedKind,
@@ -62,8 +67,22 @@ export class HttpFeedApi implements FeedApi {
       parameters.set("limit", String(Math.max(1, Math.min(50, Math.trunc(query.limit)))));
     }
     if (query.cursor) parameters.set("cursor", query.cursor);
+    if (query.source_id) parameters.set("source_id", query.source_id);
     const suffix = parameters.size ? `?${parameters.toString()}` : "";
     return this.request(`/dashboard/feeds/subscriptions${suffix}`, undefined, 8_000);
+  }
+
+  public listSubscriptionSources(
+    query: FeedSubscriptionSourcePageQuery = {},
+  ): Promise<FeedSubscriptionSourcePage> {
+    const parameters = new URLSearchParams();
+    if (query.limit !== undefined) {
+      parameters.set("limit", String(Math.max(1, Math.min(8, Math.trunc(query.limit)))));
+    }
+    if (query.cursor) parameters.set("cursor", query.cursor);
+    if (query.query?.trim()) parameters.set("query", query.query.trim());
+    const suffix = parameters.size ? `?${parameters.toString()}` : "";
+    return this.request(`/dashboard/feeds/subscription-sources${suffix}`, undefined, 8_000);
   }
 
   public openDigest(kind: FeedKind, digestId: string): Promise<OpenedFeedDigest> {

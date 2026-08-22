@@ -17,7 +17,7 @@ PkuHoleObserver 的 TreeHole 快照进入 Today 的“树洞热榜”。Today �
 - `feeds/ai-daily/YYYY/<digest>.md`
 - `feeds/treehole/YYYY/<digest>.md`
 
-Dashboard 的 Today、Reading 和原生 Digest 复用同一种条目语义与判断结果，不各自维护一套动作。Today 中三个每日更新区域独立加载、独立显示各自最近一期；某一路当天没有更新或同步失败时，不会隐藏或阻塞其它来源。Reading 按期分页加载订阅历史，不一次读取所有正文。完整正文、TreeHole 评论和人工判断仍在原生 Digest 中完成。
+Dashboard 的 Today、Reading 和原生 Digest 复用同一种条目语义与判断结果，不各自维护一套动作。Today 中三个每日更新区域独立加载、独立显示各自最近一期，只预览前几条，完整一期直接打开原生 Digest；某一路当天没有更新或同步失败时，不会隐藏或阻塞其它来源。Reading 按稳定的 `source_id` 把订阅组织成来源卡片；卡片只摘要该来源最近一期，进入来源后才按期分页加载它的历史。旧缓存没有来源身份时统一归入“来源未标注”，不按文章链接域名误拆为多个订阅。完整正文、TreeHole 评论和人工判断仍在原生 Digest 中完成。
 
 ## 2. 判断权属于用户
 

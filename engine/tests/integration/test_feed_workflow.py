@@ -11,7 +11,8 @@ from typing import cast
 import pytest
 
 import okf_workspace.feeds.cache as feed_cache_module
-from okf_workspace.feeds.cache import FeedCache
+from okf_workspace.dashboard.feeds import subscription_sources_dashboard
+from okf_workspace.feeds.cache import FeedCache, FeedEditionIndex
 from okf_workspace.feeds.decisions import FeedDecisionService
 from okf_workspace.feeds.editions import materialize_edition
 from okf_workspace.feeds.models import DecisionAction, FeedComment, FeedEdition, FeedItem, FeedKind
@@ -31,6 +32,35 @@ def _ai_item(item_id: str, title: str = "AI 工具更新") -> FeedItem:
         url="https://example.test/article",
         published_at="2026-08-17T08:00:00+08:00",
         stream="news",
+    )
+
+
+def _learning_edition(
+    issued_at: str,
+    source_id: str,
+    *,
+    source_name: str | None = None,
+) -> FeedEdition:
+    edition_id = f"{issued_at}-learning"
+    return FeedEdition(
+        edition_id=edition_id,
+        feed=FeedKind.AI_DAILY,
+        edition_at=issued_at,
+        title=f"订阅阅读 {issued_at}",
+        stream="learning",
+        items=(
+            FeedItem(
+                item_id=f"{source_id}:{issued_at}",
+                feed=FeedKind.AI_DAILY,
+                edition_id=edition_id,
+                title=f"条目 {issued_at}",
+                body="完整摘要",
+                stream="learning",
+                source_id=source_id,
+                source_name=source_name or source_id,
+                native_section="文章",
+            ),
+        ),
     )
 
 
@@ -100,13 +130,15 @@ def test_feed_cache_put_atomically_replaces_a_complete_json_file(
     )
     replacements: list[tuple[Path, Path]] = []
     original_replace = feed_cache_module.os.replace
+    expected_target = state / "feed-cache" / FeedKind.AI_DAILY.value / f"{edition.edition_id}.json"
 
     def replace(source: str | Path, target: str | Path) -> None:
         source_path = Path(source)
         target_path = Path(target)
-        assert json.loads(source_path.read_text(encoding="utf-8"))["edition_id"] == (
-            edition.edition_id
-        )
+        if target_path == expected_target:
+            assert json.loads(source_path.read_text(encoding="utf-8"))["edition_id"] == (
+                edition.edition_id
+            )
         replacements.append((source_path, target_path))
         original_replace(source_path, target_path)
 
@@ -114,7 +146,7 @@ def test_feed_cache_put_atomically_replaces_a_complete_json_file(
 
     target = FeedCache(state).put(edition)
 
-    assert replacements and replacements[0][1] == target
+    assert any(replacement_target == target for _source, replacement_target in replacements)
     assert FeedCache(state).get(FeedKind.AI_DAILY, edition.edition_id).title == edition.title
     assert not list(target.parent.glob("*.tmp"))
 
@@ -319,11 +351,264 @@ def test_feed_cache_reads_items_written_before_source_metadata_existed(tmp_path:
         encoding="utf-8",
     )
 
-    item = FeedCache(state).get(FeedKind.AI_DAILY, "2026-08-18-learning").items[0]
+    cache = FeedCache(state)
+    item = cache.get(FeedKind.AI_DAILY, "2026-08-18-learning").items[0]
 
     assert item.source_id is None
     assert item.source_name is None
     assert item.native_section is None
+    indexes = list(cache.iter_stream_indexes(FeedKind.AI_DAILY, "learning"))
+    assert len(indexes) == 1
+    assert indexes[0].items[0].source_id == "source:unattributed"
+    sidecar = state / "feed-cache/metadata/ai-daily/2026-08-18-learning.json"
+    metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert "body" not in json.dumps(metadata)
+    metadata["items"][0]["source_id"] = "source:corrupted"
+    sidecar.write_text(json.dumps(metadata), encoding="utf-8")
+
+    repaired = list(cache.iter_stream_indexes(FeedKind.AI_DAILY, "learning"))
+    assert repaired[0].items[0].source_id == "source:unattributed"
+
+
+def test_source_catalog_concurrent_puts_do_not_lose_counts(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    editions = [
+        _learning_edition(f"2026-07-{day:02d}", "source:weekly", source_name="Weekly")
+        for day in range(1, 25)
+    ]
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        writes = [executor.submit(FeedCache(state).put, edition) for edition in editions]
+        for write in writes:
+            write.result(timeout=10)
+
+    cache = FeedCache(state)
+    summaries = cache.list_stream_source_summaries(FeedKind.AI_DAILY, "learning")
+
+    assert len(summaries) == 1
+    assert summaries[0].source_id == "source:weekly"
+    assert summaries[0].edition_count == len(editions)
+    assert summaries[0].latest_digest_id == "2026-07-24-learning"
+    assert summaries[0].edition_ids == tuple(
+        f"2026-07-{day:02d}-learning" for day in range(24, 0, -1)
+    )
+    catalog = json.loads(
+        (state / "feed-cache" / "metadata" / "sources" / "ai-daily" / "learning.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert catalog["complete"] is True
+    assert catalog["version"] == 2
+    assert catalog["sources"][0]["edition_ids"] == list(summaries[0].edition_ids)
+
+
+def test_old_cache_source_catalog_seed_is_bounded_and_backfill_is_async(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    cache = FeedCache(state)
+    cache.put(_learning_edition("2026-08-20", "source:older"))
+    cache.put(_learning_edition("2026-08-22", "source:latest"))
+    catalog = state / "feed-cache" / "metadata" / "sources" / "ai-daily" / "learning.json"
+    catalog.unlink()
+    rebuild_started = Event()
+    allow_rebuild = Event()
+    rebuild_finished = Event()
+    get_calls: list[str] = []
+    original_get = FeedCache.get
+
+    def tracking_get(self: FeedCache, feed: FeedKind, edition_id: str) -> FeedEdition:
+        get_calls.append(edition_id)
+        return original_get(self, feed, edition_id)
+
+    def delayed_rebuild(
+        self: FeedCache,
+        feed: FeedKind,
+        stream: str,
+    ) -> tuple[object, ...]:
+        del self, feed, stream
+        rebuild_started.set()
+        assert allow_rebuild.wait(timeout=5)
+        rebuild_finished.set()
+        return ()
+
+    monkeypatch.setattr(FeedCache, "get", tracking_get)
+    monkeypatch.setattr(FeedCache, "rebuild_stream_source_catalog", delayed_rebuild)
+
+    status = cache.stream_source_catalog(FeedKind.AI_DAILY, "learning")
+
+    assert [summary.source_id for summary in status.sources] == ["source:latest"]
+    assert status.complete is False
+    assert status.indexing is True
+    assert get_calls == ["2026-08-22-learning"]
+    assert rebuild_started.wait(timeout=5)
+    payload = subscription_sources_dashboard(state)
+    assert payload["catalog_complete"] is False
+    assert payload["catalog_indexing"] is True
+    assert payload["total_sources"] == 1
+    allow_rebuild.set()
+    assert rebuild_finished.wait(timeout=5)
+
+
+def test_source_catalog_rebuild_recovers_corruption_from_compact_sidecars(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    cache = FeedCache(state)
+    cache.put(_learning_edition("2026-08-20", "source:alpha", source_name="Alpha"))
+    cache.put(_learning_edition("2026-08-21", "source:beta", source_name="Beta"))
+    cache.put(_learning_edition("2026-08-22", "source:alpha", source_name="Alpha"))
+    catalog = state / "feed-cache" / "metadata" / "sources" / "ai-daily" / "learning.json"
+    catalog.write_text("{broken catalog", encoding="utf-8")
+    body_reads: list[str] = []
+    original_get = FeedCache.get
+
+    def tracking_get(self: FeedCache, feed: FeedKind, edition_id: str) -> FeedEdition:
+        body_reads.append(edition_id)
+        return original_get(self, feed, edition_id)
+
+    monkeypatch.setattr(FeedCache, "get", tracking_get)
+
+    rebuilt = cache.rebuild_stream_source_catalog(FeedKind.AI_DAILY, "learning")
+    summaries = cache.list_stream_source_summaries(FeedKind.AI_DAILY, "learning")
+
+    assert body_reads == []
+    assert rebuilt == tuple(summaries)
+    assert [(summary.source_id, summary.edition_count) for summary in summaries] == [
+        ("source:alpha", 2),
+        ("source:beta", 1),
+    ]
+    assert json.loads(catalog.read_text(encoding="utf-8"))["complete"] is True
+
+
+def test_v1_source_catalog_is_backfilled_to_complete_v2(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    cache = FeedCache(state)
+    cache.put(_learning_edition("2026-08-20", "source:older"))
+    cache.put(_learning_edition("2026-08-22", "source:latest"))
+    catalog_path = state / "feed-cache" / "metadata" / "sources" / "ai-daily" / "learning.json"
+    legacy = json.loads(catalog_path.read_text(encoding="utf-8"))
+    legacy["version"] = 1
+    for source in legacy["sources"]:
+        source.pop("edition_ids")
+    catalog_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    first = cache.stream_source_catalog(FeedKind.AI_DAILY, "learning")
+
+    assert first.complete is False
+    for _attempt in range(100):
+        Event().wait(0.01)
+        current = cache.stream_source_catalog(FeedKind.AI_DAILY, "learning")
+        if current.complete:
+            break
+    else:
+        pytest.fail("v1 Feed source catalog did not finish its v2 backfill")
+    assert [source.source_id for source in current.sources] == [
+        "source:latest",
+        "source:older",
+    ]
+    assert json.loads(catalog_path.read_text(encoding="utf-8"))["version"] == 2
+
+
+def test_source_detail_uses_cataloged_edition_ids_without_history_scan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    cache = FeedCache(state)
+    for day in range(1, 25):
+        cache.put(_learning_edition(f"2026-07-{day:02d}", "source:weekly"))
+
+    def reject_history_scan(
+        self: FeedCache,
+        feed: FeedKind,
+        stream: str,
+    ) -> object:
+        del self, feed, stream
+        raise AssertionError("source detail must use cataloged edition ids")
+
+    monkeypatch.setattr(FeedCache, "iter_stream_indexes", reject_history_scan)
+
+    editions, has_more, catalog, summary = cache.list_stream_source_page(
+        FeedKind.AI_DAILY,
+        "learning",
+        "source:weekly",
+        limit=3,
+    )
+
+    assert [edition.edition_id for edition in editions] == [
+        "2026-07-24-learning",
+        "2026-07-23-learning",
+        "2026-07-22-learning",
+    ]
+    assert has_more is True
+    assert catalog.complete is True
+    assert summary is not None
+    assert summary.edition_count == 24
+
+
+def test_source_overview_rebuilds_after_latest_body_is_deleted(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    cache = FeedCache(state)
+    cache.put(_learning_edition("2026-08-20", "source:older"))
+    cache.put(_learning_edition("2026-08-22", "source:deleted"))
+    (cache.root / "ai-daily" / "2026-08-22-learning.json").unlink()
+
+    payload = subscription_sources_dashboard(state)
+
+    assert payload["catalog_complete"] is True
+    assert [
+        source["source_id"] for source in cast(list[dict[str, object]], payload["sources"])
+    ] == ["source:older"]
+
+
+def test_source_overview_waits_for_catalog_and_body_to_reach_same_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    cache = FeedCache(state)
+    cache.put(_learning_edition("2026-08-22", "source:old"))
+    writer_entered = Event()
+    allow_catalog_update = Event()
+    original_update = FeedCache._update_source_catalog_locked  # pyright: ignore[reportPrivateUsage]
+
+    def delayed_update(
+        self: FeedCache,
+        edition: FeedEditionIndex,
+        old_edition: FeedEditionIndex | None,
+        *,
+        replacing_existing: bool,
+        stream_was_empty: bool,
+    ) -> bool:
+        writer_entered.set()
+        assert allow_catalog_update.wait(timeout=5)
+        return original_update(
+            self,
+            edition,
+            old_edition,
+            replacing_existing=replacing_existing,
+            stream_was_empty=stream_was_empty,
+        )
+
+    monkeypatch.setattr(FeedCache, "_update_source_catalog_locked", delayed_update)
+    replacement = _learning_edition("2026-08-22", "source:new")
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        writer = executor.submit(cache.put, replacement)
+        assert writer_entered.wait(timeout=5)
+        reader = executor.submit(subscription_sources_dashboard, state)
+        Event().wait(0.05)
+        assert reader.done() is False
+        allow_catalog_update.set()
+        writer.result(timeout=5)
+        payload = reader.result(timeout=5)
+
+    sources = cast(list[dict[str, object]], payload["sources"])
+    assert [source["source_id"] for source in sources] == ["source:new"]
+    assert sources[0]["latest_item_count"] == 1
+    assert len(cast(list[object], sources[0]["preview_items"])) == 1
 
 
 def test_treehole_edition_preserves_metrics_media_and_folded_comments(vault: Path) -> None:

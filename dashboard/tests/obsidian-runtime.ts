@@ -27,6 +27,9 @@ export class TestElement {
   public parentElement: TestElement | null = null;
   public textContent = "";
   public value = "";
+  public selectionStart: number | null = 0;
+  public selectionEnd: number | null = 0;
+  public focusCount = 0;
   public rows = 0;
   public disabled = false;
   public scrollTop = 0;
@@ -97,7 +100,12 @@ export class TestElement {
     this.dispatch("click");
   }
 
-  public focus(): void {}
+  public focus(): void { this.focusCount += 1; }
+
+  public setSelectionRange(start: number, end: number): void {
+    this.selectionStart = start;
+    this.selectionEnd = end;
+  }
 
   public descendants(className?: string): TestElement[] {
     const nested = this.children.flatMap((child) => [child, ...child.descendants()]);

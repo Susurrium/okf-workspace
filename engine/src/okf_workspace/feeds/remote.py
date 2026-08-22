@@ -28,24 +28,61 @@ class _CapturedComment(TypedDict):
 
 
 _SSH_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}$")
+_AI_DAILY_SOURCE_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{1,79}$")
+AI_DAILY_REGISTRY_PATHS = (
+    "/opt/ai-daily-bridge/config/bridge-sources.yaml",
+    "/srv/ai-daily/bridge/config/sources.yaml",
+)
 
 _AI_DAILY_SCRIPT = """
 import json
 from pathlib import Path
 root = Path('/srv/ai-daily/bridge/outbox')
+registry_paths = tuple(Path(value) for value in __REGISTRY_PATHS__)
 prefixes = {
     'hotspot': 'china-hotspots-',
     'news': 'ai-news-',
     'learning': 'ai-learning-',
 }
+sources = []
+registry_errors = []
+try:
+    import yaml
+except Exception as error:
+    if any(path.is_file() for path in registry_paths):
+        registry_errors.append('PyYAML unavailable: ' + error.__class__.__name__)
+else:
+    for registry_path in registry_paths:
+        if not registry_path.is_file():
+            continue
+        try:
+            registry = yaml.safe_load(registry_path.read_text())
+            if not isinstance(registry, dict) or not isinstance(registry.get('sources', []), list):
+                raise ValueError('registry must contain a sources list')
+            for source in registry.get('sources', []):
+                if not isinstance(source, dict):
+                    continue
+                if source.get('collection') == 'ai_learning' and source.get('enabled', True):
+                    sources.append({
+                        'source_id': source.get('id'),
+                        'source_name': source.get('name'),
+                    })
+        except Exception as error:
+            registry_errors.append(
+                str(registry_path) + ': ' + error.__class__.__name__ + ': ' + str(error)
+            )
 documents = []
 for stream, prefix in prefixes.items():
     candidates = sorted(root.glob(prefix + '*.md'))
     if candidates:
         path = candidates[-1]
         documents.append({'stream': stream, 'name': path.name, 'markdown': path.read_text()})
-print(json.dumps({'documents': documents}, ensure_ascii=False))
-""".strip()
+print(json.dumps({
+    'documents': documents,
+    'sources': sources,
+    'registry_errors': registry_errors,
+}, ensure_ascii=False))
+""".replace("__REGISTRY_PATHS__", repr(AI_DAILY_REGISTRY_PATHS)).strip()
 
 _TREEHOLE_SCRIPT = """
 import base64
@@ -75,6 +112,16 @@ def _object(raw: str, *, label: str) -> dict[str, object]:
 class RemoteFeedPuller:
     def __init__(self, state: Path) -> None:
         self.state = state.resolve()
+        self._ai_daily_source_ids_by_name: dict[str, str] = {}
+        self._ai_daily_registry_warnings: tuple[str, ...] = ()
+
+    @property
+    def ai_daily_source_ids_by_name(self) -> Mapping[str, str]:
+        return dict(self._ai_daily_source_ids_by_name)
+
+    @property
+    def ai_daily_registry_warnings(self) -> tuple[str, ...]:
+        return self._ai_daily_registry_warnings
 
     def _python(self, alias: str, script: str, *, sudo: bool = False) -> str:
         if not _SSH_ALIAS.fullmatch(alias):
@@ -106,10 +153,47 @@ class RemoteFeedPuller:
         return result.stdout
 
     def ai_daily(self, alias: str) -> tuple[tuple[str, str], ...]:
+        self._ai_daily_source_ids_by_name = {}
+        self._ai_daily_registry_warnings = ()
         payload = _object(self._python(alias, _AI_DAILY_SCRIPT, sudo=True), label="AI Daily")
         documents = payload.get("documents")
         if not isinstance(documents, list):
             raise ValueError("AI Daily producer returned no documents")
+        source_candidates: defaultdict[str, set[str]] = defaultdict(set)
+        sources = payload.get("sources", [])
+        warnings: list[str] = []
+        registry_errors = payload.get("registry_errors", [])
+        if isinstance(registry_errors, list):
+            warnings.extend(
+                str(value).strip()[:300]
+                for value in cast(list[object], registry_errors)
+                if isinstance(value, str) and value.strip()
+            )
+        if isinstance(sources, list):
+            for value in cast(list[object], sources):
+                if not isinstance(value, dict):
+                    continue
+                source = cast(Mapping[str, object], value)
+                source_id = source.get("source_id")
+                source_name = source.get("source_name")
+                if (
+                    isinstance(source_id, str)
+                    and _AI_DAILY_SOURCE_ID.fullmatch(source_id.strip())
+                    and isinstance(source_name, str)
+                    and source_name.strip()
+                ):
+                    source_candidates[source_name.strip().casefold()].add(source_id.strip())
+        self._ai_daily_source_ids_by_name = {
+            name: next(iter(source_ids))
+            for name, source_ids in source_candidates.items()
+            if len(source_ids) == 1
+        }
+        warnings.extend(
+            f"source name maps to multiple ids: {name}"
+            for name, source_ids in source_candidates.items()
+            if len(source_ids) > 1
+        )
+        self._ai_daily_registry_warnings = tuple(dict.fromkeys(warnings))
         result: list[tuple[str, str]] = []
         for value in cast(list[object], documents):
             if not isinstance(value, dict):
