@@ -10,13 +10,14 @@ import {
 } from "../src/plugin/dashboard-ui-state.js";
 
 describe("Dashboard UI state", () => {
-  it("creates a complete default for every page and both feeds", () => {
+  it("creates a complete default for every page and independent feed surface", () => {
     const state = createDefaultDashboardUiState();
 
     expect(state.activeSection).toBe("today");
     expect(Object.keys(state.pages)).toEqual([
       "today",
       "inbox",
+      "reading",
       "learning",
       "projects",
       "knowledge",
@@ -26,6 +27,9 @@ describe("Dashboard UI state", () => {
     expect(state.pages.learning).toEqual({ scrollTop: 0, filters: {} });
     expect(state.feeds).toEqual({
       "ai-daily": { scrollTop: 0 },
+      "ai-daily-hotspot": { scrollTop: 0 },
+      "ai-daily-news": { scrollTop: 0 },
+      "ai-daily-learning": { scrollTop: 0 },
       treehole: { scrollTop: 0 },
     });
   });
@@ -75,6 +79,9 @@ describe("Dashboard UI state", () => {
       itemId: "item-4",
       updatedAt: "2026-08-21T02:00:00Z",
     });
+    expect(state.feeds["ai-daily-hotspot"].scrollTop).toBe(310);
+    expect(state.feeds["ai-daily-news"].scrollTop).toBe(310);
+    expect(state.feeds["ai-daily-learning"].scrollTop).toBe(310);
     expect(state.feeds.treehole.itemId).toBe("8459000");
     expect(state.recentFiles).toEqual([
       { path: "learning/guides/valid.md", openedAt: "2026-08-21T01:00:00Z" },
@@ -120,6 +127,21 @@ describe("Dashboard UI state", () => {
     });
   });
 
+  it("keeps daily stream and subscription scroll positions independent", () => {
+    const state = patchDashboardUiState(createDefaultDashboardUiState(), {
+      feeds: {
+        "ai-daily-hotspot": { scrollTop: 120 },
+        "ai-daily-news": { scrollTop: 240 },
+        "ai-daily-learning": { scrollTop: 480 },
+      },
+    });
+
+    expect(state.feeds["ai-daily-hotspot"].scrollTop).toBe(120);
+    expect(state.feeds["ai-daily-news"].scrollTop).toBe(240);
+    expect(state.feeds["ai-daily-learning"].scrollTop).toBe(480);
+    expect(state.feeds["ai-daily"].scrollTop).toBe(0);
+  });
+
   it("persists the narrow Today pane and the Learning context independently", () => {
     const state = patchDashboardUiState(createDefaultDashboardUiState(), {
       pages: {
@@ -132,6 +154,17 @@ describe("Dashboard UI state", () => {
     expect(restored.pages.today.tab).toBe("reading");
     expect(restored.pages.learning.tab).toBe("active");
     expect(restored.pages.learning.filters.context).toBe("project");
+  });
+
+  it("restores Reading as a first-class page without disturbing older page state", () => {
+    const state = normalizeDashboardUiState({
+      activeSection: "reading",
+      pages: { reading: { scrollTop: 640 } },
+    });
+
+    expect(state.activeSection).toBe("reading");
+    expect(state.pages.reading).toEqual({ scrollTop: 640, filters: {} });
+    expect(state.pages.inbox).toEqual({ scrollTop: 0, filters: {} });
   });
 
   it("records only real continuation Markdown paths", () => {

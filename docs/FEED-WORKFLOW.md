@@ -1,15 +1,23 @@
-# AI Daily 与树洞人工判断流程
+# 每日更新、订阅阅读与人工判断流程
 
 ## 1. 数据进入方式
 
 AI Daily 和 PkuHoleObserver 继续作为外部生产者。工作区通过只读 SSH 获取最终 Markdown 或 JSON/ZIP 快照，原始 Feed cache 放在 Vault 外的 `Runtime State/feed-cache/`。同步不会确认、移动或删除远端文件。
+
+AI Daily 是内部生产器名称，不是一个单独的用户页面。它的三个 stream 在 Dashboard 中按真实用途分开：
+
+- `hotspot` → Today 的“中国热点”；
+- `news` → Today 的“AI 资讯”；
+- `learning` → Reading 的“订阅阅读”，包括 RSS、周刊、教程和工具更新。
+
+PkuHoleObserver 的 TreeHole 快照进入 Today 的“树洞热榜”。Today 只负责浏览三个最新的每日更新；Reading 使用同一套 Feed 期次、条目和判断界面浏览持续累积的订阅历史。Reading 不是第二个 Learning：只有用户明确选择“想学习”后，对应 Source 才会进入 Learning。
 
 用户打开一期内容时，系统才创建 Obsidian 原生 `Digest`：
 
 - `feeds/ai-daily/YYYY/<digest>.md`
 - `feeds/treehole/YYYY/<digest>.md`
 
-Dashboard 展示该期全部条目，每条只显示关键摘要和必要元数据；两个 Feed 分区独立、单列、有限高度并可内部滚动。完整正文、评论和人工判断仍在原生 Digest 中完成。
+Dashboard 的 Today、Reading 和原生 Digest 复用同一种条目语义与判断结果，不各自维护一套动作。Today 中三个每日更新区域独立加载、独立显示各自最近一期；某一路当天没有更新或同步失败时，不会隐藏或阻塞其它来源。Reading 按期分页加载订阅历史，不一次读取所有正文。完整正文、TreeHole 评论和人工判断仍在原生 Digest 中完成。
 
 ## 2. 判断权属于用户
 

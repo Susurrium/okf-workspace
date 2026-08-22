@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 from okf_workspace.cli import main
 from okf_workspace.feeds.adapters import (
     ai_daily_from_v1,
@@ -12,6 +14,8 @@ from okf_workspace.feeds.adapters import (
 )
 from okf_workspace.feeds.cache import FeedCache
 from okf_workspace.feeds.models import FeedKind
+from okf_workspace.feeds.remote import RemoteFeedPuller
+from okf_workspace.feeds.sync import FeedSyncer
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "feeds"
 
@@ -107,6 +111,54 @@ date: 2026-08-16
     assert treehole.items[0].media[0].startswith("data:image/jpeg")
 
 
+def test_learning_markdown_preserves_source_and_native_section_for_h4_items() -> None:
+    articles = "\n".join(
+        f"#### {index}. [文章 {index}](https://weekly.example/articles/{index})"
+        f"\n\n文章摘要 {index}。\n"
+        for index in range(1, 11)
+    )
+    tools = "\n".join(
+        f"#### {index}. [工具 {index}](https://weekly.example/tools/{index})"
+        f"\n\n工具摘要 {index}。\n"
+        for index in range(11, 22)
+    )
+    markdown = f"""---
+title: "AI 教程、工具与总结 · 2026-08-22"
+date: 2026-08-22
+---
+# AI 教程、工具与总结
+
+## 阮一峰《科技爱好者周刊》
+
+> 本次收录 21 条
+
+### 文章
+
+{articles}
+### 工具
+
+{tools}
+## 逛逛 GitHub
+
+### 22. [一个 RSS 条目](https://github.example/item)
+
+RSS 摘要。
+"""
+
+    edition = ai_daily_markdown_from_v1(markdown, stream="learning")
+
+    assert len(edition.items) == 22
+    assert edition.items[0].source_name == "阮一峰《科技爱好者周刊》"
+    assert edition.items[0].native_section == "文章"
+    assert edition.items[9].native_section == "文章"
+    assert edition.items[10].native_section == "工具"
+    assert "### 工具" not in edition.items[9].body
+    assert edition.items[0].source_id == edition.items[20].source_id
+    assert edition.items[21].source_name == "逛逛 GitHub"
+    assert edition.items[21].native_section is None
+    assert edition.items[21].source_id != edition.items[0].source_id
+
+
 def test_feed_cli_ingest_list_and_open(vault: Path, tmp_path: Path, capsys: object) -> None:
     state = tmp_path / "state"
     assert (
@@ -166,3 +218,158 @@ def test_feed_sync_reuses_external_producer_files(tmp_path: Path) -> None:
 
     assert FeedCache(state).list_editions(FeedKind.AI_DAILY)
     assert FeedCache(state).list_editions(FeedKind.TREEHOLE)
+
+
+def test_feed_sync_isolates_one_ai_stream_and_still_syncs_treehole(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    issue = _object(FIXTURES / "ai-daily-v1.json")
+    streams = issue["streams"]
+    assert isinstance(streams, list)
+    cast(list[object], streams).append(
+        {
+            "stream": "learning",
+            "channels": [{"title": "坏数据", "items": [{"title": "缺少 artifact_id"}]}],
+        }
+    )
+    issue_path = tmp_path / "partially-invalid-ai-daily.json"
+    issue_path.write_text(json.dumps(issue, ensure_ascii=False), encoding="utf-8")
+    (state / "feed-producers.json").write_text(
+        json.dumps(
+            {
+                "ai-daily": {
+                    "payload_path": str(issue_path),
+                    "content_map_path": str(FIXTURES / "ai-daily-content.json"),
+                },
+                "treehole": {"payload_path": str(FIXTURES / "treehole-v1.json")},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    syncer = FeedSyncer(state)
+    synchronized = syncer.sync_all()
+
+    assert len(synchronized[FeedKind.AI_DAILY]) == 1
+    assert len(synchronized[FeedKind.TREEHOLE]) == 1
+    assert FeedCache(state).get(FeedKind.AI_DAILY, "2026-08-17-news").items
+    assert FeedCache(state).list_editions(FeedKind.TREEHOLE)
+    assert [(failure.feed, failure.stream) for failure in syncer.failures] == [
+        (FeedKind.AI_DAILY, "learning")
+    ]
+
+
+def test_feed_cli_returns_nonzero_and_prints_partial_sync_failures(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    issue = _object(FIXTURES / "ai-daily-v1.json")
+    streams = issue["streams"]
+    assert isinstance(streams, list)
+    cast(list[object], streams).append(
+        {
+            "stream": "learning",
+            "channels": [{"items": [{"title": "缺少 artifact_id"}]}],
+        }
+    )
+    issue_path = tmp_path / "partially-invalid-ai-daily.json"
+    issue_path.write_text(json.dumps(issue, ensure_ascii=False), encoding="utf-8")
+    (state / "feed-producers.json").write_text(
+        json.dumps(
+            {
+                "ai-daily": {"payload_path": str(issue_path)},
+                "treehole": {"payload_path": str(FIXTURES / "treehole-v1.json")},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(["feed", "sync", "all", "--state", str(state)])
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert output["ai-daily"] == ["2026-08-17-news"]
+    assert output["treehole"]
+    assert output["failures"][0]["stream"] == "learning"
+
+
+def test_sync_all_reports_malformed_treehole_without_losing_ai_daily(
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    malformed_treehole = tmp_path / "malformed-treehole.json"
+    malformed_treehole.write_text(
+        json.dumps({"snapshot": {"items": []}}),
+        encoding="utf-8",
+    )
+    (state / "feed-producers.json").write_text(
+        json.dumps(
+            {
+                "ai-daily": {"payload_path": str(FIXTURES / "ai-daily-v1.json")},
+                "treehole": {"payload_path": str(malformed_treehole)},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    syncer = FeedSyncer(state)
+    synchronized = syncer.sync_all()
+
+    assert synchronized[FeedKind.AI_DAILY]
+    assert synchronized[FeedKind.TREEHOLE] == ()
+    assert syncer.failures[0].feed is FeedKind.TREEHOLE
+    assert syncer.failures[0].stream is None
+
+
+def test_remote_ai_sync_reports_each_missing_expected_stream(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "feed-producers.json").write_text(
+        json.dumps(
+            {
+                "ai-daily": {
+                    "remote_kind": "ai-daily-bridge-v1",
+                    "ssh_alias": "producer",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    news_markdown = """---
+date: 2026-08-22
+title: AI 资讯
+---
+# AI 资讯
+
+## 1. [唯一返回的资讯](https://example.test/news)
+
+资讯正文。
+"""
+
+    def pull_news_only(
+        _puller: RemoteFeedPuller,
+        alias: str,
+    ) -> tuple[tuple[str, str], ...]:
+        assert alias == "producer"
+        return (("news", news_markdown),)
+
+    monkeypatch.setattr(RemoteFeedPuller, "ai_daily", pull_news_only)
+
+    exit_code = main(["feed", "sync", "all", "--state", str(state)])
+    output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert output["ai-daily"] == ["2026-08-22-news"]
+    assert [failure["stream"] for failure in output["failures"]] == [
+        "hotspot",
+        "learning",
+    ]
+    assert all("no document" in failure["detail"] for failure in output["failures"])
+    assert FeedCache(state).get(FeedKind.AI_DAILY, "2026-08-22-news").items

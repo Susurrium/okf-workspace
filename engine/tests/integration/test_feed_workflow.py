@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import json
 import zipfile
+from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
+from typing import cast
 
 import pytest
 
+import okf_workspace.feeds.cache as feed_cache_module
 from okf_workspace.feeds.cache import FeedCache
 from okf_workspace.feeds.decisions import FeedDecisionService
 from okf_workspace.feeds.editions import materialize_edition
@@ -78,6 +83,247 @@ def test_cache_is_outside_vault_and_edition_is_lazy(vault: Path, tmp_path: Path)
     assert (
         materialize_edition(vault, edition).read_text(encoding="utf-8").endswith("我的阅读批注。\n")
     )
+
+
+def test_feed_cache_put_atomically_replaces_a_complete_json_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    edition = FeedEdition(
+        edition_id="2026-08-22-learning",
+        feed=FeedKind.AI_DAILY,
+        edition_at="2026-08-22",
+        title="订阅阅读",
+        stream="learning",
+        items=(_ai_item("atomic:1"),),
+    )
+    replacements: list[tuple[Path, Path]] = []
+    original_replace = feed_cache_module.os.replace
+
+    def replace(source: str | Path, target: str | Path) -> None:
+        source_path = Path(source)
+        target_path = Path(target)
+        assert json.loads(source_path.read_text(encoding="utf-8"))["edition_id"] == (
+            edition.edition_id
+        )
+        replacements.append((source_path, target_path))
+        original_replace(source_path, target_path)
+
+    monkeypatch.setattr(feed_cache_module.os, "replace", replace)
+
+    target = FeedCache(state).put(edition)
+
+    assert replacements and replacements[0][1] == target
+    assert FeedCache(state).get(FeedKind.AI_DAILY, edition.edition_id).title == edition.title
+    assert not list(target.parent.glob("*.tmp"))
+
+
+def test_latest_pointer_compare_and_write_is_serialized_across_writers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+
+    def edition(issued_at: str) -> FeedEdition:
+        edition_id = f"{issued_at}-learning"
+        return FeedEdition(
+            edition_id=edition_id,
+            feed=FeedKind.AI_DAILY,
+            edition_at=issued_at,
+            title=edition_id,
+            stream="learning",
+            items=(
+                FeedItem(
+                    item_id=f"item:{issued_at}",
+                    feed=FeedKind.AI_DAILY,
+                    edition_id=edition_id,
+                    title=edition_id,
+                    body="正文",
+                    stream="learning",
+                ),
+            ),
+        )
+
+    older = edition("2026-08-21")
+    newer = edition("2026-08-22")
+    older_waiting = Event()
+    release_older = Event()
+    newer_reached_pointer_write = Event()
+    original_write = cast(
+        Callable[[Path, Mapping[str, object]], None],
+        getattr(feed_cache_module, "_write_json_atomic"),  # noqa: B009
+    )
+
+    def delayed_write(path: Path, payload: Mapping[str, object]) -> None:
+        if path.parent.name == "latest":
+            edition_id = payload.get("edition_id")
+            if edition_id == older.edition_id:
+                older_waiting.set()
+                assert release_older.wait(timeout=5)
+            elif edition_id == newer.edition_id:
+                newer_reached_pointer_write.set()
+        original_write(path, payload)
+
+    monkeypatch.setattr(feed_cache_module, "_write_json_atomic", delayed_write)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        older_write = executor.submit(FeedCache(state).put, older)
+        assert older_waiting.wait(timeout=5)
+        newer_write = executor.submit(FeedCache(state).put, newer)
+        try:
+            # A writer with no compare/write lock reaches this hook and
+            # completes before the delayed older writer, causing rollback.
+            if newer_reached_pointer_write.wait(timeout=0.2):
+                newer_write.result(timeout=5)
+        finally:
+            release_older.set()
+        older_write.result(timeout=5)
+        newer_write.result(timeout=5)
+
+    latest = FeedCache(state).latest_edition(FeedKind.AI_DAILY, stream="learning")
+    assert latest is not None and latest.edition_id == newer.edition_id
+
+
+def test_latest_stream_fallback_skips_broken_candidate_and_repairs_pointer(
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / "state"
+    cache = FeedCache(state)
+    edition_id = "2026-08-22-learning"
+    cache.put(
+        FeedEdition(
+            edition_id=edition_id,
+            feed=FeedKind.AI_DAILY,
+            edition_at="2026-08-22",
+            title="有效订阅",
+            stream="learning",
+            items=(
+                FeedItem(
+                    item_id="valid:learning",
+                    feed=FeedKind.AI_DAILY,
+                    edition_id=edition_id,
+                    title="有效条目",
+                    body="正文",
+                    stream="learning",
+                ),
+            ),
+        )
+    )
+    pointer = cache.root / "latest" / "ai-daily-learning.json"
+    pointer.write_text("{broken pointer", encoding="utf-8")
+    (cache.root / "ai-daily" / "9999-99-99-learning.json").write_text(
+        "{broken highest candidate",
+        encoding="utf-8",
+    )
+
+    latest = cache.latest_edition(FeedKind.AI_DAILY, stream="learning")
+
+    assert latest is not None and latest.edition_id == edition_id
+    repaired = json.loads(pointer.read_text(encoding="utf-8"))
+    assert repaired["edition_id"] == edition_id
+    assert repaired["edition_at"] == "2026-08-22"
+
+
+def test_pointer_repair_does_not_rollback_a_concurrent_newer_put(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+
+    def edition(issued_at: str) -> FeedEdition:
+        edition_id = f"{issued_at}-learning"
+        return FeedEdition(
+            edition_id=edition_id,
+            feed=FeedKind.AI_DAILY,
+            edition_at=issued_at,
+            title=edition_id,
+            stream="learning",
+            items=(
+                FeedItem(
+                    item_id=f"repair:{issued_at}",
+                    feed=FeedKind.AI_DAILY,
+                    edition_id=edition_id,
+                    title=edition_id,
+                    body="正文",
+                    stream="learning",
+                ),
+            ),
+        )
+
+    older = edition("2026-08-21")
+    newer = edition("2026-08-22")
+    cache = FeedCache(state)
+    cache.put(older)
+    pointer = cache.root / "latest" / "ai-daily-learning.json"
+    pointer.write_text("{broken pointer", encoding="utf-8")
+    repair_ready = Event()
+    allow_repair = Event()
+    original_update = cast(
+        Callable[[FeedCache, FeedEdition], None],
+        getattr(FeedCache, "_update_latest"),  # noqa: B009
+    )
+
+    def delayed_repair(self: FeedCache, candidate: FeedEdition) -> None:
+        if candidate.edition_id == older.edition_id:
+            repair_ready.set()
+            assert allow_repair.wait(timeout=5)
+        original_update(self, candidate)
+
+    monkeypatch.setattr(FeedCache, "_update_latest", delayed_repair)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        fallback = executor.submit(
+            cache.latest_edition,
+            FeedKind.AI_DAILY,
+            stream="learning",
+        )
+        assert repair_ready.wait(timeout=5)
+        FeedCache(state).put(newer)
+        allow_repair.set()
+        fallback_result = fallback.result(timeout=5)
+
+    assert fallback_result is not None and fallback_result.edition_id == older.edition_id
+    repaired = json.loads(pointer.read_text(encoding="utf-8"))
+    assert repaired["edition_id"] == newer.edition_id
+    latest = cache.latest_edition(FeedKind.AI_DAILY, stream="learning")
+    assert latest is not None and latest.edition_id == newer.edition_id
+
+
+def test_feed_cache_reads_items_written_before_source_metadata_existed(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    target = state / "feed-cache" / "ai-daily" / "2026-08-18-learning.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        json.dumps(
+            {
+                "edition_id": "2026-08-18-learning",
+                "feed": "ai-daily",
+                "edition_at": "2026-08-18",
+                "title": "旧订阅缓存",
+                "stream": "learning",
+                "items": [
+                    {
+                        "item_id": "legacy:learning:1",
+                        "feed": "ai-daily",
+                        "edition_id": "2026-08-18-learning",
+                        "title": "旧条目",
+                        "body": "旧缓存没有新增的来源字段。",
+                        "url": "https://legacy.example/item",
+                        "stream": "learning",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    item = FeedCache(state).get(FeedKind.AI_DAILY, "2026-08-18-learning").items[0]
+
+    assert item.source_id is None
+    assert item.source_name is None
+    assert item.native_section is None
 
 
 def test_treehole_edition_preserves_metrics_media_and_folded_comments(vault: Path) -> None:

@@ -812,11 +812,27 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 _print_json(
                     {
-                        feed.value: [edition.edition_id for edition in editions]
-                        for feed, editions in synchronized.items()
+                        **{
+                            feed.value: [edition.edition_id for edition in editions]
+                            for feed, editions in synchronized.items()
+                        },
+                        **(
+                            {
+                                "failures": [
+                                    {
+                                        "feed": failure.feed.value,
+                                        "stream": failure.stream,
+                                        "detail": failure.detail,
+                                    }
+                                    for failure in syncer.failures
+                                ]
+                            }
+                            if syncer.failures
+                            else {}
+                        ),
                     }
                 )
-                return 0
+                return 1 if syncer.failures else 0
     except (FileExistsError, FileNotFoundError, RuntimeError, ValueError) as exc:
         _fail(str(exc))
     parser.error(f"unsupported command: {args.command}")

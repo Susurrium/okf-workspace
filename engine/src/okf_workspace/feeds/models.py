@@ -46,6 +46,9 @@ class FeedItem:
     url: str | None = None
     published_at: str | None = None
     stream: str | None = None
+    source_id: str | None = None
+    source_name: str | None = None
+    native_section: str | None = None
     pid: int | None = None
     metrics: dict[str, float | int | str] = field(default_factory=_empty_metrics)
     comments: tuple[FeedComment, ...] = ()

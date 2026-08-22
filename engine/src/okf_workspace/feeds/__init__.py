@@ -10,7 +10,7 @@ from .models import (
     FeedItem,
     FeedKind,
 )
-from .sync import FeedSyncer
+from .sync import FeedSyncer, FeedSyncFailure
 
 __all__ = [
     "DecisionAction",
@@ -20,6 +20,7 @@ __all__ = [
     "FeedEdition",
     "FeedItem",
     "FeedKind",
+    "FeedSyncFailure",
     "FeedSyncer",
     "materialize_edition",
 ]

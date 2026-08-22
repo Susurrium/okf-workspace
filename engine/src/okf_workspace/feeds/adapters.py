@@ -7,13 +7,29 @@ import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import cast
+from urllib.parse import urlparse
 
 from .models import FeedComment, FeedEdition, FeedItem, FeedKind
 
 _AI_ITEM_HEADING = re.compile(
-    r"^(?:#{2,3}\s+)?\d+\.\s+\[(?P<title>.+)\]\((?P<url>https?://.+)\)\s*$"
+    r"^(?:(?P<marks>#{2,4})\s+)?\d+\.\s+\[(?P<title>.+)\]\((?P<url>https?://.+)\)\s*$"
 )
+_MARKDOWN_HEADING = re.compile(r"^(?P<marks>#{2,4})\s+(?P<title>.+?)\s*$")
 _MARKDOWN_LINK = re.compile(r"\[(?P<label>[^]]+)\]\((?P<url>https?://[^)]+)\)")
+_GENERIC_SOURCE_HEADINGS = {"来源", "最新条目"}
+
+
+def _source_identity(source_name: str | None, url: str | None) -> str | None:
+    if source_name:
+        digest = hashlib.sha256(source_name.casefold().encode("utf-8")).hexdigest()[:16]
+        return f"source:{digest}"
+    hostname = urlparse(url).hostname if url else None
+    return hostname.casefold() if hostname else None
+
+
+def _source_heading(value: str) -> str | None:
+    name = value.strip()
+    return None if not name or name in _GENERIC_SOURCE_HEADINGS else name
 
 
 def _frontmatter_value(markdown: str, key: str) -> str | None:
@@ -39,19 +55,37 @@ def ai_daily_markdown_from_v1(markdown: str, *, stream: str) -> FeedEdition:
         raise ValueError("AI Daily Markdown has no date")
     title = _frontmatter_value(markdown, "title") or f"AI Daily {issue_date} · {stream}"
     lines = markdown.splitlines()
-    starts: list[tuple[int, re.Match[str]]] = []
+    starts: list[tuple[int, re.Match[str], str | None, str | None]] = []
+    source_name: str | None = None
+    native_section: str | None = None
     for index, line in enumerate(lines):
         match = _AI_ITEM_HEADING.fullmatch(line)
         if match is not None:
-            starts.append((index, match))
+            starts.append((index, match, source_name, native_section))
+            continue
+        heading = _MARKDOWN_HEADING.fullmatch(line)
+        if heading is None:
+            continue
+        level = len(heading.group("marks"))
+        if level == 2:
+            source_name = _source_heading(heading.group("title"))
+            native_section = None
+        elif level == 3:
+            native_section = heading.group("title").strip() or None
     items: list[FeedItem] = []
     seen_urls: set[str] = set()
     edition_id = f"{issue_date}-{stream}"
-    for item_index, (start, match) in enumerate(starts):
+    for item_index, (start, match, source_name, native_section) in enumerate(starts):
         end = starts[item_index + 1][0] if item_index + 1 < len(starts) else len(lines)
         body_lines = lines[start + 1 : end]
+        item_level = len(match.group("marks") or "")
         section_break = next(
-            (index for index, line in enumerate(body_lines) if line.startswith("## ")),
+            (
+                index
+                for index, line in enumerate(body_lines)
+                if (heading := _MARKDOWN_HEADING.fullmatch(line)) is not None
+                and (item_level == 0 or len(heading.group("marks")) <= item_level)
+            ),
             None,
         )
         if section_break is not None:
@@ -86,6 +120,9 @@ def ai_daily_markdown_from_v1(markdown: str, *, stream: str) -> FeedEdition:
                 url=url,
                 published_at=published_at,
                 stream=stream,
+                source_id=_source_identity(source_name, url),
+                source_name=source_name,
+                native_section=native_section,
                 media=tuple(dict.fromkeys(media)),
             )
         )
@@ -132,6 +169,9 @@ def ai_daily_from_v1(
                 if not isinstance(channel_object, dict):
                     continue
                 channel = cast(Mapping[str, object], channel_object)
+                channel_name = (
+                    str(channel["title"]).strip() if channel.get("title") else None
+                )
                 channel_items = channel.get("items", [])
                 if not isinstance(channel_items, list):
                     continue
@@ -145,6 +185,16 @@ def ai_daily_from_v1(
                         str(cast(list[object], urls)[0])
                         if isinstance(urls, list) and urls
                         else None
+                    )
+                    source_name = (
+                        str(item["source_name"]).strip()
+                        if item.get("source_name")
+                        else channel_name
+                    )
+                    source_id = (
+                        str(item["source_id"]).strip()
+                        if item.get("source_id")
+                        else _source_identity(source_name, url)
                     )
                     items.append(
                         FeedItem(
@@ -161,6 +211,11 @@ def ai_daily_from_v1(
                                 str(item["generated_at"]) if item.get("generated_at") else None
                             ),
                             stream=stream_name,
+                            source_id=source_id,
+                            source_name=source_name,
+                            native_section=(
+                                str(item["section"]).strip() if item.get("section") else None
+                            ),
                         )
                     )
         editions.append(

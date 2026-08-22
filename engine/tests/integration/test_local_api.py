@@ -373,6 +373,203 @@ def test_feed_api_syncs_configured_v1_producers(vault: Path, tmp_path: Path) -> 
     assert {item["feed"] for item in synchronized.json()} == {"ai-daily", "treehole"}
 
 
+def test_feed_api_reports_partial_sync_failures_without_losing_successes(
+    vault: Path,
+    tmp_path: Path,
+) -> None:
+    client, headers, paths = _client(vault, tmp_path)
+    paths.state.mkdir(exist_ok=True)
+    issue = json.loads((FEED_FIXTURES / "ai-daily-v1.json").read_text(encoding="utf-8"))
+    issue["streams"].append(
+        {
+            "stream": "learning",
+            "channels": [{"items": [{"title": "缺少 artifact_id"}]}],
+        }
+    )
+    issue_path = tmp_path / "partial-ai-daily.json"
+    issue_path.write_text(json.dumps(issue, ensure_ascii=False), encoding="utf-8")
+    (paths.state / "feed-producers.json").write_text(
+        json.dumps(
+            {
+                "ai-daily": {
+                    "payload_path": str(issue_path),
+                    "content_map_path": str(FEED_FIXTURES / "ai-daily-content.json"),
+                },
+                "treehole": {"payload_path": str(FEED_FIXTURES / "treehole-v1.json")},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = client.post("/feeds/sync", headers=headers)
+
+    assert response.status_code == 200
+    results = response.json()
+    assert any(
+        item["status"] == "ok"
+        and item["feed"] == "ai-daily"
+        and item["digest_id"] == "2026-08-17-news"
+        for item in results
+    )
+    assert any(item["status"] == "ok" and item["feed"] == "treehole" for item in results)
+    assert any(
+        item["status"] == "error"
+        and item["feed"] == "ai-daily"
+        and item["section"] == "learning"
+        and "artifact_id" in item["detail"]
+        for item in results
+    )
+
+
+def test_feed_dashboard_selects_each_latest_stream_and_pages_subscriptions_stably(
+    vault: Path,
+    tmp_path: Path,
+) -> None:
+    client, headers, paths = _client(vault, tmp_path)
+    cache = FeedCache(paths.state)
+
+    def put(stream: str, issued_at: str, *, source_name: str | None = None) -> None:
+        edition_id = f"{issued_at}-{stream}"
+        cache.put(
+            FeedEdition(
+                edition_id=edition_id,
+                feed=FeedKind.AI_DAILY,
+                edition_at=issued_at,
+                title=f"{stream} {issued_at}",
+                stream=stream,
+                items=(
+                    FeedItem(
+                        item_id=f"ai-daily:{stream}:{issued_at}",
+                        feed=FeedKind.AI_DAILY,
+                        edition_id=edition_id,
+                        title=f"{stream} item {issued_at}",
+                        body="完整摘要。",
+                        url=f"https://{stream}.example/{issued_at}",
+                        stream=stream,
+                        source_id="source:weekly" if source_name else None,
+                        source_name=source_name,
+                        native_section="工具" if source_name else None,
+                    ),
+                ),
+            )
+        )
+
+    put("hotspot", "2026-08-20")
+    put("news", "2026-08-19")
+    put("learning", "2026-08-21", source_name="阮一峰《科技爱好者周刊》")
+    put("learning", "2026-08-20")
+    put("learning", "2026-08-19")
+
+    summary = client.get("/dashboard/feeds/summary", headers=headers).json()
+    assert [(edition["section"], edition["issued_at"]) for edition in summary["ai_daily"]] == [
+        ("hotspot", "2026-08-20"),
+        ("news", "2026-08-19"),
+        ("learning", "2026-08-21"),
+    ]
+
+    first = client.get(
+        "/dashboard/feeds/subscriptions?limit=2",
+        headers=headers,
+    ).json()
+    assert first["section"] == "learning"
+    assert [edition["issued_at"] for edition in first["editions"]] == [
+        "2026-08-21",
+        "2026-08-20",
+    ]
+    assert first["has_more"] is True
+    assert isinstance(first["next_cursor"], str)
+    newest_item = first["editions"][0]["items"][0]
+    assert newest_item["source"] == "阮一峰《科技爱好者周刊》"
+    assert newest_item["source_id"] == "source:weekly"
+    assert newest_item["native_section"] == "工具"
+    assert newest_item["decision"] is None
+    legacy_item = first["editions"][1]["items"][0]
+    assert legacy_item["source"] == "learning.example"
+    assert legacy_item["source_id"] == "learning.example"
+
+    put("learning", "2026-08-22")
+    second = client.get(
+        "/dashboard/feeds/subscriptions",
+        headers=headers,
+        params={"limit": 2, "cursor": first["next_cursor"]},
+    ).json()
+    assert [edition["issued_at"] for edition in second["editions"]] == ["2026-08-19"]
+    assert second["has_more"] is False
+    assert second["next_cursor"] is None
+
+    assert (
+        client.get(
+            "/dashboard/feeds/subscriptions?limit=0",
+            headers=headers,
+        ).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            "/dashboard/feeds/subscriptions?cursor=not-a-valid-cursor",
+            headers=headers,
+        ).status_code
+        == 400
+    )
+
+
+def test_feed_summary_does_not_deserialize_old_large_or_broken_editions(
+    vault: Path,
+    tmp_path: Path,
+) -> None:
+    client, headers, paths = _client(vault, tmp_path)
+    cache = FeedCache(paths.state)
+    news_id = "2026-08-22-news"
+    cache.put(
+        FeedEdition(
+            edition_id=news_id,
+            feed=FeedKind.AI_DAILY,
+            edition_at="2026-08-22",
+            title="最新 AI 资讯",
+            stream="news",
+            items=(
+                FeedItem(
+                    item_id="news:latest",
+                    feed=FeedKind.AI_DAILY,
+                    edition_id=news_id,
+                    title="最新资讯",
+                    body="摘要",
+                    stream="news",
+                ),
+            ),
+        )
+    )
+    treehole_id = "hot-20260822-1100-observer-test"
+    cache.put(
+        FeedEdition(
+            edition_id=treehole_id,
+            feed=FeedKind.TREEHOLE,
+            edition_at="2026-08-22",
+            title="最新树洞",
+            items=(
+                FeedItem(
+                    item_id="treehole:latest",
+                    feed=FeedKind.TREEHOLE,
+                    edition_id=treehole_id,
+                    title="TreeHole #1",
+                    body="正文",
+                    pid=1,
+                ),
+            ),
+        )
+    )
+    broken = "{broken" + ("x" * 200_000)
+    (cache.root / "ai-daily" / "zzzz-news.json").write_text(broken, encoding="utf-8")
+    (cache.root / "treehole" / "zzzz-old.json").write_text(broken, encoding="utf-8")
+
+    response = client.get("/dashboard/feeds/summary", headers=headers)
+
+    assert response.status_code == 200
+    summary = response.json()
+    assert summary["ai_daily"][0]["digest_id"] == news_id
+    assert summary["treehole"]["digest_id"] == treehole_id
+
+
 def test_conversion_endpoint_hides_original_and_runtime_paths(vault: Path, tmp_path: Path) -> None:
     client, headers, paths = _client(vault, tmp_path)
     record = paths.state / "conversions" / "conv-test" / "status.json"

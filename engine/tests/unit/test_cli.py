@@ -52,7 +52,7 @@ def test_doctor_json_is_safe_across_native_powershell_code_pages(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     status: dict[str, object] = {
-        "version": "1.7.2",
+        "version": "1.8.0",
         "items": [
             {
                 "item_id": "index",

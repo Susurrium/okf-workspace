@@ -13,6 +13,7 @@ okf_version: "0.2"
 | Dashboard | Obsidian 左侧 Workspace 图标 | 快速创建、导入、筛选、查看进度和跳转 |
 | Today | `life/daily/YYYY/MM/YYYY-MM-DD.md` | 今日日记、随手记录和明确任务 |
 | Inbox | `inbox/captures/YYYY/MM/` | 尚未确定去向的输入 |
+| Reading | Dashboard → Reading | 浏览 RSS、周刊、教程与工具更新；明确选择后才进入 Learning |
 | Tasks | [正式任务视图](system/views/Tasks.md) | 汇总带 `#task` 的未完成任务 |
 
 ## 2. 内容结构
@@ -53,7 +54,7 @@ okf_version: "0.2"
 Feed     → Digest   → Source → Source Text ┘
 ```
 
-- `feeds/ai-daily/`、`feeds/treehole/`：可快速浏览、再由人决定去向的 Digest
+- `feeds/ai-daily/`、`feeds/treehole/`：Today 和 Reading 打开后物化的原生 Digest；列表与历史目录仍由 Vault 外 Feed cache 提供
 - `sources/records/<kind>/`：Source 身份、原件资源和持久用途列表 `uses[]`
 - `sources/text/<kind>/`：转换、Feed 或 Web Clipper 得到的完整 Source Text
 - `system/integrations/web-clipper/`：每个浏览器一次性导入的官方 Web Clipper 模板

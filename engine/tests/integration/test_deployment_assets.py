@@ -26,6 +26,14 @@ def _run_powershell(command: str) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _available_powershells() -> tuple[str, ...]:
+    return tuple(
+        executable
+        for executable in ("powershell.exe", "pwsh")
+        if shutil.which(executable) is not None
+    )
+
+
 def _write_claudian_build(source: Path) -> None:
     source.mkdir()
     (source / "main.js").write_text("// compiled\n", encoding="utf-8")
@@ -76,8 +84,64 @@ def test_windows_scripts_parse_and_server_compose_contains_no_committed_secrets(
         "if($errors.Count){$failed=$true;$errors|ForEach-Object Message}};"
         "if($failed){exit 1}"
     )
+    for executable in _available_powershells():
+        completed = subprocess.run(
+            [executable, "-NoProfile", "-Command", command],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        assert completed.returncode == 0, (
+            f"{executable}: {completed.stderr or completed.stdout}"
+        )
+
+    yaml = YAML(typ="safe")
+    compose = yaml.load((root / "deploy" / "server" / "compose.yml").read_text(encoding="utf-8"))
+    assert "couchdb" in compose["services"]
+    assert "caddy" in compose["services"]
+    assert "5984:5984" not in json.dumps(compose)
+    assert not (root / "deploy" / "server" / "secrets" / "couchdb.env").exists()
+
+
+@pytest.mark.parametrize("executable", _available_powershells())
+def test_json_hashtable_reader_is_recursive_and_cross_version(
+    tmp_path: Path,
+    executable: str,
+) -> None:
+    root = Path(__file__).parents[3]
+    common = root / "deploy" / "windows" / "common.ps1"
+    payload = tmp_path / "nested.json"
+    payload.write_text(
+        json.dumps(
+            {
+                "nested": {
+                    "items": [
+                        {"name": "中文"},
+                        [],
+                        None,
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    command = (
+        f". {_powershell_quote(common)}; "
+        f"$data=Read-OkfJsonHashtable -Path {_powershell_quote(payload)}; "
+        "if($data -isnot [hashtable]){throw 'root is not a hashtable'}; "
+        "if($data['nested'] -isnot [hashtable]){throw 'nested object is not a hashtable'}; "
+        "if($data['nested']['items'] -isnot [object[]]){throw 'items is not an array'}; "
+        "if($data['nested']['items'][0] -isnot [hashtable]){"
+        "throw 'array object is not a hashtable'}; "
+        "if($data['nested']['items'][0]['name'] -cne '中文'){throw 'unicode changed'}; "
+        "if($data['nested']['items'][1].Count -ne 0){throw 'empty array changed'}; "
+        "if($null -ne $data['nested']['items'][2]){throw 'null changed'}"
+    )
     completed = subprocess.run(
-        ["pwsh", "-NoProfile", "-Command", command],
+        [executable, "-NoProfile", "-Command", command],
         check=False,
         capture_output=True,
         text=True,
@@ -86,12 +150,13 @@ def test_windows_scripts_parse_and_server_compose_contains_no_committed_secrets(
     )
     assert completed.returncode == 0, completed.stderr or completed.stdout
 
-    yaml = YAML(typ="safe")
-    compose = yaml.load((root / "deploy" / "server" / "compose.yml").read_text(encoding="utf-8"))
-    assert "couchdb" in compose["services"]
-    assert "caddy" in compose["services"]
-    assert "5984:5984" not in json.dumps(compose)
-    assert not (root / "deploy" / "server" / "secrets" / "couchdb.env").exists()
+    scripts = list((root / "deploy" / "windows").glob("*.ps1")) + list(
+        (root / "scripts").glob("*.ps1")
+    )
+    assert all(
+        "ConvertFrom-Json -AsHashtable" not in path.read_text(encoding="utf-8")
+        for path in scripts
+    )
 
 
 def test_dashboard_persists_only_external_token_file_path() -> None:
@@ -111,7 +176,14 @@ def test_dashboard_persists_only_external_token_file_path() -> None:
     assert "token: this.settings.token" not in plugin
     assert "$pluginData.Remove('token')" in installer
     assert "feedReadingPositions" not in installer
-    assert "ConvertFrom-Json -AsHashtable" in installer
+    assert "Read-OkfJsonHashtable -Path $pluginDataPath" in installer
+    assert "ConvertFrom-Json -AsHashtable" not in installer
+    assert installer.index("Read-OkfJsonHashtable -Path $pluginDataPath") < installer.index(
+        "Install-OkfDashboardPluginAtomic"
+    )
+    assert installer.index("Get-OkfDashboardPluginMigrationPlan") < installer.index(
+        "Install-OkfDashboardPluginAtomic"
+    )
     assert "Write-OkfJson -Path $pluginDataPath -Value $pluginData" in installer
     assert "$PSBoundParameters.ContainsKey('MarkItDownUrl')" in installer
     assert "$PSBoundParameters.ContainsKey('SkipVectorIndex')" in installer
@@ -137,6 +209,12 @@ def test_dashboard_persists_only_external_token_file_path() -> None:
     assert (
         "if ($explicitState -or -not $data.ContainsKey('serviceLogDirectory'))"
         in quick_installer
+    )
+    assert quick_installer.index("Read-OkfJsonHashtable -Path $dataPath") < (
+        quick_installer.index("Install-OkfDashboardPluginAtomic")
+    )
+    assert quick_installer.index("Get-OkfDashboardPluginMigrationPlan") < (
+        quick_installer.index("Install-OkfDashboardPluginAtomic")
     )
     assert "$PSCmdlet.ShouldProcess($task, 'Stop and unregister scheduled task')" in uninstaller
     assert "System32\\WindowsPowerShell\\v1.0\\powershell.exe" in installer
@@ -387,6 +465,62 @@ def test_quick_dashboard_installer_rejects_a_mistyped_vault_before_build(
     assert completed.returncode != 0
     assert "Vault does not exist" in (completed.stderr + completed.stdout)
     assert not missing_vault.exists()
+
+
+@pytest.mark.parametrize("executable", _available_powershells())
+@pytest.mark.parametrize(
+    "broken_input",
+    ["invalid-dashboard-settings", "non-object-deployment-config"],
+)
+def test_quick_dashboard_installer_preflights_json_before_replacing_artifacts(
+    tmp_path: Path,
+    executable: str,
+    broken_input: str,
+) -> None:
+    root = Path(__file__).parents[3]
+    vault = tmp_path / "vault"
+    target = vault / ".obsidian" / "plugins" / "okf-workspace-dashboard"
+    target.mkdir(parents=True)
+    artifacts = {
+        "main.js": b"old dashboard javascript\n",
+        "manifest.json": b'{"id":"okf-workspace-dashboard","version":"old"}\n',
+        "styles.css": b"old dashboard css\n",
+        "data.json": b'{"keep":"user setting"}\n',
+    }
+    for name, content in artifacts.items():
+        (target / name).write_bytes(content)
+
+    state = tmp_path / "state"
+    if broken_input == "invalid-dashboard-settings":
+        (target / "data.json").write_text('{"broken"', encoding="utf-8")
+        artifacts["data.json"] = (target / "data.json").read_bytes()
+    else:
+        config = state / "config" / "deployment.json"
+        config.parent.mkdir(parents=True)
+        config.write_text('[{"api_port": 9999}]', encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            executable,
+            "-NoProfile",
+            "-File",
+            str(root / "scripts" / "install-dashboard.ps1"),
+            "-Vault",
+            str(vault),
+            "-State",
+            str(state),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert completed.returncode != 0
+    assert {name: (target / name).read_bytes() for name in artifacts} == artifacts
+    assert not list(target.parent.glob(".okf-workspace-dashboard.stage-*"))
+    assert not list(target.parent.glob(".okf-workspace-dashboard.backup-*"))
 
 
 def test_claudian_installer_preserves_the_official_upstream_plugin(tmp_path: Path) -> None:

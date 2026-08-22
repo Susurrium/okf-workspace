@@ -45,9 +45,16 @@ import type {
   FeedDigestEdition,
   FeedDigestItem,
   FeedKind,
+  FeedSubscriptionPage,
+  FeedSyncResult,
+  AiDailyStream,
 } from "../feeds/types.js";
 import { DASHBOARD_VERSION } from "../version.js";
 import type OkfBrainPlugin from "./main.js";
+import {
+  DASHBOARD_FEEDS,
+  type DashboardFeed,
+} from "./dashboard-ui-state.js";
 import type { CodexHandoffRequest } from "./claudian-bridge.js";
 import { VaultDashboardReader, type InboxProjection } from "./vault-dashboard.js";
 import {
@@ -60,6 +67,7 @@ export const OKF_DASHBOARD_VIEW = "okf-workspace-dashboard";
 export type DashboardSection =
   | "today"
   | "inbox"
+  | "reading"
   | "learning"
   | "projects"
   | "knowledge"
@@ -68,10 +76,12 @@ export type DashboardSection =
 type Section = DashboardSection;
 type TodayPane = "actions" | "reading";
 type LearningContextFilter = "all" | DashboardLearningContext;
+const SUBSCRIPTION_FIRST_PAGE_TTL_MS = 120_000;
 
 const NAVIGATION: readonly { id: Section; label: string }[] = [
   { id: "today", label: "Today" },
   { id: "inbox", label: "Inbox" },
+  { id: "reading", label: "Reading" },
   { id: "learning", label: "Learning" },
   { id: "projects", label: "Projects" },
   { id: "knowledge", label: "Knowledge" },
@@ -81,6 +91,7 @@ const NAVIGATION: readonly { id: Section; label: string }[] = [
 const PAGE_COPY: Readonly<Record<Section, { title: string; description: string }>> = {
   today: { title: "Today", description: "现在值得处理、继续和阅读的内容。" },
   inbox: { title: "Inbox", description: "处理尚未确定去向的输入，并查看文件转换进度。" },
+  reading: { title: "订阅阅读", description: "浏览 RSS、周刊、教程与工具更新；选择想学习后才会进入 Learning。" },
   learning: { title: "Learning", description: "继续学习，或准备下一份 Study Guide。" },
   projects: { title: "Projects", description: "聚焦进行中项目的状态和唯一下一步。" },
   knowledge: { title: "Knowledge", description: "搜索、阅读和维护 Wiki 与 Wiki Map。" },
@@ -150,8 +161,19 @@ export class OkfDashboardView extends ItemView {
   private inboxIngestedVia: IngestedViaFilter = "all";
   private readonly selectedCaptures = new Set<string>();
   private readonly pageScroll = new Map<Section, number>();
-  private readonly feedScroll: Partial<Record<FeedKind, number>> = {};
-  private readonly feedScrollPersistTimers: Partial<Record<FeedKind, number>> = {};
+  private readonly feedScroll: Partial<Record<DashboardFeed, number>> = {};
+  private readonly feedScrollPersistTimers: Partial<Record<DashboardFeed, number>> = {};
+  private subscriptionEditions: FeedDigestEdition[] = [];
+  private subscriptionCursor: string | null = null;
+  private subscriptionHasMore = false;
+  private subscriptionsLoaded = false;
+  private subscriptionPagesLoaded = 0;
+  private subscriptionLoadedAt = 0;
+  private subscriptionProjectionVersion = -1;
+  private subscriptionFirstPageRequest: {
+    projectionVersion: number;
+    promise: Promise<void>;
+  } | undefined;
   private readonly actionPanels = new Set<AnchoredActionPanel>();
   private readonly vaultReader: VaultDashboardReader;
   private systemCache: SystemStatus | undefined;
@@ -173,6 +195,9 @@ export class OkfDashboardView extends ItemView {
       this.pageScroll.set(section as Section, page.scrollTop);
     }
     this.feedScroll["ai-daily"] = state.feeds["ai-daily"].scrollTop;
+    this.feedScroll["ai-daily-hotspot"] = state.feeds["ai-daily-hotspot"].scrollTop;
+    this.feedScroll["ai-daily-news"] = state.feeds["ai-daily-news"].scrollTop;
+    this.feedScroll["ai-daily-learning"] = state.feeds["ai-daily-learning"].scrollTop;
     this.feedScroll.treehole = state.feeds.treehole.scrollTop;
     const todayPane = state.pages.today.tab;
     if (todayPane === "actions" || todayPane === "reading") this.todayPane = todayPane;
@@ -247,7 +272,7 @@ export class OkfDashboardView extends ItemView {
       window.clearTimeout(this.refreshTimer);
       this.refreshTimer = undefined;
     }
-    for (const kind of ["ai-daily", "treehole"] as const) {
+    for (const kind of DASHBOARD_FEEDS) {
       const timer = this.feedScrollPersistTimers[kind];
       if (timer !== undefined) window.clearTimeout(timer);
       delete this.feedScrollPersistTimers[kind];
@@ -342,6 +367,7 @@ export class OkfDashboardView extends ItemView {
     try {
       if (this.section === "today") await this.renderToday(body);
       else if (this.section === "inbox") await this.renderInbox(body);
+      else if (this.section === "reading") await this.renderReading(body);
       else if (this.section === "system") await this.renderSystem(body);
       else if (this.section === "life") await this.renderLife(body);
       else if (this.section === "learning") await this.renderLearning(body);
@@ -548,7 +574,7 @@ export class OkfDashboardView extends ItemView {
     });
     for (const option of [
       { value: "actions" as const, label: "行动" },
-      { value: "reading" as const, label: "今日阅读" },
+      { value: "reading" as const, label: "每日更新" },
     ]) {
       const selected = this.todayPane === option.value;
       const button = paneTabs.createEl("button", {
@@ -570,7 +596,7 @@ export class OkfDashboardView extends ItemView {
     });
     const readingPane = workspace.createEl("section", {
       cls: `okf-today-pane okf-today-pane--reading${this.todayPane === "reading" ? " is-mobile-active" : ""}`,
-      attr: { "aria-label": "今日阅读" },
+      attr: { "aria-label": "每日更新" },
     });
 
     const attentionCounts = countTodayAttention({
@@ -687,7 +713,7 @@ export class OkfDashboardView extends ItemView {
       }
     }
 
-    this.renderFeedLoading(readingPane);
+    this.renderDailyFeeds(readingPane);
 
     void this.api()
       .systemStatus()
@@ -881,152 +907,308 @@ export class OkfDashboardView extends ItemView {
     }
   }
 
-  private renderFeedLoading(parent: HTMLElement): void {
+  private renderDailyFeeds(parent: HTMLElement): void {
     const reading = this.dashboardSection(
       parent,
-      "今日阅读",
-      "先快速浏览关键信息；完整内容和人工判断仍在原生 Digest。",
+      "每日更新",
+      "快速浏览中国热点、AI 资讯和树洞热榜；完整内容与判断仍在原生 Digest。",
       "okf-dashboard__reading",
     );
-    const shelf = reading.createDiv({ cls: "okf-feed-shelf" });
-    const aiDaily = shelf.createEl("section", {
-      cls: "okf-feed-project okf-feed-project--ai-daily",
+    const shelf = reading.createDiv({ cls: "okf-feed-shelf okf-feed-shelf--daily" });
+    const definitions: readonly {
+      id: DashboardFeed;
+      kind: FeedKind;
+      title: string;
+      section?: AiDailyStream;
+      modifier: string;
+    }[] = [
+      {
+        id: "ai-daily-hotspot",
+        kind: "ai-daily",
+        title: "中国热点",
+        section: "hotspot",
+        modifier: "hotspot",
+      },
+      {
+        id: "ai-daily-news",
+        kind: "ai-daily",
+        title: "AI 资讯",
+        section: "news",
+        modifier: "news",
+      },
+      {
+        id: "treehole",
+        kind: "treehole",
+        title: "树洞热榜",
+        modifier: "treehole",
+      },
+    ];
+    const surfaces = definitions.map((definition) => {
+      const panel = shelf.createEl("section", {
+        cls: `okf-feed-project okf-feed-project--${definition.modifier}`,
+      });
+      const header = panel.createDiv({ cls: "okf-feed-project__header" });
+      const heading = header.createDiv({ cls: "okf-feed-project__heading" });
+      heading.createEl("h3", { text: definition.title });
+      const meta = heading.createDiv({
+        cls: "okf-dashboard__muted",
+        text: "正在读取最新一期…",
+      });
+      const content = panel.createDiv({ cls: "okf-feed-project__scroll" });
+      this.attachFeedScroll(definition.id, content);
+      content.createDiv({ cls: "okf-dashboard__muted", text: `正在读取${definition.title}…` });
+      return { ...definition, panel, header, meta, content };
     });
-    const aiHeader = aiDaily.createDiv({ cls: "okf-feed-project__header" });
-    const aiHeading = aiHeader.createDiv({ cls: "okf-feed-project__heading" });
-    aiHeading.createEl("h3", { text: "AI Daily" });
-    const aiMeta = aiHeading.createDiv({ cls: "okf-dashboard__muted", text: "正在读取最新一期…" });
-    const treehole = shelf.createEl("section", {
-      cls: "okf-feed-project okf-feed-project--treehole",
-    });
-    const treeholeHeader = treehole.createDiv({ cls: "okf-feed-project__header" });
-    const treeholeHeading = treeholeHeader.createDiv({ cls: "okf-feed-project__heading" });
-    treeholeHeading.createEl("h3", { text: "树洞热榜" });
-    const treeholeMeta = treeholeHeading.createDiv({ cls: "okf-dashboard__muted", text: "正在读取最新一期…" });
-    const aiContent = aiDaily.createDiv({ cls: "okf-feed-project__scroll" });
-    const treeholeContent = treehole.createDiv({ cls: "okf-feed-project__scroll" });
-    const openDigestWithFeedback = (
-      button: HTMLButtonElement,
-      kind: FeedKind,
-      digestId: string,
-    ): void => {
-      if (button.disabled) return;
-      button.disabled = true;
-      void this.plugin.openFeedDigest(kind, digestId)
-        .catch((error: unknown) => {
-          new Notice(error instanceof Error ? error.message : "无法打开 Feed Digest", 10_000);
-        })
-        .finally(() => {
-          button.disabled = false;
-        });
-    };
-    aiContent.dataset.feed = "ai-daily";
-    treeholeContent.dataset.feed = "treehole";
-    aiContent.scrollTop = this.feedScroll["ai-daily"] ?? 0;
-    treeholeContent.scrollTop = this.feedScroll.treehole ?? 0;
-    let restoringScroll = false;
-    const rememberScroll = (kind: FeedKind, element: HTMLElement): void => {
-      if (restoringScroll) return;
-      this.lastInteractionAt = Date.now();
-      this.feedScroll[kind] = element.scrollTop;
-      const pending = this.feedScrollPersistTimers[kind];
-      if (pending !== undefined) window.clearTimeout(pending);
-      this.feedScrollPersistTimers[kind] = window.setTimeout(() => {
-        delete this.feedScrollPersistTimers[kind];
-        this.plugin.updateDashboardFeedUiState(kind, {
-          scrollTop: this.feedScroll[kind] ?? 0,
-        });
-      }, 120);
-    };
-    aiContent.addEventListener("scroll", () => rememberScroll("ai-daily", aiContent), { passive: true });
-    treeholeContent.addEventListener("scroll", () => rememberScroll("treehole", treeholeContent), { passive: true });
     let rendered: FeedDashboardDigest | undefined;
     const renderDigest = (digest: FeedDashboardDigest): void => {
       if (!shelf.isConnected) return;
-      const aiScrollTop = rendered ? aiContent.scrollTop : (this.feedScroll["ai-daily"] ?? 0);
-      const treeholeScrollTop = rendered ? treeholeContent.scrollTop : (this.feedScroll.treehole ?? 0);
-      restoringScroll = true;
       rendered = digest;
-      aiContent.empty();
-      treeholeContent.empty();
-      for (const action of shelf.querySelectorAll<HTMLElement>(".okf-feed-project__digest-action")) {
-        action.remove();
-      }
-      if (!digest.ai_daily.length) {
-        aiMeta.setText("当前没有可读内容");
-        aiContent.createDiv({ cls: "okf-dashboard__empty", text: "暂时没有 AI Daily 内容。" });
-      } else {
-        const latest = digest.ai_daily[0]!;
-        const total = digest.ai_daily.reduce((sum, edition) => sum + edition.item_count, 0);
-        aiMeta.setText(`${latest.issued_at} · ${total} 条`);
-        const openDigest = aiHeader.createEl("button", {
-          text: "打开 Digest",
-          cls: "okf-dashboard__ghost-action okf-feed-project__digest-action",
-        });
-        openDigest.addEventListener("click", () => {
-          openDigestWithFeedback(openDigest, "ai-daily", latest.digest_id);
-        });
-        for (const edition of digest.ai_daily) {
-          this.renderFeedDigestEdition(aiContent, "ai-daily", edition);
+      for (const surface of surfaces) {
+        const edition = surface.kind === "treehole"
+          ? digest.treehole ?? undefined
+          : latestAiDailyEdition(digest, surface.section!);
+        surface.content.empty();
+        for (const action of surface.header.querySelectorAll<HTMLElement>(
+          ".okf-feed-project__digest-action",
+        )) action.remove();
+        if (!edition) {
+          surface.meta.setText("当前没有可读内容");
+          surface.content.createDiv({
+            cls: "okf-dashboard__empty",
+            text: `暂时没有${surface.title}内容。`,
+          });
+          continue;
         }
-        aiContent.createDiv({
-          cls: "okf-feed-project__footer",
-          text: `已显示本期全部 ${total} 条`,
-        });
-      }
-      if (digest.treehole) {
-        const treeholeDigest = digest.treehole;
-        treeholeMeta.setText(`${treeholeDigest.issued_at} · ${treeholeDigest.item_count} 条`);
-        const openDigest = treeholeHeader.createEl("button", {
-          text: "打开 Digest",
+        surface.meta.setText(`${formatFeedDate(edition.issued_at)} · ${edition.item_count} 条`);
+        const openDigest = surface.header.createEl("button", {
+          text: "打开本期",
           cls: "okf-dashboard__ghost-action okf-feed-project__digest-action",
         });
         openDigest.addEventListener("click", () => {
-          openDigestWithFeedback(openDigest, "treehole", treeholeDigest.digest_id);
+          this.openFeedDigest(openDigest, surface.kind, edition.digest_id);
         });
-        this.renderFeedDigestEdition(treeholeContent, "treehole", treeholeDigest);
-        treeholeContent.createDiv({
+        this.renderFeedDigestEdition(surface.content, surface.kind, edition, {
+          heading: false,
+          mode: "compact",
+        });
+        surface.content.createDiv({
           cls: "okf-feed-project__footer",
-          text: `已显示本期全部 ${treeholeDigest.item_count} 条`,
+          text: `已显示本期全部 ${edition.item_count} 条`,
         });
-      } else {
-        treeholeMeta.setText("当前没有可读内容");
-        treeholeContent.createDiv({ cls: "okf-dashboard__empty", text: "暂时没有树洞热榜内容。" });
+        surface.content.scrollTop = this.feedScroll[surface.id] ?? 0;
       }
-      requestAnimationFrame(() => {
-        aiContent.scrollTop = aiScrollTop;
-        treeholeContent.scrollTop = treeholeScrollTop;
-        this.feedScroll["ai-daily"] = aiScrollTop;
-        this.feedScroll.treehole = treeholeScrollTop;
-        restoringScroll = false;
-      });
     };
     const cached = this.plugin.feedDashboardDigestSnapshot();
-    if (cached) {
-      renderDigest(cached);
-    } else {
-      aiContent.createDiv({ cls: "okf-dashboard__muted", text: "正在读取 AI Daily…" });
-      treeholeContent.createDiv({ cls: "okf-dashboard__muted", text: "正在读取树洞热榜…" });
-    }
-    void this.plugin
-      .loadFeedDashboardDigest()
+    if (cached) renderDigest(cached);
+    void this.plugin.loadFeedDashboardDigest()
       .then((digest) => {
         if (digest !== rendered) renderDigest(digest);
       })
       .catch((error: unknown) => {
-        if (rendered) return;
+        if (rendered || !shelf.isConnected) return;
         const message = error instanceof Error ? error.message : "Feed 摘要暂时无法读取";
-        aiMeta.setText("暂时无法读取");
-        treeholeMeta.setText("暂时无法读取");
-        aiContent.empty();
-        treeholeContent.empty();
-        aiContent.createDiv({ cls: "okf-dashboard__muted", text: message });
-        treeholeContent.createDiv({ cls: "okf-dashboard__muted", text: message });
-        const retry = aiContent.createEl("button", { text: "重新读取", cls: "okf-dashboard__secondary-action" });
-        retry.addEventListener("click", () => {
-          shelf.remove();
-          this.renderFeedLoading(parent);
+        for (const surface of surfaces) {
+          surface.meta.setText("暂时无法读取");
+          surface.content.empty();
+          surface.content.createDiv({ cls: "okf-dashboard__muted", text: message });
+          const retry = surface.content.createEl("button", {
+            text: "重新读取",
+            cls: "okf-dashboard__secondary-action",
+          });
+          retry.addEventListener("click", () => {
+            reading.remove();
+            this.renderDailyFeeds(parent);
+          });
+        }
+      });
+  }
+
+  private async renderReading(container: HTMLElement): Promise<void> {
+    const actions = container.createDiv({
+      cls: "okf-dashboard__hero-actions okf-reading-actions",
+    });
+    const sync = actions.createEl("button", {
+      text: "同步最新内容",
+      cls: "okf-dashboard__secondary-action",
+    });
+    sync.addEventListener("click", () => {
+      void this.runButtonAction(
+        sync,
+        () => this.syncFeedsAndRefresh(),
+        false,
+        "订阅内容已同步",
+      );
+    });
+
+    let refreshWarning = "";
+    if (this.subscriptionsNeedRefresh()) {
+      try {
+        await this.refreshSubscriptionFirstPage();
+      } catch (error) {
+        if (!this.subscriptionsLoaded) throw error;
+        refreshWarning = error instanceof Error ? error.message : "订阅内容刷新失败";
+      }
+    }
+    if (refreshWarning) {
+      container.createDiv({
+        cls: "okf-dashboard__inline-alert",
+        text: `最新内容暂时无法刷新，正在显示上次加载结果：${refreshWarning}`,
+      });
+    }
+    if (!this.subscriptionEditions.length) {
+      container.createDiv({
+        cls: "okf-dashboard__empty okf-dashboard__empty--panel",
+        text: "还没有订阅阅读内容。同步后，RSS、周刊与教程更新会显示在这里。",
+      });
+      return;
+    }
+
+    const panel = container.createEl("section", {
+      cls: "okf-feed-project okf-feed-project--ai-daily okf-feed-project--reading",
+    });
+    const header = panel.createDiv({ cls: "okf-feed-project__header" });
+    const heading = header.createDiv({ cls: "okf-feed-project__heading" });
+    heading.createEl("h3", { text: "订阅期次" });
+    const total = this.subscriptionEditions.reduce(
+      (sum, edition) => sum + edition.item_count,
+      0,
+    );
+    heading.createDiv({
+      cls: "okf-dashboard__muted",
+      text: `已加载 ${this.subscriptionEditions.length} 期 · ${total} 条`,
+    });
+    const latest = this.subscriptionEditions[0]!;
+    const openLatest = header.createEl("button", {
+      text: "打开最新一期",
+      cls: "okf-dashboard__ghost-action okf-feed-project__digest-action",
+    });
+    openLatest.addEventListener("click", () => {
+      this.openFeedDigest(openLatest, "ai-daily", latest.digest_id);
+    });
+    const content = panel.createDiv({ cls: "okf-feed-project__scroll okf-reading-feed__scroll" });
+    this.attachFeedScroll("ai-daily-learning", content);
+    for (const edition of this.subscriptionEditions) {
+      this.renderFeedDigestEdition(content, "ai-daily", edition, {
+        heading: `${formatFeedDate(edition.issued_at)} · ${edition.item_count} 条`,
+        mode: "full",
+      });
+    }
+    const footer = content.createDiv({ cls: "okf-feed-project__footer okf-reading-feed__footer" });
+    if (this.subscriptionHasMore && this.subscriptionCursor) {
+      const cursor = this.subscriptionCursor;
+      const more = footer.createEl("button", {
+        text: "加载更早内容",
+        cls: "okf-dashboard__secondary-action",
+      });
+      more.addEventListener("click", () => {
+        void this.runButtonAction(more, async () => {
+          const page = await this.plugin.loadFeedSubscriptions({
+            limit: 4,
+            cursor,
+          });
+          this.appendSubscriptionPage(page);
+          await this.render(true);
         });
+      });
+    } else {
+      footer.createSpan({ text: `已显示全部 ${total} 条` });
+    }
+    content.scrollTop = this.feedScroll["ai-daily-learning"] ?? 0;
+  }
+
+  private async refreshSubscriptionFirstPage(): Promise<void> {
+    const projectionVersion = this.plugin.feedProjectionVersion();
+    const inFlight = this.subscriptionFirstPageRequest;
+    if (inFlight?.projectionVersion === projectionVersion) {
+      await inFlight.promise;
+      return;
+    }
+    const promise = this.loadAndCommitSubscriptionFirstPage(projectionVersion);
+    this.subscriptionFirstPageRequest = { projectionVersion, promise };
+    try {
+      await promise;
+    } finally {
+      if (this.subscriptionFirstPageRequest?.promise === promise) {
+        this.subscriptionFirstPageRequest = undefined;
+      }
+    }
+  }
+
+  private async loadAndCommitSubscriptionFirstPage(projectionVersion: number): Promise<void> {
+    const page = await this.plugin.loadFeedSubscriptions({ limit: 4 });
+    if (projectionVersion !== this.plugin.feedProjectionVersion()) return;
+    const loadedDigestIds = new Set(this.subscriptionEditions.map((edition) => edition.digest_id));
+    const firstPageOverlapsHistory = page.editions.some((edition) =>
+      loadedDigestIds.has(edition.digest_id)
+    );
+    // The deepest cursor is only safe when the refreshed first page still joins
+    // the already loaded history. If several new editions create a gap, restart
+    // pagination from the new first page so no intermediate edition is skipped.
+    const preserveLoadedHistory = this.subscriptionPagesLoaded > 1 && firstPageOverlapsHistory;
+    this.subscriptionEditions = preserveLoadedHistory
+      ? mergeSubscriptionEditions(page.editions, this.subscriptionEditions)
+      : mergeSubscriptionEditions([], page.editions);
+    if (!preserveLoadedHistory) {
+      this.subscriptionCursor = page.next_cursor;
+      this.subscriptionHasMore = page.has_more;
+      this.subscriptionPagesLoaded = 1;
+    }
+    this.subscriptionsLoaded = true;
+    this.subscriptionLoadedAt = Date.now();
+    this.subscriptionProjectionVersion = projectionVersion;
+  }
+
+  private async syncFeedsAndRefresh(): Promise<void> {
+    const results = await this.plugin.syncFeedsNow();
+    if (this.section === "reading") await this.refreshSubscriptionFirstPage();
+    await this.render(true);
+    const failure = feedSyncFailureMessage(results);
+    if (failure) throw new Error(failure);
+  }
+
+  private appendSubscriptionPage(page: FeedSubscriptionPage): void {
+    this.subscriptionEditions = mergeSubscriptionEditions(this.subscriptionEditions, page.editions);
+    this.subscriptionCursor = page.next_cursor;
+    this.subscriptionHasMore = page.has_more;
+    this.subscriptionPagesLoaded += 1;
+  }
+
+  private subscriptionsNeedRefresh(now = Date.now()): boolean {
+    return !this.subscriptionsLoaded ||
+      this.subscriptionProjectionVersion !== this.plugin.feedProjectionVersion() ||
+      now - this.subscriptionLoadedAt >= SUBSCRIPTION_FIRST_PAGE_TTL_MS;
+  }
+
+  private attachFeedScroll(feed: DashboardFeed, element: HTMLElement): void {
+    element.dataset.feed = feed;
+    element.scrollTop = this.feedScroll[feed] ?? 0;
+    element.addEventListener("scroll", () => {
+      this.lastInteractionAt = Date.now();
+      this.feedScroll[feed] = element.scrollTop;
+      const pending = this.feedScrollPersistTimers[feed];
+      if (pending !== undefined) window.clearTimeout(pending);
+      this.feedScrollPersistTimers[feed] = window.setTimeout(() => {
+        delete this.feedScrollPersistTimers[feed];
+        this.plugin.updateDashboardFeedUiState(feed, {
+          scrollTop: this.feedScroll[feed] ?? 0,
+        });
+      }, 120);
+    }, { passive: true });
+  }
+
+  private openFeedDigest(
+    button: HTMLButtonElement,
+    kind: FeedKind,
+    digestId: string,
+  ): void {
+    if (button.disabled) return;
+    button.disabled = true;
+    void this.plugin.openFeedDigest(kind, digestId)
+      .catch((error: unknown) => {
+        new Notice(error instanceof Error ? error.message : "无法打开 Feed Digest", 10_000);
+      })
+      .finally(() => {
+        button.disabled = false;
       });
   }
 
@@ -1034,13 +1216,20 @@ export class OkfDashboardView extends ItemView {
     parent: HTMLElement,
     kind: FeedKind,
     edition: FeedDigestEdition,
+    options: {
+      heading?: string | false;
+      mode?: "compact" | "full";
+    } = {},
   ): void {
-    const section = parent.createEl("section", { cls: "okf-feed-digest__edition" });
-    const title =
-      kind === "ai-daily"
-        ? edition.section ? aiDailyPreviewStreamTitle(edition.section) : "其他"
-        : "本期条目";
-    section.createEl("h4", { text: title });
+    const mode = options.mode ?? "full";
+    const section = parent.createEl("section", {
+      cls: `okf-feed-digest__edition is-${mode}`,
+    });
+    const defaultHeading = kind === "ai-daily"
+      ? edition.section ? aiDailyPreviewStreamTitle(edition.section) : "其他"
+      : "本期条目";
+    const heading = options.heading === undefined ? defaultHeading : options.heading;
+    if (heading !== false) section.createEl("h4", { text: heading });
     if (edition.quality && edition.quality !== "ok") {
       section.createDiv({
         cls: "okf-dashboard__feed-warning",
@@ -1051,7 +1240,7 @@ export class OkfDashboardView extends ItemView {
     }
     const items = section.createDiv({ cls: "okf-feed-digest__items" });
     for (const [index, item] of edition.items.entries()) {
-      this.renderFeedDigestItem(items, kind, edition, item, index + 1);
+      this.renderFeedDigestItem(items, kind, edition, item, index + 1, mode);
     }
   }
 
@@ -1061,12 +1250,14 @@ export class OkfDashboardView extends ItemView {
     edition: FeedDigestEdition,
     item: FeedDigestItem,
     index: number,
+    mode: "compact" | "full" = "full",
   ): void {
     const card = parent.createEl("article", {
-      cls: "okf-feed-digest__item",
+      cls: `okf-feed-digest__item is-${mode}`,
       attr: {
         role: "link",
         tabindex: "0",
+        "data-feed-kind": kind,
         "aria-label": `阅读与判断：${item.title}`,
       },
     });
@@ -1081,6 +1272,10 @@ export class OkfDashboardView extends ItemView {
     if (item.summary) card.createDiv({ cls: "okf-feed-digest__summary", text: item.summary });
     const metadata = kind === "treehole" ? treeholeMetadata(item) : aiDailyMetadata(item);
     if (metadata) card.createDiv({ cls: "okf-dashboard__muted", text: metadata });
+    const decision = feedDecisionLabel(
+      this.plugin.feedDecisionSnapshot(kind, item.item_id)?.action ?? item.decision,
+    );
+    if (decision) card.createSpan({ cls: "okf-feed-digest__decision", text: decision });
     card.createSpan({ cls: "okf-feed-digest__open-label", text: "阅读与判断 →" });
     let opening = false;
     const open = (): void => {
@@ -1091,8 +1286,9 @@ export class OkfDashboardView extends ItemView {
       void this.plugin
         .openFeedItem(kind, edition.digest_id, item.block_id)
         .then(async () => {
-          const panel = card.closest(".okf-feed-project");
-          for (const previous of panel?.querySelectorAll<HTMLElement>(".is-last-read") ?? []) {
+          for (const previous of this.contentEl.querySelectorAll<HTMLElement>(
+            `.okf-feed-digest__item[data-feed-kind="${kind}"].is-last-read`,
+          )) {
             previous.removeClass("is-last-read");
             previous.removeAttribute("aria-current");
           }
@@ -2791,7 +2987,12 @@ export class OkfDashboardView extends ItemView {
         cls: "okf-dashboard__secondary-action okf-dashboard__system-action",
       });
       action.addEventListener("click", () => {
-        void this.runButtonAction(action, () => this.plugin.syncFeedsNow(), true, "Feed 已同步");
+        void this.runButtonAction(
+          action,
+          () => this.syncFeedsAndRefresh(),
+          false,
+          "Feed 已同步",
+        );
       });
     } else if (item.action) {
       card.createDiv({ cls: "okf-dashboard__muted okf-dashboard__system-action", text: item.action });
@@ -3253,9 +3454,76 @@ function formatLocalTimestamp(value: string): string {
 }
 
 function aiDailyMetadata(item: FeedDigestItem): string {
-  return [item.source, item.published_at, item.media_count ? `${item.media_count} 个媒体` : ""]
-    .filter(Boolean)
-    .join(" · ");
+  const parts = [
+    item.source_name || item.source,
+    item.native_section,
+    item.published_at,
+    item.media_count ? `${item.media_count} 个媒体` : "",
+  ].filter((value): value is string => Boolean(value));
+  return [...new Set(parts)].join(" · ");
+}
+
+export function latestAiDailyEdition(
+  digest: FeedDashboardDigest,
+  section: AiDailyStream,
+): FeedDigestEdition | undefined {
+  return digest.ai_daily
+    .filter((edition) => edition.section === section)
+    .reduce<FeedDigestEdition | undefined>((latest, edition) =>
+      !latest || edition.issued_at.localeCompare(latest.issued_at) > 0 ? edition : latest,
+    undefined);
+}
+
+export function mergeSubscriptionEditions(
+  current: readonly FeedDigestEdition[],
+  incoming: readonly FeedDigestEdition[],
+): FeedDigestEdition[] {
+  const merged = [...current];
+  const seen = new Set(current.map((edition) => edition.digest_id));
+  for (const edition of incoming) {
+    if (edition.section !== "learning" || seen.has(edition.digest_id)) continue;
+    seen.add(edition.digest_id);
+    merged.push(edition);
+  }
+  return merged;
+}
+
+export function feedDecisionLabel(
+  decision: FeedDigestItem["decision"],
+): string {
+  if (!decision) return "";
+  return {
+    "learn-now": "已开始学习",
+    "learn-later": "待生成学习材料",
+    "wiki-now": "已整理 Wiki",
+    "source-only": "已保存来源",
+    ignore: "已忽略",
+    later: "旧版稍后处理",
+  }[decision];
+}
+
+export function feedSyncFailureMessage(results: readonly FeedSyncResult[]): string {
+  const failures = results.filter((result) => result.status === "error");
+  if (!failures.length) return "";
+  const details = failures.map((failure) => {
+    const label = failure.feed === "treehole"
+      ? "树洞热榜"
+      : failure.section === "hotspot" || failure.section === "news" || failure.section === "learning"
+        ? aiDailyPreviewStreamTitle(failure.section)
+        : failure.section || "AI Daily";
+    return `${label}：${failure.detail}`;
+  });
+  return `部分内容同步失败（其他内容已更新）：${details.join("；")}`;
+}
+
+function formatFeedDate(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/u.exec(value);
+  if (!match) return value;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const prefix = year === new Date().getFullYear() ? "" : `${year}年`;
+  return `${prefix}${month}月${day}日`;
 }
 
 export function treeholeMetadata(item: FeedDigestItem): string {

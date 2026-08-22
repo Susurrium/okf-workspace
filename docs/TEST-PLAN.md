@@ -36,7 +36,8 @@ cd E:\code\okf-workspace
 ## 3. Dashboard 关键矩阵
 
 - 测试真实 `OkfDashboardView`，不能只测未运行的旧 page model。
-- Today 双栏与窄 pane 模式；Feed 独立滚动和刷新后位置保持。
+- Today 双栏与窄 pane 模式；中国热点、AI 资讯、树洞热榜各自选择最近一期、独立滚动并保持刷新前位置。
+- Reading 只展示 `learning` 订阅流，复用 Today/Digest 的 Feed 条目交互；历史按稳定游标分页，连续加载不重复、不跳期。
 - Inbox 三阶段、渠道过滤、Web 四个离散动作及明确反馈。
 - Learning 的 `全部 = Course + Project-related + Independent`，具体关系筛选和双关联正确。
 - Project 快速记录、关联学习入口、状态与下一步展示准确。
@@ -73,7 +74,7 @@ cd E:\code\okf-workspace
 - MinerU 服务器真实转换一个复杂 PDF；
 - MarkItDown 真实转换一个 DOCX；
 - 本机 Codex 完成一次可见会话和一次后台生成；
-- AI Daily 与树洞各处理一条；
+- Today 的中国热点、AI 资讯、树洞热榜各打开一条；Reading 加载两期订阅内容并处理一条；
 - Obsidian 重启后 Dashboard、Claudian、本地服务生命周期正常；
 - Windows 开机无旧 worker 或多余终端。
 

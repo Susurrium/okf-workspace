@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { aiDailyPreviewStreamTitle } from "../src/domain/ai-daily-preview.js";
+import { evictUnresolvedFeedDecisions } from "../src/feeds/decision-cache.js";
 import { feedItemMappings } from "../src/feeds/mappings.js";
 import { HttpFeedApi } from "../src/feeds/service.js";
 import {
@@ -21,7 +22,7 @@ describe("Dashboard Feed workflow", () => {
   it("uses the current AI Daily stream labels", () => {
     expect(aiDailyPreviewStreamTitle("news")).toBe("AI 资讯");
     expect(aiDailyPreviewStreamTitle("hotspot")).toBe("中国热点");
-    expect(aiDailyPreviewStreamTitle("learning")).toBe("AI 学习更新");
+    expect(aiDailyPreviewStreamTitle("learning")).toBe("订阅阅读");
   });
 
   it("offers five explicit human outcomes", () => {
@@ -38,7 +39,7 @@ describe("Dashboard Feed workflow", () => {
     const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(
       () => new AbortController().signal,
     );
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -51,6 +52,46 @@ describe("Dashboard Feed workflow", () => {
       vi.unstubAllGlobals();
       timeout.mockRestore();
     }
+  });
+
+  it("loads subscription editions with bounded opaque-cursor pagination", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({
+        section: "learning",
+        editions: [],
+        next_cursor: null,
+        has_more: false,
+      }), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const api = new HttpFeedApi("http://127.0.0.1:8765", "token");
+      await api.listSubscriptions({ limit: 4, cursor: "opaque+/=" });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "http://127.0.0.1:8765/dashboard/feeds/subscriptions?limit=4&cursor=opaque%2B%2F%3D",
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps durable Feed decisions when a synchronization refreshes edition data", () => {
+    const decision = {
+      item_id: "learning-old:1",
+      action: "wiki-now" as const,
+      source: "sources/records/ai-daily/learning-old-1.md",
+    };
+    const cache = new Map([
+      ["ai-daily:learning-old:1", decision],
+      ["ai-daily:unknown", undefined],
+    ]);
+
+    evictUnresolvedFeedDecisions(cache);
+
+    expect(cache.get("ai-daily:learning-old:1")).toBe(decision);
+    expect(cache.has("ai-daily:unknown")).toBe(false);
   });
 
   it("explains deferred learning and remains able to read a legacy later receipt", () => {

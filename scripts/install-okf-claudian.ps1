@@ -66,6 +66,36 @@ foreach ($legacyId in @('claudian')) {
     if ($owned) { $ownedLegacyPluginIds.Add($legacyId) | Out-Null }
 }
 
+$settingsRoot = Join-Path $vaultRoot '.claudian'
+$settingsPath = Join-Path $settingsRoot 'claudian-settings.json'
+$settings = @{}
+if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+    $settings = Read-OkfJsonHashtable -Path $settingsPath -Description 'OKF Claudian settings'
+}
+
+$communityPluginsPath = Join-Path $vaultRoot '.obsidian\community-plugins.json'
+$enabled = [System.Collections.Generic.List[string]]::new()
+if (Test-Path -LiteralPath $communityPluginsPath -PathType Leaf) {
+    $rawCommunityPlugins = [System.IO.File]::ReadAllText($communityPluginsPath)
+    if (-not $rawCommunityPlugins.Trim().StartsWith('[') -or
+        -not $rawCommunityPlugins.Trim().EndsWith(']')) {
+        throw "Obsidian community plugin configuration must be a JSON array: $communityPluginsPath"
+    }
+    try {
+        $parsedCommunityPlugins = ConvertFrom-Json -InputObject $rawCommunityPlugins
+    } catch {
+        throw "Obsidian community plugin configuration is invalid JSON: $communityPluginsPath"
+    }
+    foreach ($id in @($parsedCommunityPlugins)) {
+        if ($id -isnot [string]) {
+            throw "Obsidian community plugin configuration contains a non-string id: $communityPluginsPath"
+        }
+        if (-not $ownedLegacyPluginIds.Contains($id) -and -not $enabled.Contains($id)) {
+            $enabled.Add($id)
+        }
+    }
+}
+
 $pluginTarget = [System.IO.Path]::GetFullPath(
     (Join-Path $vaultRoot '.obsidian\plugins\okf-claudian')
 )
@@ -79,14 +109,7 @@ foreach ($artifactName in $artifactNames) {
     if ($sourceHash -ne $targetHash) { throw "Artifact verification failed: $artifactName" }
 }
 
-$settingsRoot = Join-Path $vaultRoot '.claudian'
-$settingsPath = Join-Path $settingsRoot 'claudian-settings.json'
 New-Item -ItemType Directory -Force -Path $settingsRoot | Out-Null
-$settings = @{}
-if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
-    $settings = Get-Content -LiteralPath $settingsPath -Raw -Encoding UTF8 |
-        ConvertFrom-Json -AsHashtable
-}
 if (-not $settings.ContainsKey('systemPromptMode')) { $settings['systemPromptMode'] = 'okf-native' }
 if (-not $settings.ContainsKey('settingsProvider')) { $settings['settingsProvider'] = 'codex' }
 if (-not $settings.ContainsKey('locale')) { $settings['locale'] = 'zh-CN' }
@@ -107,17 +130,6 @@ if (-not $codexConfig.ContainsKey('enabled')) { $codexConfig['enabled'] = $true 
 if (-not $codexConfig.ContainsKey('safeMode')) { $codexConfig['safeMode'] = 'workspace-write' }
 Write-OkfJson -Path $settingsPath -Value $settings
 
-$communityPluginsPath = Join-Path $vaultRoot '.obsidian\community-plugins.json'
-$enabled = [System.Collections.Generic.List[string]]::new()
-if (Test-Path -LiteralPath $communityPluginsPath -PathType Leaf) {
-    foreach ($id in @(Get-Content -LiteralPath $communityPluginsPath -Raw -Encoding UTF8 | ConvertFrom-Json)) {
-        if ($id -is [string] -and
-            -not $ownedLegacyPluginIds.Contains($id) -and
-            -not $enabled.Contains($id)) {
-            $enabled.Add($id)
-        }
-    }
-}
 if (-not $enabled.Contains('okf-claudian')) { $enabled.Add('okf-claudian') }
 Write-OkfJson -Path $communityPluginsPath -Value $enabled.ToArray()
 

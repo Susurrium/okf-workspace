@@ -24,4 +24,16 @@ describe("Dashboard global styles", () => {
       /\.okf-action-panel__copy\s*\{[^}]*flex:\s*1 1 auto[^}]*text-align:\s*left/isu,
     );
   });
+
+  it("uses one responsive Feed surface for daily updates and subscription history", () => {
+    expect(styles).toMatch(
+      /\.okf-feed-shelf--daily\s*\{[^}]*grid-template-columns:\s*repeat\(3,/isu,
+    );
+    expect(styles).toContain(".okf-feed-project--reading");
+    expect(styles).toContain(".okf-reading-feed__scroll");
+    expect(styles).toContain(".okf-feed-digest__item.is-full");
+    expect(styles).toMatch(
+      /@container\s*\(max-width:\s*1250px\)[\s\S]*?\.okf-feed-shelf--daily\s*>\s*:last-child\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/iu,
+    );
+  });
 });

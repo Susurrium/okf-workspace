@@ -1,6 +1,7 @@
 export const DASHBOARD_SECTIONS = [
   "today",
   "inbox",
+  "reading",
   "learning",
   "projects",
   "knowledge",
@@ -9,7 +10,14 @@ export const DASHBOARD_SECTIONS = [
 ] as const;
 
 export type DashboardSection = (typeof DASHBOARD_SECTIONS)[number];
-export type DashboardFeed = "ai-daily" | "treehole";
+export const DASHBOARD_FEEDS = [
+  "ai-daily",
+  "ai-daily-hotspot",
+  "ai-daily-news",
+  "ai-daily-learning",
+  "treehole",
+] as const;
+export type DashboardFeed = (typeof DASHBOARD_FEEDS)[number];
 export type DashboardFilterValue = string | number | boolean;
 
 export interface DashboardPageUiState {
@@ -65,7 +73,7 @@ export interface LegacyFeedReadingPosition {
 }
 
 export type LegacyFeedReadingPositions = Partial<
-  Record<DashboardFeed, LegacyFeedReadingPosition>
+  Record<"ai-daily" | "treehole", LegacyFeedReadingPosition>
 >;
 
 const RECENT_FILE_LIMIT = 50;
@@ -91,6 +99,9 @@ export function createDefaultDashboardUiState(): DashboardUiState {
     ) as Record<DashboardSection, DashboardPageUiState>,
     feeds: {
       "ai-daily": { scrollTop: 0 },
+      "ai-daily-hotspot": { scrollTop: 0 },
+      "ai-daily-news": { scrollTop: 0 },
+      "ai-daily-learning": { scrollTop: 0 },
       treehole: { scrollTop: 0 },
     },
     recentFiles: [],
@@ -113,8 +124,24 @@ export function normalizeDashboardUiState(
     pages[section] = normalizePageState(storedPages?.[section]);
   }
   const storedFeeds = objectValue(record?.feeds);
-  const feeds = {
-    "ai-daily": normalizeFeedState(storedFeeds?.["ai-daily"], legacy?.["ai-daily"]),
+  const aiDaily = normalizeFeedState(storedFeeds?.["ai-daily"], legacy?.["ai-daily"]);
+  const feeds: Record<DashboardFeed, DashboardFeedUiState> = {
+    "ai-daily": aiDaily,
+    // Older releases had one scroll position for every AI Daily stream. Use it
+    // only as the initial fallback; each surface is persisted independently
+    // after the first interaction.
+    "ai-daily-hotspot": normalizeFeedState(
+      storedFeeds?.["ai-daily-hotspot"],
+      { scrollTop: aiDaily.scrollTop },
+    ),
+    "ai-daily-news": normalizeFeedState(
+      storedFeeds?.["ai-daily-news"],
+      { scrollTop: aiDaily.scrollTop },
+    ),
+    "ai-daily-learning": normalizeFeedState(
+      storedFeeds?.["ai-daily-learning"],
+      { scrollTop: aiDaily.scrollTop },
+    ),
     treehole: normalizeFeedState(storedFeeds?.treehole, legacy?.treehole),
   };
   return {
@@ -137,10 +164,12 @@ export function patchDashboardUiState(
     if (!pagePatch) continue;
     pages[section] = patchPageState(current.pages[section], pagePatch);
   }
-  const feeds = {
-    "ai-daily": patchFeedState(current.feeds["ai-daily"], patch.feeds?.["ai-daily"]),
-    treehole: patchFeedState(current.feeds.treehole, patch.feeds?.treehole),
-  };
+  const feeds = Object.fromEntries(
+    DASHBOARD_FEEDS.map((feed) => [
+      feed,
+      patchFeedState(current.feeds[feed], patch.feeds?.[feed]),
+    ]),
+  ) as Record<DashboardFeed, DashboardFeedUiState>;
   return {
     version: 1,
     activeSection: isDashboardSection(patch.activeSection)
@@ -282,7 +311,9 @@ function normalizeFeedState(value: unknown, legacy: unknown): DashboardFeedUiSta
   const itemId = textValue(record?.itemId) ?? textValue(fallback?.itemId);
   const updatedAt = timestampValue(record?.updatedAt) ?? timestampValue(fallback?.updatedAt);
   return {
-    scrollTop: scrollValue(record?.scrollTop),
+    scrollTop: record?.scrollTop === undefined
+      ? scrollValue(fallback?.scrollTop)
+      : scrollValue(record.scrollTop),
     ...(editionId ? { editionId } : {}),
     ...(itemId ? { itemId } : {}),
     ...(updatedAt ? { updatedAt } : {}),

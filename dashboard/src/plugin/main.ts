@@ -18,11 +18,15 @@ import type {
   WebCaptureAction,
 } from "../api/types.js";
 import { FeedTransportError, HttpFeedApi } from "../feeds/service.js";
+import { evictUnresolvedFeedDecisions } from "../feeds/decision-cache.js";
 import type {
   FeedDashboardDigest,
   FeedDecisionAction,
   FeedDecisionResult,
   FeedKind,
+  FeedSubscriptionPage,
+  FeedSubscriptionPageQuery,
+  FeedSyncResult,
 } from "../feeds/types.js";
 import { feedItemMappings } from "../feeds/mappings.js";
 import { HttpDocumentImportApi } from "../imports/service.js";
@@ -71,6 +75,7 @@ import {
   normalizeDashboardUiState,
   patchDashboardUiState,
   type DashboardFeedUiStatePatch,
+  type DashboardFeed,
   type DashboardPageUiStatePatch,
   type DashboardSection,
   type DashboardUiState,
@@ -82,6 +87,7 @@ export default class OkfBrainPlugin extends Plugin {
   public settings: OkfBrainSettings = DEFAULT_SETTINGS;
   private feedDigestCache: { value: FeedDashboardDigest; loadedAt: number } | undefined;
   private feedDigestRequest: Promise<FeedDashboardDigest> | undefined;
+  private feedProjectionRevision = 0;
   private readonly feedDecisionCache = new Map<string, FeedDecisionResult | undefined>();
   private readonly feedDecisionRequests = new Map<string, Promise<FeedDecisionResult | undefined>>();
   private dashboardRefreshTimer: number | undefined;
@@ -217,7 +223,7 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public updateDashboardFeedUiState(
-    feed: FeedKind,
+    feed: DashboardFeed,
     patch: DashboardFeedUiStatePatch,
   ): DashboardUiState {
     return this.updateDashboardUiState({ feeds: { [feed]: patch } });
@@ -966,28 +972,60 @@ export default class OkfBrainPlugin extends Plugin {
     }
     if (this.feedDigestRequest) return this.feedDigestRequest;
     const api = new HttpFeedApi(this.settings.baseUrl, this.settings.token);
-    this.feedDigestRequest = (async () => {
+    const revision = this.feedProjectionRevision;
+    const request = (async () => {
       try {
         const value = await api.dashboardDigest();
-        this.feedDigestCache = { value, loadedAt: Date.now() };
+        if (revision === this.feedProjectionRevision) {
+          this.feedDigestCache = { value, loadedAt: Date.now() };
+        }
         return value;
       } catch {
         await this.ensureLocalServiceAvailable();
         const value = await api.dashboardDigest();
-        this.feedDigestCache = { value, loadedAt: Date.now() };
+        if (revision === this.feedProjectionRevision) {
+          this.feedDigestCache = { value, loadedAt: Date.now() };
+        }
         return value;
-      } finally {
-        this.feedDigestRequest = undefined;
       }
     })();
-    return this.feedDigestRequest;
+    this.feedDigestRequest = request;
+    try {
+      return await request;
+    } finally {
+      if (this.feedDigestRequest === request) this.feedDigestRequest = undefined;
+    }
   }
 
   public feedDashboardDigestSnapshot(): FeedDashboardDigest | undefined {
     return this.feedDigestCache?.value;
   }
 
-  public async syncFeedsNow(): Promise<void> {
+  public feedProjectionVersion(): number {
+    return this.feedProjectionRevision;
+  }
+
+  public feedDecisionSnapshot(
+    feed: FeedKind,
+    itemId: string,
+  ): FeedDecisionResult | undefined {
+    return this.feedDecisionCache.get(this.feedDecisionKey(feed, itemId));
+  }
+
+  public async loadFeedSubscriptions(
+    query: FeedSubscriptionPageQuery = {},
+  ): Promise<FeedSubscriptionPage> {
+    const api = new HttpFeedApi(this.settings.baseUrl, this.settings.token);
+    try {
+      return await api.listSubscriptions(query);
+    } catch (error) {
+      if (!(error instanceof FeedTransportError)) throw error;
+      await this.ensureLocalServiceAvailable();
+      return api.listSubscriptions(query);
+    }
+  }
+
+  public async syncFeedsNow(): Promise<FeedSyncResult[]> {
     await this.ensureLocalServiceAvailable();
     if (this.feedDigestRequest) {
       try {
@@ -996,15 +1034,15 @@ export default class OkfBrainPlugin extends Plugin {
         // A failed stale request must not block an explicit synchronization.
       }
     }
-    await this.api().syncFeeds();
-    this.feedDigestCache = undefined;
-    this.feedDecisionCache.clear();
-    this.feedDecisionRequests.clear();
+    const results = await this.api().syncFeeds();
+    this.invalidateFeedProjections();
+    evictUnresolvedFeedDecisions(this.feedDecisionCache);
     try {
       await this.loadFeedDashboardDigest();
     } catch (error) {
       console.warn("[okf-workspace] feeds synchronized but dashboard refresh failed", error);
     }
+    return results;
   }
 
   public async openFeedItem(
@@ -1677,7 +1715,15 @@ export default class OkfBrainPlugin extends Plugin {
       this.watchSemanticOperation(result.semantic_operation.operation_id);
     }
     this.feedDecisionCache.set(this.feedDecisionKey(feed, itemId), result);
+    this.invalidateFeedProjections();
+    this.refreshDashboardViews();
     return result;
+  }
+
+  private invalidateFeedProjections(): void {
+    this.feedDigestCache = undefined;
+    this.feedDigestRequest = undefined;
+    this.feedProjectionRevision += 1;
   }
 
   public loadFeedDecision(

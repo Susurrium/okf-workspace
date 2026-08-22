@@ -6,6 +6,68 @@ function Resolve-OkfPath {
     return [System.IO.Path]::GetFullPath($Path)
 }
 
+function ConvertTo-OkfHashtable {
+    [CmdletBinding()]
+    param([AllowNull()][object]$InputObject)
+
+    if ($null -eq $InputObject) { return $null }
+
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        $converted = @{}
+        foreach ($key in $InputObject.Keys) {
+            $converted[[string]$key] = ConvertTo-OkfHashtable -InputObject $InputObject[$key]
+        }
+        return $converted
+    }
+
+    if ($InputObject -is [System.Management.Automation.PSCustomObject]) {
+        $converted = @{}
+        foreach ($property in $InputObject.PSObject.Properties) {
+            $converted[$property.Name] = ConvertTo-OkfHashtable -InputObject $property.Value
+        }
+        return $converted
+    }
+
+    if ($InputObject -is [System.Collections.IEnumerable] -and $InputObject -isnot [string]) {
+        $convertedItems = [System.Collections.Generic.List[object]]::new()
+        foreach ($item in $InputObject) {
+            $convertedItems.Add((ConvertTo-OkfHashtable -InputObject $item))
+        }
+        # Prevent PowerShell's pipeline from flattening nested or empty JSON arrays.
+        return ,([object[]]$convertedItems.ToArray())
+    }
+
+    return $InputObject
+}
+
+function Read-OkfJsonHashtable {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$Description = 'JSON document'
+    )
+
+    $resolvedPath = Resolve-OkfPath $Path
+    if (-not (Test-Path -LiteralPath $resolvedPath -PathType Leaf)) {
+        throw "$Description not found: $resolvedPath"
+    }
+    $rawJson = [System.IO.File]::ReadAllText($resolvedPath)
+    try {
+        $parsed = ConvertFrom-Json -InputObject $rawJson
+    } catch {
+        throw "$Description is invalid JSON: $resolvedPath. $($_.Exception.Message)"
+    }
+    $trimmedJson = $rawJson.Trim()
+    if (-not $trimmedJson.StartsWith('{') -or -not $trimmedJson.EndsWith('}')) {
+        throw "$Description must contain a JSON object: $resolvedPath"
+    }
+    $converted = ConvertTo-OkfHashtable -InputObject $parsed
+    if ($converted -isnot [System.Collections.IDictionary]) {
+        throw "$Description must contain a JSON object: $resolvedPath"
+    }
+    return $converted
+}
+
 function Write-OkfJson {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -411,7 +473,7 @@ function Install-OkfDashboardPluginAtomic {
         -ExpectedId 'okf-workspace-dashboard'
 }
 
-function Complete-OkfDashboardPluginMigration {
+function Get-OkfDashboardPluginMigrationPlan {
     param([Parameter(Mandatory)][string]$Vault)
 
     $currentId = 'okf-workspace-dashboard'
@@ -419,22 +481,6 @@ function Complete-OkfDashboardPluginMigration {
     $vaultPath = Resolve-OkfPath $Vault
     $obsidianRoot = Join-Path $vaultPath '.obsidian'
     $pluginsRoot = Join-Path $obsidianRoot 'plugins'
-    $currentTarget = Assert-OkfChildPath `
-        -Parent $pluginsRoot `
-        -Child (Join-Path $pluginsRoot $currentId)
-    $currentManifestPath = Join-Path $currentTarget 'manifest.json'
-    if (-not (Test-Path -LiteralPath $currentManifestPath -PathType Leaf)) {
-        throw "Installed Dashboard manifest is missing: $currentManifestPath"
-    }
-    try {
-        $currentManifest = Get-Content -LiteralPath $currentManifestPath -Raw | ConvertFrom-Json
-    } catch {
-        throw "Installed Dashboard manifest is invalid JSON: $currentManifestPath"
-    }
-    if ([string]$currentManifest.id -cne $currentId) {
-        throw "Installed Dashboard manifest id must be '$currentId', found '$([string]$currentManifest.id)'"
-    }
-
     $legacyTarget = Assert-OkfChildPath `
         -Parent $pluginsRoot `
         -Child (Join-Path $pluginsRoot $legacyId)
@@ -490,6 +536,54 @@ function Complete-OkfDashboardPluginMigration {
         $preserved.Add($pluginId)
     }
     $enabled = @($currentId) + @($preserved.ToArray())
+
+    return [pscustomobject]@{
+        Vault = $vaultPath
+        LegacyTarget = $legacyTarget
+        RemoveLegacy = $removeLegacy
+        CommunityPlugins = $communityPlugins
+        Enabled = $enabled
+    }
+}
+
+function Complete-OkfDashboardPluginMigration {
+    param(
+        [Parameter(Mandatory)][string]$Vault,
+        [object]$Preflight = $null
+    )
+
+    $currentId = 'okf-workspace-dashboard'
+    $vaultPath = Resolve-OkfPath $Vault
+    $obsidianRoot = Join-Path $vaultPath '.obsidian'
+    $pluginsRoot = Join-Path $obsidianRoot 'plugins'
+    $currentTarget = Assert-OkfChildPath `
+        -Parent $pluginsRoot `
+        -Child (Join-Path $pluginsRoot $currentId)
+    $currentManifestPath = Join-Path $currentTarget 'manifest.json'
+    if (-not (Test-Path -LiteralPath $currentManifestPath -PathType Leaf)) {
+        throw "Installed Dashboard manifest is missing: $currentManifestPath"
+    }
+    try {
+        $currentManifest = Get-Content -LiteralPath $currentManifestPath -Raw | ConvertFrom-Json
+    } catch {
+        throw "Installed Dashboard manifest is invalid JSON: $currentManifestPath"
+    }
+    if ([string]$currentManifest.id -cne $currentId) {
+        throw "Installed Dashboard manifest id must be '$currentId', found '$([string]$currentManifest.id)'"
+    }
+
+    $migration = if ($null -eq $Preflight) {
+        Get-OkfDashboardPluginMigrationPlan -Vault $vaultPath
+    } else {
+        $Preflight
+    }
+    if (-not (Test-OkfSamePath -Left ([string]$migration.Vault) -Right $vaultPath)) {
+        throw "Dashboard migration preflight belongs to another Vault: $($migration.Vault)"
+    }
+    $communityPlugins = [string]$migration.CommunityPlugins
+    $legacyTarget = [string]$migration.LegacyTarget
+    $removeLegacy = [bool]$migration.RemoveLegacy
+    $enabled = @($migration.Enabled)
 
     # Commit the load order before deleting the retired code. A failed delete is
     # safe to retry: the old directory remains present but is no longer enabled.

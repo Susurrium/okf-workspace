@@ -23,6 +23,7 @@ from fastapi import (
     Form,
     Header,
     HTTPException,
+    Query,
     Request,
     UploadFile,
 )
@@ -38,7 +39,7 @@ from okf_workspace.ai import (
 )
 from okf_workspace.config import BrainPaths
 from okf_workspace.dashboard.catalog import scan_notes
-from okf_workspace.dashboard.feeds import feed_dashboard
+from okf_workspace.dashboard.feeds import feed_dashboard, subscription_dashboard
 from okf_workspace.dashboard.system import system_status
 from okf_workspace.dashboard.views import dashboard_view, today_view
 from okf_workspace.feeds import (
@@ -454,6 +455,20 @@ def create_app(
     @app.get("/dashboard/feeds/summary", dependencies=protected)
     def get_feed_dashboard() -> dict[str, object]:
         return feed_dashboard(configured.state)
+
+    @app.get("/dashboard/feeds/subscriptions", dependencies=protected)
+    def get_feed_subscriptions(
+        limit: Annotated[int, Query(ge=1, le=50)] = 20,
+        cursor: str | None = None,
+    ) -> dict[str, object]:
+        try:
+            return subscription_dashboard(
+                configured.state,
+                limit=limit,
+                cursor=cursor,
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
 
     @app.get("/notes", dependencies=protected)
     def get_notes(
@@ -995,10 +1010,12 @@ def create_app(
 
     @app.post("/feeds/sync", dependencies=protected)
     def sync_feeds() -> list[dict[str, object]]:
-        synchronized = FeedSyncer(configured.state).sync_all()
-        return [
+        syncer = FeedSyncer(configured.state)
+        synchronized = syncer.sync_all()
+        successes: list[dict[str, object]] = [
             {
                 "feed": edition.feed.value,
+                "status": "ok",
                 "digest_id": edition.edition_id,
                 "issued_at": edition.edition_at,
                 "item_count": len(edition.items),
@@ -1006,6 +1023,16 @@ def create_app(
             for editions in synchronized.values()
             for edition in editions
         ]
+        failures: list[dict[str, object]] = [
+            {
+                "feed": failure.feed.value,
+                "status": "error",
+                "section": failure.stream,
+                "detail": failure.detail,
+            }
+            for failure in syncer.failures
+        ]
+        return successes + failures
 
     @app.post("/index/rebuild", dependencies=protected)
     def rebuild_index() -> dict[str, object]:

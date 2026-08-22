@@ -266,21 +266,38 @@ Write-OkfJson -Path $configPath -Value $config
 
 $pluginTarget = Join-Path $vaultPath '.obsidian\plugins\okf-workspace-dashboard'
 $legacyPluginTarget = Join-Path $vaultPath '.obsidian\plugins\okf-brain-dashboard'
-Install-OkfDashboardPluginAtomic `
-    -DashboardRoot (Join-Path $repo 'dashboard') `
-    -Target $pluginTarget | Out-Null
-& (Join-Path $repo 'scripts\install-okf-claudian.ps1') `
-    -Vault $vaultPath `
-    -ClaudianRepository $claudianRepo
-if ($LASTEXITCODE -ne 0) { throw 'OKF Claudian installation failed' }
 $pluginDataPath = Join-Path $pluginTarget 'data.json'
 $legacyPluginDataPath = Join-Path $legacyPluginTarget 'data.json'
 $pluginData = @{}
 if (Test-Path -LiteralPath $pluginDataPath -PathType Leaf) {
-    $pluginData = Get-Content -LiteralPath $pluginDataPath -Raw | ConvertFrom-Json -AsHashtable
+    $pluginData = Read-OkfJsonHashtable -Path $pluginDataPath -Description 'Dashboard settings'
 } elseif (Test-Path -LiteralPath $legacyPluginDataPath -PathType Leaf) {
-    $pluginData = Get-Content -LiteralPath $legacyPluginDataPath -Raw | ConvertFrom-Json -AsHashtable
+    $pluginData = Read-OkfJsonHashtable -Path $legacyPluginDataPath -Description 'Legacy Dashboard settings'
 }
+
+$obsidianAppConfig = Join-Path $vaultPath '.obsidian\app.json'
+$obsidianAppSettings = @{}
+if (Test-Path -LiteralPath $obsidianAppConfig -PathType Leaf) {
+    $obsidianAppSettings = Read-OkfJsonHashtable -Path $obsidianAppConfig -Description 'Obsidian app settings'
+}
+
+$templaterManifest = Join-Path $vaultPath '.obsidian\plugins\templater-obsidian\manifest.json'
+$templaterDataPath = Join-Path $vaultPath '.obsidian\plugins\templater-obsidian\data.json'
+$templaterData = @{}
+if ((Test-Path -LiteralPath $templaterManifest -PathType Leaf) -and
+    (Test-Path -LiteralPath $templaterDataPath -PathType Leaf)) {
+    $templaterData = Read-OkfJsonHashtable -Path $templaterDataPath -Description 'Templater settings'
+}
+
+# Read and validate every existing JSON input before replacing Dashboard artifacts.
+& (Join-Path $repo 'scripts\install-okf-claudian.ps1') `
+    -Vault $vaultPath `
+    -ClaudianRepository $claudianRepo
+if ($LASTEXITCODE -ne 0) { throw 'OKF Claudian installation failed' }
+$dashboardMigration = Get-OkfDashboardPluginMigrationPlan -Vault $vaultPath
+Install-OkfDashboardPluginAtomic `
+    -DashboardRoot (Join-Path $repo 'dashboard') `
+    -Target $pluginTarget | Out-Null
 $pluginData['baseUrl'] = "http://127.0.0.1:$ApiPort"
 $pluginData['tokenFile'] = $tokenFile
 $pluginData['pythonExecutable'] = $python
@@ -292,13 +309,10 @@ Write-OkfJson -Path $pluginDataPath -Value $pluginData
 
 # Only after the replacement plugin and its settings are durable do we switch
 # Obsidian's load order and retire the explicitly supported legacy plugin id.
-$enabled = @(Complete-OkfDashboardPluginMigration -Vault $vaultPath)
+$enabled = @(Complete-OkfDashboardPluginMigration `
+    -Vault $vaultPath `
+    -Preflight $dashboardMigration)
 
-$obsidianAppConfig = Join-Path $vaultPath '.obsidian\app.json'
-$obsidianAppSettings = @{}
-if (Test-Path -LiteralPath $obsidianAppConfig -PathType Leaf) {
-    $obsidianAppSettings = Get-Content -LiteralPath $obsidianAppConfig -Raw | ConvertFrom-Json -AsHashtable
-}
 $obsidianAppSettings['alwaysUpdateLinks'] = $true
 $obsidianAppSettings['showInlineTitle'] = $false
 $obsidianAppSettings['propertiesInDocument'] = 'visible'
@@ -306,13 +320,7 @@ Write-OkfJson -Path $obsidianAppConfig -Value $obsidianAppSettings
 
 $communityPlugins = Join-Path $vaultPath '.obsidian\community-plugins.json'
 
-$templaterManifest = Join-Path $vaultPath '.obsidian\plugins\templater-obsidian\manifest.json'
 if (Test-Path -LiteralPath $templaterManifest -PathType Leaf) {
-    $templaterDataPath = Join-Path $vaultPath '.obsidian\plugins\templater-obsidian\data.json'
-    $templaterData = @{}
-    if (Test-Path -LiteralPath $templaterDataPath -PathType Leaf) {
-        $templaterData = Get-Content -LiteralPath $templaterDataPath -Raw | ConvertFrom-Json -AsHashtable
-    }
     $templaterData['templates_folder'] = 'system/templates/interactive'
     if (-not $templaterData.ContainsKey('command_timeout')) { $templaterData['command_timeout'] = 5 }
     if (-not $templaterData.ContainsKey('trigger_on_file_creation_mode')) {

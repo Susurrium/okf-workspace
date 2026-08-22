@@ -63,12 +63,16 @@ export interface FeedDigestItem {
   summary: string;
   url?: string | null;
   source: string;
+  source_id?: string | null;
+  source_name?: string | null;
+  native_section?: string | null;
   published_at?: string | null;
   section?: AiDailyStream | null;
   pid?: number | null;
   metrics: Record<string, number | string>;
   comment_count: number;
   media_count: number;
+  decision?: FeedDecisionReceiptAction | null;
 }
 
 export interface FeedDigestEdition {
@@ -86,6 +90,35 @@ export interface FeedDashboardDigest {
   ai_daily: FeedDigestEdition[];
   treehole: FeedDigestEdition | null;
 }
+
+export interface FeedSubscriptionPage {
+  section: "learning";
+  editions: FeedDigestEdition[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
+export interface FeedSubscriptionPageQuery {
+  limit?: number;
+  cursor?: string;
+}
+
+export interface FeedSyncSuccess {
+  feed: FeedKind;
+  status: "ok";
+  digest_id: string;
+  issued_at: string;
+  item_count: number;
+}
+
+export interface FeedSyncFailure {
+  feed: FeedKind;
+  status: "error";
+  section: string | null;
+  detail: string;
+}
+
+export type FeedSyncResult = FeedSyncSuccess | FeedSyncFailure;
 
 export interface FeedDecisionResult {
   item_id: string;

@@ -143,11 +143,13 @@ Codex 读取现有内容、来源和本轮结论，补充解释、例子、纠�
 
 Codex 会先检索已有 Wiki，选择新建、更新、合并或拆分，并在你明确声明完成时写 `studied_at`。如果材料有价值但你不想学习，也使用同一个 `$distill-wiki` 直接形成 Wiki；此时不写 `studied_at`。主题 Wiki 足够多且关系需要导航时，再调用 `$maintain-wiki-map`。
 
-## 7. AI Daily 与树洞
+## 7. 每日更新与订阅阅读
 
-Today 把 AI Daily 与树洞分成两个独立、单列、有限高度并可内部滚动的区域。Dashboard 展示全部条目的关键摘要；完整正文、评论和判断在 Obsidian 原生 Digest 中阅读。
+AI Daily 是外部生产器名称，内部的内容在界面中按用途分开。Today 的“每日更新”只展示中国热点、AI 资讯和树洞热榜三个独立区域；每个区域选择自己的最近一期，因此更新日期不同也不会互相遮蔽。Reading 则使用同一套 Feed 条目界面分页展示 RSS、周刊、教程和工具更新。它是持续累积的候选阅读档案，不是第二个 Learning。
 
-系统不替你计算兴趣或价值。每条由你选择：现在学习、稍后学习、直接形成 Wiki、只保存参考或不保留。对应的长期决定写入 `Source.uses[]`，`purpose` 为 `study / wiki / reference`，并可携带明确选择的 Course/Project。同一 Source 可以有多个上下文用途。暂时不能决定时直接离开即可：条目仍在 Feed 和原生 Digest 中，不产生决定回执、Source 或 `undecided`。选择“现在”会额外启动后台任务；选择“稍后学习”不会制造空白 Study Guide/Wiki。
+Dashboard 展示条目的关键摘要和必要元数据；点击条目会打开 Obsidian 原生 Digest 的准确位置，完整正文、TreeHole 评论和人工判断都沿用同一套交互。浏览订阅内容不会自动创建 Source 或 Study Guide，只有明确选择“想学习”后才进入 Learning。
+
+系统不替你计算兴趣或价值。每条由你选择：现在学习、稍后学习、直接形成 Wiki、只保存参考或不保留。对应的长期决定写入 `Source.uses[]`，`purpose` 为 `study / wiki / reference`，并可携带明确选择的 Course/Project。同一 Source 可以有多个上下文用途。暂时不能决定时直接离开即可：条目仍在 Feed cache、Reading 和原生 Digest 中，不产生决定回执、Source 或 `undecided`。选择“现在”会额外启动后台任务；选择“稍后学习”不会制造空白 Study Guide/Wiki。
 
 详见 [Feed 人工判断流程](FEED-WORKFLOW.md)。
 

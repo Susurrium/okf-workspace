@@ -23,6 +23,8 @@ export class TestElement {
   public readonly attributes = new Map<string, string>();
   public readonly classes = new Set<string>();
   public readonly listeners = new Map<string, ((event: Event) => void)[]>();
+  public readonly dataset: Record<string, string> = {};
+  public parentElement: TestElement | null = null;
   public textContent = "";
   public value = "";
   public rows = 0;
@@ -33,11 +35,12 @@ export class TestElement {
   public constructor(public readonly tagName = "div", options: TestElementOptions = {}) {
     this.textContent = options.text ?? "";
     for (const name of options.cls?.split(/\s+/u).filter(Boolean) ?? []) this.classes.add(name);
-    for (const [name, value] of Object.entries(options.attr ?? {})) this.attributes.set(name, value);
+    for (const [name, value] of Object.entries(options.attr ?? {})) this.setAttr(name, value);
   }
 
   public createEl(tagName: string, options: TestElementOptions = {}): TestElement {
     const child = new TestElement(tagName, options);
+    child.parentElement = this;
     this.children.push(child);
     return child;
   }
@@ -61,10 +64,24 @@ export class TestElement {
     else this.classes.delete(name);
   }
 
-  public setAttr(name: string, value: string): void { this.attributes.set(name, value); }
-  public removeAttribute(name: string): void { this.attributes.delete(name); }
+  public setAttr(name: string, value: string): void {
+    this.attributes.set(name, value);
+    if (name.startsWith("data-")) this.dataset[dataAttributeKey(name)] = value;
+  }
+  public removeAttribute(name: string): void {
+    this.attributes.delete(name);
+    if (name.startsWith("data-")) delete this.dataset[dataAttributeKey(name)];
+  }
   public setText(value: string): void { this.textContent = value; }
   public empty(): void { this.children.length = 0; this.textContent = ""; }
+  public remove(): void {
+    if (this.parentElement) {
+      const index = this.parentElement.children.indexOf(this);
+      if (index >= 0) this.parentElement.children.splice(index, 1);
+    }
+    this.parentElement = null;
+    this.isConnected = false;
+  }
 
   public addEventListener(type: string, callback: (event: Event) => void): void {
     const listeners = this.listeners.get(type) ?? [];
@@ -86,6 +103,28 @@ export class TestElement {
     const nested = this.children.flatMap((child) => [child, ...child.descendants()]);
     return className ? nested.filter((child) => child.classes.has(className)) : nested;
   }
+
+  public querySelectorAll(selector: string): TestElement[] {
+    const classes = [...selector.matchAll(/\.([a-z0-9_-]+)/giu)].map((match) => match[1]!);
+    const data = /\[data-([a-z0-9_-]+)="([^"]*)"\]/iu.exec(selector);
+    return this.descendants().filter((child) =>
+      classes.every((className) => child.classes.has(className)) &&
+      (!data || child.dataset[dataAttributeKey(`data-${data[1]}`)] === data[2]));
+  }
+
+  public closest(selector: string): TestElement | null {
+    const className = /^\.([a-z0-9_-]+)$/iu.exec(selector)?.[1];
+    let current: TestElement | null = this;
+    while (current) {
+      if (className && current.classes.has(className)) return current;
+      current = current.parentElement;
+    }
+    return null;
+  }
+}
+
+function dataAttributeKey(name: string): string {
+  return name.slice(5).replace(/-([a-z])/gu, (_match, letter: string) => letter.toUpperCase());
 }
 
 export class ItemView {

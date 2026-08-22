@@ -116,7 +116,8 @@ MarkItDown 在 `release-manifest.yaml` 中锁定兼容版本。
 
 ### 阶段 F：Dashboard
 
-- Today 宽屏为左行动、右今日阅读；窄屏按 pane 宽度切换行动/阅读。
+- Today 宽屏为左行动、右每日更新；每日更新只展示中国热点、AI 资讯与树洞热榜，窄屏按 pane 宽度切换行动/更新。
+- Reading 复用 Feed 条目与原生 Digest 判断流程，按期分页承载持续累积的 RSS、周刊、教程和工具更新。
 - Inbox 按待判断、待转换、待生成分层；操作后立即反馈，不因整页刷新丢状态。
 - Learning 左侧学习归属、右侧学习材料；全部包含 Course、Project 与 Independent。
 - Projects 是紧凑状态/下一步列表，不复制重型项目管理器。

@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repository = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $repository 'deploy\windows\common.ps1')
 $sourceRoot = Join-Path $repository 'engine\workspace\skills'
 $vaultRoot = [System.IO.Path]::GetFullPath($Vault)
 if (-not (Test-Path -LiteralPath $vaultRoot -PathType Container)) {
@@ -24,8 +25,9 @@ $ownedNames = [System.Collections.Generic.HashSet[string]]::new(
     [System.StringComparer]::OrdinalIgnoreCase
 )
 if ($ownershipExists) {
-    $ownership = Get-Content -LiteralPath $ownershipPath -Raw -Encoding UTF8 |
-        ConvertFrom-Json -AsHashtable
+    $ownership = Read-OkfJsonHashtable `
+        -Path $ownershipPath `
+        -Description 'OKF Skill ownership manifest'
     if ([int]$ownership['schema'] -ne 1 -or [string]$ownership['owner'] -ne $ownershipOwner) {
         throw "Unsupported OKF Skill ownership manifest: $ownershipPath"
     }

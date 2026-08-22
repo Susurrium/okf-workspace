@@ -6,6 +6,8 @@ import type {
   FeedDigestSummary,
   FeedItem,
   FeedKind,
+  FeedSubscriptionPage,
+  FeedSubscriptionPageQuery,
 } from "./types.js";
 
 export interface OpenedFeedDigest {
@@ -17,6 +19,7 @@ export interface FeedApi {
   listDigests(kind: FeedKind): Promise<FeedDigestSummary[]>;
   getDigest(kind: FeedKind, digestId: string): Promise<FeedDigest>;
   dashboardDigest(): Promise<FeedDashboardDigest>;
+  listSubscriptions(query?: FeedSubscriptionPageQuery): Promise<FeedSubscriptionPage>;
   openDigest(kind: FeedKind, digestId: string): Promise<OpenedFeedDigest>;
   decide(
     kind: FeedKind,
@@ -49,6 +52,18 @@ export class HttpFeedApi implements FeedApi {
 
   public dashboardDigest(): Promise<FeedDashboardDigest> {
     return this.request("/dashboard/feeds/summary", undefined, 8_000);
+  }
+
+  public listSubscriptions(
+    query: FeedSubscriptionPageQuery = {},
+  ): Promise<FeedSubscriptionPage> {
+    const parameters = new URLSearchParams();
+    if (query.limit !== undefined) {
+      parameters.set("limit", String(Math.max(1, Math.min(50, Math.trunc(query.limit)))));
+    }
+    if (query.cursor) parameters.set("cursor", query.cursor);
+    const suffix = parameters.size ? `?${parameters.toString()}` : "";
+    return this.request(`/dashboard/feeds/subscriptions${suffix}`, undefined, 8_000);
   }
 
   public openDigest(kind: FeedKind, digestId: string): Promise<OpenedFeedDigest> {

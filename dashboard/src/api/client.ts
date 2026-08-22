@@ -8,6 +8,7 @@ import type {
   WebCaptureAction,
   WebCapturePublishResult,
 } from "./types.js";
+import type { FeedSyncResult } from "../feeds/types.js";
 
 export class LocalApi {
   public constructor(
@@ -234,7 +235,7 @@ export class LocalApi {
     return this.request(`/system/status${query}`);
   }
 
-  public syncFeeds(): Promise<unknown[]> {
+  public syncFeeds(): Promise<FeedSyncResult[]> {
     return this.request("/feeds/sync", { method: "POST" }, 60_000);
   }
 
