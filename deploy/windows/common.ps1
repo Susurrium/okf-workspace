@@ -107,7 +107,8 @@ function Assert-OkfChildPath {
         [Parameter(Mandatory)][string]$Parent,
         [Parameter(Mandatory)][string]$Child
     )
-    $resolvedParent = (Resolve-OkfPath $Parent).TrimEnd('\') + '\'
+    $separator = [System.IO.Path]::DirectorySeparatorChar
+    $resolvedParent = (Resolve-OkfPath $Parent).TrimEnd('\', '/') + $separator
     $resolvedChild = Resolve-OkfPath $Child
     if (-not $resolvedChild.StartsWith($resolvedParent, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing path outside intended root: $resolvedChild"
