@@ -6,7 +6,7 @@ import {
   FEED_SUBSCRIPTION_CONTENT_MIN,
   FEED_SUBSCRIPTION_FULL_CONTENT_DEFAULT,
   feedSubscriptionAdapterLabel,
-  feedSubscriptionDisplayUrl,
+  feedSubscriptionDisplayOrigin,
   feedSubscriptionFailureLabel,
   feedSubscriptionModeLabel,
   normalizeFeedSubscriptionContentMax,
@@ -104,7 +104,7 @@ export class FeedSubscriptionAddModal extends Modal {
     url.addEventListener("input", () => {
       this.url = url.value;
     });
-    const name = this.field(form, "显示名称（可选）", "name", {
+    const name = this.field(form, "来源名称（可选）", "name", {
       type: "text",
       placeholder: "留空时使用检测到的来源名称",
       autocomplete: "off",
@@ -112,6 +112,7 @@ export class FeedSubscriptionAddModal extends Modal {
     name.value = this.name;
     name.addEventListener("input", () => {
       this.name = name.value;
+      name.removeAttribute("aria-invalid");
     });
     const adapter = this.selectField(form, "来源类型", "adapter", [
       ["auto", "自动检测（推荐）"],
@@ -142,12 +143,16 @@ export class FeedSubscriptionAddModal extends Modal {
     });
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      void this.detect(detect, feedback);
+      void this.detect(detect, feedback, name);
     });
     url.focus();
   }
 
-  private async detect(button: HTMLButtonElement, feedback: HTMLElement): Promise<void> {
+  private async detect(
+    button: HTMLButtonElement,
+    feedback: HTMLElement,
+    nameInput: HTMLInputElement,
+  ): Promise<void> {
     if (this.submitting) return;
     let url: string;
     try {
@@ -180,6 +185,13 @@ export class FeedSubscriptionAddModal extends Modal {
       if (generation !== this.requestGeneration) return;
       feedback.addClass("is-error");
       feedback.setText(feedSubscriptionErrorMessage(error));
+      if (
+        error instanceof FeedHttpError
+        && ["source_name_conflict", "invalid_source_name"].includes(error.code ?? "")
+      ) {
+        nameInput.setAttr("aria-invalid", "true");
+        nameInput.focus();
+      }
     } finally {
       if (generation === this.requestGeneration) {
         this.submitting = false;
@@ -201,16 +213,13 @@ export class FeedSubscriptionAddModal extends Modal {
       attr: { "aria-label": "订阅检测结果" },
     });
     summary.createEl("h3", { text: preview.source_name });
+    const origin = summary.createDiv({ cls: "okf-feed-subscription-preview__url" });
+    origin.createSpan({ text: "来源域名：" });
+    origin.createEl("strong", { text: feedSubscriptionDisplayOrigin(preview.canonical_url) });
     summary.createDiv({
-      cls: "okf-feed-subscription-preview__url",
-      text: feedSubscriptionDisplayUrl(preview.canonical_url, preview.url_redacted !== false),
+      cls: "okf-dashboard__muted",
+      text: "来源域名只用于辨识来源；不包含订阅路径或私密参数，也不能用于重新检测。",
     });
-    if (preview.url_redacted) {
-      summary.createDiv({
-        cls: "okf-dashboard__muted",
-        text: "为保护隐私，显示地址已隐藏查询参数。",
-      });
-    }
     const badges = summary.createDiv({ cls: "okf-feed-subscription-preview__badges" });
     badges.createSpan({
       cls: "okf-dashboard__badge",
@@ -440,16 +449,18 @@ export class FeedSubscriptionSettingsModal extends Modal {
   private page: FeedSubscriptionManagementPage | undefined;
   private source: FeedSubscriptionManagementSource | undefined;
   private busy = false;
+  private readonly projection: Pick<FeedSubscriptionSource, "source_id" | "source_name">;
 
   public constructor(
     app: App,
-    private readonly projection: Pick<
-      FeedSubscriptionSource,
-      "source_id" | "source_name"
-    >,
+    projection: Pick<FeedSubscriptionSource, "source_id" | "source_name">,
     private readonly actions: FeedSubscriptionSettingsActions,
   ) {
     super(app);
+    this.projection = {
+      source_id: projection.source_id,
+      source_name: projection.source_name,
+    };
   }
 
   public onOpen(): void {
@@ -500,16 +511,13 @@ export class FeedSubscriptionSettingsModal extends Modal {
       cls: `okf-feed-subscription-status is-${source.status}`,
       text: managementStatusLabel(source),
     });
+    const origin = this.contentEl.createDiv({ cls: "okf-feed-subscription-preview__url" });
+    origin.createSpan({ text: "来源域名：" });
+    origin.createEl("strong", { text: feedSubscriptionDisplayOrigin(source.canonical_url) });
     this.contentEl.createDiv({
-      cls: "okf-feed-subscription-preview__url",
-      text: feedSubscriptionDisplayUrl(source.canonical_url, source.url_redacted !== false),
+      cls: "okf-dashboard__muted",
+      text: "来源域名只用于辨识来源；不包含订阅路径或私密参数，也不能用于重新检测。",
     });
-    if (source.url_redacted) {
-      this.contentEl.createDiv({
-        cls: "okf-dashboard__muted",
-        text: "显示地址已隐藏私密参数；Dashboard 不会保存或重放这些参数。",
-      });
-    }
     const facts = this.contentEl.createDiv({ cls: "okf-feed-subscription-settings__facts" });
     this.fact(facts, "类型", feedSubscriptionAdapterLabel(source.adapter));
     this.fact(
@@ -732,6 +740,12 @@ export function feedSubscriptionErrorMessage(error: unknown): string {
     }
     if (["source_exists", "duplicate_source"].includes(error.code ?? "")) {
       return "这个订阅已经存在，请在对应来源卡中打开设置。";
+    }
+    if (error.code === "source_name_conflict") {
+      return "来源名称已存在，请修改名称后重新检测。";
+    }
+    if (error.code === "invalid_source_name") {
+      return "来源名称不能使用保留标题、换行或 Markdown 标题符号，请修改后重新检测。";
     }
     if (error.code === "protected_source") {
       return "这是系统必需来源，不能移除；如需停用，可以暂停订阅。";

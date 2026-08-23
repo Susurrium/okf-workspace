@@ -56,8 +56,8 @@ def _source(
     return {
         "source_id": source_id,
         "source_name": name,
-        "canonical_url": f"https://feeds.example.test/{source_id}.xml",
-        "url_redacted": False,
+        "canonical_url": "https://feeds.example.test",
+        "url_redacted": True,
         "adapter": "rss",
         "enabled": enabled,
         "required": False,
@@ -68,6 +68,7 @@ def _source(
         "last_success_at": None,
         "last_error_at": None,
         "last_error": None,
+        "last_error_type": None,
     }
 
 
@@ -77,10 +78,11 @@ def _preview(revision: str) -> dict[str, object]:
         "expires_at": (datetime.now(UTC) + timedelta(minutes=10)).isoformat(),
         "detected_adapter": "rss",
         "detected_from": "content-type",
-        "canonical_url": "https://feeds.example.test/example.xml",
-        "url_redacted": False,
+        "canonical_url": "https://feeds.example.test",
+        "url_redacted": True,
         "source_id": "feed-0123456789abcdef01234567",
         "source_name": "Example Weekly",
+        "existing_source_id": None,
         "entries": [
             {
                 "title": "Issue 1",
@@ -97,6 +99,7 @@ def _preview(revision: str) -> dict[str, object]:
             "content_modes": ["summary", "full"],
             "can_include_existing": True,
         },
+        "warnings": [],
         "_revision": revision,
     }
 
@@ -127,7 +130,7 @@ def test_subscription_api_preview_confirm_is_cas_bound_and_idempotent(
             assert payload["preview_id"] == "preview-opaque-1"
             assert payload["expected_registry_revision"] == first_revision
             source = _source()
-            source["canonical_url"] = "https://feeds.example.test/example.xml"
+            source["canonical_url"] = "https://feeds.example.test"
             return {
                 "source": source,
                 "existing_items_marked_seen": 3,
@@ -182,6 +185,79 @@ def test_subscription_api_preview_confirm_is_cas_bound_and_idempotent(
     assert mirror.sources[0].source_id == _source()["source_id"]
 
 
+def test_subscription_preview_accepts_the_real_remote_duplicate_and_warning_fields(
+    vault: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, headers, _paths = _client(vault, tmp_path)
+    revision = "a" * 64
+
+    def source_admin(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        action: str,
+        _payload: dict[str, object],
+    ) -> tuple[dict[str, object], str]:
+        assert action == "preview"
+        value = _preview(revision)
+        value.pop("_revision")
+        value["existing_source_id"] = "feed-0123456789abcdef01234567"
+        value["warnings"] = [
+            "这个来源已经存在",
+            "remote token=https://private.example/feed?token=super-secret",
+        ]
+        return value, revision
+
+    monkeypatch.setattr(RemoteFeedPuller, "source_admin", source_admin)
+
+    response = client.post(
+        "/feeds/subscriptions/preview",
+        headers=headers,
+        json={"url": "https://feeds.example.test/example.xml"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["existing_source_id"] == "feed-0123456789abcdef01234567"
+    assert response.json()["warnings"] == [
+        "这个来源已经存在",
+        "来源更新失败，详情已隐藏",
+    ]
+    assert "super-secret" not in response.text
+
+
+def test_subscription_preview_rejects_a_source_path_projection(
+    vault: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, headers, _paths = _client(vault, tmp_path)
+    revision = "a" * 64
+
+    def source_admin(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        action: str,
+        _payload: dict[str, object],
+    ) -> tuple[dict[str, object], str]:
+        assert action == "preview"
+        value = _preview(revision)
+        value.pop("_revision")
+        value["canonical_url"] = "https://feeds.example.test/PATH-SECRET"
+        return value, revision
+
+    monkeypatch.setattr(RemoteFeedPuller, "source_admin", source_admin)
+    response = client.post(
+        "/feeds/subscriptions/preview",
+        headers=headers,
+        json={"url": "https://feeds.example.test/PATH-SECRET"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["code"] == "invalid_response"
+    assert "PATH-SECRET" not in response.text
+
+
 def test_subscription_api_exposes_stale_mirror_and_mutations_preserve_tombstone(
     vault: Path,
     tmp_path: Path,
@@ -203,6 +279,7 @@ def test_subscription_api_exposes_stale_mirror_and_mutations_preserve_tombstone(
         legacy_source = _source(source_id)
         legacy_source["added_at"] = None
         legacy_source["adapter"] = "ruanyf_weekly"
+        legacy_source["last_error_type"] = "ReadTimeout"
         if action == "list":
             return {"sources": [legacy_source], "count": 1}, revision
         if action == "disable":
@@ -227,6 +304,7 @@ def test_subscription_api_exposes_stale_mirror_and_mutations_preserve_tombstone(
     assert listed.json()["sources"][0]["status"] == "enabled"
     assert listed.json()["sources"][0]["added_at"] is None
     assert listed.json()["sources"][0]["adapter"] == "ruanyf_weekly"
+    assert listed.json()["sources"][0]["last_error_type"] == "ReadTimeout"
 
     disabled = client.post(
         f"/feeds/subscriptions/{source_id}/disable",
@@ -333,6 +411,8 @@ def test_subscription_preview_expiry_cas_conflict_and_remote_errors_are_explicit
     (
         ("unsafe_url", False, 400),
         ("source_exists", False, 409),
+        ("source_name_conflict", False, 409),
+        ("invalid_source_name", False, 422),
         ("discovery_failed", False, 422),
         ("registry_unavailable", True, 503),
         ("command_rejected", False, 403),

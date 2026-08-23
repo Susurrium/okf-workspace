@@ -185,7 +185,7 @@ describe("FeedSubscriptionAddModal", () => {
     });
     expect(root.descendants("okf-feed-subscription-preview__entry")).toHaveLength(3);
     expect(root.descendants().some((element) =>
-      element.textContent === "https://example.com/feed_name.xml"
+      element.textContent === "https://example.com"
     )).toBe(true);
     expect(root.descendants().some((element) => element.tagName === "code")).toBe(false);
 
@@ -229,8 +229,78 @@ describe("FeedSubscriptionAddModal", () => {
     expect(confirmAction).not.toHaveBeenCalled();
   });
 
+  it("preserves input and focuses the optional source name after a name conflict", async () => {
+    const previewAction = vi.fn(async () => {
+      throw new FeedHttpError(409, JSON.stringify({
+        detail: {
+          code: "source_name_conflict",
+          message: "conflict",
+          retryable: false,
+        },
+      }));
+    });
+    const modal = new FeedSubscriptionAddModal({} as App, {
+      preview: previewAction,
+      confirm: vi.fn(),
+      confirmed: vi.fn(),
+    });
+    modal.open();
+    const root = rootOf(modal);
+    const url = "https://example.com/another-feed.xml";
+    enter(root, "okf-subscription-url", url);
+    enter(root, "okf-subscription-name", "重复名称");
+
+    submitCurrentForm(root);
+
+    await vi.waitFor(() => {
+      expect(root.descendants().some((element) =>
+        element.textContent === "来源名称已存在，请修改名称后重新检测。"
+      )).toBe(true);
+    });
+    expect(elementById(root, "okf-subscription-url").value).toBe(url);
+    const name = elementById(root, "okf-subscription-name");
+    expect(name.value).toBe("重复名称");
+    expect(name.attributes.get("aria-invalid")).toBe("true");
+    expect(name.focusCount).toBe(1);
+
+    enter(root, "okf-subscription-name", "新的来源名称");
+    expect(name.attributes.has("aria-invalid")).toBe(false);
+  });
+
+  it("focuses the source name after the remote rejects an unsafe name", async () => {
+    const previewAction = vi.fn(async () => {
+      throw new FeedHttpError(422, JSON.stringify({
+        detail: {
+          code: "invalid_source_name",
+          message: "invalid",
+          retryable: false,
+        },
+      }));
+    });
+    const modal = new FeedSubscriptionAddModal({} as App, {
+      preview: previewAction,
+      confirm: vi.fn(),
+      confirmed: vi.fn(),
+    });
+    modal.open();
+    const root = rootOf(modal);
+    enter(root, "okf-subscription-url", "https://example.com/feed.xml");
+    enter(root, "okf-subscription-name", "# 注入标题");
+
+    submitCurrentForm(root);
+
+    await vi.waitFor(() => {
+      expect(root.descendants().some((element) =>
+        element.textContent.includes("来源名称不能使用保留标题")
+      )).toBe(true);
+    });
+    const name = elementById(root, "okf-subscription-name");
+    expect(name.attributes.get("aria-invalid")).toBe("true");
+    expect(name.focusCount).toBe(1);
+  });
+
   it("shows only the redacted preview URL after detecting a private feed address", async () => {
-    const privateUrl = "https://example.com/feed.xml?token=secret-token#private";
+    const privateUrl = "https://reader:credential@example.com/private/secret-feed.xml?token=secret-token#private";
     const previewAction = vi.fn(async () => preview({
       detected_from: "rss",
       canonical_url: privateUrl,
@@ -253,15 +323,21 @@ describe("FeedSubscriptionAddModal", () => {
     }));
     await vi.waitFor(() => {
       expect(root.descendants().some((element) =>
-        element.textContent === "https://example.com/feed.xml"
+        element.textContent === "https://example.com"
       )).toBe(true);
     });
     expect(root.descendants().some((element) => element.textContent.includes("secret-token")))
       .toBe(false);
     expect(root.descendants().some((element) => element.value.includes("secret-token")))
       .toBe(false);
-    expect(root.descendants().some((element) => element.textContent.includes("已隐藏查询参数")))
+    expect(root.descendants().some((element) =>
+      element.textContent.includes("来源域名只用于辨识来源")
+    ))
       .toBe(true);
+    for (const secret of ["credential", "private", "secret-feed", "secret-token"]) {
+      expect(root.descendants().some((element) => element.textContent.includes(secret))).toBe(false);
+      expect(root.descendants().some((element) => element.value.includes(secret))).toBe(false);
+    }
   });
 
   it("honors a one-time source whose detected current content is mandatory", async () => {
@@ -396,7 +472,7 @@ describe("FeedSubscriptionSettingsModal", () => {
 
   it("treats a redacted existing URL as display-only and never offers replay", async () => {
     const source = managedSource({
-      canonical_url: "https://example.com/private-feed.xml?token=secret-token#private",
+      canonical_url: "https://reader:credential@example.com/private/secret-feed.xml?token=secret-token#private",
       url_redacted: true,
     });
     const modal = new FeedSubscriptionSettingsModal({} as App, projection(source), {
@@ -411,13 +487,21 @@ describe("FeedSubscriptionSettingsModal", () => {
 
     await vi.waitFor(() => {
       expect(root.descendants().some((element) =>
-        element.textContent.includes("不会保存或重放这些参数")
+        element.textContent.includes("来源域名只用于辨识来源")
       )).toBe(true);
     });
-    expect(root.descendants().some((element) => element.textContent.includes("重新检测")))
+    expect(root.descendants().some((element) =>
+      element.tagName === "button" && element.textContent.includes("重新检测")
+    ))
       .toBe(false);
-    expect(root.descendants().some((element) => element.textContent.includes("token=")))
-      .toBe(false);
+    expect(root.descendants().some((element) => element.textContent === "https://example.com"))
+      .toBe(true);
+    for (const secret of ["credential", "private", "secret-feed", "secret-token", "token="]) {
+      expect(root.descendants().some((element) => element.textContent.includes(secret))).toBe(false);
+      expect(root.descendants().some((element) => element.value.includes(secret))).toBe(false);
+    }
+    expect(JSON.stringify((modal as unknown as { projection: unknown }).projection))
+      .not.toContain("secret");
   });
 
   it("disables mutations for a stale registry mirror without replaying a display URL", async () => {
@@ -447,7 +531,9 @@ describe("FeedSubscriptionSettingsModal", () => {
     removeButton.click();
     expect(disable).not.toHaveBeenCalled();
     expect(remove).not.toHaveBeenCalled();
-    expect(root.descendants().some((element) => element.textContent.includes("重新检测")))
+    expect(root.descendants().some((element) =>
+      element.tagName === "button" && element.textContent.includes("重新检测")
+    ))
       .toBe(false);
   });
 

@@ -34,6 +34,7 @@ from .subscriptions import (
     ManagementSource,
     SourceRegistryMirror,
     safe_remote_error_summary,
+    safe_remote_error_type,
 )
 
 _AI_DAILY_STREAMS = ("hotspot", "news", "learning")
@@ -87,11 +88,6 @@ def _export_cursor(value: object, *, nullable: bool = False) -> dict[str, str] |
     if parsed.tzinfo is None:
         raise ValueError("AI Daily export cursor timestamp requires a timezone")
     return {"recorded_at": recorded_at, "artifact_id": artifact_id}
-
-
-def _cursor_key(value: Mapping[str, str]) -> tuple[datetime, str]:
-    recorded_at = datetime.fromisoformat(value["recorded_at"].replace("Z", "+00:00"))
-    return recorded_at.astimezone(UTC), value["artifact_id"]
 
 
 def _safe_export_name(value: object) -> str:
@@ -604,10 +600,15 @@ class FeedSyncer:
             candidates.setdefault(source.source_name.casefold(), set()).add(
                 source.source_id
             )
-        ambiguous = [name for name, ids in candidates.items() if len(ids) != 1]
-        if ambiguous:
-            raise ValueError("AI Daily registry contains ambiguous source names")
-        return {name: next(iter(ids)) for name, ids in candidates.items()}
+        # A legacy or externally edited Registry can still contain duplicate
+        # display names.  Do not let that ambiguity block unrelated hotspot or
+        # news documents in the same export page: omit only the unsafe name
+        # mapping and let the learning adapter fall back to its legacy identity.
+        return {
+            name: next(iter(ids))
+            for name, ids in candidates.items()
+            if len(ids) == 1
+        }
 
     @staticmethod
     def _validate_stream_health(
@@ -666,25 +667,22 @@ class FeedSyncer:
                         )
                 last_error_type = source.get("last_error_type")
                 last_error = source.get("last_error")
-                if last_error_type is not None and (
-                    not isinstance(last_error_type, str)
-                    or not last_error_type
-                    or len(last_error_type) > 80
-                ):
-                    raise ValueError("AI Daily export source health is invalid")
                 try:
+                    safe_last_error_type = safe_remote_error_type(last_error_type)
                     safe_last_error = safe_remote_error_summary(last_error)
                 except ValueError as error:
                     raise ValueError(
                         "AI Daily export source health is invalid"
                     ) from error
+                if last_error_type is not None and safe_last_error_type is None:
+                    raise ValueError("AI Daily export source health is invalid")
                 projected_sources.append(
                     {
                         "source_id": source_id,
                         "status": source_status,
                         "last_success_at": source.get("last_success_at"),
                         "last_error_at": source.get("last_error_at"),
-                        "last_error_type": last_error_type,
+                        "last_error_type": safe_last_error_type,
                         "last_error": safe_last_error,
                     }
                 )
@@ -720,7 +718,12 @@ class FeedSyncer:
         if len(document_values) > _EXPORT_PAGE_LIMIT:
             raise ValueError("AI Daily export documents are invalid")
         editions: list[FeedEdition] = []
-        prior_key = _cursor_key(after) if after is not None else None
+        seen_cursors: set[tuple[str, str]] = set()
+        after_key = (
+            (after["recorded_at"], after["artifact_id"])
+            if after is not None
+            else None
+        )
         total_markdown_bytes = 0
         for raw_document in document_values:
             if not isinstance(raw_document, dict):
@@ -728,12 +731,10 @@ class FeedSyncer:
             document = cast(Mapping[str, object], raw_document)
             cursor = _export_cursor(document.get("cursor"))
             assert cursor is not None
-            cursor_key = _cursor_key(cursor)
-            if prior_key is not None and cursor_key <= prior_key:
-                raise ValueError("AI Daily export document cursors are not increasing")
-            prior_key = cursor_key
-            if next_cursor is not None and cursor_key > _cursor_key(next_cursor):
-                raise ValueError("AI Daily export document is beyond next_cursor")
+            cursor_key = (cursor["recorded_at"], cursor["artifact_id"])
+            if cursor_key == after_key or cursor_key in seen_cursors:
+                raise ValueError("AI Daily export document cursors are not unique")
+            seen_cursors.add(cursor_key)
             _safe_export_name(document.get("name"))
             stream = document.get("stream")
             issued_at = document.get("issued_at")
@@ -790,6 +791,9 @@ class FeedSyncer:
         with exclusive_feed_cache_lock(sync_lock):
             # A concurrent process may have advanced the cursor before this lock.
             cursor = self._load_export_cursor(alias)
+            seen_page_cursors: set[tuple[str, str]] = set()
+            if cursor is not None:
+                seen_page_cursors.add((cursor["recorded_at"], cursor["artifact_id"]))
             for _page_number in range(_EXPORT_MAX_PAGES):
                 with mirror.locked() as locked_mirror:
                     result = puller.feed_export(
@@ -827,15 +831,21 @@ class FeedSyncer:
                         raise ValueError("AI Daily export dropped its existing cursor")
                     if editions and next_cursor is None:
                         raise ValueError("AI Daily export documents have no next_cursor")
-                    if (
-                        cursor is not None
-                        and next_cursor is not None
-                        and _cursor_key(next_cursor) < _cursor_key(cursor)
-                    ):
-                        raise ValueError("AI Daily export cursor moved backwards")
+                    if editions and next_cursor == cursor:
+                        raise ValueError(
+                            "AI Daily export documents did not advance the cursor"
+                        )
+                    if next_cursor is not None and next_cursor != cursor:
+                        next_key = (
+                            next_cursor["recorded_at"],
+                            next_cursor["artifact_id"],
+                        )
+                        if next_key in seen_page_cursors:
+                            raise ValueError("AI Daily export repeated a prior cursor")
+                        seen_page_cursors.add(next_key)
                     if has_more and (
                         next_cursor is None
-                        or (cursor is not None and _cursor_key(next_cursor) <= _cursor_key(cursor))
+                        or next_cursor == cursor
                     ):
                         raise ValueError("AI Daily export did not advance a paged cursor")
                     if exported_registry is not None:

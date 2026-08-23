@@ -4,7 +4,7 @@ import {
   createFeedSubscriptionIdempotencyKey,
   feedSubscriptionAdapterLabel,
   feedSubscriptionCardState,
-  feedSubscriptionDisplayUrl,
+  feedSubscriptionDisplayOrigin,
   feedSubscriptionFailureLabel,
   normalizeFeedSubscriptionContentMax,
   normalizeFeedSubscriptionUrl,
@@ -78,14 +78,13 @@ describe("Feed subscription domain", () => {
   });
 
   it("defensively strips private URL components from display-only projections", () => {
-    expect(feedSubscriptionDisplayUrl(
+    expect(feedSubscriptionDisplayOrigin(
       "https://reader:secret@example.com/feed.xml?token=private#fragment",
-      true,
-    )).toBe("https://example.com/feed.xml");
-    expect(feedSubscriptionDisplayUrl("https://example.com/public?edition=1", false))
-      .toBe("https://example.com/public?edition=1");
-    expect(feedSubscriptionDisplayUrl("not-a-url?token=private", true))
-      .toBe("订阅地址已隐藏");
+    )).toBe("https://example.com");
+    expect(feedSubscriptionDisplayOrigin("https://example.com:8443/public?edition=1"))
+      .toBe("https://example.com:8443");
+    expect(feedSubscriptionDisplayOrigin("not-a-url?token=private"))
+      .toBe("来源域名不可用");
   });
 
   it("creates stable-shape, distinct idempotency keys", () => {

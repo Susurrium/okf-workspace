@@ -11,7 +11,7 @@ import pytest
 from okf_workspace.dashboard.feeds import feed_dashboard
 from okf_workspace.feeds import FeedCache, FeedKind, FeedSyncer
 from okf_workspace.feeds.remote import RemoteFeedPuller, RemoteProtocolError
-from okf_workspace.feeds.subscriptions import SourceRegistryMirror
+from okf_workspace.feeds.subscriptions import ManagementSource, SourceRegistryMirror
 
 
 def _markdown(date: str, stream: str, title: str) -> str:
@@ -51,8 +51,8 @@ def _source() -> dict[str, object]:
     return {
         "source_id": "feed-0123456789abcdef01234567",
         "source_name": "Example Weekly",
-        "canonical_url": "https://feeds.example.test/example.xml",
-        "url_redacted": False,
+        "canonical_url": "https://feeds.example.test",
+        "url_redacted": True,
         "adapter": "rss",
         "enabled": True,
         "required": False,
@@ -178,6 +178,45 @@ def test_forced_json_transport_passes_no_remote_command_or_secret_in_errors(
     assert raised.value.code == "remote_unavailable"
     assert "secret" not in str(raised.value)
     assert "private.example" not in str(raised.value)
+
+
+@pytest.mark.parametrize("protocol", ["source-admin.v1", "feed-export.v1"])
+def test_forced_json_preserves_retryable_structured_rc1_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    protocol: str,
+) -> None:
+    def failed(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        request = json.loads(cast(str, kwargs["input"]))
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout=json.dumps(
+                {
+                    "protocol": protocol,
+                    "request_id": request["request_id"],
+                    "ok": False,
+                    "error": {
+                        "code": "internal_error",
+                        "message": "safe remote detail",
+                        "retryable": True,
+                    },
+                }
+            )
+            + "\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", failed)
+    puller = RemoteFeedPuller(tmp_path)
+    with pytest.raises(RemoteProtocolError) as raised:
+        if protocol == "source-admin.v1":
+            puller.source_admin("source-admin-alias", "list", {})
+        else:
+            puller.feed_export("feed-export-alias", after=None)
+
+    assert raised.value.code == "internal_error"
+    assert raised.value.retryable is True
 
 
 def test_incremental_export_pulls_all_pages_commits_cursor_and_mirrors_registry(
@@ -326,6 +365,7 @@ def test_incremental_export_commits_partial_stream_health_without_losing_documen
                             "last_success_at": None,
                             "last_error_at": "2026-08-23T06:50:00+00:00",
                             "last_error": "upstream timeout",
+                            "last_error_type": "ReadTimeout" + "X" * 100,
                         }
                     ],
                 },
@@ -347,9 +387,10 @@ def test_incremental_export_commits_partial_stream_health_without_losing_documen
     learning = cast(dict[str, object], streams["learning"])
     assert learning["status"] == "error"
     assert "upstream timeout" in json.dumps(learning)
+    assert "ReadTimeout" + "X" * 100 in json.dumps(learning)
 
 
-def test_incremental_export_rejects_an_empty_page_that_moves_cursor_backwards(
+def test_incremental_export_accepts_a_later_sequence_with_an_earlier_timestamp(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -392,6 +433,80 @@ def test_incremental_export_rejects_an_empty_page_that_moves_cursor_backwards(
         }
 
     monkeypatch.setattr(RemoteFeedPuller, "feed_export", export)
-    with pytest.raises(ValueError, match="backwards"):
+    assert FeedSyncer(state).sync(FeedKind.AI_DAILY) == ()
+    assert json.loads(cursor_path.read_text(encoding="utf-8"))["cursor"] == _cursor(2)
+
+
+def test_incremental_export_rejects_documents_without_cursor_progress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _state(tmp_path)
+    fingerprint = hashlib.sha256(
+        b"okf-feed-export-v1\0ai-daily-feed-export"
+    ).hexdigest()
+    cursor_path = state / "feed-sync" / "ai-daily-export-cursor.json"
+    cursor_path.parent.mkdir(parents=True)
+    cursor_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "producer_fingerprint": fingerprint,
+                "cursor": _cursor(3),
+                "updated_at": "2026-08-23T07:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    replayed = _document(
+        4,
+        "learning",
+        _markdown("2026-08-24", "learning", "不应提交的重复页面"),
+    )
+
+    def export(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        *,
+        after: object,
+        limit: int,
+        include_registry: bool,
+    ) -> dict[str, object]:
+        assert after == _cursor(3)
+        assert limit == 30 and include_registry is True
+        return {
+            "documents": [replayed],
+            "next_cursor": _cursor(3),
+            "has_more": False,
+            "stream_status": {
+                stream: {"status": "ok", "sources": []}
+                for stream in ("hotspot", "news", "learning")
+            },
+        }
+
+    monkeypatch.setattr(RemoteFeedPuller, "feed_export", export)
+    with pytest.raises(ValueError, match="did not advance"):
         FeedSyncer(state).sync(FeedKind.AI_DAILY)
+
     assert json.loads(cursor_path.read_text(encoding="utf-8"))["cursor"] == _cursor(3)
+    assert not (
+        state / "feed-cache" / "ai-daily" / "2026-08-24-learning.json"
+    ).exists()
+
+
+def test_legacy_duplicate_source_names_are_omitted_without_blocking_sync() -> None:
+    first_payload = _source()
+    first_payload["source_id"] = "feed-111111111111111111111111"
+    first_payload["source_name"] = "Shared Weekly"
+    second_payload = _source()
+    second_payload["source_id"] = "feed-222222222222222222222222"
+    second_payload["source_name"] = "shared weekly"
+
+    mapping = FeedSyncer._source_ids_by_name(  # pyright: ignore[reportPrivateUsage]
+        (
+            ManagementSource.parse(first_payload),
+            ManagementSource.parse(second_payload),
+        )
+    )
+
+    assert mapping == {}

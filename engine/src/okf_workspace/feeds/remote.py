@@ -326,8 +326,8 @@ class RemoteFeedPuller:
             response_protocol != protocol
             or response_request_id != request_id
             or not isinstance(ok, bool)
-            or completed.returncode not in {0, 2}
             or (ok and completed.returncode != 0)
+            or (not ok and completed.returncode not in {1, 2})
         ):
             raise RemoteProtocolError(
                 "invalid_response",

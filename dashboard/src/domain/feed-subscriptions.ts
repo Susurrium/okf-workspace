@@ -84,17 +84,12 @@ export function feedSubscriptionFailureLabel(errorType?: string | null): string 
   return "来源最近一次更新失败";
 }
 
-export function feedSubscriptionDisplayUrl(value: string, redacted: boolean): string {
-  if (!redacted) return value;
+export function feedSubscriptionDisplayOrigin(value: string): string {
   try {
     const parsed = new URL(value);
-    parsed.username = "";
-    parsed.password = "";
-    parsed.search = "";
-    parsed.hash = "";
-    return parsed.toString();
+    return parsed.origin;
   } catch {
-    return "订阅地址已隐藏";
+    return "来源域名不可用";
   }
 }
 

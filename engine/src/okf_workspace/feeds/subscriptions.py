@@ -24,7 +24,7 @@ _ADDABLE_ADAPTERS = {"rss", "github_repository", "github_releases"}
 _MANAGEMENT_ADAPTERS = {*_ADDABLE_ADAPTERS, "ruanyf_weekly"}
 _CONTENT_MODES = {"summary", "full"}
 _MAX_SOURCES = 2_000
-_ERROR_TYPE = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
+_ERROR_TYPE = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
 _SENSITIVE_ERROR_MARKERS = (
     "://",
     "?",
@@ -65,12 +65,6 @@ def _required_string(value: object, *, field: str, limit: int) -> str:
     return normalized
 
 
-def _optional_string(value: object, *, field: str, limit: int) -> str | None:
-    if value is None:
-        return None
-    return _required_string(value, field=field, limit=limit)
-
-
 def _canonical_url(value: object) -> str:
     url = _required_string(value, field="canonical_url", limit=4096)
     parsed = urlsplit(url)
@@ -89,6 +83,14 @@ def _projected_url(value: object) -> str:
     return url
 
 
+def _projected_source_origin(value: object) -> str:
+    url = _projected_url(value)
+    parsed = urlsplit(url)
+    if parsed.path not in {"", "/"}:
+        raise ValueError("projected source URL must contain only its origin")
+    return url
+
+
 def safe_remote_error_summary(value: object) -> str | None:
     if value is None:
         return None
@@ -97,6 +99,13 @@ def safe_remote_error_summary(value: object) -> str | None:
     if any(marker in folded for marker in _SENSITIVE_ERROR_MARKERS):
         return "来源更新失败，详情已隐藏"
     return summary
+
+
+def safe_remote_error_type(value: object) -> str | None:
+    if value is None:
+        return None
+    error_type = _required_string(value, field="last_error_type", limit=120)
+    return error_type if _ERROR_TYPE.fullmatch(error_type) is not None else None
 
 
 def _revision(value: object) -> str:
@@ -198,7 +207,7 @@ class ManagementSource:
             source_name=_required_string(
                 value.get("source_name"), field="source_name", limit=300
             ),
-            canonical_url=_projected_url(value.get("canonical_url")),
+            canonical_url=_projected_source_origin(value.get("canonical_url")),
             url_redacted=url_redacted,
             adapter=adapter,
             enabled=enabled,
@@ -213,19 +222,7 @@ class ManagementSource:
                 value.get("last_success_at"), field="last_success_at"
             ),
             last_error_at=_optional_time(value.get("last_error_at"), field="last_error_at"),
-            last_error_type=(
-                error_type
-                if (
-                    (error_type := _optional_string(
-                        value.get("last_error_type"),
-                        field="last_error_type",
-                        limit=80,
-                    ))
-                    is not None
-                    and _ERROR_TYPE.fullmatch(error_type) is not None
-                )
-                else None
-            ),
+            last_error_type=safe_remote_error_type(value.get("last_error_type")),
             last_error=safe_remote_error_summary(value.get("last_error")),
         )
 
@@ -433,6 +430,8 @@ def _remote_error(error: RemoteProtocolError) -> SubscriptionError:
         return SubscriptionError(409, code, "操作标识已被另一项请求使用")
     if code == "source_exists":
         return SubscriptionError(409, code, "这个来源已经订阅")
+    if code == "source_name_conflict":
+        return SubscriptionError(409, code, "来源名称已存在，请修改名称后重试")
     if code == "protected_source":
         return SubscriptionError(409, code, "这个内置来源不能移除")
     if code == "preview_expired":
@@ -452,6 +451,8 @@ def _remote_error(error: RemoteProtocolError) -> SubscriptionError:
         return SubscriptionError(400, code, "订阅请求无效")
     if code in {"discovery_failed", "detection_failed", "preview_invalid"}:
         return SubscriptionError(422, code, "无法识别这个订阅地址")
+    if code == "invalid_source_name":
+        return SubscriptionError(422, code, "来源名称无效，请修改名称后重试")
     if code in {
         "lock_busy",
         "registry_unavailable",
@@ -590,9 +591,11 @@ class SubscriptionService:
             "url_redacted",
             "source_id",
             "source_name",
+            "existing_source_id",
             "entries",
             "defaults",
             "capabilities",
+            "warnings",
         }:
             raise SubscriptionError(502, "invalid_response", "订阅预览内容无效")
         try:
@@ -600,7 +603,7 @@ class SubscriptionService:
                 result.get("preview_id"), field="preview_id", limit=300
             )
             expires_at = _parse_time(result.get("expires_at"), field="expires_at")
-            canonical_url = _projected_url(result.get("canonical_url"))
+            canonical_url = _projected_source_origin(result.get("canonical_url"))
             url_redacted = result.get("url_redacted")
             if not isinstance(url_redacted, bool):
                 raise ValueError("url_redacted must be a boolean")
@@ -614,6 +617,15 @@ class SubscriptionService:
                 result.get("detected_from"), field="detected_from", limit=120
             )
             _required_string(result.get("source_name"), field="source_name", limit=300)
+            existing_source_id = result.get("existing_source_id")
+            if existing_source_id is not None:
+                existing_source_id = _required_string(
+                    existing_source_id,
+                    field="existing_source_id",
+                    limit=128,
+                )
+                if _SOURCE_ID.fullmatch(existing_source_id) is None:
+                    raise ValueError("existing_source_id contains unsupported characters")
         except ValueError as error:
             raise SubscriptionError(
                 502, "invalid_response", "订阅预览内容无效"
@@ -625,15 +637,29 @@ class SubscriptionService:
         entries = result.get("entries")
         defaults = result.get("defaults")
         capabilities = result.get("capabilities")
-        if not isinstance(entries, list):
+        warnings = result.get("warnings")
+        if not isinstance(entries, list) or not isinstance(warnings, list):
             raise SubscriptionError(502, "invalid_response", "订阅预览内容无效")
         entry_values = cast(list[object], entries)
+        warning_values = cast(list[object], warnings)
         if (
             len(entry_values) > 3
+            or len(warning_values) > 20
             or not isinstance(defaults, dict)
             or not isinstance(capabilities, dict)
         ):
             raise SubscriptionError(502, "invalid_response", "订阅预览内容无效")
+        try:
+            safe_warnings: list[str] = []
+            for index, warning in enumerate(warning_values):
+                normalized_warning = safe_remote_error_summary(warning)
+                if normalized_warning is None:
+                    raise ValueError(f"warnings[{index}] must not be null")
+                safe_warnings.append(normalized_warning)
+        except ValueError as error:
+            raise SubscriptionError(
+                502, "invalid_response", "订阅预览内容无效"
+            ) from error
         for entry_value in entry_values:
             if not isinstance(entry_value, dict):
                 raise SubscriptionError(502, "invalid_response", "订阅预览内容无效")
@@ -642,7 +668,7 @@ class SubscriptionService:
                 raise SubscriptionError(502, "invalid_response", "订阅预览内容无效")
             try:
                 _required_string(entry.get("title"), field="entry.title", limit=500)
-                _canonical_url(entry.get("url"))
+                _projected_url(entry.get("url"))
                 _optional_time(entry.get("published_at"), field="entry.published_at")
             except ValueError as error:
                 raise SubscriptionError(
@@ -699,7 +725,7 @@ class SubscriptionService:
             "registry_revision": revision,
         }
         _atomic_json(self._opaque_path(self.previews, preview_id), stored)
-        return {**result, "registry_revision": revision}
+        return {**result, "warnings": safe_warnings, "registry_revision": revision}
 
     @staticmethod
     def _fingerprint(action: str, payload: Mapping[str, object]) -> str:
