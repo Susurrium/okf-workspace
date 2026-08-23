@@ -121,14 +121,12 @@ def _latest_feed(cache: FeedCache, feed: FeedKind) -> dict[str, object] | None:
 
 
 def _latest_ai_daily_streams(cache: FeedCache) -> list[dict[str, object]]:
-    editions = cache.list_editions(FeedKind.AI_DAILY)
-    if not editions:
-        return []
-    latest_date = editions[0].edition_at
-    stream_order = {"hotspot": 0, "news": 1, "learning": 2}
-    latest = [edition for edition in editions if edition.edition_at == latest_date]
-    latest.sort(key=lambda edition: stream_order.get(edition.stream or "", 99))
-    return [_feed_summary(edition) for edition in latest]
+    latest: list[dict[str, object]] = []
+    for stream in ("hotspot", "news"):
+        edition = cache.latest_edition(FeedKind.AI_DAILY, stream=stream)
+        if edition is not None:
+            latest.append(_feed_summary(edition))
+    return latest
 
 
 def today_view(vault: Path, state: Path, target_date: date | None = None) -> dict[str, object]:

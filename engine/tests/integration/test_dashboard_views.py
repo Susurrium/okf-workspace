@@ -144,17 +144,17 @@ def test_capture_outside_inbox_is_not_projected_as_pending(vault: Path, tmp_path
     assert inbox["captures"] == []
 
 
-def test_today_feed_projection_lists_every_stream_from_latest_ai_daily_issue(
+def test_today_feed_projection_uses_latest_hotspot_and_news_independently(
     vault: Path,
     tmp_path: Path,
 ) -> None:
     state = tmp_path / "state"
     cache = FeedCache(state)
     for edition_date, stream in (
+        ("2026-08-15", "hotspot"),
         ("2026-08-16", "news"),
-        ("2026-08-17", "learning"),
-        ("2026-08-17", "news"),
         ("2026-08-17", "hotspot"),
+        ("2026-08-18", "learning"),
     ):
         edition_id = f"{edition_date}-{stream}"
         cache.put(
@@ -180,6 +180,8 @@ def test_today_feed_projection_lists_every_stream_from_latest_ai_daily_issue(
     today = today_view(vault, state, date(2026, 8, 17))
     streams = cast(list[dict[str, object]], today["latest_ai_daily_streams"])
 
-    assert [item["section"] for item in streams] == ["hotspot", "news", "learning"]
-    assert {item["issued_at"] for item in streams} == {"2026-08-17"}
+    assert [(item["section"], item["issued_at"]) for item in streams] == [
+        ("hotspot", "2026-08-17"),
+        ("news", "2026-08-16"),
+    ]
     assert all(item["item_count"] == 1 for item in streams)
