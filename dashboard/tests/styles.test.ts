@@ -50,4 +50,22 @@ describe("Dashboard global styles", () => {
       /@container\s*\(max-width:\s*759px\)[\s\S]*?\.okf-reading-source-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/iu,
     );
   });
+
+  it("keeps subscription states readable and management forms keyboard/mobile friendly", () => {
+    expect(styles).toContain(".okf-feed-subscription-status.is-waiting");
+    expect(styles).toContain(".okf-reading-source-card__empty");
+    expect(styles).toContain(".okf-workflow-modal select:focus-visible,");
+    expect(styles).toMatch(
+      /\.okf-dashboard button:focus-visible,[\s\S]*?\{[^}]*outline:\s*2px solid/iu,
+    );
+    expect(styles).toMatch(
+      /\.okf-feed-subscription-modal\s*\{[^}]*width:\s*min\(680px,/isu,
+    );
+    expect(styles).toMatch(
+      /@media\s*\(max-width:\s*700px\)[\s\S]*?\.okf-feed-subscription-settings__facts\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/iu,
+    );
+    expect(styles).toMatch(
+      /@media\s*\(max-width:\s*700px\)[\s\S]*?\.okf-feed-subscription-modal__actions button,[\s\S]*?width:\s*100%/iu,
+    );
+  });
 });

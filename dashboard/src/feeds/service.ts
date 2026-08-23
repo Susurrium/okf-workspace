@@ -8,6 +8,15 @@ import type {
   FeedKind,
   FeedSubscriptionPage,
   FeedSubscriptionPageQuery,
+  FeedSubscriptionConfirmRequest,
+  FeedSubscriptionConfirmResult,
+  FeedSubscriptionManagementPage,
+  FeedSubscriptionMutationRequest,
+  FeedSubscriptionMutationResult,
+  FeedSubscriptionPreview,
+  FeedSubscriptionPreviewRequest,
+  FeedSubscriptionRemoveRequest,
+  FeedSubscriptionRemoveResult,
   FeedSubscriptionSourcePage,
   FeedSubscriptionSourcePageQuery,
   FeedSubscriptionSourceItemsPage,
@@ -31,6 +40,21 @@ export interface FeedApi {
     sourceId: string,
     query?: FeedSubscriptionSourceItemsQuery,
   ): Promise<FeedSubscriptionSourceItemsPage>;
+  previewSubscription(request: FeedSubscriptionPreviewRequest): Promise<FeedSubscriptionPreview>;
+  confirmSubscription(request: FeedSubscriptionConfirmRequest): Promise<FeedSubscriptionConfirmResult>;
+  listManagedSubscriptions(): Promise<FeedSubscriptionManagementPage>;
+  enableSubscription(
+    sourceId: string,
+    request: FeedSubscriptionMutationRequest,
+  ): Promise<FeedSubscriptionMutationResult>;
+  disableSubscription(
+    sourceId: string,
+    request: FeedSubscriptionMutationRequest,
+  ): Promise<FeedSubscriptionMutationResult>;
+  removeSubscription(
+    sourceId: string,
+    request: FeedSubscriptionRemoveRequest,
+  ): Promise<FeedSubscriptionRemoveResult>;
   openDigest(kind: FeedKind, digestId: string): Promise<OpenedFeedDigest>;
   decide(
     kind: FeedKind,
@@ -108,6 +132,47 @@ export class HttpFeedApi implements FeedApi {
     );
   }
 
+  public previewSubscription(
+    request: FeedSubscriptionPreviewRequest,
+  ): Promise<FeedSubscriptionPreview> {
+    return this.request("/feeds/subscriptions/preview", jsonPost(request), 30_000);
+  }
+
+  public confirmSubscription(
+    request: FeedSubscriptionConfirmRequest,
+  ): Promise<FeedSubscriptionConfirmResult> {
+    return this.request("/feeds/subscriptions/confirm", jsonPost(request), 30_000);
+  }
+
+  public listManagedSubscriptions(): Promise<FeedSubscriptionManagementPage> {
+    return this.request("/feeds/subscriptions", undefined, 15_000);
+  }
+
+  public enableSubscription(
+    sourceId: string,
+    request: FeedSubscriptionMutationRequest,
+  ): Promise<FeedSubscriptionMutationResult> {
+    return this.subscriptionMutation(sourceId, "enable", request);
+  }
+
+  public disableSubscription(
+    sourceId: string,
+    request: FeedSubscriptionMutationRequest,
+  ): Promise<FeedSubscriptionMutationResult> {
+    return this.subscriptionMutation(sourceId, "disable", request);
+  }
+
+  public removeSubscription(
+    sourceId: string,
+    request: FeedSubscriptionRemoveRequest,
+  ): Promise<FeedSubscriptionRemoveResult> {
+    return this.request(
+      `/feeds/subscriptions/${encodeURIComponent(sourceId)}/remove`,
+      jsonPost(request),
+      30_000,
+    );
+  }
+
   public openDigest(kind: FeedKind, digestId: string): Promise<OpenedFeedDigest> {
     return this.request(`/feeds/${kind}/digests/${encodeURIComponent(digestId)}/open`, {
       method: "POST",
@@ -144,6 +209,18 @@ export class HttpFeedApi implements FeedApi {
     }
   }
 
+  private subscriptionMutation(
+    sourceId: string,
+    action: "enable" | "disable",
+    request: FeedSubscriptionMutationRequest,
+  ): Promise<FeedSubscriptionMutationResult> {
+    return this.request(
+      `/feeds/subscriptions/${encodeURIComponent(sourceId)}/${action}`,
+      jsonPost(request),
+      30_000,
+    );
+  }
+
   private async request<T>(path: string, init?: RequestInit, timeout = 20_000): Promise<T> {
     let response: Response;
     try {
@@ -170,11 +247,56 @@ export class HttpFeedApi implements FeedApi {
   }
 }
 
+function jsonPost(value: object): RequestInit {
+  return {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(value),
+  };
+}
+
 export class FeedHttpError extends Error {
+  public readonly code: string | undefined;
+  public readonly retryable: boolean | undefined;
+  public readonly publicMessage: string;
+
   public constructor(public readonly status: number, detail: string) {
-    super(`Feed API ${status}: ${detail}`);
+    const structured = parseFeedApiError(detail);
+    const publicMessage = structured?.message ?? detail;
+    super(`Feed API ${status}: ${publicMessage}`);
     this.name = "FeedHttpError";
+    this.code = structured?.code;
+    this.retryable = structured?.retryable;
+    this.publicMessage = publicMessage;
   }
+}
+
+interface StructuredFeedApiError {
+  code?: string;
+  message: string;
+  retryable?: boolean;
+}
+
+function parseFeedApiError(raw: string): StructuredFeedApiError | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw) as unknown;
+  } catch {
+    return undefined;
+  }
+  if (!value || typeof value !== "object") return undefined;
+  const detail = (value as { detail?: unknown }).detail;
+  if (typeof detail === "string") return { message: detail };
+  if (!detail || typeof detail !== "object") return undefined;
+  const record = detail as { code?: unknown; message?: unknown; retryable?: unknown };
+  if (typeof record.message !== "string" || !record.message.trim()) return undefined;
+  return {
+    message: record.message.trim(),
+    ...(typeof record.code === "string" && record.code.trim()
+      ? { code: record.code.trim() }
+      : {}),
+    ...(typeof record.retryable === "boolean" ? { retryable: record.retryable } : {}),
+  };
 }
 
 export function isTreeholeItem(item: FeedItem): item is FeedItem & { pid: number } {

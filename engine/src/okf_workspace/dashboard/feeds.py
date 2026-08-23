@@ -22,6 +22,7 @@ from okf_workspace.feeds.models import (
     UNATTRIBUTED_SOURCE_NAME,
     reading_source_id,
 )
+from okf_workspace.feeds.subscriptions import ManagementSource, SourceRegistryMirror
 
 _MARKDOWN_LINK = re.compile(r"!?\[([^\]]*)\]\([^)]+\)")
 _MARKDOWN_DECORATION = re.compile(r"[#>*_`~-]+")
@@ -265,13 +266,25 @@ def _decode_subscription_cursor(cursor: str, source_id: str | None) -> str:
 class _ReadingSource:
     source_id: str
     source_name: str
-    latest_issued_at: str
-    latest_digest_id: str
+    latest_issued_at: str | None
+    latest_digest_id: str | None
     latest_item_count: int
     latest_native_section_counts: dict[str, int]
     edition_count: int
     latest_quality: str | None
     latest_quality_reason: str | None
+    status: str
+    registry_managed: bool
+    enabled: bool | None
+    registry_status: str | None
+    canonical_url: str | None
+    url_redacted: bool | None
+    adapter: str | None
+    required: bool | None
+    last_success_at: str | None
+    last_error_at: str | None
+    last_error_type: str | None
+    last_error: str | None
 
 
 def _encode_source_cursor(source: _ReadingSource, query: str) -> str:
@@ -281,7 +294,7 @@ def _encode_source_cursor(source: _ReadingSource, query: str) -> str:
             "kind": "subscription-sources",
             "query": query,
             "unattributed": source.source_id == UNATTRIBUTED_SOURCE_ID,
-            "latest_issued_at": source.latest_issued_at,
+            "latest_issued_at": source.latest_issued_at or "",
             "source_id": source.source_id,
         }
     )
@@ -391,8 +404,9 @@ def _comes_after_source_cursor(
     unattributed = source.source_id == UNATTRIBUTED_SOURCE_ID
     if unattributed != cursor_unattributed:
         return unattributed and not cursor_unattributed
-    if source.latest_issued_at != cursor_latest:
-        return source.latest_issued_at < cursor_latest
+    source_latest = source.latest_issued_at or ""
+    if source_latest != cursor_latest:
+        return source_latest < cursor_latest
     return source.source_id > cursor_source_id
 
 
@@ -415,16 +429,21 @@ def _source_card(
                 pending_decision_count += 1
             if len(preview_items) < 3:
                 preview_items.append(projection)
+    latest_revision = (
+        _reading_projection_revision(
+            source.source_id,
+            source.latest_digest_id,
+            matching_items,
+        )
+        if source.latest_digest_id is not None and edition is not None
+        else None
+    )
     return {
         "source_id": source.source_id,
         "source_name": source.source_name,
         "latest_issued_at": source.latest_issued_at,
         "latest_digest_id": source.latest_digest_id,
-        "latest_revision": _reading_projection_revision(
-            source.source_id,
-            source.latest_digest_id,
-            matching_items,
-        ),
+        "latest_revision": latest_revision,
         # The following three fields intentionally describe only the latest
         # edition. Historical undecided items must not inflate a source card.
         "latest_item_count": source.latest_item_count,
@@ -434,7 +453,74 @@ def _source_card(
         "quality": source.latest_quality,
         "quality_reason": source.latest_quality_reason,
         "preview_items": preview_items,
+        "status": source.status,
+        "registry_managed": source.registry_managed,
+        "enabled": source.enabled,
+        "registry_status": source.registry_status,
+        "canonical_url": source.canonical_url,
+        "url_redacted": source.url_redacted,
+        "adapter": source.adapter,
+        "required": source.required,
+        "last_success_at": source.last_success_at,
+        "last_error_at": source.last_error_at,
+        "last_error_type": source.last_error_type,
+        "last_error": source.last_error,
     }
+
+
+@dataclass(slots=True)
+class _RegistryMetadata:
+    status: str
+    registry_managed: bool
+    enabled: bool | None
+    registry_status: str | None
+    canonical_url: str | None
+    url_redacted: bool | None
+    adapter: str | None
+    required: bool | None
+    last_success_at: str | None
+    last_error_at: str | None
+    last_error_type: str | None
+    last_error: str | None
+
+
+def _registry_metadata(source: ManagementSource | None) -> _RegistryMetadata:
+    if source is None:
+        return _RegistryMetadata(
+            status="active",
+            registry_managed=False,
+            enabled=None,
+            registry_status=None,
+            canonical_url=None,
+            url_redacted=None,
+            adapter=None,
+            required=None,
+            last_success_at=None,
+            last_error_at=None,
+            last_error_type=None,
+            last_error=None,
+        )
+    status = (
+        "removed"
+        if source.status == "removed"
+        else "disabled"
+        if not source.enabled or source.status == "disabled"
+        else "active"
+    )
+    return _RegistryMetadata(
+        status=status,
+        registry_managed=True,
+        enabled=source.enabled,
+        registry_status=source.status,
+        canonical_url=source.canonical_url,
+        url_redacted=source.url_redacted,
+        adapter=source.adapter,
+        required=source.required,
+        last_success_at=source.last_success_at,
+        last_error_at=source.last_error_at,
+        last_error_type=source.last_error_type,
+        last_error=source.last_error,
+    )
 
 
 def feed_dashboard(state: Path) -> dict[str, object]:
@@ -446,8 +532,29 @@ def feed_dashboard(state: Path) -> dict[str, object]:
         if (edition := cache.latest_edition(FeedKind.AI_DAILY, stream=stream)) is not None
     ]
     treehole = cache.latest_edition(FeedKind.TREEHOLE)
+    ai_daily_sync: dict[str, object] | None = None
+    sync_status_path = state / "feed-sync" / "ai-daily-stream-status.json"
+    try:
+        if sync_status_path.stat().st_size <= 1024 * 1024:
+            sync_status_value = cast(
+                object, json.loads(sync_status_path.read_text(encoding="utf-8"))
+            )
+            if isinstance(sync_status_value, dict):
+                sync_status = cast(Mapping[str, object], sync_status_value)
+                if (
+                    sync_status.get("version") == 1
+                    and isinstance(sync_status.get("updated_at"), str)
+                    and isinstance(sync_status.get("streams"), dict)
+                ):
+                    ai_daily_sync = {
+                        "updated_at": sync_status["updated_at"],
+                        "streams": sync_status["streams"],
+                    }
+    except (FileNotFoundError, OSError, ValueError):
+        pass
     return {
         "ai_daily": [_digest(edition, decisions) for edition in streams],
+        "ai_daily_sync": ai_daily_sync,
         "treehole": _digest(treehole, decisions) if treehole else None,
     }
 
@@ -467,6 +574,15 @@ def subscription_sources_dashboard(
     cursor_value = _decode_source_cursor(cursor, normalized_query) if cursor is not None else None
     cache = FeedCache(state)
     decisions = FeedDecisionStore(state)
+    try:
+        registry = SourceRegistryMirror(state).load()
+    except (OSError, ValueError):
+        registry = None
+    registry_sources = (
+        {value.source_id: value for value in registry.sources}
+        if registry is not None
+        else {}
+    )
     for attempt in range(2):
         try:
             with cache.locked_stream_source_catalog(
@@ -474,20 +590,89 @@ def subscription_sources_dashboard(
                 "learning",
             ) as catalog:
                 summaries = list(catalog.sources)
-                all_sources = [
-                    _ReadingSource(
-                        source_id=value.source_id,
-                        source_name=value.source_name,
-                        latest_issued_at=value.latest_issued_at,
-                        latest_digest_id=value.latest_digest_id,
-                        latest_item_count=value.latest_item_count,
-                        latest_native_section_counts=dict(value.latest_native_section_counts),
-                        edition_count=value.edition_count,
-                        latest_quality=value.latest_quality,
-                        latest_quality_reason=value.latest_quality_reason,
+                all_sources: list[_ReadingSource] = []
+                for value in summaries:
+                    managed = registry_sources.get(value.source_id)
+                    metadata = _registry_metadata(managed)
+                    all_sources.append(
+                        _ReadingSource(
+                            source_id=value.source_id,
+                            source_name=(
+                                managed.source_name if managed is not None else value.source_name
+                            ),
+                            latest_issued_at=value.latest_issued_at,
+                            latest_digest_id=value.latest_digest_id,
+                            latest_item_count=value.latest_item_count,
+                            latest_native_section_counts=dict(
+                                value.latest_native_section_counts
+                            ),
+                            edition_count=value.edition_count,
+                            latest_quality=value.latest_quality,
+                            latest_quality_reason=value.latest_quality_reason,
+                            status=metadata.status,
+                            registry_managed=metadata.registry_managed,
+                            enabled=metadata.enabled,
+                            registry_status=metadata.registry_status,
+                            canonical_url=metadata.canonical_url,
+                            url_redacted=metadata.url_redacted,
+                            adapter=metadata.adapter,
+                            required=metadata.required,
+                            last_success_at=metadata.last_success_at,
+                            last_error_at=metadata.last_error_at,
+                            last_error_type=metadata.last_error_type,
+                            last_error=metadata.last_error,
+                        )
                     )
-                    for value in summaries
+                content_ids = {value.source_id for value in all_sources}
+                for managed in registry_sources.values():
+                    if managed.source_id in content_ids:
+                        continue
+                    if managed.status == "removed":
+                        continue
+                    metadata = _registry_metadata(managed)
+                    if metadata.status == "active":
+                        metadata.status = "waiting"
+                    all_sources.append(
+                        _ReadingSource(
+                            source_id=managed.source_id,
+                            source_name=managed.source_name,
+                            latest_issued_at=None,
+                            latest_digest_id=None,
+                            latest_item_count=0,
+                            latest_native_section_counts={},
+                            edition_count=0,
+                            latest_quality=None,
+                            latest_quality_reason=None,
+                            status=metadata.status,
+                            registry_managed=metadata.registry_managed,
+                            enabled=metadata.enabled,
+                            registry_status=metadata.registry_status,
+                            canonical_url=metadata.canonical_url,
+                            url_redacted=metadata.url_redacted,
+                            adapter=metadata.adapter,
+                            required=metadata.required,
+                            last_success_at=metadata.last_success_at,
+                            last_error_at=metadata.last_error_at,
+                            last_error_type=metadata.last_error_type,
+                            last_error=metadata.last_error,
+                        )
+                    )
+                known = [
+                    value
+                    for value in all_sources
+                    if value.source_id != UNATTRIBUTED_SOURCE_ID
                 ]
+                known.sort(key=lambda value: value.source_id)
+                known.sort(
+                    key=lambda value: value.latest_issued_at or "",
+                    reverse=True,
+                )
+                unattributed = [
+                    value
+                    for value in all_sources
+                    if value.source_id == UNATTRIBUTED_SOURCE_ID
+                ]
+                all_sources = known + unattributed
                 matched = [
                     source
                     for source in all_sources
@@ -504,22 +689,35 @@ def subscription_sources_dashboard(
                 has_more = len(page) > limit
                 visible = page[:limit]
                 summaries_by_id = {value.source_id: value for value in summaries}
+                content_visible = [
+                    value for value in visible if value.source_id in summaries_by_id
+                ]
                 latest_editions = cache.load_source_latest_editions_locked(
                     FeedKind.AI_DAILY,
                     "learning",
                     catalog,
-                    (summaries_by_id[value.source_id] for value in visible),
+                    (summaries_by_id[value.source_id] for value in content_visible),
                 )
                 return _bounded_reading_page({
                     "section": "learning",
                     "latest_items_pagination": True,
+                    "registry_revision": (
+                        registry.registry_revision if registry is not None else None
+                    ),
+                    "registry_updated_at": (
+                        registry.updated_at if registry is not None else None
+                    ),
                     "catalog_complete": catalog.complete,
                     "catalog_indexing": catalog.indexing,
                     "sources": [
                         _source_card(
                             decisions,
                             source,
-                            latest_editions[source.latest_digest_id],
+                            (
+                                latest_editions[source.latest_digest_id]
+                                if source.latest_digest_id is not None
+                                else None
+                            ),
                         )
                         for source in visible
                     ],

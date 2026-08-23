@@ -10,12 +10,6 @@ if ([bool]$deployment.enable_vectors) { $indexArguments += '--vectors' }
 & $okf @indexArguments
 if ($LASTEXITCODE -ne 0) { throw 'Incremental index update failed' }
 
-$producers = Join-Path ([string]$deployment.state) 'feed-producers.json'
-if (Test-Path -LiteralPath $producers) {
-    & $okf feed sync all --state ([string]$deployment.state)
-    if ($LASTEXITCODE -ne 0) { throw 'Feed sync failed' }
-}
-
 if ([string]$deployment.backup_repository) {
     & (Join-Path $PSScriptRoot 'backup.ps1') -Config $Config
     if ($LASTEXITCODE -ne 0) { throw 'Daily backup failed' }

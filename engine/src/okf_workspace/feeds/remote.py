@@ -7,6 +7,7 @@ import hashlib
 import json
 import re
 import subprocess
+import uuid
 import zipfile
 from collections import defaultdict
 from collections.abc import Mapping
@@ -30,6 +31,19 @@ class _CapturedComment(TypedDict):
 
 _SSH_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}$")
 _AI_DAILY_SOURCE_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{1,79}$")
+_REGISTRY_REVISION = re.compile(r"^[0-9a-f]{64}$")
+_SOURCE_ADMIN_RESPONSE_MAX_BYTES = 512 * 1024
+_FEED_EXPORT_RESPONSE_MAX_BYTES = 16 * 1024 * 1024
+_REMOTE_ERROR_CODE = re.compile(r"^[a-z][a-z0-9_]{0,79}$")
+_SOURCE_ADMIN_ACTIONS = {
+    "get",
+    "list",
+    "preview",
+    "add",
+    "enable",
+    "disable",
+    "remove",
+}
 AI_DAILY_REGISTRY_PATHS = (
     "/opt/ai-daily-bridge/config/bridge-sources.yaml",
     "/srv/ai-daily/bridge/config/sources.yaml",
@@ -154,6 +168,23 @@ def _object(raw: str, *, label: str) -> dict[str, object]:
     return cast(dict[str, object], loaded)
 
 
+class RemoteProtocolError(RuntimeError):
+    """A sanitized, structured failure from a fixed remote Feed command."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str = "remote Feed request failed",
+        *,
+        retryable: bool = False,
+        registry_revision: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
+        self.registry_revision = registry_revision
+
+
 class RemoteFeedPuller:
     def __init__(self, state: Path) -> None:
         self.state = state.resolve()
@@ -206,6 +237,195 @@ class RemoteFeedPuller:
             )
             raise RuntimeError(f"{alias}: {detail}")
         return result.stdout
+
+    def _forced_json(
+        self,
+        alias: str,
+        *,
+        protocol: str,
+        action: str,
+        payload: Mapping[str, object],
+        max_response_bytes: int,
+    ) -> tuple[dict[str, object], str | None]:
+        """Call an SSH forced command without supplying any remote shell text."""
+
+        if not _SSH_ALIAS.fullmatch(alias):
+            raise ValueError("unsafe SSH alias")
+        request_id = uuid.uuid4().hex
+        request = {
+            **dict(payload),
+            "protocol": protocol,
+            "request_id": request_id,
+            "action": action,
+        }
+        encoded = json.dumps(
+            request,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        try:
+            completed = subprocess.run(
+                [
+                    "ssh",
+                    "-o",
+                    "BatchMode=yes",
+                    "-o",
+                    "ConnectTimeout=10",
+                    alias,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=90,
+                input=encoded + "\n",
+                shell=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RemoteProtocolError(
+                "remote_unavailable",
+                "remote Feed service is unavailable",
+                retryable=True,
+            ) from exc
+        stdout = completed.stdout
+        if len(stdout.encode("utf-8")) > max_response_bytes:
+            raise RemoteProtocolError(
+                "response_too_large",
+                "remote Feed response exceeds its transport limit",
+            )
+        lines = [line for line in stdout.splitlines() if line.strip()]
+        if len(lines) != 1:
+            if completed.returncode != 0:
+                raise RemoteProtocolError(
+                    "remote_unavailable",
+                    "remote Feed service is unavailable",
+                    retryable=True,
+                )
+            raise RemoteProtocolError(
+                "invalid_response",
+                "remote Feed service returned an invalid response",
+            )
+        try:
+            response = _object(lines[0], label="remote Feed service")
+        except (json.JSONDecodeError, ValueError) as exc:
+            if completed.returncode != 0:
+                raise RemoteProtocolError(
+                    "remote_unavailable",
+                    "remote Feed service is unavailable",
+                    retryable=True,
+                ) from exc
+            raise RemoteProtocolError(
+                "invalid_response",
+                "remote Feed service returned an invalid response",
+            ) from exc
+        response_protocol = response.get("protocol")
+        response_request_id = response.get("request_id")
+        ok = response.get("ok")
+        if (
+            response_protocol != protocol
+            or response_request_id != request_id
+            or not isinstance(ok, bool)
+            or completed.returncode not in {0, 2}
+            or (ok and completed.returncode != 0)
+        ):
+            raise RemoteProtocolError(
+                "invalid_response",
+                "remote Feed service returned an invalid response",
+            )
+        revision_value = response.get("registry_revision")
+        if revision_value is not None and (
+            not isinstance(revision_value, str)
+            or _REGISTRY_REVISION.fullmatch(revision_value) is None
+        ):
+            raise RemoteProtocolError(
+                "invalid_response",
+                "remote Feed service returned an invalid response",
+            )
+        revision = (
+            revision_value
+            if isinstance(revision_value, str)
+            and _REGISTRY_REVISION.fullmatch(revision_value)
+            else None
+        )
+        if ok:
+            result = response.get("result")
+            if not isinstance(result, dict):
+                raise RemoteProtocolError(
+                    "invalid_response",
+                    "remote Feed service returned an invalid response",
+                )
+            return cast(dict[str, object], result), revision
+        error_value = response.get("error")
+        if not isinstance(error_value, dict):
+            raise RemoteProtocolError(
+                "invalid_response",
+                "remote Feed service returned an invalid response",
+            )
+        error = cast(Mapping[str, object], error_value)
+        code = error.get("code")
+        retryable = error.get("retryable")
+        if (
+            not isinstance(code, str)
+            or _REMOTE_ERROR_CODE.fullmatch(code) is None
+            or not isinstance(retryable, bool)
+        ):
+            raise RemoteProtocolError(
+                "invalid_response",
+                "remote Feed service returned an invalid response",
+            )
+        raise RemoteProtocolError(
+            code[:80],
+            f"remote Feed request failed ({code[:80]})",
+            retryable=retryable,
+            registry_revision=revision,
+        )
+
+    def source_admin(
+        self,
+        alias: str,
+        action: str,
+        payload: Mapping[str, object],
+    ) -> tuple[dict[str, object], str]:
+        if action not in _SOURCE_ADMIN_ACTIONS:
+            raise ValueError("unsupported source-admin action")
+        result, revision = self._forced_json(
+            alias,
+            protocol="source-admin.v1",
+            action=action,
+            payload=payload,
+            max_response_bytes=_SOURCE_ADMIN_RESPONSE_MAX_BYTES,
+        )
+        if revision is None:
+            raise RemoteProtocolError(
+                "invalid_response",
+                "source-admin response has no registry revision",
+            )
+        return result, revision
+
+    def feed_export(
+        self,
+        alias: str,
+        *,
+        after: Mapping[str, str] | None,
+        limit: int = 30,
+        include_registry: bool = True,
+    ) -> dict[str, object]:
+        if not 1 <= limit <= 30:
+            raise ValueError("Feed export limit must be between 1 and 30")
+        result, _revision = self._forced_json(
+            alias,
+            protocol="feed-export.v1",
+            action="sync",
+            payload={
+                "after": dict(after) if after is not None else None,
+                "streams": ["hotspot", "news", "learning"],
+                "limit": limit,
+                "include_registry": include_registry,
+            },
+            max_response_bytes=_FEED_EXPORT_RESPONSE_MAX_BYTES,
+        )
+        return result
 
     def ai_daily(self, alias: str) -> tuple[tuple[str, str], ...]:
         self._ai_daily_source_ids_by_name = {}

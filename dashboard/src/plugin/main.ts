@@ -26,6 +26,16 @@ import type {
   FeedKind,
   FeedSubscriptionPage,
   FeedSubscriptionPageQuery,
+  FeedSubscriptionConfirmRequest,
+  FeedSubscriptionConfirmResult,
+  FeedSubscriptionManagementPage,
+  FeedSubscriptionMutationRequest,
+  FeedSubscriptionMutationResult,
+  FeedSubscriptionPreview,
+  FeedSubscriptionPreviewRequest,
+  FeedSubscriptionRemoveRequest,
+  FeedSubscriptionRemoveResult,
+  FeedSubscriptionSource,
   FeedSubscriptionSourcePage,
   FeedSubscriptionSourcePageQuery,
   FeedSubscriptionSourceItemsPage,
@@ -54,6 +64,10 @@ import { feedLivePreviewExtension } from "./live-preview.js";
 import { LocalServiceManager } from "./local-service.js";
 import { ChoiceModal, FieldsPromptModal, ProjectLogModal, TextPromptModal } from "./prompts.js";
 import { QuickCaptureModal } from "./quick-capture-modal.js";
+import {
+  FeedSubscriptionAddModal,
+  FeedSubscriptionSettingsModal,
+} from "./feed-subscription-modal.js";
 import { SemanticOperationMonitor } from "./semantic-monitor.js";
 import { VaultDashboardReader } from "./vault-dashboard.js";
 import { VaultNoteService, type ReviewPeriod } from "./vault-note-service.js";
@@ -1061,6 +1075,84 @@ export default class OkfBrainPlugin extends Plugin {
       if (!(error instanceof FeedTransportError)) throw error;
       await this.ensureLocalServiceAvailable();
       return api.listSubscriptionSourceItems(sourceId, query);
+    }
+  }
+
+  public promptAddFeedSubscription(): void {
+    new FeedSubscriptionAddModal(this.app, {
+      preview: (request) => this.previewFeedSubscription(request),
+      confirm: (request) => this.confirmFeedSubscription(request),
+      confirmed: (result) => {
+        this.invalidateFeedProjections();
+        this.refreshDashboardViews();
+        new Notice(
+          result.next_run_will_include_current
+            ? "订阅已添加；当前内容会在首次更新中进入 Reading"
+            : "订阅已添加；将从下一次新内容开始",
+          8_000,
+        );
+      },
+    }).open();
+  }
+
+  public promptFeedSubscriptionSettings(source: FeedSubscriptionSource): void {
+    new FeedSubscriptionSettingsModal(this.app, source, {
+      load: () => this.loadManagedFeedSubscriptions(),
+      enable: (sourceId, request) => this.enableFeedSubscription(sourceId, request),
+      disable: (sourceId, request) => this.disableFeedSubscription(sourceId, request),
+      remove: (sourceId, request) => this.removeFeedSubscription(sourceId, request),
+      changed: () => {
+        this.invalidateFeedProjections();
+        this.refreshDashboardViews();
+      },
+    }).open();
+  }
+
+  public previewFeedSubscription(
+    request: FeedSubscriptionPreviewRequest,
+  ): Promise<FeedSubscriptionPreview> {
+    return this.withFeedApi((api) => api.previewSubscription(request));
+  }
+
+  public confirmFeedSubscription(
+    request: FeedSubscriptionConfirmRequest,
+  ): Promise<FeedSubscriptionConfirmResult> {
+    return this.withFeedApi((api) => api.confirmSubscription(request));
+  }
+
+  public loadManagedFeedSubscriptions(): Promise<FeedSubscriptionManagementPage> {
+    return this.withFeedApi((api) => api.listManagedSubscriptions());
+  }
+
+  public enableFeedSubscription(
+    sourceId: string,
+    request: FeedSubscriptionMutationRequest,
+  ): Promise<FeedSubscriptionMutationResult> {
+    return this.withFeedApi((api) => api.enableSubscription(sourceId, request));
+  }
+
+  public disableFeedSubscription(
+    sourceId: string,
+    request: FeedSubscriptionMutationRequest,
+  ): Promise<FeedSubscriptionMutationResult> {
+    return this.withFeedApi((api) => api.disableSubscription(sourceId, request));
+  }
+
+  public removeFeedSubscription(
+    sourceId: string,
+    request: FeedSubscriptionRemoveRequest,
+  ): Promise<FeedSubscriptionRemoveResult> {
+    return this.withFeedApi((api) => api.removeSubscription(sourceId, request));
+  }
+
+  private async withFeedApi<T>(operation: (api: HttpFeedApi) => Promise<T>): Promise<T> {
+    const api = new HttpFeedApi(this.settings.baseUrl, this.settings.token);
+    try {
+      return await operation(api);
+    } catch (error) {
+      if (!(error instanceof FeedTransportError)) throw error;
+      await this.ensureLocalServiceAvailable();
+      return operation(api);
     }
   }
 

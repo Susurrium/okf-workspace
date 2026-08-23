@@ -2,7 +2,7 @@
 
 ## 1. 数据进入方式
 
-AI Daily 和 PkuHoleObserver 继续作为外部生产者。工作区通过只读 SSH 获取最终 Markdown 或 JSON/ZIP 快照，原始 Feed cache 放在 Vault 外的 `Runtime State/feed-cache/`。同步不会确认、移动或删除远端文件。
+AI Daily 和 PkuHoleObserver 继续作为外部生产者。AI Daily 使用专用只读 forced-command SSH alias 和 `feed-export.v1` 游标，从上次成功位置增量补齐所有期次；只有一页中的文档全部校验并写入本机 cache 后才推进本机游标。任一 stream 暂时失败时保留其它 stream 与 last-good 内容，断网后由下次计划任务从原游标补拉。PkuHoleObserver 继续获取 JSON/ZIP 快照。原始 Feed cache 放在 Vault 外的 `Runtime State/feed-cache/`；同步不会确认、移动或删除远端文件。
 
 AI Daily 是内部生产器名称，不是一个单独的用户页面。它的三个 stream 在 Dashboard 中按真实用途分开：
 
@@ -11,6 +11,20 @@ AI Daily 是内部生产器名称，不是一个单独的用户页面。它的�
 - `learning` → Reading 的“订阅阅读”，包括 RSS、周刊、教程和工具更新。
 
 PkuHoleObserver 的 TreeHole 快照进入 Today 的“树洞热榜”。Today 只负责浏览三个最新的每日更新；Reading 使用同一套 Feed 期次、条目和判断界面浏览持续累积的订阅历史。Reading 不是第二个 Learning：只有用户明确选择“想学习”后，对应 Source 才会进入 Learning。
+
+Reading 的订阅管理通过另一把专用 forced-command SSH alias 调用 `source-admin.v1`，不允许本机拼接或发送远端 shell 命令。新增来源必须先预览再确认；预览短期保存在 Runtime State，并绑定规范 URL 和 registry revision。确认、启用、停用和移除都使用 CAS revision 与 idempotency key。移除表示停止后续抓取：有历史内容的来源卡继续保留并标为“已移除”，尚无历史的空卡从 Reading 消失。
+
+`Runtime State/feed-producers.json` 中的新协议配置使用两项明确 alias；二者必须由 OpenSSH 配置绑定各自的远端 forced command，不能复用可执行任意命令的普通登录 alias：
+
+```json
+{
+  "ai-daily": {
+    "remote_kind": "ai-daily-bridge-v1",
+    "feed_export_ssh_alias": "ai-daily-feed-export",
+    "source_admin_ssh_alias": "ai-daily-source-admin"
+  }
+}
+```
 
 用户打开一期内容时，系统才创建 Obsidian 原生 `Digest`：
 

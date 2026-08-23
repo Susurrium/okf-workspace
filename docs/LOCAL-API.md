@@ -65,7 +65,10 @@ Dashboard 分为“读取面”和“命令面”：
 | `GET /semantic/operations/{id}` | 读取真实阶段：`queued/retrieving/generating/publishing/indexing` |
 | `POST /semantic/operations/{id}/cancel` | 停止检索或 Codex 子进程；进入发布阶段后不再接受取消 |
 | `POST /semantic/operations/{id}/retry` | 从保留的来源和任务参数重新排队；目标尚未生成也可重试 |
-| `GET/POST /feeds/...` | Feed 列表、阅读和六种人工决定 |
+| `GET/POST /feeds/...` | Feed 列表、阅读和五种人工决定 |
+| `GET /feeds/subscriptions` | 获取远端订阅 registry 的本机镜像；离线时明确返回 stale/unconfigured 状态 |
+| `POST /feeds/subscriptions/preview`、`POST /feeds/subscriptions/confirm` | 先安全发现并预览来源，再以 revision + idempotency key 确认添加 |
+| `POST /feeds/subscriptions/{source_id}/enable\|disable\|remove` | 以 CAS revision 启停或明确确认移除订阅；移除保留历史状态 |
 | `POST /index/sync`、`POST /index/rebuild` | 合并增量同步，或显式重建全文索引和任务投影 |
 | `GET /changes/latest`、`POST /undo` | AI 改动摘要和可恢复撤销 |
 | `GET /system/status` | 只返回用户可行动的系统问题 |

@@ -108,12 +108,131 @@ export interface FeedSubscriptionPageQuery {
   source_id?: string;
 }
 
+export type FeedSubscriptionAdapter =
+  | "auto"
+  | "rss"
+  | "github_repository"
+  | "github_releases";
+export type FeedSubscriptionDetectedAdapter = Exclude<FeedSubscriptionAdapter, "auto">;
+export type FeedSubscriptionRegistryAdapter =
+  | FeedSubscriptionDetectedAdapter
+  | "ruanyf_weekly";
+export type FeedSubscriptionContentMode = "summary" | "full";
+export type FeedSubscriptionRegistryStatus = "enabled" | "disabled" | "error" | "removed";
+export type FeedSubscriptionOverviewStatus = "waiting" | "active" | "disabled" | "removed";
+
+export interface FeedSubscriptionErrorDetail {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
+export interface FeedSubscriptionPreviewRequest {
+  url: string;
+  name?: string;
+  adapter?: FeedSubscriptionAdapter;
+}
+
+export interface FeedSubscriptionPreviewEntry {
+  title: string;
+  url: string;
+  published_at: string | null;
+}
+
+export interface FeedSubscriptionPreview {
+  preview_id: string;
+  expires_at: string;
+  registry_revision: string;
+  detected_adapter: FeedSubscriptionDetectedAdapter;
+  detected_from: string;
+  canonical_url: string;
+  url_redacted: boolean;
+  source_id: string;
+  source_name: string;
+  entries: FeedSubscriptionPreviewEntry[];
+  defaults: {
+    include_existing: boolean;
+    content_mode: "summary";
+    content_max_chars: 12000;
+  };
+  capabilities: {
+    content_modes: FeedSubscriptionContentMode[];
+    can_include_existing: boolean;
+  };
+  warnings?: string[];
+  existing_source_id?: string | null;
+}
+
+export interface FeedSubscriptionConfirmRequest {
+  preview_id: string;
+  expected_registry_revision: string;
+  idempotency_key: string;
+  include_existing?: boolean;
+  content_mode?: FeedSubscriptionContentMode;
+  content_max_chars?: number;
+}
+
+export interface FeedSubscriptionManagementSource {
+  source_id: string;
+  source_name: string;
+  canonical_url: string;
+  url_redacted: boolean;
+  adapter: FeedSubscriptionRegistryAdapter;
+  enabled: boolean;
+  required: boolean;
+  added_at: string | null;
+  content_mode: FeedSubscriptionContentMode;
+  content_max_chars: number;
+  status: FeedSubscriptionRegistryStatus;
+  last_success_at: string | null;
+  last_error_at: string | null;
+  last_error_type: string | null;
+  last_error: string | null;
+}
+
+export interface FeedSubscriptionConfirmResult {
+  registry_revision: string;
+  source: FeedSubscriptionManagementSource;
+  existing_items_marked_seen: number;
+  next_run_will_include_current: boolean;
+}
+
+export interface FeedSubscriptionManagementPage {
+  registry_revision: string | null;
+  sources: FeedSubscriptionManagementSource[];
+  count: number;
+  mirror_updated_at: string | null;
+  remote_status: "current" | "stale" | "unconfigured";
+  error?: FeedSubscriptionErrorDetail | null;
+}
+
+export interface FeedSubscriptionMutationRequest {
+  expected_registry_revision: string;
+  idempotency_key: string;
+}
+
+export interface FeedSubscriptionMutationResult {
+  registry_revision: string;
+  source: FeedSubscriptionManagementSource;
+}
+
+export interface FeedSubscriptionRemoveRequest extends FeedSubscriptionMutationRequest {
+  confirm: true;
+}
+
+export interface FeedSubscriptionRemoveResult {
+  registry_revision: string;
+  source_id: string;
+  removed: true;
+  historical_state_retained: true;
+}
+
 export interface FeedSubscriptionSource {
   source_id: string;
   source_name: string;
-  latest_issued_at: string;
-  latest_digest_id: string;
-  latest_revision?: string;
+  latest_issued_at: string | null;
+  latest_digest_id: string | null;
+  latest_revision?: string | null;
   quality?: string | null;
   quality_reason?: string | null;
   latest_item_count: number;
@@ -121,6 +240,18 @@ export interface FeedSubscriptionSource {
   edition_count: number;
   native_section_counts: Record<string, number>;
   preview_items: FeedDigestItem[];
+  status?: FeedSubscriptionOverviewStatus;
+  registry_managed?: boolean;
+  enabled?: boolean;
+  registry_status?: FeedSubscriptionRegistryStatus | null;
+  canonical_url?: string | null;
+  url_redacted?: boolean;
+  adapter?: FeedSubscriptionRegistryAdapter | null;
+  required?: boolean;
+  last_success_at?: string | null;
+  last_error_at?: string | null;
+  last_error_type?: string | null;
+  last_error?: string | null;
 }
 
 export interface FeedSubscriptionSourceItemsPage {
@@ -144,6 +275,8 @@ export interface FeedSubscriptionSourcePage {
   latest_items_pagination?: boolean;
   catalog_complete?: boolean;
   catalog_indexing?: boolean;
+  registry_revision?: string | null;
+  registry_updated_at?: string | null;
   sources: FeedSubscriptionSource[];
   total_sources: number;
   matched_sources: number;

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "okf-workspace-engine"
-version = "1.9.2"
+version = "1.10.0"
 description = "Vault-native OKF workspace engine for Obsidian and Codex"
 readme = "README.md"
 requires-python = ">=3.12"

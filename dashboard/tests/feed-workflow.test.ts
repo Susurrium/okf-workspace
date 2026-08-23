@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { aiDailyPreviewStreamTitle } from "../src/domain/ai-daily-preview.js";
 import { evictUnresolvedFeedDecisions } from "../src/feeds/decision-cache.js";
 import { feedItemMappings } from "../src/feeds/mappings.js";
-import { HttpFeedApi } from "../src/feeds/service.js";
+import { FeedHttpError, HttpFeedApi } from "../src/feeds/service.js";
 import {
   FEED_DECISION_ACTIONS,
   feedDecisionFeedback,
@@ -128,6 +128,105 @@ describe("Dashboard Feed workflow", () => {
       expect(fetchMock.mock.calls[0]?.[0]).toBe(
         "http://127.0.0.1:8765/dashboard/feeds/subscription-sources/source%2F%E4%B8%AD%E6%96%87/latest-items?limit=50&cursor=opaque%2B%2F%3D",
       );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("uses the subscription-management contract and preserves CAS request bodies", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const api = new HttpFeedApi("http://127.0.0.1:8765/", "token");
+      await api.previewSubscription({
+        url: "https://example.com/feed.xml",
+        name: "示例订阅",
+        adapter: "auto",
+      });
+      await api.confirmSubscription({
+        preview_id: "preview-1",
+        expected_registry_revision: "revision-1",
+        idempotency_key: "confirm-1",
+        include_existing: true,
+        content_mode: "full",
+        content_max_chars: 12_000,
+      });
+      await api.listManagedSubscriptions();
+      await api.enableSubscription("source/中文", {
+        expected_registry_revision: "revision-2",
+        idempotency_key: "enable-1",
+      });
+      await api.disableSubscription("source/中文", {
+        expected_registry_revision: "revision-3",
+        idempotency_key: "disable-1",
+      });
+      await api.removeSubscription("source/中文", {
+        expected_registry_revision: "revision-4",
+        idempotency_key: "remove-1",
+        confirm: true,
+      });
+
+      expect(fetchMock.mock.calls.map(([input]) => input)).toEqual([
+        "http://127.0.0.1:8765/feeds/subscriptions/preview",
+        "http://127.0.0.1:8765/feeds/subscriptions/confirm",
+        "http://127.0.0.1:8765/feeds/subscriptions",
+        "http://127.0.0.1:8765/feeds/subscriptions/source%2F%E4%B8%AD%E6%96%87/enable",
+        "http://127.0.0.1:8765/feeds/subscriptions/source%2F%E4%B8%AD%E6%96%87/disable",
+        "http://127.0.0.1:8765/feeds/subscriptions/source%2F%E4%B8%AD%E6%96%87/remove",
+      ]);
+      expect(fetchMock.mock.calls.map(([, init]) => init?.method)).toEqual([
+        "POST",
+        "POST",
+        undefined,
+        "POST",
+        "POST",
+        "POST",
+      ]);
+      expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+        preview_id: "preview-1",
+        expected_registry_revision: "revision-1",
+        idempotency_key: "confirm-1",
+        include_existing: true,
+        content_mode: "full",
+        content_max_chars: 12_000,
+      });
+      expect(JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body))).toEqual({
+        expected_registry_revision: "revision-4",
+        idempotency_key: "remove-1",
+        confirm: true,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("parses structured subscription failures instead of surfacing raw JSON", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      detail: {
+        code: "unsafe_url",
+        message: "订阅地址不安全",
+        retryable: false,
+      },
+    }), { status: 400, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const api = new HttpFeedApi("http://127.0.0.1:8765", "token");
+      const error = await api.previewSubscription({
+        url: "http://127.0.0.1/private",
+        adapter: "auto",
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(FeedHttpError);
+      expect(error).toMatchObject({
+        status: 400,
+        code: "unsafe_url",
+        retryable: false,
+        publicMessage: "订阅地址不安全",
+      });
+      expect((error as Error).message).toBe("Feed API 400: 订阅地址不安全");
+      expect((error as Error).message).not.toContain("{\"detail\"");
     } finally {
       vi.unstubAllGlobals();
     }

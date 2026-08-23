@@ -57,6 +57,7 @@ from okf_workspace.feeds import (
     materialize_edition,
 )
 from okf_workspace.feeds.adapters import ai_daily_from_v1, treehole_from_v1
+from okf_workspace.feeds.subscriptions import SubscriptionError, SubscriptionService
 from okf_workspace.git import (
     GitCheckpointError,
     create_checkpoint,
@@ -209,6 +210,30 @@ class DocumentRouteRequest(BaseModel):
 class FeedIngestRequest(BaseModel):
     payload: dict[str, object]
     content_by_artifact: dict[str, str] = Field(default_factory=dict)
+
+
+class SubscriptionPreviewRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=4096)
+    name: str | None = Field(default=None, min_length=1, max_length=300)
+    adapter: Literal["auto", "rss", "github_repository", "github_releases"] = "auto"
+
+
+class SubscriptionConfirmRequest(BaseModel):
+    preview_id: str = Field(min_length=1, max_length=300)
+    expected_registry_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    idempotency_key: str = Field(min_length=1, max_length=128)
+    include_existing: bool | None = None
+    content_mode: Literal["summary", "full"] | None = None
+    content_max_chars: int | None = Field(default=None, ge=100, le=20_000)
+
+
+class SubscriptionMutationRequest(BaseModel):
+    expected_registry_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    idempotency_key: str = Field(min_length=1, max_length=128)
+
+
+class SubscriptionRemoveRequest(SubscriptionMutationRequest):
+    confirm: bool
 
 
 class RetryRequest(BaseModel):
@@ -438,6 +463,13 @@ def create_app(
     @app.exception_handler(ValueError)
     def invalid_request(_request: Request, error: ValueError) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(error)[:300]})
+
+    @app.exception_handler(SubscriptionError)
+    def subscription_error(_request: Request, error: SubscriptionError) -> JSONResponse:
+        return JSONResponse(
+            status_code=error.status_code,
+            content={"detail": error.public()},
+        )
 
     def authorize(authorization: Annotated[str | None, Header()] = None) -> None:
         scheme, _, value = (authorization or "").partition(" ")
@@ -1056,6 +1088,67 @@ def create_app(
             {"digest_id": edition.edition_id, "cached": cache.put(edition).is_file()}
             for edition in editions
         ]
+
+    @app.get("/feeds/subscriptions", dependencies=protected)
+    def list_feed_subscriptions() -> dict[str, object]:
+        return SubscriptionService(configured.state).list_sources()
+
+    @app.post("/feeds/subscriptions/preview", dependencies=protected)
+    def preview_feed_subscription(
+        request: SubscriptionPreviewRequest,
+    ) -> dict[str, object]:
+        return SubscriptionService(configured.state).preview(
+            request.model_dump(exclude_none=True)
+        )
+
+    @app.post("/feeds/subscriptions/confirm", dependencies=protected)
+    def confirm_feed_subscription(
+        request: SubscriptionConfirmRequest,
+    ) -> dict[str, object]:
+        return SubscriptionService(configured.state).confirm(
+            request.model_dump(exclude_none=True)
+        )
+
+    @app.post(
+        "/feeds/subscriptions/{source_id:path}/enable",
+        dependencies=protected,
+    )
+    def enable_feed_subscription(
+        source_id: str,
+        request: SubscriptionMutationRequest,
+    ) -> dict[str, object]:
+        return SubscriptionService(configured.state).set_enabled(
+            source_id,
+            True,
+            request.model_dump(),
+        )
+
+    @app.post(
+        "/feeds/subscriptions/{source_id:path}/disable",
+        dependencies=protected,
+    )
+    def disable_feed_subscription(
+        source_id: str,
+        request: SubscriptionMutationRequest,
+    ) -> dict[str, object]:
+        return SubscriptionService(configured.state).set_enabled(
+            source_id,
+            False,
+            request.model_dump(),
+        )
+
+    @app.post(
+        "/feeds/subscriptions/{source_id:path}/remove",
+        dependencies=protected,
+    )
+    def remove_feed_subscription(
+        source_id: str,
+        request: SubscriptionRemoveRequest,
+    ) -> dict[str, object]:
+        return SubscriptionService(configured.state).remove(
+            source_id,
+            request.model_dump(),
+        )
 
     @app.post("/feeds/sync", dependencies=protected)
     def sync_feeds() -> list[dict[str, object]]:

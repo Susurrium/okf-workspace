@@ -37,6 +37,14 @@ import {
 } from "../domain/dashboard-experience.js";
 import { aiDailyPreviewStreamTitle } from "../domain/ai-daily-preview.js";
 import {
+  feedSubscriptionAdapterLabel,
+  feedSubscriptionCardLabel,
+  feedSubscriptionCardState,
+  feedSubscriptionFailureLabel,
+  feedSubscriptionHasLatest,
+  type FeedSubscriptionCardState,
+} from "../domain/feed-subscriptions.js";
+import {
   isSemanticOperationActive,
   isSemanticOperationRetryable,
 } from "../domain/semantic-operation-state.js";
@@ -1208,6 +1216,12 @@ export class OkfDashboardView extends ItemView {
     const actions = container.createDiv({
       cls: "okf-dashboard__hero-actions okf-reading-actions",
     });
+    const add = actions.createEl("button", {
+      text: "添加订阅",
+      cls: "mod-cta okf-dashboard__primary-action",
+      attr: { type: "button" },
+    });
+    add.addEventListener("click", () => this.plugin.promptAddFeedSubscription());
     const sync = actions.createEl("button", {
       text: "同步最新内容",
       cls: "okf-dashboard__secondary-action",
@@ -1370,22 +1384,45 @@ export class OkfDashboardView extends ItemView {
   }
 
   private renderSubscriptionSourceCard(parent: HTMLElement, source: FeedSubscriptionSource): void {
+    const cardState = feedSubscriptionCardState(source);
+    const hasLatest = feedSubscriptionHasLatest(source);
     const surface = this.createFeedCardSurface(parent, {
       title: source.source_name,
-      meta: [
-        formatFeedDate(source.latest_issued_at),
-        `本期 ${source.latest_item_count} 条`,
-        `待判断 ${source.pending_decision_count}`,
-        `历史 ${source.edition_count} 期`,
-      ].join(" · "),
-      cardClass: "okf-feed-card--source okf-feed-card--scrollable okf-reading-source-card",
+      meta: hasLatest
+        ? [
+            formatFeedDate(source.latest_issued_at),
+            `本期 ${source.latest_item_count} 条`,
+            `待判断 ${source.pending_decision_count}`,
+            `历史 ${source.edition_count} 期`,
+          ].join(" · ")
+        : this.emptySubscriptionSourceMeta(source),
+      cardClass: [
+        "okf-feed-card--source",
+        hasLatest ? "okf-feed-card--scrollable" : "okf-feed-card--empty",
+        "okf-reading-source-card",
+        `is-${cardState}`,
+      ].join(" "),
       headerClass: "okf-reading-source-card__header",
       metaClass: "okf-reading-source-card__meta",
       contextClass: "okf-reading-source-card__sections",
-      bodyClass: "okf-feed-project__scroll okf-reading-source-card__preview",
+      bodyClass: hasLatest
+        ? "okf-feed-project__scroll okf-reading-source-card__preview"
+        : "okf-reading-source-card__preview",
       footerClass: "okf-reading-source-card__footer",
-      attributes: { "data-source-id": source.source_id },
+      attributes: {
+        "data-source-id": source.source_id,
+        "data-subscription-status": cardState,
+      },
     });
+    if (
+      source.registry_managed !== undefined || source.status !== undefined ||
+      source.registry_status !== undefined
+    ) {
+      surface.context.createSpan({
+        cls: `okf-feed-subscription-status is-${cardState}`,
+        text: feedSubscriptionCardLabel(cardState),
+      });
+    }
     const sections = Object.entries(source.native_section_counts)
       .filter(([label, count]) => Boolean(label.trim()) && count > 0)
       .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "zh-CN"));
@@ -1399,6 +1436,19 @@ export class OkfDashboardView extends ItemView {
           text: `其他 ${sections.length - 3} 类`,
         });
       }
+    }
+    if (!hasLatest) {
+      const empty = surface.body.createDiv({ cls: "okf-reading-source-card__empty" });
+      empty.createEl("strong", { text: feedSubscriptionCardLabel(cardState) });
+      empty.createDiv({ text: this.emptySubscriptionSourceMessage(source, cardState) });
+      if (cardState === "error") {
+        empty.createDiv({
+          cls: "okf-dashboard__inline-alert",
+          text: feedSubscriptionFailureLabel(source.last_error_type),
+        });
+      }
+      this.renderSubscriptionSettingsAction(surface.footer, source);
+      return;
     }
     const edition: FeedDigestEdition = {
       digest_id: source.latest_digest_id,
@@ -1519,6 +1569,44 @@ export class OkfDashboardView extends ItemView {
       attr: { type: "button" },
     });
     viewAll.addEventListener("click", () => this.openSubscriptionSource(source));
+    this.renderSubscriptionSettingsAction(surface.footer, source);
+  }
+
+  private renderSubscriptionSettingsAction(
+    footer: HTMLElement,
+    source: FeedSubscriptionSource,
+  ): void {
+    if (
+      source.registry_managed !== true && source.status !== "removed" &&
+      source.registry_status !== "removed"
+    ) return;
+    const settings = footer.createEl("button", {
+      text: "设置…",
+      cls: "okf-dashboard__ghost-action",
+      attr: { type: "button" },
+    });
+    settings.addEventListener("click", () => this.plugin.promptFeedSubscriptionSettings(source));
+  }
+
+  private emptySubscriptionSourceMeta(
+    source: FeedSubscriptionSource,
+  ): string {
+    return [
+      source.adapter ? feedSubscriptionAdapterLabel(source.adapter) : "",
+      source.edition_count ? `历史 ${source.edition_count} 期` : "尚无历史",
+    ].filter(Boolean).join(" · ");
+  }
+
+  private emptySubscriptionSourceMessage(
+    source: FeedSubscriptionSource,
+    state: FeedSubscriptionCardState,
+  ): string {
+    if (state === "disabled") return "恢复后才会继续抓取新内容；已有历史不会删除。";
+    if (state === "error") return "最近一次更新失败，可在设置中重新检测、暂停或移除。";
+    if (state === "removed") return "订阅设置已移除，已有历史内容仍然保留。";
+    return source.canonical_url
+      ? "来源卡已建立，后台首次更新完成后会自动出现内容。"
+      : "正在等待这个来源的首次更新。";
   }
 
   private async renderReadingSourceDetail(
@@ -1926,6 +2014,9 @@ export class OkfDashboardView extends ItemView {
   }
 
   private readingSourceItemsState(source: FeedSubscriptionSource): ReadingSourceItemsState {
+    if (!feedSubscriptionHasLatest(source)) {
+      throw new Error("Reading source items require a published latest edition");
+    }
     const current = this.readingSourceItems.get(source.source_id);
     const revision = this.readingSourceRevision(source);
     if (

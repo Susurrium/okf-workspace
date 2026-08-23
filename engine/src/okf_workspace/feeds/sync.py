@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -29,9 +30,76 @@ from .models import (
     reading_source_id,
 )
 from .remote import RemoteFeedPuller, treehole_capture_context
+from .subscriptions import (
+    ManagementSource,
+    SourceRegistryMirror,
+    safe_remote_error_summary,
+)
 
 _AI_DAILY_STREAMS = ("hotspot", "news", "learning")
 _SOURCE_ID_MIGRATION_VERSION = 3
+_EXPORT_DOCUMENT_MAX_BYTES = 128 * 1024
+_EXPORT_PAGE_MARKDOWN_MAX_BYTES = 4 * 1024 * 1024
+_EXPORT_PAGE_LIMIT = 30
+_EXPORT_MAX_PAGES = 1_000
+
+
+def _write_json_atomic(path: Path, payload: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, ensure_ascii=True, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _export_cursor(value: object, *, nullable: bool = False) -> dict[str, str] | None:
+    if value is None and nullable:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("AI Daily export cursor must be an object")
+    cursor = cast(Mapping[str, object], value)
+    if set(cursor) != {"recorded_at", "artifact_id"}:
+        raise ValueError("AI Daily export cursor has unsupported fields")
+    recorded_at = cursor.get("recorded_at")
+    artifact_id = cursor.get("artifact_id")
+    if (
+        not isinstance(recorded_at, str)
+        or not recorded_at
+        or len(recorded_at) > 80
+        or not isinstance(artifact_id, str)
+        or not artifact_id
+        or len(artifact_id) > 300
+    ):
+        raise ValueError("AI Daily export cursor is invalid")
+    try:
+        parsed = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("AI Daily export cursor timestamp is invalid") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("AI Daily export cursor timestamp requires a timezone")
+    return {"recorded_at": recorded_at, "artifact_id": artifact_id}
+
+
+def _cursor_key(value: Mapping[str, str]) -> tuple[datetime, str]:
+    recorded_at = datetime.fromisoformat(value["recorded_at"].replace("Z", "+00:00"))
+    return recorded_at.astimezone(UTC), value["artifact_id"]
+
+
+def _safe_export_name(value: object) -> str:
+    if not isinstance(value, str) or not value or len(value) > 240:
+        raise ValueError("AI Daily export document name is invalid")
+    if Path(value).name != value or not value.endswith(".md") or ".." in value:
+        raise ValueError("AI Daily export document name is unsafe")
+    return value
 
 
 def _needs_exact_source_hint(item: FeedItem) -> bool:
@@ -458,6 +526,344 @@ class FeedSyncer:
                 if not retry:
                     return
 
+    def _export_cursor_path(self) -> Path:
+        return self.state / "feed-sync" / "ai-daily-export-cursor.json"
+
+    @staticmethod
+    def _export_alias_fingerprint(alias: str) -> str:
+        return hashlib.sha256(
+            b"okf-feed-export-v1\0" + alias.encode("utf-8")
+        ).hexdigest()
+
+    def _load_export_cursor(self, alias: str) -> dict[str, str] | None:
+        path = self._export_cursor_path()
+        if not path.is_file():
+            return None
+        loaded = cast(object, json.loads(path.read_text(encoding="utf-8")))
+        if not isinstance(loaded, dict):
+            raise ValueError("AI Daily export cursor state is invalid")
+        value = cast(Mapping[str, object], loaded)
+        if value.get("version") != 1:
+            raise ValueError("AI Daily export cursor version is unsupported")
+        fingerprint = value.get("producer_fingerprint")
+        if not isinstance(fingerprint, str) or len(fingerprint) != 64:
+            raise ValueError("AI Daily export cursor producer binding is invalid")
+        if fingerprint != self._export_alias_fingerprint(alias):
+            return None
+        return _export_cursor(value.get("cursor"), nullable=True)
+
+    def _commit_export_cursor(self, alias: str, cursor: Mapping[str, str]) -> None:
+        _write_json_atomic(
+            self._export_cursor_path(),
+            {
+                "version": 1,
+                "producer_fingerprint": self._export_alias_fingerprint(alias),
+                "cursor": dict(cursor),
+                "updated_at": datetime.now(UTC).isoformat(),
+            },
+        )
+
+    @staticmethod
+    def _registry_from_export(
+        value: object,
+    ) -> tuple[str, tuple[ManagementSource, ...]] | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("AI Daily export registry must be an object")
+        registry = cast(Mapping[str, object], value)
+        revision = registry.get("revision")
+        sources_value = registry.get("sources")
+        if (
+            not isinstance(revision, str)
+            or len(revision) != 64
+            or any(character not in "0123456789abcdef" for character in revision)
+            or not isinstance(sources_value, list)
+        ):
+            raise ValueError("AI Daily export registry is invalid")
+        source_values = cast(list[object], sources_value)
+        if len(source_values) > 2_000:
+            raise ValueError("AI Daily export registry is invalid")
+        sources: list[ManagementSource] = []
+        for value in source_values:
+            if not isinstance(value, dict):
+                raise ValueError("AI Daily export registry source must be an object")
+            sources.append(ManagementSource.parse(cast(Mapping[str, object], value)))
+        if len({source.source_id for source in sources}) != len(sources):
+            raise ValueError("AI Daily export registry contains duplicate source ids")
+        return revision, tuple(sources)
+
+    @staticmethod
+    def _source_ids_by_name(
+        sources: tuple[ManagementSource, ...],
+    ) -> dict[str, str]:
+        candidates: dict[str, set[str]] = {}
+        for source in sources:
+            if source.status == "removed":
+                continue
+            candidates.setdefault(source.source_name.casefold(), set()).add(
+                source.source_id
+            )
+        ambiguous = [name for name, ids in candidates.items() if len(ids) != 1]
+        if ambiguous:
+            raise ValueError("AI Daily registry contains ambiguous source names")
+        return {name: next(iter(ids)) for name, ids in candidates.items()}
+
+    @staticmethod
+    def _validate_stream_health(
+        value: object,
+    ) -> tuple[tuple[tuple[str, str], ...], dict[str, object]]:
+        if not isinstance(value, dict):
+            raise ValueError("AI Daily export stream_status must be an object")
+        statuses = cast(Mapping[str, object], value)
+        failures: list[tuple[str, str]] = []
+        projection: dict[str, object] = {}
+        for stream in _AI_DAILY_STREAMS:
+            stream_value = statuses.get(stream)
+            if not isinstance(stream_value, dict):
+                raise ValueError(f"AI Daily export has no {stream} stream status")
+            stream_status = cast(Mapping[str, object], stream_value)
+            status = stream_status.get("status")
+            sources = stream_status.get("sources")
+            if status not in {"ok", "degraded", "error", "unknown"}:
+                raise ValueError("AI Daily export stream status is invalid")
+            if not isinstance(sources, list):
+                raise ValueError("AI Daily export stream source health is invalid")
+            source_values = cast(list[object], sources)
+            if len(source_values) > 2_000:
+                raise ValueError("AI Daily export stream source health is invalid")
+            projected_sources: list[dict[str, object]] = []
+            for source_value in source_values:
+                if not isinstance(source_value, dict):
+                    raise ValueError("AI Daily export source health must be an object")
+                source = cast(Mapping[str, object], source_value)
+                source_id = source.get("source_id")
+                source_status = source.get("status")
+                if (
+                    not isinstance(source_id, str)
+                    or not source_id
+                    or len(source_id) > 128
+                    or source_status not in {"enabled", "disabled", "error"}
+                ):
+                    raise ValueError("AI Daily export source health is invalid")
+                for field in ("last_success_at", "last_error_at"):
+                    field_value = source.get(field)
+                    if field_value is None:
+                        continue
+                    if not isinstance(field_value, str) or len(field_value) > 80:
+                        raise ValueError("AI Daily export source health is invalid")
+                    try:
+                        parsed = datetime.fromisoformat(
+                            field_value.replace("Z", "+00:00")
+                        )
+                    except ValueError as error:
+                        raise ValueError(
+                            "AI Daily export source health timestamp is invalid"
+                        ) from error
+                    if parsed.tzinfo is None:
+                        raise ValueError(
+                            "AI Daily export source health timestamp requires a timezone"
+                        )
+                last_error_type = source.get("last_error_type")
+                last_error = source.get("last_error")
+                if last_error_type is not None and (
+                    not isinstance(last_error_type, str)
+                    or not last_error_type
+                    or len(last_error_type) > 80
+                ):
+                    raise ValueError("AI Daily export source health is invalid")
+                try:
+                    safe_last_error = safe_remote_error_summary(last_error)
+                except ValueError as error:
+                    raise ValueError(
+                        "AI Daily export source health is invalid"
+                    ) from error
+                projected_sources.append(
+                    {
+                        "source_id": source_id,
+                        "status": source_status,
+                        "last_success_at": source.get("last_success_at"),
+                        "last_error_at": source.get("last_error_at"),
+                        "last_error_type": last_error_type,
+                        "last_error": safe_last_error,
+                    }
+                )
+            if status in {"degraded", "error"}:
+                failures.append((stream, cast(str, status)))
+            projection[stream] = {
+                "status": status,
+                "sources": projected_sources,
+            }
+        return tuple(failures), projection
+
+    def _commit_stream_health(self, streams: Mapping[str, object]) -> None:
+        _write_json_atomic(
+            self.state / "feed-sync" / "ai-daily-stream-status.json",
+            {
+                "version": 1,
+                "updated_at": datetime.now(UTC).isoformat(),
+                "streams": dict(streams),
+            },
+        )
+
+    @staticmethod
+    def _validate_export_documents(
+        value: object,
+        *,
+        after: Mapping[str, str] | None,
+        next_cursor: Mapping[str, str] | None,
+        source_ids_by_name: Mapping[str, str],
+    ) -> list[FeedEdition]:
+        if not isinstance(value, list):
+            raise ValueError("AI Daily export documents are invalid")
+        document_values = cast(list[object], value)
+        if len(document_values) > _EXPORT_PAGE_LIMIT:
+            raise ValueError("AI Daily export documents are invalid")
+        editions: list[FeedEdition] = []
+        prior_key = _cursor_key(after) if after is not None else None
+        total_markdown_bytes = 0
+        for raw_document in document_values:
+            if not isinstance(raw_document, dict):
+                raise ValueError("AI Daily export document must be an object")
+            document = cast(Mapping[str, object], raw_document)
+            cursor = _export_cursor(document.get("cursor"))
+            assert cursor is not None
+            cursor_key = _cursor_key(cursor)
+            if prior_key is not None and cursor_key <= prior_key:
+                raise ValueError("AI Daily export document cursors are not increasing")
+            prior_key = cursor_key
+            if next_cursor is not None and cursor_key > _cursor_key(next_cursor):
+                raise ValueError("AI Daily export document is beyond next_cursor")
+            _safe_export_name(document.get("name"))
+            stream = document.get("stream")
+            issued_at = document.get("issued_at")
+            markdown = document.get("markdown")
+            checksum = document.get("content_sha256")
+            declared_size = document.get("size_bytes")
+            if stream not in _AI_DAILY_STREAMS:
+                raise ValueError("AI Daily export document stream is invalid")
+            if not isinstance(issued_at, str) or not issued_at or len(issued_at) > 80:
+                raise ValueError("AI Daily export document issued_at is invalid")
+            if not isinstance(markdown, str) or not markdown:
+                raise ValueError("AI Daily export document markdown is invalid")
+            encoded = markdown.encode("utf-8")
+            size = len(encoded)
+            total_markdown_bytes += size
+            if (
+                size > _EXPORT_DOCUMENT_MAX_BYTES
+                or total_markdown_bytes > _EXPORT_PAGE_MARKDOWN_MAX_BYTES
+                or isinstance(declared_size, bool)
+                or not isinstance(declared_size, int)
+                or declared_size != size
+            ):
+                raise ValueError("AI Daily export document size is invalid")
+            if (
+                not isinstance(checksum, str)
+                or len(checksum) != 64
+                or hashlib.sha256(encoded).hexdigest() != checksum
+            ):
+                raise ValueError("AI Daily export document checksum is invalid")
+            edition = ai_daily_markdown_from_v1(
+                markdown,
+                stream=cast(str, stream),
+                source_ids_by_name=(
+                    source_ids_by_name if stream == "learning" else None
+                ),
+            )
+            if issued_at != edition.edition_at and not issued_at.startswith(
+                edition.edition_at + "T"
+            ):
+                raise ValueError("AI Daily export issued_at does not match its Markdown")
+            editions.append(edition)
+        return editions
+
+    def _sync_incremental_ai_daily(
+        self,
+        alias: str,
+        puller: RemoteFeedPuller,
+    ) -> tuple[FeedEdition, ...]:
+        cursor = self._load_export_cursor(alias)
+        stored: list[FeedEdition] = []
+        mirror = SourceRegistryMirror(self.state)
+        sync_lock = self.state / "feed-sync" / ".ai-daily-export.lock"
+        reported_health: set[str] = set()
+        with exclusive_feed_cache_lock(sync_lock):
+            # A concurrent process may have advanced the cursor before this lock.
+            cursor = self._load_export_cursor(alias)
+            for _page_number in range(_EXPORT_MAX_PAGES):
+                with mirror.locked() as locked_mirror:
+                    result = puller.feed_export(
+                        alias,
+                        after=cursor,
+                        limit=_EXPORT_PAGE_LIMIT,
+                        include_registry=True,
+                    )
+                    next_cursor = _export_cursor(
+                        result.get("next_cursor"), nullable=True
+                    )
+                    has_more = result.get("has_more")
+                    if not isinstance(has_more, bool):
+                        raise ValueError("AI Daily export has_more must be a boolean")
+                    current_sources = locked_mirror.load().sources
+                    exported_registry = self._registry_from_export(
+                        result.get("registry")
+                    )
+                    registry_sources = (
+                        exported_registry[1]
+                        if exported_registry is not None
+                        else current_sources
+                    )
+                    source_ids_by_name = self._source_ids_by_name(registry_sources)
+                    editions = self._validate_export_documents(
+                        result.get("documents"),
+                        after=cursor,
+                        next_cursor=next_cursor,
+                        source_ids_by_name=source_ids_by_name,
+                    )
+                    health_failures, health_projection = self._validate_stream_health(
+                        result.get("stream_status")
+                    )
+                    if cursor is not None and next_cursor is None:
+                        raise ValueError("AI Daily export dropped its existing cursor")
+                    if editions and next_cursor is None:
+                        raise ValueError("AI Daily export documents have no next_cursor")
+                    if (
+                        cursor is not None
+                        and next_cursor is not None
+                        and _cursor_key(next_cursor) < _cursor_key(cursor)
+                    ):
+                        raise ValueError("AI Daily export cursor moved backwards")
+                    if has_more and (
+                        next_cursor is None
+                        or (cursor is not None and _cursor_key(next_cursor) <= _cursor_key(cursor))
+                    ):
+                        raise ValueError("AI Daily export did not advance a paged cursor")
+                    if exported_registry is not None:
+                        locked_mirror.replace(
+                            exported_registry[0], exported_registry[1]
+                        )
+                for edition in editions:
+                    self.cache.put(edition)
+                    stored.append(edition)
+                self._commit_stream_health(health_projection)
+                if next_cursor is not None and next_cursor != cursor:
+                    self._commit_export_cursor(alias, next_cursor)
+                cursor = next_cursor
+                for stream, health_status in health_failures:
+                    if stream in reported_health:
+                        continue
+                    reported_health.add(stream)
+                    self._record_failure(
+                        FeedKind.AI_DAILY,
+                        ValueError(
+                            f"AI Daily remote stream is {health_status}"
+                        ),
+                        stream=stream,
+                    )
+                if not has_more:
+                    return tuple(stored)
+            raise ValueError("AI Daily export exceeded its page safety limit")
+
     def _sync(self, feed: FeedKind) -> tuple[FeedEdition, ...]:
         failure_count = len(self._failures)
         feed_config = self._config().get(feed.value)
@@ -474,6 +880,17 @@ class FeedSyncer:
         remote_puller: RemoteFeedPuller | None = None
         reported_registry_warnings: set[str] = set()
         if isinstance(remote_kind, str):
+            export_alias = config.get("feed_export_ssh_alias")
+            if (
+                feed is FeedKind.AI_DAILY
+                and remote_kind == "ai-daily-bridge-v1"
+                and isinstance(export_alias, str)
+                and export_alias
+            ):
+                return self._sync_incremental_ai_daily(
+                    export_alias,
+                    RemoteFeedPuller(self.state),
+                )
             if not isinstance(ssh_alias, str) or not ssh_alias:
                 raise ValueError("remote producer requires ssh_alias")
             puller = RemoteFeedPuller(self.state)

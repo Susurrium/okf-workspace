@@ -1932,6 +1932,71 @@ button.okf-action-panel__action:focus-visible,
   flex: 1 1 auto;
 }
 
+.okf-reading-source-card__footer {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+}
+
+.okf-reading-source-card__empty {
+  display: grid;
+  min-height: 180px;
+  align-content: center;
+  gap: 7px;
+  padding: 18px 8px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  text-align: center;
+}
+
+.okf-feed-subscription-status {
+  display: inline-flex;
+  min-height: 1.45rem;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid var(--okf-border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--okf-surface-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.3;
+}
+
+.okf-feed-subscription-status.is-active,
+.okf-feed-subscription-status.is-enabled {
+  border-color: color-mix(in srgb, var(--color-green, #4d9375) 45%, var(--okf-border));
+  color: var(--color-green, #4d9375);
+}
+
+.okf-feed-subscription-status.is-waiting {
+  border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--okf-border));
+  color: var(--text-accent);
+}
+
+.okf-feed-subscription-status.is-disabled {
+  border-color: color-mix(in srgb, var(--text-faint) 55%, var(--okf-border));
+  color: var(--text-faint);
+}
+
+.okf-feed-subscription-status.is-error {
+  border-color: color-mix(in srgb, var(--color-red, #d04b4b) 45%, var(--okf-border));
+  color: var(--color-red, #d04b4b);
+}
+
+.okf-feed-subscription-status.is-removed {
+  color: var(--text-faint);
+  border-style: dashed;
+}
+
+.okf-reading-source-card.is-error {
+  box-shadow: inset 3px 0 0 var(--color-red, #d04b4b);
+}
+
+.okf-reading-source-card.is-disabled,
+.okf-reading-source-card.is-removed {
+  box-shadow: inset 3px 0 0 var(--text-faint);
+}
+
 .okf-reading-source-card__load-state {
   display: flex;
   align-items: center;
@@ -2372,6 +2437,7 @@ button.okf-action-panel__action:focus-visible,
 .okf-dashboard button:focus-visible,
 .okf-workflow-modal button:focus-visible,
 .okf-workflow-modal input:focus-visible,
+.okf-workflow-modal select:focus-visible,
 .okf-workflow-modal textarea:focus-visible {
   outline: 2px solid var(--interactive-accent);
   outline-offset: 2px;
@@ -2459,7 +2525,10 @@ button.okf-action-panel__action:focus-visible,
 
 .okf-workflow-modal textarea,
 .okf-workflow-modal input[type="text"],
-.okf-workflow-modal input[type="search"] {
+.okf-workflow-modal input[type="search"],
+.okf-workflow-modal input[type="url"],
+.okf-workflow-modal input[type="number"],
+.okf-workflow-modal select {
   width: 100%;
 }
 
@@ -2478,6 +2547,210 @@ button.okf-action-panel__action:focus-visible,
   border-color: transparent;
   color: var(--text-muted);
   background: transparent;
+}
+
+.okf-feed-subscription-modal {
+  --okf-surface: var(--background-primary);
+  --okf-surface-muted: var(--background-secondary);
+  --okf-surface-hover: var(--background-modifier-hover);
+  --okf-border: var(--background-modifier-border);
+  --okf-accent: var(--interactive-accent);
+  --okf-accent-hover: var(--interactive-accent-hover);
+  --okf-radius: var(--radius-m, 8px);
+  --okf-radius-small: var(--radius-s, 5px);
+  width: min(680px, calc(100vw - 32px));
+}
+
+.okf-feed-subscription-modal button.okf-dashboard__primary-action {
+  border-color: var(--okf-accent);
+  color: var(--text-on-accent);
+  background: var(--okf-accent);
+  font-weight: var(--font-semibold);
+}
+
+.okf-feed-subscription-modal button.okf-dashboard__primary-action:hover {
+  border-color: var(--okf-accent-hover);
+  background: var(--okf-accent-hover);
+}
+
+.okf-feed-subscription-modal button.okf-dashboard__secondary-action {
+  border: 1px solid var(--okf-border);
+  color: var(--text-normal);
+  background: var(--okf-surface);
+}
+
+.okf-feed-subscription-modal button.okf-dashboard__secondary-action:hover,
+.okf-feed-subscription-modal button.okf-dashboard__ghost-action:hover {
+  background: var(--okf-surface-hover);
+}
+
+.okf-feed-subscription-modal button.okf-dashboard__ghost-action {
+  border-color: transparent;
+  color: var(--text-muted);
+  background: transparent;
+}
+
+.okf-feed-subscription-modal button.okf-dashboard__danger-action {
+  border-color: color-mix(in srgb, var(--text-error) 45%, var(--okf-border));
+  color: var(--text-error);
+  background: transparent;
+}
+
+.okf-feed-subscription-modal button.okf-dashboard__danger-action:hover {
+  color: var(--text-on-accent);
+  background: var(--text-error);
+}
+
+.okf-feed-subscription-modal .is-hidden {
+  display: none;
+}
+
+.okf-feed-subscription-modal__intro {
+  margin-bottom: 14px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.okf-feed-subscription-modal__form {
+  display: grid;
+  gap: 12px;
+}
+
+.okf-feed-subscription-modal__field {
+  display: grid;
+  gap: 5px;
+}
+
+.okf-feed-subscription-modal__field > label {
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-medium, 500);
+}
+
+.okf-feed-subscription-modal__field input,
+.okf-feed-subscription-modal__field select {
+  margin: 0;
+}
+
+.okf-feed-subscription-modal__feedback {
+  min-height: 1.5em;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.okf-feed-subscription-modal__feedback.is-error {
+  color: var(--text-error);
+}
+
+.okf-feed-subscription-modal__actions,
+.okf-feed-subscription-settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.okf-feed-subscription-preview {
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius);
+  background: var(--okf-surface-muted);
+}
+
+.okf-feed-subscription-preview h3,
+.okf-feed-subscription-preview h4,
+.okf-feed-subscription-settings__heading h3 {
+  margin: 0;
+}
+
+.okf-feed-subscription-preview__url {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.45;
+}
+
+.okf-feed-subscription-preview__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.okf-feed-subscription-preview__entries {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.okf-feed-subscription-preview__entry {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius-small);
+  background: var(--okf-surface);
+}
+
+.okf-feed-subscription-preview__entry strong {
+  line-height: 1.4;
+}
+
+.okf-feed-subscription-modal__advanced {
+  padding: 8px 10px 10px;
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius-small);
+}
+
+.okf-feed-subscription-modal__advanced > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.okf-feed-subscription-modal__advanced .okf-feed-subscription-modal__field {
+  margin-top: 9px;
+}
+
+.okf-feed-subscription-settings__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.okf-feed-subscription-settings__facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.okf-feed-subscription-settings__fact {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--okf-border);
+  border-radius: var(--okf-radius-small);
+}
+
+.okf-feed-subscription-settings__fact span {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.okf-feed-subscription-settings__danger {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: var(--okf-radius-small);
+}
+
+.okf-feed-subscription-settings__danger {
+  border: 1px solid color-mix(in srgb, var(--color-red, #d04b4b) 42%, var(--okf-border));
+  background: color-mix(in srgb, var(--color-red, #d04b4b) 7%, var(--okf-surface));
 }
 
 .okf-quick-capture-modal__workflow {
@@ -2569,6 +2842,21 @@ button.okf-action-panel__action:focus-visible,
 }
 
 @media (max-width: 700px) {
+  .okf-feed-subscription-settings__facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .okf-feed-subscription-modal__actions,
+  .okf-feed-subscription-settings__actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .okf-feed-subscription-modal__actions button,
+  .okf-feed-subscription-settings__actions button {
+    width: 100%;
+  }
+
   .okf-today-pane-tabs {
     display: flex;
   }

@@ -143,9 +143,9 @@ function subscriptionSourceItemsPage(
   const end = Math.min(source.latest_item_count, start + limit);
   return {
     source_id: source.source_id,
-    digest_id: source.latest_digest_id,
+    digest_id: source.latest_digest_id!,
     ...(source.latest_revision ? { latest_revision: source.latest_revision } : {}),
-    issued_at: source.latest_issued_at,
+    issued_at: source.latest_issued_at!,
     item_count: source.latest_item_count,
     items: Array.from({ length: end - start }, (_value, offset) => {
       const index = start + offset;
@@ -196,6 +196,58 @@ describe("real Dashboard View source handoff", () => {
 
     expect(view.getViewType()).toBe(OKF_DASHBOARD_VIEW);
     expect(view.getDisplayText()).toBe("Dashboard");
+  });
+
+  it("renders a newly confirmed source as a waiting card without requesting missing items", () => {
+    const loadItems = vi.fn();
+    const openSettings = vi.fn();
+    const source: FeedSubscriptionSource = {
+      source_id: "new-rss-source",
+      source_name: "新订阅",
+      latest_issued_at: null,
+      latest_digest_id: null,
+      latest_revision: null,
+      quality: null,
+      quality_reason: null,
+      latest_item_count: 0,
+      pending_decision_count: 0,
+      edition_count: 0,
+      native_section_counts: {},
+      preview_items: [],
+      status: "waiting",
+      registry_managed: true,
+      enabled: true,
+      registry_status: "enabled",
+      canonical_url: "https://example.com/feed.xml",
+      adapter: "rss",
+      required: false,
+      last_success_at: null,
+      last_error_at: null,
+      last_error_type: null,
+      last_error: null,
+    };
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, {
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      loadFeedSubscriptionSourceItems: loadItems,
+      promptFeedSubscriptionSettings: openSettings,
+    } as never);
+    enableLatestItemsPagination(view);
+    const runtime = view as unknown as {
+      renderSubscriptionSourceCard: (parent: HTMLElement, value: FeedSubscriptionSource) => void;
+    };
+    const parent = new TestElement();
+
+    runtime.renderSubscriptionSourceCard(parent as unknown as HTMLElement, source);
+
+    expect(loadItems).not.toHaveBeenCalled();
+    expect(parent.descendants("okf-feed-subscription-status")[0]?.textContent)
+      .toBe("等待首次更新");
+    expect(parent.descendants().some((element) =>
+      element.textContent.includes("后台首次更新完成后")
+    )).toBe(true);
+    parent.descendants().find((element) => element.textContent === "设置…")?.click();
+    expect(openSettings).toHaveBeenCalledWith(source);
   });
 
   it("restores each Reading source by digest and resets it when a new edition arrives", async () => {
@@ -873,6 +925,7 @@ describe("real Dashboard View source handoff", () => {
       next_cursor: null,
       has_more: false,
     }));
+    const promptAddFeedSubscription = vi.fn();
     const plugin = {
       getDashboardUiState: () => state,
       semanticOperationsSnapshot: () => [],
@@ -887,6 +940,7 @@ describe("real Dashboard View source handoff", () => {
       rememberFeedReadingPosition: vi.fn(async () => undefined),
       openFeedDigest: vi.fn(async () => undefined),
       ensureLocalServiceAvailable: vi.fn(async () => undefined),
+      promptAddFeedSubscription,
       updateDashboardFeedUiState: () => undefined,
       updateDashboardPageUiState: () => undefined,
     };
@@ -918,6 +972,8 @@ describe("real Dashboard View source handoff", () => {
     expect(root.descendants("okf-feed-card__body")).toHaveLength(1);
     expect(root.descendants("okf-feed-card__footer")).toHaveLength(1);
     expect(root.descendants("okf-reading-source-search")).toHaveLength(1);
+    root.descendants().find((item) => item.textContent === "添加订阅")?.click();
+    expect(promptAddFeedSubscription).toHaveBeenCalledOnce();
     expect(root.descendants("okf-reading-source-card__sections")[0]?.children.map((item) => item.textContent))
       .toEqual(["工具 3", "文章 2", "资源 2", "其他 2 类"]);
     await vi.waitFor(() => expect(root.descendants("okf-feed-digest__item")).toHaveLength(5));

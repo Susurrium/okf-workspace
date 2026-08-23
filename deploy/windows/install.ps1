@@ -376,7 +376,15 @@ if (-not $SkipScheduledTasks) {
 
     $maintenanceAction = New-ScheduledTaskAction -Execute $maintenanceShell -Argument "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot 'maintenance.ps1')`" -Config `"$configPath`""
     $maintenanceTrigger = New-ScheduledTaskTrigger -Daily -At '02:30'
-    Register-ScheduledTask -TaskName 'OKF Workspace Daily Maintenance' -Action $maintenanceAction -Trigger $maintenanceTrigger -Description 'Refresh indexes and synchronize configured Feed sources; run optional backup when enabled.' -Force | Out-Null
+    Register-ScheduledTask -TaskName 'OKF Workspace Daily Maintenance' -Action $maintenanceAction -Trigger $maintenanceTrigger -Description 'Refresh indexes; run optional backup and restore checks when enabled.' -Force | Out-Null
+
+    $feedSyncAction = New-ScheduledTaskAction -Execute $maintenanceShell -Argument "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot 'feed-sync.ps1')`" -Config `"$configPath`""
+    $feedSyncTrigger = New-ScheduledTaskTrigger -Daily -At '06:50'
+    $feedSyncSettings = New-ScheduledTaskSettingsSet `
+        -StartWhenAvailable `
+        -RestartCount 3 `
+        -RestartInterval (New-TimeSpan -Minutes 10)
+    Register-ScheduledTask -TaskName 'OKF Workspace Feed Sync' -Action $feedSyncAction -Trigger $feedSyncTrigger -Settings $feedSyncSettings -Description 'Incrementally synchronize all AI Daily editions after the remote publish window; retry after transient offline failures.' -Force | Out-Null
 }
 
 Write-Host 'OKF Workspace installation complete.'

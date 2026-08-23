@@ -41,7 +41,7 @@ cd E:\code\okf-workspace
 4. 在 Vault 外创建本地 API token；
 5. 写入 Engine、MinerU、MarkItDown 与 Codex 配置；
 6. 构建全文及可选向量索引；
-7. 注册一个每日维护任务，用于索引与已配置 Feed 同步。
+7. 注册两个相互独立的计划任务：02:30 的每日维护负责索引、可选备份与恢复检查；06:50 的 Feed Sync 在远端发布窗口后执行增量同步，支持错过启动后补跑和 10 分钟间隔的三次临时故障重试。
 
 安装器不会创建登录常驻 API 任务。Dashboard 插件在 Obsidian 加载后启动自己持有的本地
 Engine 子进程，Obsidian 退出后服务随之停止。

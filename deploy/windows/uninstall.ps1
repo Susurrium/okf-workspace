@@ -67,6 +67,7 @@ $ownedLegacyClaudian = Confirm-OkfRetiredPluginDirectoryOwnership `
 
 foreach ($task in @(
     'OKF Workspace Daily Maintenance',
+    'OKF Workspace Feed Sync',
     'OKF Brain Local Service',
     'OKF Brain Daily Maintenance',
     'Obsidian Workflow Hub',
