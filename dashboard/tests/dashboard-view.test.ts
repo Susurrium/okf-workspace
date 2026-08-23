@@ -21,8 +21,10 @@ import type {
   FeedDigestEdition,
   FeedSubscriptionPage,
   FeedSubscriptionSource,
+  FeedSubscriptionSourceItemsPage,
   FeedSubscriptionSourcePage,
 } from "../src/feeds/types.js";
+import { FeedHttpError } from "../src/feeds/service.js";
 import { normalizeDashboardUiState } from "../src/plugin/dashboard-ui-state.js";
 import type { AnchoredActionPanelOptions } from "../src/ui/anchored-action-panel.js";
 import { Notice, TestElement } from "./obsidian-runtime.js";
@@ -124,11 +126,45 @@ function subscriptionSource(
     source_name: sourceName,
     latest_issued_at: "2026-08-23",
     latest_digest_id: digestId,
+    latest_revision: `${digestId}:revision`,
     latest_item_count: previewCount,
     pending_decision_count: previewCount,
     edition_count: 3,
     native_section_counts: { 工具: Math.ceil(previewCount / 2), 文章: Math.floor(previewCount / 2) },
-    preview_items: preview,
+    preview_items: preview.slice(0, 3),
+  };
+}
+
+function subscriptionSourceItemsPage(
+  source: FeedSubscriptionSource,
+  start = 0,
+  limit = 40,
+): FeedSubscriptionSourceItemsPage {
+  const end = Math.min(source.latest_item_count, start + limit);
+  return {
+    source_id: source.source_id,
+    digest_id: source.latest_digest_id,
+    ...(source.latest_revision ? { latest_revision: source.latest_revision } : {}),
+    issued_at: source.latest_issued_at,
+    item_count: source.latest_item_count,
+    items: Array.from({ length: end - start }, (_value, offset) => {
+      const index = start + offset;
+      return {
+        item_id: `${source.latest_digest_id}:${index + 1}`,
+        block_id: `${source.latest_digest_id}-${index + 1}`,
+        title: `条目 ${source.source_name} ${index + 1}`,
+        summary: "摘要",
+        source: source.source_name,
+        source_id: source.source_id,
+        source_name: source.source_name,
+        native_section: index % 2 ? "文章" : "工具",
+        metrics: {},
+        comment_count: 0,
+        media_count: 0,
+      };
+    }),
+    next_cursor: end < source.latest_item_count ? `cursor-${end}` : null,
+    has_more: end < source.latest_item_count,
   };
 }
 
@@ -146,6 +182,11 @@ function deferred<T>(): {
   return { promise, resolve, reject };
 }
 
+function enableLatestItemsPagination(view: OkfDashboardView): void {
+  (view as unknown as { subscriptionLatestItemsPagination: boolean })
+    .subscriptionLatestItemsPagination = true;
+}
+
 describe("real Dashboard View source handoff", () => {
   it("constructs the registered runtime View rather than a legacy page model", () => {
     const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
@@ -155,6 +196,624 @@ describe("real Dashboard View source handoff", () => {
 
     expect(view.getViewType()).toBe(OKF_DASHBOARD_VIEW);
     expect(view.getDisplayText()).toBe("Dashboard");
+  });
+
+  it("restores each Reading source by digest and resets it when a new edition arrives", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", { setTimeout, clearTimeout });
+    try {
+      const updateSourceState = vi.fn(() => undefined);
+      const state = normalizeDashboardUiState({
+        readingSources: {
+          "source-a": { digestId: "older-digest", scrollTop: 240 },
+        },
+      });
+      const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+      const view = new OkfDashboardView(leaf, {
+        getDashboardUiState: () => state,
+        feedReadingPosition: () => undefined,
+        feedDecisionSnapshot: () => undefined,
+        openFeedItem: vi.fn(async () => undefined),
+        rememberFeedReadingPosition: vi.fn(async () => undefined),
+        loadFeedSubscriptionSourceItems: async () => subscriptionSourceItemsPage(
+          subscriptionSource("source-a", "Alpha", "new-digest", 5),
+        ),
+        updateDashboardReadingSourceUiState: updateSourceState,
+      } as never);
+      enableLatestItemsPagination(view);
+      const runtime = view as unknown as {
+        renderSubscriptionSourceCard: (parent: HTMLElement, source: FeedSubscriptionSource) => void;
+      };
+      const parent = new TestElement();
+
+      runtime.renderSubscriptionSourceCard(
+        parent as unknown as HTMLElement,
+        subscriptionSource("source-a", "Alpha", "new-digest", 5),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+
+      const body = parent.descendants("okf-reading-source-card__preview")[0]!;
+      expect(body.scrollTop).toBe(0);
+      expect(parent.descendants("okf-feed-digest__item")).toHaveLength(5);
+      expect(updateSourceState).toHaveBeenCalledWith("source-a", expect.objectContaining({
+        digestId: "new-digest",
+        scrollTop: 0,
+      }));
+
+      body.scrollTop = 175;
+      body.dispatch("scroll");
+      vi.advanceTimersByTime(120);
+      expect(updateSourceState).toHaveBeenLastCalledWith("source-a", expect.objectContaining({
+        digestId: "new-digest",
+        scrollTop: 175,
+      }));
+
+      const sameDigestParent = new TestElement();
+      runtime.renderSubscriptionSourceCard(
+        sameDigestParent as unknown as HTMLElement,
+        subscriptionSource("source-a", "Alpha", "new-digest", 5),
+      );
+      expect(sameDigestParent.descendants("okf-reading-source-card__preview")[0]?.scrollTop)
+        .toBe(175);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it("loads 50+ Reading items in bounded pages, deduplicates overlap, and single-flights scrolls", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", { setTimeout, clearTimeout });
+    try {
+      const source = subscriptionSource("source-many", "Many Weekly", "digest-many", 55);
+      const secondPage = deferred<FeedSubscriptionSourceItemsPage>();
+      const loadItems = vi.fn((
+        _sourceId: string,
+        query: { limit?: number; cursor?: string } = {},
+      ) => {
+        if (!query.cursor) return Promise.resolve(subscriptionSourceItemsPage(source, 0, 40));
+        const overlapping = subscriptionSourceItemsPage(source, 39, 40);
+        return secondPage.promise.then(() => overlapping);
+      });
+      const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+      const view = new OkfDashboardView(leaf, {
+        getDashboardUiState: () => normalizeDashboardUiState(undefined),
+        feedReadingPosition: () => undefined,
+        feedDecisionSnapshot: () => undefined,
+        openFeedItem: vi.fn(async () => undefined),
+        rememberFeedReadingPosition: vi.fn(async () => undefined),
+        loadFeedSubscriptionSourceItems: loadItems,
+        updateDashboardReadingSourceUiState: vi.fn(() => undefined),
+      } as never);
+      enableLatestItemsPagination(view);
+      const runtime = view as unknown as {
+        renderSubscriptionSourceCard: (parent: HTMLElement, value: FeedSubscriptionSource) => void;
+      };
+      const parent = new TestElement();
+
+      runtime.renderSubscriptionSourceCard(parent as unknown as HTMLElement, source);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(parent.descendants("okf-feed-digest__item")).toHaveLength(40);
+      expect(loadItems).toHaveBeenCalledTimes(1);
+      expect(loadItems).toHaveBeenNthCalledWith(1, "source-many", { limit: 40 });
+
+      const body = parent.descendants("okf-reading-source-card__preview")[0]!;
+      Object.assign(body, { clientHeight: 400, scrollHeight: 2_000, scrollTop: 1_500 });
+      body.dispatch("scroll");
+      body.dispatch("scroll");
+      expect(loadItems).toHaveBeenCalledTimes(2);
+      expect(loadItems).toHaveBeenNthCalledWith(2, "source-many", {
+        limit: 40,
+        cursor: "cursor-40",
+      });
+
+      secondPage.resolve(subscriptionSourceItemsPage(source, 39, 40));
+      await vi.advanceTimersByTimeAsync(0);
+      const items = parent.descendants("okf-feed-digest__item");
+      expect(items).toHaveLength(55);
+      expect(new Set(items.map((item) => item.children[0]?.textContent)).size).toBe(55);
+      expect(loadItems).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it("discards a late latest-item response after the source digest changes", async () => {
+    const oldPage = deferred<FeedSubscriptionSourceItemsPage>();
+    const oldSource = subscriptionSource("source-race", "Race", "digest-old", 5);
+    const newSource = subscriptionSource("source-race", "Race", "digest-new", 5);
+    const loadItems = vi.fn((_sourceId: string) =>
+      loadItems.mock.calls.length === 1
+        ? oldPage.promise
+        : Promise.resolve(subscriptionSourceItemsPage(newSource)),
+    );
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, {
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      feedReadingPosition: () => undefined,
+      feedDecisionSnapshot: () => undefined,
+      openFeedItem: vi.fn(async () => undefined),
+      rememberFeedReadingPosition: vi.fn(async () => undefined),
+      loadFeedSubscriptionSourceItems: loadItems,
+      updateDashboardReadingSourceUiState: vi.fn(() => undefined),
+    } as never);
+    enableLatestItemsPagination(view);
+    const runtime = view as unknown as {
+      renderSubscriptionSourceCard: (parent: HTMLElement, value: FeedSubscriptionSource) => void;
+      readingSourceItems: Map<string, { digestId: string; items: Array<{ item_id: string }> }>;
+    };
+    const oldParent = new TestElement();
+    const newParent = new TestElement();
+
+    runtime.renderSubscriptionSourceCard(oldParent as unknown as HTMLElement, oldSource);
+    runtime.renderSubscriptionSourceCard(newParent as unknown as HTMLElement, newSource);
+    oldPage.resolve(subscriptionSourceItemsPage(oldSource));
+    await oldPage.promise;
+    await vi.waitFor(() => {
+      expect(newParent.descendants("okf-feed-digest__item")).toHaveLength(5);
+    });
+    expect(runtime.readingSourceItems.get("source-race")?.digestId).toBe("digest-new");
+    expect(runtime.readingSourceItems.get("source-race")?.items[0]?.item_id)
+      .toContain("digest-new");
+
+    await Promise.resolve();
+    expect(newParent.descendants("okf-feed-digest__item")).toHaveLength(5);
+    expect(runtime.readingSourceItems.get("source-race")?.digestId).toBe("digest-new");
+    expect(runtime.readingSourceItems.get("source-race")?.items[0]?.item_id)
+      .toContain("digest-new");
+  });
+
+  it("keeps the bounded preview when latest-item loading fails and retries in place", async () => {
+    const source = subscriptionSource("source-retry", "Retry", "digest-retry", 5);
+    const loadItems = vi.fn(() =>
+      loadItems.mock.calls.length === 1
+        ? Promise.reject(new Error("暂时离线"))
+        : Promise.resolve(subscriptionSourceItemsPage(source)),
+    );
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, {
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      feedReadingPosition: () => undefined,
+      feedDecisionSnapshot: () => undefined,
+      openFeedItem: vi.fn(async () => undefined),
+      rememberFeedReadingPosition: vi.fn(async () => undefined),
+      loadFeedSubscriptionSourceItems: loadItems,
+      updateDashboardReadingSourceUiState: vi.fn(() => undefined),
+    } as never);
+    enableLatestItemsPagination(view);
+    const runtime = view as unknown as {
+      renderSubscriptionSourceCard: (parent: HTMLElement, value: FeedSubscriptionSource) => void;
+    };
+    const parent = new TestElement();
+
+    runtime.renderSubscriptionSourceCard(parent as unknown as HTMLElement, source);
+    await vi.waitFor(() => {
+      expect(parent.descendants().some((item) => item.textContent === "重试加载")).toBe(true);
+    });
+    expect(parent.descendants("okf-feed-digest__item")).toHaveLength(3);
+    expect(parent.descendants().some((item) => item.textContent === "暂时离线")).toBe(true);
+
+    parent.descendants().find((item) => item.textContent === "重试加载")?.click();
+    await vi.waitFor(() => {
+      expect(parent.descendants("okf-feed-digest__item")).toHaveLength(5);
+    });
+    expect(loadItems).toHaveBeenCalledTimes(2);
+  });
+
+  it("updates every rerendered card that shares an in-flight latest-items request", async () => {
+    const source = subscriptionSource("source-shared", "Shared", "digest-shared", 5);
+    const pending = deferred<FeedSubscriptionSourceItemsPage>();
+    const loadItems = vi.fn(() => pending.promise);
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, {
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      feedReadingPosition: () => undefined,
+      feedDecisionSnapshot: () => undefined,
+      openFeedItem: vi.fn(async () => undefined),
+      rememberFeedReadingPosition: vi.fn(async () => undefined),
+      loadFeedSubscriptionSourceItems: loadItems,
+      updateDashboardReadingSourceUiState: vi.fn(() => undefined),
+    } as never);
+    enableLatestItemsPagination(view);
+    const runtime = view as unknown as {
+      renderSubscriptionSourceCard: (parent: HTMLElement, value: FeedSubscriptionSource) => void;
+    };
+    const first = new TestElement();
+    const rerendered = new TestElement();
+
+    runtime.renderSubscriptionSourceCard(first as unknown as HTMLElement, source);
+    runtime.renderSubscriptionSourceCard(rerendered as unknown as HTMLElement, source);
+    expect(loadItems).toHaveBeenCalledTimes(1);
+    expect(rerendered.descendants().some((item) => item.textContent.includes("正在加载")))
+      .toBe(true);
+
+    pending.resolve(subscriptionSourceItemsPage(source));
+    await vi.waitFor(() => {
+      expect(rerendered.descendants("okf-feed-digest__item")).toHaveLength(5);
+    });
+    expect(first.descendants("okf-feed-digest__item")).toHaveLength(5);
+  });
+
+  it("replaces a latest-items state when its revision changes without digest or count changes", async () => {
+    const oldSource = subscriptionSource("source-revision", "Old", "same-digest", 5);
+    oldSource.latest_revision = "revision-1";
+    const newSource = subscriptionSource("source-revision", "New", "same-digest", 5);
+    newSource.latest_revision = "revision-2";
+    const oldPage = deferred<FeedSubscriptionSourceItemsPage>();
+    const loadItems = vi.fn(() =>
+      loadItems.mock.calls.length === 1
+        ? oldPage.promise
+        : Promise.resolve(subscriptionSourceItemsPage(newSource))
+    );
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, {
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      feedReadingPosition: () => undefined,
+      feedDecisionSnapshot: () => undefined,
+      openFeedItem: vi.fn(async () => undefined),
+      rememberFeedReadingPosition: vi.fn(async () => undefined),
+      loadFeedSubscriptionSourceItems: loadItems,
+      updateDashboardReadingSourceUiState: vi.fn(() => undefined),
+    } as never);
+    enableLatestItemsPagination(view);
+    const runtime = view as unknown as {
+      renderSubscriptionSourceCard: (parent: HTMLElement, value: FeedSubscriptionSource) => void;
+      readingSourceItems: Map<string, {
+        revision: string;
+        items: Array<{ title: string }>;
+      }>;
+    };
+    const oldParent = new TestElement();
+    const newParent = new TestElement();
+
+    runtime.renderSubscriptionSourceCard(oldParent as unknown as HTMLElement, oldSource);
+    runtime.renderSubscriptionSourceCard(newParent as unknown as HTMLElement, newSource);
+    oldPage.resolve(subscriptionSourceItemsPage(oldSource));
+    await vi.waitFor(() => {
+      expect(newParent.descendants("okf-feed-digest__item")).toHaveLength(5);
+    });
+
+    expect(loadItems).toHaveBeenCalledTimes(2);
+    expect(runtime.readingSourceItems.get("source-revision")?.revision).toBe("revision-2");
+    expect(runtime.readingSourceItems.get("source-revision")?.items[0]?.title).toContain("New");
+  });
+
+  it("keeps an old Engine on bounded previews without calling the unsupported endpoint", async () => {
+    const source = subscriptionSource("source-legacy", "Legacy", "digest-legacy", 5);
+    const loadItems = vi.fn(async () => subscriptionSourceItemsPage(source));
+    const plugin = {
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      loadFeedSubscriptionSources: vi.fn(async (): Promise<FeedSubscriptionSourcePage> => ({
+        section: "learning",
+        sources: [source],
+        total_sources: 1,
+        matched_sources: 1,
+        next_cursor: null,
+        has_more: false,
+      })),
+      loadFeedSubscriptionSourceItems: loadItems,
+      feedProjectionVersion: () => 0,
+      feedReadingPosition: () => undefined,
+      feedDecisionSnapshot: () => undefined,
+      openFeedItem: vi.fn(async () => undefined),
+      rememberFeedReadingPosition: vi.fn(async () => undefined),
+      updateDashboardReadingSourceUiState: vi.fn(() => undefined),
+    };
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, plugin as never);
+    const runtime = view as unknown as {
+      loadAndCommitSubscriptionSourceFirstPage: (
+        projectionVersion: number,
+        query: string,
+      ) => Promise<boolean>;
+      renderSubscriptionSourceCard: (parent: HTMLElement, value: FeedSubscriptionSource) => void;
+      subscriptionLatestItemsPagination: boolean;
+    };
+
+    await runtime.loadAndCommitSubscriptionSourceFirstPage(0, "");
+    const parent = new TestElement();
+    runtime.renderSubscriptionSourceCard(parent as unknown as HTMLElement, source);
+    await Promise.resolve();
+
+    expect(runtime.subscriptionLatestItemsPagination).toBe(false);
+    expect(loadItems).not.toHaveBeenCalled();
+    expect(parent.descendants("okf-feed-digest__item")).toHaveLength(3);
+  });
+
+  it("degrades the whole view once after a mixed-version latest-items 404", async () => {
+    const loadItems = vi.fn(async () => {
+      throw new FeedHttpError(404, "not found");
+    });
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, {
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      feedReadingPosition: () => undefined,
+      feedDecisionSnapshot: () => undefined,
+      openFeedItem: vi.fn(async () => undefined),
+      rememberFeedReadingPosition: vi.fn(async () => undefined),
+      loadFeedSubscriptionSourceItems: loadItems,
+      updateDashboardReadingSourceUiState: vi.fn(() => undefined),
+    } as never);
+    enableLatestItemsPagination(view);
+    const refreshOverview = vi.fn();
+    const runtime = view as unknown as {
+      section: string;
+      subscriptionSourcesLoadedAt: number;
+      subscriptionLatestItemsPagination: boolean;
+      readingSourceItemsEndpointDisabled: boolean;
+      scheduleExternalRefresh: () => void;
+      renderSubscriptionSourceCard: (parent: HTMLElement, value: FeedSubscriptionSource) => void;
+    };
+    runtime.section = "reading";
+    runtime.subscriptionSourcesLoadedAt = 123;
+    runtime.scheduleExternalRefresh = refreshOverview;
+    const parent = new TestElement();
+
+    for (let index = 0; index < 3; index += 1) {
+      runtime.renderSubscriptionSourceCard(
+        parent as unknown as HTMLElement,
+        subscriptionSource(`source-404-${index}`, `Missing ${index}`, `digest-404-${index}`, 5),
+      );
+    }
+    await vi.waitFor(() => expect(runtime.readingSourceItemsEndpointDisabled).toBe(true));
+
+    expect(loadItems).toHaveBeenCalledTimes(1);
+    expect(runtime.subscriptionLatestItemsPagination).toBe(false);
+    expect(runtime.subscriptionSourcesLoadedAt).toBe(0);
+    expect(refreshOverview).toHaveBeenCalledTimes(1);
+    expect(parent.descendants("okf-feed-digest__item")).toHaveLength(9);
+    expect(parent.descendants().some((item) => item.textContent === "重试加载")).toBe(false);
+  });
+
+  it("recovers one stale Reading cursor by restarting the latest edition from page one", async () => {
+    const source = subscriptionSource("source-stale", "Stale", "digest-stale", 55);
+    const loadItems = vi.fn((
+      _sourceId: string,
+      query: { limit?: number; cursor?: string } = {},
+    ) => {
+      if (loadItems.mock.calls.length === 1) {
+        return Promise.resolve(subscriptionSourceItemsPage(source, 0, 40));
+      }
+      if (query.cursor) return Promise.reject(new FeedHttpError(400, "stale cursor"));
+      return Promise.resolve(subscriptionSourceItemsPage(source, 0, 40));
+    });
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, {
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      feedReadingPosition: () => undefined,
+      feedDecisionSnapshot: () => undefined,
+      openFeedItem: vi.fn(async () => undefined),
+      rememberFeedReadingPosition: vi.fn(async () => undefined),
+      loadFeedSubscriptionSourceItems: loadItems,
+      updateDashboardReadingSourceUiState: vi.fn(() => undefined),
+    } as never);
+    enableLatestItemsPagination(view);
+    const runtime = view as unknown as {
+      renderSubscriptionSourceCard: (parent: HTMLElement, value: FeedSubscriptionSource) => void;
+    };
+    const parent = new TestElement();
+
+    runtime.renderSubscriptionSourceCard(parent as unknown as HTMLElement, source);
+    await vi.waitFor(() => {
+      expect(parent.descendants("okf-feed-digest__item")).toHaveLength(40);
+    });
+    const body = parent.descendants("okf-reading-source-card__preview")[0]!;
+    Object.assign(body, { clientHeight: 400, scrollHeight: 2_000, scrollTop: 1_500 });
+    vi.stubGlobal("window", globalThis);
+    try {
+      body.dispatch("scroll");
+      await vi.waitFor(() => expect(loadItems).toHaveBeenCalledTimes(3));
+      await vi.waitFor(() => {
+        expect(parent.descendants("okf-feed-digest__item")).toHaveLength(40);
+      });
+
+      expect(loadItems.mock.calls.map((call) => call[1])).toEqual([
+        { limit: 40 },
+        { limit: 40, cursor: "cursor-40" },
+        { limit: 40 },
+      ]);
+      expect(body.scrollTop).toBe(0);
+      expect(parent.descendants().some((item) => item.textContent === "重试加载")).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("limits latest-item requests to four globally after the compatibility probe", async () => {
+    const probeSource = subscriptionSource("source-probe", "Probe", "digest-probe", 5);
+    const probe = deferred<FeedSubscriptionSourceItemsPage>();
+    const pending = new Map<string, ReturnType<typeof deferred<FeedSubscriptionSourceItemsPage>>>();
+    let active = 0;
+    let maximumActive = 0;
+    const loadItems = vi.fn((sourceId: string) => {
+      if (sourceId === probeSource.source_id) return probe.promise;
+      const request = pending.get(sourceId);
+      if (!request) throw new Error(`missing deferred request for ${sourceId}`);
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      return request.promise.finally(() => {
+        active -= 1;
+      });
+    });
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, {
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      feedReadingPosition: () => undefined,
+      feedDecisionSnapshot: () => undefined,
+      openFeedItem: vi.fn(async () => undefined),
+      rememberFeedReadingPosition: vi.fn(async () => undefined),
+      loadFeedSubscriptionSourceItems: loadItems,
+      updateDashboardReadingSourceUiState: vi.fn(() => undefined),
+    } as never);
+    enableLatestItemsPagination(view);
+    const runtime = view as unknown as {
+      renderSubscriptionSourceCard: (parent: HTMLElement, value: FeedSubscriptionSource) => void;
+    };
+    runtime.renderSubscriptionSourceCard(new TestElement() as unknown as HTMLElement, probeSource);
+    probe.resolve(subscriptionSourceItemsPage(probeSource));
+    await vi.waitFor(() => expect(loadItems).toHaveBeenCalledTimes(1));
+    await Promise.resolve();
+
+    const sources = Array.from({ length: 8 }, (_value, index) =>
+      subscriptionSource(`source-limit-${index}`, `Limit ${index}`, `digest-limit-${index}`, 5)
+    );
+    for (const source of sources) {
+      pending.set(source.source_id, deferred<FeedSubscriptionSourceItemsPage>());
+      runtime.renderSubscriptionSourceCard(new TestElement() as unknown as HTMLElement, source);
+    }
+    expect(active).toBe(4);
+    expect(maximumActive).toBe(4);
+
+    pending.get(sources[0]!.source_id)?.resolve(subscriptionSourceItemsPage(sources[0]!));
+    await vi.waitFor(() => expect(loadItems).toHaveBeenCalledTimes(6));
+    expect(active).toBe(4);
+    for (const source of sources.slice(1)) {
+      pending.get(source.source_id)?.resolve(subscriptionSourceItemsPage(source));
+    }
+    await vi.waitFor(() => expect(active).toBe(0));
+    expect(maximumActive).toBe(4);
+  });
+
+  it("keeps latest-item and scroll caches aligned to the 32 most recent Reading sources", () => {
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, {
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      feedReadingPosition: () => undefined,
+      feedDecisionSnapshot: () => undefined,
+      openFeedItem: vi.fn(async () => undefined),
+      rememberFeedReadingPosition: vi.fn(async () => undefined),
+      updateDashboardReadingSourceUiState: vi.fn(() => undefined),
+    } as never);
+    const runtime = view as unknown as {
+      renderSubscriptionSourceCard: (parent: HTMLElement, value: FeedSubscriptionSource) => void;
+      readingSourceItems: Map<string, unknown>;
+      readingSourceScroll: Map<string, number>;
+      readingSourceScrollDigest: Map<string, string>;
+    };
+
+    for (let index = 0; index < 33; index += 1) {
+      runtime.renderSubscriptionSourceCard(
+        new TestElement() as unknown as HTMLElement,
+        subscriptionSource(`source-lru-${index}`, `LRU ${index}`, `digest-lru-${index}`),
+      );
+    }
+
+    expect(runtime.readingSourceItems.size).toBe(32);
+    expect(runtime.readingSourceScroll.size).toBe(32);
+    expect(runtime.readingSourceScrollDigest.size).toBe(32);
+    expect(runtime.readingSourceItems.has("source-lru-0")).toBe(false);
+    expect(runtime.readingSourceScroll.has("source-lru-0")).toBe(false);
+    expect(runtime.readingSourceItems.has("source-lru-32")).toBe(true);
+    expect(runtime.readingSourceScroll.has("source-lru-32")).toBe(true);
+  });
+
+  it("rehydrates an evicted in-flight card and completes it when the old card is scrolled", async () => {
+    const sources = Array.from({ length: 33 }, (_value, index) =>
+      subscriptionSource(`source-rehydrate-${index}`, `Rehydrate ${index}`, `digest-rehydrate-${index}`, 5)
+    );
+    const firstRequest = deferred<FeedSubscriptionSourceItemsPage>();
+    const loadItems = vi.fn((sourceId: string) => {
+      if (sourceId === sources[0]!.source_id && loadItems.mock.calls.length === 1) {
+        return firstRequest.promise;
+      }
+      const source = sources.find((candidate) => candidate.source_id === sourceId);
+      if (!source) throw new Error(`unknown source ${sourceId}`);
+      return Promise.resolve(subscriptionSourceItemsPage(source));
+    });
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, {
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      feedReadingPosition: () => undefined,
+      feedDecisionSnapshot: () => undefined,
+      openFeedItem: vi.fn(async () => undefined),
+      rememberFeedReadingPosition: vi.fn(async () => undefined),
+      loadFeedSubscriptionSourceItems: loadItems,
+      updateDashboardReadingSourceUiState: vi.fn(() => undefined),
+    } as never);
+    enableLatestItemsPagination(view);
+    const runtime = view as unknown as {
+      renderSubscriptionSourceCard: (parent: HTMLElement, value: FeedSubscriptionSource) => void;
+      readingSourceItems: Map<string, unknown>;
+      readingSourceScroll: Map<string, number>;
+    };
+    const parents = sources.map(() => new TestElement());
+    for (const [index, source] of sources.entries()) {
+      runtime.renderSubscriptionSourceCard(parents[index]! as unknown as HTMLElement, source);
+    }
+    expect(runtime.readingSourceItems.has(sources[0]!.source_id)).toBe(false);
+    expect(loadItems).toHaveBeenCalledTimes(1);
+
+    const firstBody = parents[0]!.descendants("okf-reading-source-card__preview")[0]!;
+    Object.assign(firstBody, { clientHeight: 400, scrollHeight: 2_000, scrollTop: 1_500 });
+    vi.stubGlobal("window", globalThis);
+    try {
+      firstBody.dispatch("scroll");
+      expect(runtime.readingSourceItems.has(sources[0]!.source_id)).toBe(true);
+      expect(runtime.readingSourceScroll.has(sources[0]!.source_id)).toBe(true);
+      firstRequest.resolve(subscriptionSourceItemsPage(sources[0]!));
+      await vi.waitFor(() => {
+        expect(parents[0]!.descendants("okf-feed-digest__item")).toHaveLength(5);
+      });
+
+      expect(loadItems.mock.calls.filter((call) => call[0] === sources[0]!.source_id))
+        .toHaveLength(2);
+      expect(parents[0]!.descendants().some((item) => item.textContent.includes("正在加载")))
+        .toBe(false);
+      expect(runtime.readingSourceItems.size).toBe(32);
+      expect(runtime.readingSourceScroll.size).toBe(32);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("cancels queued latest-item requests and discards the active response on close", async () => {
+    const sources = Array.from({ length: 3 }, (_value, index) =>
+      subscriptionSource(`source-close-${index}`, `Close ${index}`, `digest-close-${index}`, 5)
+    );
+    const active = deferred<FeedSubscriptionSourceItemsPage>();
+    const loadItems = vi.fn(() => active.promise);
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, {
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      feedReadingPosition: () => undefined,
+      feedDecisionSnapshot: () => undefined,
+      openFeedItem: vi.fn(async () => undefined),
+      rememberFeedReadingPosition: vi.fn(async () => undefined),
+      loadFeedSubscriptionSourceItems: loadItems,
+      updateDashboardReadingSourceUiState: vi.fn(() => undefined),
+      updateDashboardFeedUiState: vi.fn(() => undefined),
+      updateDashboardPageUiState: vi.fn(() => undefined),
+    } as never);
+    enableLatestItemsPagination(view);
+    const runtime = view as unknown as {
+      renderSubscriptionSourceCard: (parent: HTMLElement, value: FeedSubscriptionSource) => void;
+      readingSourceItems: Map<string, unknown>;
+      readingSourceItemsRequestQueue: unknown[];
+      readingSourceItemsActiveRequests: number;
+      readingSourceItemsRequestsCancelled: boolean;
+    };
+    const parents = sources.map(() => new TestElement());
+    for (const [index, source] of sources.entries()) {
+      runtime.renderSubscriptionSourceCard(parents[index]! as unknown as HTMLElement, source);
+    }
+    expect(loadItems).toHaveBeenCalledTimes(1);
+    expect(runtime.readingSourceItemsRequestQueue).toHaveLength(2);
+
+    vi.stubGlobal("window", globalThis);
+    try {
+      await view.onClose();
+      expect(runtime.readingSourceItemsRequestsCancelled).toBe(true);
+      expect(runtime.readingSourceItemsRequestQueue).toHaveLength(0);
+      expect(runtime.readingSourceItems.size).toBe(0);
+
+      active.resolve(subscriptionSourceItemsPage(sources[0]!));
+      await vi.waitFor(() => expect(runtime.readingSourceItemsActiveRequests).toBe(0));
+      expect(loadItems).toHaveBeenCalledTimes(1);
+      expect(parents[0]!.descendants("okf-feed-digest__item")).toHaveLength(3);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("renders Reading in the real navigation and reuses Feed items with cursor pagination", async () => {
@@ -204,6 +863,7 @@ describe("real Dashboard View source handoff", () => {
     source.native_section_counts = { 工具: 3, 文章: 2, 资源: 2, 教程: 1, 其他: 1 };
     const loadFeedSubscriptionSources = vi.fn(async () => ({
       section: "learning" as const,
+      latest_items_pagination: true,
       sources: [{
         ...source,
         pending_decision_count: Math.max(0, 5 - projectionVersion),
@@ -219,6 +879,7 @@ describe("real Dashboard View source handoff", () => {
       conversionSnapshot: () => [],
       loadFeedSubscriptions,
       loadFeedSubscriptionSources,
+      loadFeedSubscriptionSourceItems: vi.fn(async () => subscriptionSourceItemsPage(source)),
       feedProjectionVersion: () => projectionVersion,
       feedDecisionSnapshot: (_feed: string, itemId: string) => decisions.get(itemId),
       feedReadingPosition: () => undefined,
@@ -259,7 +920,11 @@ describe("real Dashboard View source handoff", () => {
     expect(root.descendants("okf-reading-source-search")).toHaveLength(1);
     expect(root.descendants("okf-reading-source-card__sections")[0]?.children.map((item) => item.textContent))
       .toEqual(["工具 3", "文章 2", "资源 2", "其他 2 类"]);
-    expect(root.descendants("okf-feed-digest__item")).toHaveLength(3);
+    await vi.waitFor(() => expect(root.descendants("okf-feed-digest__item")).toHaveLength(5));
+    expect(root.descendants("okf-reading-source-card")[0]?.hasClass("okf-feed-card--scrollable"))
+      .toBe(true);
+    expect(root.descendants("okf-reading-source-card__preview")[0]?.dataset.sourceId)
+      .toBe("source-a");
     expect(root.descendants("okf-dashboard__feed-warning")[0]?.textContent)
       .toBe("采集不完整：部分内容缺失");
     expect(root.descendants("okf-feed-digest__item").every((item) => item.hasClass("is-compact"))).toBe(true);

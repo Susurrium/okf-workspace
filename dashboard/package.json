@@ -1,6 +1,6 @@
 {
   "name": "okf-workspace-dashboard",
-  "version": "1.13.1",
+  "version": "1.13.2",
   "private": true,
   "type": "module",
   "scripts": {

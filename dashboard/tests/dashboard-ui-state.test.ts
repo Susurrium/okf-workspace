@@ -32,6 +32,7 @@ describe("Dashboard UI state", () => {
       "ai-daily-learning": { scrollTop: 0 },
       treehole: { scrollTop: 0 },
     });
+    expect(state.readingSources).toEqual({});
   });
 
   it("migrates old feed reading positions and tolerates malformed settings", () => {
@@ -140,6 +141,45 @@ describe("Dashboard UI state", () => {
     expect(state.feeds["ai-daily-news"].scrollTop).toBe(240);
     expect(state.feeds["ai-daily-learning"].scrollTop).toBe(480);
     expect(state.feeds["ai-daily"].scrollTop).toBe(0);
+  });
+
+  it("persists bounded per-source Reading scroll positions by digest", () => {
+    let state = normalizeDashboardUiState({
+      readingSources: {
+        "source:kept": {
+          digestId: "2026-08-23-learning",
+          scrollTop: 180,
+          updatedAt: "2026-08-23T02:00:00Z",
+        },
+        "source:invalid": { digestId: "", scrollTop: 999 },
+      },
+    });
+    expect(state.readingSources).toEqual({
+      "source:kept": {
+        digestId: "2026-08-23-learning",
+        scrollTop: 180,
+        updatedAt: "2026-08-23T02:00:00Z",
+      },
+    });
+
+    for (let index = 0; index < 35; index += 1) {
+      state = patchDashboardUiState(state, {
+        readingSources: {
+          [`source:${index}`]: {
+            digestId: `digest:${index}`,
+            scrollTop: index,
+            updatedAt: `2026-08-23T03:${String(index).padStart(2, "0")}:00Z`,
+          },
+        },
+      });
+    }
+    expect(Object.keys(state.readingSources)).toHaveLength(32);
+    expect(state.readingSources["source:34"]).toEqual({
+      digestId: "digest:34",
+      scrollTop: 34,
+      updatedAt: "2026-08-23T03:34:00Z",
+    });
+    expect(state.readingSources["source:0"]).toBeUndefined();
   });
 
   it("persists the narrow Today pane and the Learning context independently", () => {

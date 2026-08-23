@@ -113,6 +113,7 @@ export interface FeedSubscriptionSource {
   source_name: string;
   latest_issued_at: string;
   latest_digest_id: string;
+  latest_revision?: string;
   quality?: string | null;
   quality_reason?: string | null;
   latest_item_count: number;
@@ -122,8 +123,25 @@ export interface FeedSubscriptionSource {
   preview_items: FeedDigestItem[];
 }
 
+export interface FeedSubscriptionSourceItemsPage {
+  source_id: string;
+  digest_id: string;
+  latest_revision?: string;
+  issued_at: string;
+  item_count: number;
+  items: FeedDigestItem[];
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
+export interface FeedSubscriptionSourceItemsQuery {
+  limit?: number;
+  cursor?: string;
+}
+
 export interface FeedSubscriptionSourcePage {
   section: "learning";
+  latest_items_pagination?: boolean;
   catalog_complete?: boolean;
   catalog_indexing?: boolean;
   sources: FeedSubscriptionSource[];

@@ -92,6 +92,12 @@ export class TestElement {
     this.listeners.set(type, listeners);
   }
 
+  public removeEventListener(type: string, callback: (event: Event) => void): void {
+    const listeners = this.listeners.get(type);
+    if (!listeners) return;
+    this.listeners.set(type, listeners.filter((candidate) => candidate !== callback));
+  }
+
   public dispatch(type: string, event: Partial<Event> = {}): void {
     for (const callback of this.listeners.get(type) ?? []) callback(event as Event);
   }

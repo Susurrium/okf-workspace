@@ -648,6 +648,7 @@ def test_reading_source_cards_are_latest_scoped_searchable_and_stably_paged(
     )
     assert first_response.status_code == 200
     first = first_response.json()
+    assert first["latest_items_pagination"] is True
     assert first["catalog_complete"] is True
     assert first["catalog_indexing"] is False
     assert first["total_sources"] == 3
@@ -661,13 +662,16 @@ def test_reading_source_cards_are_latest_scoped_searchable_and_stably_paged(
     alpha = first["sources"][1]
     assert alpha["latest_issued_at"] == "2026-08-22"
     assert alpha["latest_digest_id"] == alpha_id
+    assert len(alpha["latest_revision"]) == 64
     assert alpha["latest_item_count"] == 5
     assert alpha["pending_decision_count"] == 4
     assert alpha["edition_count"] == 2
     assert alpha["native_section_counts"] == {"工具": 2, "文章": 2, "未分类": 1}
     assert alpha["quality"] == "partial"
     assert alpha["quality_reason"] == "一个来源暂时不可用"
+    assert "latest_items" not in alpha
     assert len(alpha["preview_items"]) == 3
+    assert alpha["preview_items"][0]["decision"] == "ignore"
     assert all(value["decision"] is None for value in alpha["preview_items"][1:])
 
     new_id = "2026-08-25-learning"
@@ -725,6 +729,252 @@ def test_reading_source_cards_are_latest_scoped_searchable_and_stably_paged(
         ).status_code
         == 422
     )
+
+
+def test_reading_source_latest_items_are_bounded_cursor_bound_and_protected(
+    vault: Path,
+    tmp_path: Path,
+) -> None:
+    client, headers, paths = _client(vault, tmp_path)
+    cache = FeedCache(paths.state)
+
+    def put(
+        issued_at: str,
+        count: int,
+        *,
+        source_id: str = "source:alpha",
+        indexes: tuple[int, ...] | None = None,
+        body_suffix: str = "",
+    ) -> None:
+        edition_id = f"{issued_at}-learning"
+        selected_indexes = indexes if indexes is not None else tuple(range(count))
+        assert len(selected_indexes) == count
+        cache.put(
+            FeedEdition(
+                edition_id=edition_id,
+                feed=FeedKind.AI_DAILY,
+                edition_at=issued_at,
+                title=f"订阅阅读 {issued_at}",
+                stream="learning",
+                items=tuple(
+                    FeedItem(
+                        item_id=f"{source_id}:{issued_at}:{index:03d}",
+                        feed=FeedKind.AI_DAILY,
+                        edition_id=edition_id,
+                        title=f"条目 {index}",
+                        body=f"摘要 {index}{body_suffix}",
+                        url=f"https://reading.example/{index}",
+                        stream="learning",
+                        source_id=source_id,
+                        source_name="Alpha Weekly" if source_id == "source:alpha" else "Beta",
+                    )
+                    for index in selected_indexes
+                ),
+            )
+        )
+
+    put("2026-08-23", 55)
+    put("2026-08-22", 1, source_id="source:beta")
+    put("2026-08-21", 1, source_id="source/with/slash")
+    path = "/dashboard/feeds/subscription-sources/source:alpha/latest-items"
+
+    overview = client.get(
+        "/dashboard/feeds/subscription-sources",
+        headers=headers,
+        params={"query": "Alpha"},
+    ).json()
+    assert overview["latest_items_pagination"] is True
+    original_revision = overview["sources"][0]["latest_revision"]
+    assert len(original_revision) == 64
+
+    assert client.get(path).status_code == 401
+    first_response = client.get(path, headers=headers, params={"limit": 50})
+    assert first_response.status_code == 200
+    first = first_response.json()
+    assert first["source_id"] == "source:alpha"
+    assert first["digest_id"] == "2026-08-23-learning"
+    assert first["latest_revision"] == original_revision
+    assert first["item_count"] == 55
+    assert len(first["items"]) == 50
+    assert first["has_more"] is True
+    assert isinstance(first["next_cursor"], str)
+
+    second_response = client.get(
+        path,
+        headers=headers,
+        params={"limit": 50, "cursor": first["next_cursor"]},
+    )
+    assert second_response.status_code == 200
+    second = second_response.json()
+    assert len(second["items"]) == 5
+    assert second["has_more"] is False
+    assert second["next_cursor"] is None
+    first_ids = {item["item_id"] for item in first["items"]}
+    second_ids = {item["item_id"] for item in second["items"]}
+    assert not first_ids.intersection(second_ids)
+
+    assert (
+        client.get(
+            "/dashboard/feeds/subscription-sources/source:beta/latest-items",
+            headers=headers,
+            params={"cursor": first["next_cursor"]},
+        ).status_code
+        == 400
+    )
+    tampered = ("A" if first["next_cursor"][0] != "A" else "B") + first["next_cursor"][1:]
+    assert client.get(path, headers=headers, params={"cursor": tampered}).status_code == 400
+    assert client.get(path, headers=headers, params={"limit": 51}).status_code == 422
+    slash_source = client.get(
+        "/dashboard/feeds/subscription-sources/source%2Fwith%2Fslash/latest-items",
+        headers=headers,
+    )
+    assert slash_source.status_code == 200
+    assert slash_source.json()["source_id"] == "source/with/slash"
+    assert (
+        client.get(
+            "/dashboard/feeds/subscription-sources/source:missing/latest-items",
+            headers=headers,
+        ).status_code
+        == 404
+    )
+
+    # Keep the old boundary item at index 49 while changing the already-read
+    # prefix. An anchor-only cursor would accept this and then duplicate item 0
+    # while omitting item 50.
+    reordered = (50, *range(1, 49), 49, 0, *range(51, 55))
+    put("2026-08-23", 55, indexes=reordered)
+    assert (
+        client.get(
+            path,
+            headers=headers,
+            params={"cursor": first["next_cursor"]},
+        ).status_code
+        == 400
+    )
+
+    # An in-place correction with the same digest, item count, and order must
+    # also invalidate the old cursor and produce a new Dashboard identity.
+    put("2026-08-23", 55, body_suffix=" · 修订")
+    assert (
+        client.get(
+            path,
+            headers=headers,
+            params={"cursor": first["next_cursor"]},
+        ).status_code
+        == 400
+    )
+    corrected_overview = client.get(
+        "/dashboard/feeds/subscription-sources",
+        headers=headers,
+        params={"query": "Alpha"},
+    ).json()
+    assert corrected_overview["sources"][0]["latest_revision"] != original_revision
+
+    put("2026-08-24", 1)
+    assert (
+        client.get(
+            path,
+            headers=headers,
+            params={"cursor": first["next_cursor"]},
+        ).status_code
+        == 400
+    )
+
+
+def test_reading_source_item_projection_has_hard_byte_limits_without_rejecting_content(
+    vault: Path,
+    tmp_path: Path,
+) -> None:
+    client, headers, paths = _client(vault, tmp_path)
+    cache = FeedCache(paths.state)
+
+    def put(
+        issued_at: str,
+        items: tuple[FeedItem, ...],
+    ) -> None:
+        cache.put(
+            FeedEdition(
+                edition_id=f"{issued_at}-learning",
+                feed=FeedKind.AI_DAILY,
+                edition_at=issued_at,
+                title=f"订阅阅读 {issued_at}",
+                stream="learning",
+                items=items,
+            )
+        )
+
+    artifact_id = "2026-08-20-learning"
+    put(
+        "2026-08-20",
+        (
+            FeedItem(
+                item_id="artifact:128-kib",
+                feed=FeedKind.AI_DAILY,
+                edition_id=artifact_id,
+                title="正常 artifact.v2 内容",
+                body="x" * (128 * 1024),
+                stream="learning",
+                source_id="source:artifact",
+                source_name="Artifact",
+            ),
+        ),
+    )
+    artifact_response = client.get(
+        "/dashboard/feeds/subscription-sources/source:artifact/latest-items",
+        headers=headers,
+    )
+    assert artifact_response.status_code == 200
+    assert len(artifact_response.json()["items"]) == 1
+
+    oversized_id = "2026-08-21-learning"
+    put(
+        "2026-08-21",
+        (
+            FeedItem(
+                item_id="oversized:item",
+                feed=FeedKind.AI_DAILY,
+                edition_id=oversized_id,
+                title="单项越界",
+                body="摘要",
+                stream="learning",
+                source_id="source:oversized-item",
+                source_name="Oversized item",
+                metrics={"blob": "x" * (65 * 1024)},
+            ),
+        ),
+    )
+    oversized_item_response = client.get(
+        "/dashboard/feeds/subscription-sources/source:oversized-item/latest-items",
+        headers=headers,
+    )
+    assert oversized_item_response.status_code == 413
+    assert "Reading item projection exceeds" in oversized_item_response.json()["detail"]
+
+    oversized_page_id = "2026-08-22-learning"
+    put(
+        "2026-08-22",
+        tuple(
+            FeedItem(
+                item_id=f"oversized:page:{index}",
+                feed=FeedKind.AI_DAILY,
+                edition_id=oversized_page_id,
+                title=f"分页越界 {index}",
+                body="摘要",
+                stream="learning",
+                source_id="source:oversized-page",
+                source_name="Oversized page",
+                metrics={"blob": "x" * (24 * 1024)},
+            )
+            for index in range(50)
+        ),
+    )
+    oversized_page_response = client.get(
+        "/dashboard/feeds/subscription-sources/source:oversized-page/latest-items",
+        headers=headers,
+        params={"limit": 50},
+    )
+    assert oversized_page_response.status_code == 413
+    assert "Reading page projection exceeds" in oversized_page_response.json()["detail"]
 
 
 def test_reading_source_overview_uses_catalog_and_loads_shared_latest_once(

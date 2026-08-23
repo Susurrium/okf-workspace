@@ -28,6 +28,8 @@ import type {
   FeedSubscriptionPageQuery,
   FeedSubscriptionSourcePage,
   FeedSubscriptionSourcePageQuery,
+  FeedSubscriptionSourceItemsPage,
+  FeedSubscriptionSourceItemsQuery,
   FeedSyncResult,
 } from "../feeds/types.js";
 import { feedItemMappings } from "../feeds/mappings.js";
@@ -79,6 +81,7 @@ import {
   type DashboardFeedUiStatePatch,
   type DashboardFeed,
   type DashboardPageUiStatePatch,
+  type DashboardReadingSourceUiStatePatch,
   type DashboardSection,
   type DashboardUiState,
   type DashboardUiStatePatch,
@@ -229,6 +232,13 @@ export default class OkfBrainPlugin extends Plugin {
     patch: DashboardFeedUiStatePatch,
   ): DashboardUiState {
     return this.updateDashboardUiState({ feeds: { [feed]: patch } });
+  }
+
+  public updateDashboardReadingSourceUiState(
+    sourceId: string,
+    patch: DashboardReadingSourceUiStatePatch,
+  ): DashboardUiState {
+    return this.updateDashboardUiState({ readingSources: { [sourceId]: patch } });
   }
 
   public recentDashboardFiles(): readonly RecentDashboardFile[] {
@@ -1037,6 +1047,20 @@ export default class OkfBrainPlugin extends Plugin {
       if (!(error instanceof FeedTransportError)) throw error;
       await this.ensureLocalServiceAvailable();
       return api.listSubscriptionSources(query);
+    }
+  }
+
+  public async loadFeedSubscriptionSourceItems(
+    sourceId: string,
+    query: FeedSubscriptionSourceItemsQuery = {},
+  ): Promise<FeedSubscriptionSourceItemsPage> {
+    const api = new HttpFeedApi(this.settings.baseUrl, this.settings.token);
+    try {
+      return await api.listSubscriptionSourceItems(sourceId, query);
+    } catch (error) {
+      if (!(error instanceof FeedTransportError)) throw error;
+      await this.ensureLocalServiceAvailable();
+      return api.listSubscriptionSourceItems(sourceId, query);
     }
   }
 

@@ -10,7 +10,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard, cast
 from urllib.parse import urlparse
 
 from okf_workspace.feeds import FeedCache, FeedEdition, FeedItem, FeedKind
@@ -28,6 +28,14 @@ _MARKDOWN_DECORATION = re.compile(r"[#>*_`~-]+")
 _PRODUCER_SUMMARY = re.compile(r"(?m)^\*\*摘要：\*\*[ \t]*(?P<value>.+?)[ \t]*$")
 _CURSOR_VERSION = 1
 _CURSOR_DOMAIN = b"okf-feed-dashboard-cursor-v1\0"
+_READING_SNAPSHOT_DOMAIN = b"okf-reading-source-item-snapshot-v1\0"
+_READING_PROJECTION_DOMAIN = b"okf-reading-source-projection-v1\0"
+_READING_ITEM_PROJECTION_MAX_BYTES = 64 * 1024
+_READING_PAGE_PROJECTION_MAX_BYTES = 1024 * 1024
+
+
+class FeedProjectionTooLarge(ValueError):
+    """A bounded Dashboard projection would exceed its transport contract."""
 
 
 def _excerpt(body: str, *, limit: int = 220) -> str:
@@ -107,6 +115,79 @@ def _canonical_cursor_payload(payload: Mapping[str, object]) -> bytes:
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
+
+
+def _canonical_json_bytes(value: object) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _reading_item_snapshot(items: list[FeedItem]) -> str:
+    payload = [item.item_id for item in items]
+    return hashlib.sha256(
+        _READING_SNAPSHOT_DOMAIN + _canonical_json_bytes(payload)
+    ).hexdigest()
+
+
+def _reading_projection_revision(
+    source_id: str,
+    digest_id: str,
+    items: list[FeedItem],
+) -> str:
+    payload = {
+        "source_id": source_id,
+        "digest_id": digest_id,
+        "items": [
+            {
+                "item_id": item.item_id,
+                "title": item.title,
+                "body": item.body,
+                "url": item.url,
+                "published_at": item.published_at,
+                "stream": item.stream,
+                "source_id": item.source_id,
+                "source_name": item.source_name,
+                "native_section": item.native_section,
+                "pid": item.pid,
+                "metrics": item.metrics,
+                "comment_count": len(item.comments),
+                "media_count": len(item.media),
+            }
+            for item in items
+        ],
+    }
+    return hashlib.sha256(
+        _READING_PROJECTION_DOMAIN + _canonical_json_bytes(payload)
+    ).hexdigest()
+
+
+def _bounded_reading_item_projection(
+    item: FeedItem,
+    decisions: FeedDecisionStore,
+) -> dict[str, object]:
+    projection = _item(item, decisions)
+    encoded_size = len(_canonical_json_bytes(projection))
+    if encoded_size > _READING_ITEM_PROJECTION_MAX_BYTES:
+        raise FeedProjectionTooLarge(
+            "Reading item projection exceeds "
+            f"{_READING_ITEM_PROJECTION_MAX_BYTES} bytes: {item.item_id} "
+            f"({encoded_size} bytes)"
+        )
+    return projection
+
+
+def _bounded_reading_page(payload: dict[str, object]) -> dict[str, object]:
+    encoded_size = len(_canonical_json_bytes(payload))
+    if encoded_size > _READING_PAGE_PROJECTION_MAX_BYTES:
+        raise FeedProjectionTooLarge(
+            "Reading page projection exceeds "
+            f"{_READING_PAGE_PROJECTION_MAX_BYTES} bytes ({encoded_size} bytes)"
+        )
+    return payload
 
 
 def _encode_cursor(payload: Mapping[str, object]) -> str:
@@ -238,6 +319,70 @@ def _decode_source_cursor(cursor: str, query: str) -> tuple[bool, str, str]:
     return unattributed, latest_issued_at, source_id
 
 
+def _encode_source_items_cursor(
+    source_id: str,
+    digest_id: str,
+    next_index: int,
+    item_snapshot: str,
+    projection_revision: str,
+) -> str:
+    return _encode_cursor(
+        {
+            "version": _CURSOR_VERSION,
+            "kind": "subscription-source-latest-items",
+            "source_id": source_id,
+            "digest_id": digest_id,
+            "next_index": next_index,
+            "item_snapshot": item_snapshot,
+            "projection_revision": projection_revision,
+        }
+    )
+
+
+def _decode_source_items_cursor(
+    cursor: str,
+    source_id: str,
+) -> tuple[str, int, str, str]:
+    payload = _decode_cursor(cursor)
+    if set(payload) != {
+        "version",
+        "kind",
+        "source_id",
+        "digest_id",
+        "next_index",
+        "item_snapshot",
+        "projection_revision",
+    }:
+        raise ValueError("invalid Reading source item cursor")
+    digest_id = payload.get("digest_id")
+    next_index = payload.get("next_index")
+    item_snapshot = payload.get("item_snapshot")
+    projection_revision = payload.get("projection_revision")
+    if (
+        payload.get("version") != _CURSOR_VERSION
+        or payload.get("kind") != "subscription-source-latest-items"
+        or payload.get("source_id") != source_id
+        or not isinstance(digest_id, str)
+        or not digest_id
+        or not isinstance(next_index, int)
+        or isinstance(next_index, bool)
+        or next_index < 1
+        or next_index > 1_000_000
+        or not _is_sha256(item_snapshot)
+        or not _is_sha256(projection_revision)
+    ):
+        raise ValueError("invalid Reading source item cursor")
+    return digest_id, next_index, item_snapshot, projection_revision
+
+
+def _is_sha256(value: object) -> TypeGuard[str]:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
 def _comes_after_source_cursor(
     source: _ReadingSource,
     cursor: tuple[bool, str, str],
@@ -257,13 +402,15 @@ def _source_card(
     edition: FeedEdition | None,
 ) -> dict[str, object]:
     preview_items: list[dict[str, object]] = []
+    matching_items: list[FeedItem] = []
     pending_decision_count = source.latest_item_count
     if edition is not None:
         pending_decision_count = 0
         for item in edition.items:
             if reading_source_id(item) != source.source_id:
                 continue
-            projection = _item(item, decisions)
+            matching_items.append(item)
+            projection = _bounded_reading_item_projection(item, decisions)
             if projection["decision"] is None:
                 pending_decision_count += 1
             if len(preview_items) < 3:
@@ -273,6 +420,11 @@ def _source_card(
         "source_name": source.source_name,
         "latest_issued_at": source.latest_issued_at,
         "latest_digest_id": source.latest_digest_id,
+        "latest_revision": _reading_projection_revision(
+            source.source_id,
+            source.latest_digest_id,
+            matching_items,
+        ),
         # The following three fields intentionally describe only the latest
         # edition. Historical undecided items must not inflate a source card.
         "latest_item_count": source.latest_item_count,
@@ -307,7 +459,7 @@ def subscription_sources_dashboard(
     cursor: str | None = None,
     query: str | None = None,
 ) -> dict[str, object]:
-    """Return a stable page of Reading sources and latest-edition previews."""
+    """Return a stable page of Reading sources and bounded latest-edition previews."""
 
     if not 1 <= limit <= 8:
         raise ValueError("Reading source page limit must be between 1 and 8")
@@ -358,8 +510,9 @@ def subscription_sources_dashboard(
                     catalog,
                     (summaries_by_id[value.source_id] for value in visible),
                 )
-                return {
+                return _bounded_reading_page({
                     "section": "learning",
+                    "latest_items_pagination": True,
                     "catalog_complete": catalog.complete,
                     "catalog_indexing": catalog.indexing,
                     "sources": [
@@ -379,12 +532,114 @@ def subscription_sources_dashboard(
                     if has_more and visible
                     else None,
                     "has_more": has_more,
-                }
+                })
         except FeedSourceCatalogStale:
             if attempt:
                 raise
             cache.rebuild_stream_source_catalog(FeedKind.AI_DAILY, "learning")
     raise AssertionError("unreachable Feed source catalog retry")
+
+
+def subscription_source_latest_items_dashboard(
+    state: Path,
+    source_id: str,
+    *,
+    limit: int = 40,
+    cursor: str | None = None,
+) -> dict[str, object]:
+    """Return one bounded page from a Reading source's current latest edition."""
+
+    normalized_source_id = source_id.strip()
+    if not normalized_source_id:
+        raise ValueError("Reading source id must not be empty")
+    if len(normalized_source_id) > 500:
+        raise ValueError("Reading source id must not exceed 500 characters")
+    if not 1 <= limit <= 50:
+        raise ValueError("Reading source item page limit must be between 1 and 50")
+    decoded = (
+        _decode_source_items_cursor(cursor, normalized_source_id)
+        if cursor is not None
+        else None
+    )
+    cache = FeedCache(state)
+    decisions = FeedDecisionStore(state)
+    for attempt in range(2):
+        try:
+            with cache.locked_stream_source_catalog(
+                FeedKind.AI_DAILY,
+                "learning",
+            ) as catalog:
+                summary = next(
+                    (
+                        value
+                        for value in catalog.sources
+                        if value.source_id == normalized_source_id
+                    ),
+                    None,
+                )
+                if summary is None:
+                    raise KeyError(normalized_source_id)
+                edition = cache.load_source_latest_editions_locked(
+                    FeedKind.AI_DAILY,
+                    "learning",
+                    catalog,
+                    (summary,),
+                )[summary.latest_digest_id]
+                matching = [
+                    item
+                    for item in edition.items
+                    if reading_source_id(item) == normalized_source_id
+                ]
+                if len(matching) != summary.latest_item_count:
+                    raise FeedSourceCatalogStale(
+                        "Feed source latest item count does not match its catalog"
+                    )
+                item_snapshot = _reading_item_snapshot(matching)
+                projection_revision = _reading_projection_revision(
+                    normalized_source_id,
+                    summary.latest_digest_id,
+                    matching,
+                )
+                start = 0
+                if decoded is not None:
+                    digest_id, start, cursor_snapshot, cursor_revision = decoded
+                    if digest_id != summary.latest_digest_id:
+                        raise ValueError("Reading source latest edition changed")
+                    if (
+                        cursor_snapshot != item_snapshot
+                        or cursor_revision != projection_revision
+                        or start > len(matching)
+                    ):
+                        raise ValueError("Reading source item cursor no longer matches its edition")
+                page = matching[start : start + limit]
+                next_index = start + len(page)
+                has_more = next_index < len(matching)
+                projected_items = [
+                    _bounded_reading_item_projection(item, decisions) for item in page
+                ]
+                return _bounded_reading_page({
+                    "source_id": normalized_source_id,
+                    "digest_id": summary.latest_digest_id,
+                    "latest_revision": projection_revision,
+                    "issued_at": summary.latest_issued_at,
+                    "item_count": len(matching),
+                    "items": projected_items,
+                    "next_cursor": _encode_source_items_cursor(
+                        normalized_source_id,
+                        summary.latest_digest_id,
+                        next_index,
+                        item_snapshot,
+                        projection_revision,
+                    )
+                    if has_more and page
+                    else None,
+                    "has_more": has_more,
+                })
+        except FeedSourceCatalogStale:
+            if attempt:
+                raise
+            cache.rebuild_stream_source_catalog(FeedKind.AI_DAILY, "learning")
+    raise AssertionError("unreachable Reading source item retry")
 
 
 def subscription_dashboard(

@@ -40,8 +40,10 @@ from okf_workspace.ai import (
 from okf_workspace.config import BrainPaths
 from okf_workspace.dashboard.catalog import scan_notes
 from okf_workspace.dashboard.feeds import (
+    FeedProjectionTooLarge,
     feed_dashboard,
     subscription_dashboard,
+    subscription_source_latest_items_dashboard,
     subscription_sources_dashboard,
 )
 from okf_workspace.dashboard.system import system_status
@@ -489,6 +491,31 @@ def create_app(
                 cursor=cursor,
                 query=query,
             )
+        except FeedProjectionTooLarge as error:
+            raise HTTPException(status_code=413, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @app.get(
+        "/dashboard/feeds/subscription-sources/{source_id:path}/latest-items",
+        dependencies=protected,
+    )
+    def get_feed_subscription_source_latest_items(
+        source_id: str,
+        limit: Annotated[int, Query(ge=1, le=50)] = 40,
+        cursor: Annotated[str | None, Query(max_length=4096)] = None,
+    ) -> dict[str, object]:
+        try:
+            return subscription_source_latest_items_dashboard(
+                configured.state,
+                source_id,
+                limit=limit,
+                cursor=cursor,
+            )
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Reading source not found") from error
+        except FeedProjectionTooLarge as error:
+            raise HTTPException(status_code=413, detail=str(error)) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 

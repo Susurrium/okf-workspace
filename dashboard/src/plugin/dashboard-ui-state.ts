@@ -33,6 +33,12 @@ export interface DashboardFeedUiState {
   updatedAt?: string;
 }
 
+export interface DashboardReadingSourceUiState {
+  digestId: string;
+  scrollTop: number;
+  updatedAt?: string;
+}
+
 export interface RecentDashboardFile {
   path: string;
   openedAt: string;
@@ -43,6 +49,7 @@ export interface DashboardUiState {
   activeSection: DashboardSection;
   pages: Record<DashboardSection, DashboardPageUiState>;
   feeds: Record<DashboardFeed, DashboardFeedUiState>;
+  readingSources: Record<string, DashboardReadingSourceUiState>;
   recentFiles: RecentDashboardFile[];
 }
 
@@ -59,10 +66,17 @@ export interface DashboardFeedUiStatePatch {
   updatedAt?: string | null;
 }
 
+export interface DashboardReadingSourceUiStatePatch {
+  digestId?: string | null;
+  scrollTop?: number;
+  updatedAt?: string | null;
+}
+
 export interface DashboardUiStatePatch {
   activeSection?: DashboardSection;
   pages?: Partial<Record<DashboardSection, DashboardPageUiStatePatch>>;
   feeds?: Partial<Record<DashboardFeed, DashboardFeedUiStatePatch>>;
+  readingSources?: Record<string, DashboardReadingSourceUiStatePatch | null>;
   recentFiles?: readonly RecentDashboardFile[];
 }
 
@@ -77,6 +91,7 @@ export type LegacyFeedReadingPositions = Partial<
 >;
 
 const RECENT_FILE_LIMIT = 50;
+const READING_SOURCE_SCROLL_LIMIT = 32;
 const CONTINUATION_ROOTS = new Set([
   "feeds",
   "inbox",
@@ -104,6 +119,7 @@ export function createDefaultDashboardUiState(): DashboardUiState {
       "ai-daily-learning": { scrollTop: 0 },
       treehole: { scrollTop: 0 },
     },
+    readingSources: {},
     recentFiles: [],
   };
 }
@@ -149,6 +165,7 @@ export function normalizeDashboardUiState(
     activeSection,
     pages,
     feeds,
+    readingSources: normalizeReadingSources(record?.readingSources),
     recentFiles: normalizeRecentFiles(record?.recentFiles),
   };
 }
@@ -170,6 +187,7 @@ export function patchDashboardUiState(
       patchFeedState(current.feeds[feed], patch.feeds?.[feed]),
     ]),
   ) as Record<DashboardFeed, DashboardFeedUiState>;
+  const readingSources = patchReadingSources(current.readingSources, patch.readingSources);
   return {
     version: 1,
     activeSection: isDashboardSection(patch.activeSection)
@@ -177,10 +195,46 @@ export function patchDashboardUiState(
       : current.activeSection,
     pages,
     feeds,
+    readingSources,
     recentFiles: patch.recentFiles === undefined
       ? current.recentFiles
       : normalizeRecentFiles(patch.recentFiles),
   };
+}
+
+function patchReadingSources(
+  current: Record<string, DashboardReadingSourceUiState>,
+  patches: Record<string, DashboardReadingSourceUiStatePatch | null> | undefined,
+): Record<string, DashboardReadingSourceUiState> {
+  if (!patches) return normalizeReadingSources(current);
+  const entries = new Map(Object.entries(current));
+  for (const [rawSourceId, patch] of Object.entries(patches)) {
+    const sourceId = textValue(rawSourceId);
+    if (!sourceId || sourceId.length > 512) continue;
+    if (patch === null) {
+      entries.delete(sourceId);
+      continue;
+    }
+    const previous = entries.get(sourceId);
+    const digestId = patch.digestId === undefined
+      ? previous?.digestId
+      : textValue(patch.digestId);
+    if (!digestId) {
+      entries.delete(sourceId);
+      continue;
+    }
+    const updatedAt = patch.updatedAt === undefined
+      ? previous?.updatedAt
+      : timestampValue(patch.updatedAt);
+    entries.set(sourceId, {
+      digestId,
+      scrollTop: patch.scrollTop === undefined
+        ? previous?.scrollTop ?? 0
+        : scrollValue(patch.scrollTop),
+      ...(updatedAt ? { updatedAt } : {}),
+    });
+  }
+  return normalizeReadingSources(Object.fromEntries(entries));
 }
 
 export function recordRecentDashboardFile(
@@ -336,6 +390,44 @@ function patchFeedState(
     ...(itemId ? { itemId } : {}),
     ...(updatedAt ? { updatedAt } : {}),
   };
+}
+
+function normalizeReadingSources(
+  value: unknown,
+): Record<string, DashboardReadingSourceUiState> {
+  const record = objectValue(value);
+  const normalized: Array<{
+    sourceId: string;
+    state: DashboardReadingSourceUiState;
+    order: number;
+  }> = [];
+  let order = 0;
+  for (const [rawSourceId, item] of Object.entries(record ?? {})) {
+    const sourceId = textValue(rawSourceId);
+    const source = objectValue(item);
+    const digestId = textValue(source?.digestId);
+    const updatedAt = timestampValue(source?.updatedAt);
+    if (!sourceId || sourceId.length > 512 || !digestId || digestId.length > 512) continue;
+    normalized.push({
+      sourceId,
+      state: {
+        digestId,
+        scrollTop: scrollValue(source?.scrollTop),
+        ...(updatedAt ? { updatedAt } : {}),
+      },
+      order: order++,
+    });
+  }
+  normalized.sort((left, right) => {
+    const leftUpdated = left.state.updatedAt ? Date.parse(left.state.updatedAt) : 0;
+    const rightUpdated = right.state.updatedAt ? Date.parse(right.state.updatedAt) : 0;
+    return rightUpdated - leftUpdated || left.order - right.order;
+  });
+  return Object.fromEntries(
+    normalized
+      .slice(0, READING_SOURCE_SCROLL_LIMIT)
+      .map(({ sourceId, state }) => [sourceId, state]),
+  );
 }
 
 function normalizeRecentFiles(value: unknown): RecentDashboardFile[] {

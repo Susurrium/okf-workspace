@@ -47,10 +47,12 @@ import type {
   FeedKind,
   FeedSubscriptionPage,
   FeedSubscriptionSource,
+  FeedSubscriptionSourceItemsPage,
   FeedSubscriptionSourcePage,
   FeedSyncResult,
   AiDailyStream,
 } from "../feeds/types.js";
+import { FeedHttpError } from "../feeds/service.js";
 import { DASHBOARD_VERSION } from "../version.js";
 import type OkfBrainPlugin from "./main.js";
 import {
@@ -81,7 +83,10 @@ type LearningContextFilter = "all" | DashboardLearningContext;
 const SUBSCRIPTION_FIRST_PAGE_TTL_MS = 120_000;
 const SUBSCRIPTION_SOURCE_PAGE_SIZE = 8;
 const SUBSCRIPTION_EDITION_PAGE_SIZE = 4;
-const READING_SOURCE_PREVIEW_LIMIT = 3;
+const READING_SOURCE_ITEMS_PAGE_SIZE = 40;
+const READING_SOURCE_LOAD_THRESHOLD_PX = 160;
+const READING_SOURCE_CACHE_LIMIT = 32;
+const READING_SOURCE_REQUEST_CONCURRENCY = 4;
 
 interface FeedCardSurface {
   card: HTMLElement;
@@ -89,6 +94,36 @@ interface FeedCardSurface {
   context: HTMLElement;
   body: HTMLElement;
   footer: HTMLElement;
+}
+
+interface ReadingSourceItemsState {
+  digestId: string;
+  revision: string;
+  itemCount: number;
+  previewItems: FeedDigestItem[];
+  items: FeedDigestItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  status: "idle" | "loading" | "ready" | "error";
+  error?: string;
+  staleCursorRetried: boolean;
+  request?: Promise<boolean>;
+}
+
+interface ReadingSourceItemsRequest {
+  generation: number;
+  sourceId: string;
+  state: ReadingSourceItemsState;
+  run: () => Promise<FeedSubscriptionSourceItemsPage>;
+  resolve: (page: FeedSubscriptionSourceItemsPage) => void;
+  reject: (error: unknown) => void;
+}
+
+class ReadingSourceItemsUnavailableError extends Error {
+  public constructor() {
+    super("当前服务不支持订阅来源条目分页");
+    this.name = "ReadingSourceItemsUnavailableError";
+  }
 }
 
 const NAVIGATION: readonly { id: Section; label: string }[] = [
@@ -177,6 +212,17 @@ export class OkfDashboardView extends ItemView {
   private readonly feedScroll: Partial<Record<DashboardFeed, number>> = {};
   private readonly feedScrollEdition: Partial<Record<DashboardFeed, string>> = {};
   private readonly feedScrollPersistTimers: Partial<Record<DashboardFeed, number>> = {};
+  private readonly readingSourceScroll = new Map<string, number>();
+  private readonly readingSourceScrollDigest = new Map<string, string>();
+  private readonly readingSourceScrollPersistTimers = new Map<string, number>();
+  private readonly readingSourceItems = new Map<string, ReadingSourceItemsState>();
+  private readonly readingSourceItemsRequestQueue: ReadingSourceItemsRequest[] = [];
+  private readingSourceItemsActiveRequests = 0;
+  private readingSourceItemsRequestGeneration = 0;
+  private readingSourceItemsEndpointConfirmed = false;
+  private readingSourceItemsEndpointDisabled = false;
+  private readingSourceItemsRequestsCancelled = false;
+  private subscriptionLatestItemsPagination = false;
   private subscriptionEditions: FeedDigestEdition[] = [];
   private subscriptionCursor: string | null = null;
   private subscriptionHasMore = false;
@@ -250,6 +296,10 @@ export class OkfDashboardView extends ItemView {
       const editionId = state.feeds[feed].editionId;
       if (editionId) this.feedScrollEdition[feed] = editionId;
     }
+    for (const [sourceId, position] of Object.entries(state.readingSources)) {
+      this.readingSourceScroll.set(sourceId, position.scrollTop);
+      this.readingSourceScrollDigest.set(sourceId, position.digestId);
+    }
     const todayPane = state.pages.today.tab;
     if (todayPane === "actions" || todayPane === "reading") this.todayPane = todayPane;
     const learningTab = state.pages.learning.tab;
@@ -308,6 +358,7 @@ export class OkfDashboardView extends ItemView {
   }
 
   public async onOpen(): Promise<void> {
+    this.readingSourceItemsRequestsCancelled = false;
     this.contentEl.addEventListener("scroll", this.handlePageScroll, { passive: true });
     this.contentEl.addEventListener("pointerdown", this.markDashboardInteraction, { passive: true });
     this.contentEl.addEventListener("keydown", this.markDashboardInteraction);
@@ -341,6 +392,7 @@ export class OkfDashboardView extends ItemView {
     this.subscriptionRequestGeneration += 1;
     this.subscriptionPaginationGeneration += 1;
     this.subscriptionFirstPageRequest = undefined;
+    this.cancelReadingSourceItemRequests();
     for (const kind of DASHBOARD_FEEDS) {
       const timer = this.feedScrollPersistTimers[kind];
       if (timer !== undefined) window.clearTimeout(timer);
@@ -353,6 +405,13 @@ export class OkfDashboardView extends ItemView {
         });
       }
     }
+    for (const [sourceId, timer] of this.readingSourceScrollPersistTimers) {
+      window.clearTimeout(timer);
+      this.persistReadingSourceScroll(sourceId);
+    }
+    this.readingSourceScrollPersistTimers.clear();
+    this.readingSourceScroll.clear();
+    this.readingSourceScrollDigest.clear();
     const scrollTop = this.contentEl.scrollTop;
     this.pageScroll.set(this.section, scrollTop);
     this.plugin.updateDashboardPageUiState(this.section, { scrollTop });
@@ -1319,11 +1378,11 @@ export class OkfDashboardView extends ItemView {
         `待判断 ${source.pending_decision_count}`,
         `历史 ${source.edition_count} 期`,
       ].join(" · "),
-      cardClass: "okf-feed-card--source okf-reading-source-card",
+      cardClass: "okf-feed-card--source okf-feed-card--scrollable okf-reading-source-card",
       headerClass: "okf-reading-source-card__header",
       metaClass: "okf-reading-source-card__meta",
       contextClass: "okf-reading-source-card__sections",
-      bodyClass: "okf-reading-source-card__preview",
+      bodyClass: "okf-feed-project__scroll okf-reading-source-card__preview",
       footerClass: "okf-reading-source-card__footer",
       attributes: { "data-source-id": source.source_id },
     });
@@ -1349,14 +1408,111 @@ export class OkfDashboardView extends ItemView {
       quality: source.quality ?? null,
       quality_reason: source.quality_reason ?? null,
       item_count: source.latest_item_count,
-      items: source.preview_items,
+      items: [],
     };
-    this.renderFeedDigestEdition(surface.body, "ai-daily", edition, {
-      heading: false,
-      mode: "compact",
-      limit: READING_SOURCE_PREVIEW_LIMIT,
-      suppressSourceMetadata: true,
-    });
+    let state = this.readingSourceItemsState(source);
+    const restoreScroll = this.attachReadingSourceScroll(source.source_id, surface.body);
+    const adoptCurrentState = (rehydrate: boolean): ReadingSourceItemsState | undefined => {
+      if (!surface.card.isConnected || this.readingSourceItemsRequestsCancelled) return undefined;
+      const current = this.readingSourceItems.get(source.source_id);
+      if (current) {
+        if (
+          current.digestId !== source.latest_digest_id ||
+          current.revision !== this.readingSourceRevision(source)
+        ) return undefined;
+        state = current;
+        this.touchReadingSourceItems(source.source_id, current);
+        return current;
+      }
+      if (!rehydrate) return undefined;
+      state = this.readingSourceItemsState(source);
+      return state;
+    };
+    const renderDetachedPreview = (): void => {
+      if (!surface.card.isConnected || this.readingSourceItemsRequestsCancelled) return;
+      surface.body.empty();
+      this.renderFeedDigestEdition(surface.body, "ai-daily", {
+        ...edition,
+        items: source.preview_items,
+      }, {
+        heading: false,
+        mode: "compact",
+        suppressSourceMetadata: true,
+      });
+      restoreScroll(source.latest_digest_id);
+    };
+    const renderItems = (): void => {
+      const current = adoptCurrentState(false);
+      if (!current) {
+        renderDetachedPreview();
+        return;
+      }
+      surface.body.empty();
+      this.renderFeedDigestEdition(surface.body, "ai-daily", {
+        ...edition,
+        item_count: current.itemCount,
+        items: current.items,
+      }, {
+        heading: false,
+        mode: "compact",
+        suppressSourceMetadata: true,
+      });
+      if (current.status === "loading") {
+        surface.body.createDiv({
+          cls: "okf-dashboard__muted okf-reading-source-card__load-state",
+          text: current.nextCursor ? "正在加载更多条目…" : "正在加载本期全部条目…",
+        });
+      } else if (current.status === "error") {
+        const failure = surface.body.createDiv({
+          cls: "okf-reading-source-card__load-state is-error",
+        });
+        failure.createSpan({ text: current.error ?? "本期条目暂时无法继续加载。" });
+        const retry = failure.createEl("button", {
+          text: "重试加载",
+          cls: "okf-dashboard__ghost-action",
+          attr: { type: "button" },
+        });
+        retry.addEventListener("click", () => {
+          const retryState = adoptCurrentState(true);
+          if (!retryState) return;
+          const request = this.loadReadingSourceItemsPage(source, retryState);
+          renderItems();
+          void request.then(renderItems);
+        });
+      }
+      restoreScroll(source.latest_digest_id);
+    };
+    surface.body.addEventListener("scroll", () => {
+      const previous = state;
+      const current = adoptCurrentState(true);
+      if (!current) return;
+      // Scrolling is an access for both caches. Rehydrating an evicted card
+      // moves the same source to the recent end of both LRUs before loading.
+      this.touchReadingSourceItems(source.source_id, current);
+      if (current !== previous) renderItems();
+      if (
+        !this.readingSourceNearBottom(surface.body) ||
+        current.status === "loading" ||
+        !current.hasMore ||
+        !this.canLoadReadingSourceItems()
+      ) return;
+      const request = this.loadReadingSourceItemsPage(source, current);
+      renderItems();
+      void request.then(renderItems);
+    }, { passive: true });
+    renderItems();
+    // Capability negotiation keeps the same three-item overview compatible
+    // with older Engine releases. A supported Engine fills the fixed-height
+    // card lazily, without inflating the source overview response.
+    if (this.canLoadReadingSourceItems() && state.status === "idle") {
+      this.loadReadingSourceItemsPage(source, state);
+      renderItems();
+    }
+    // A render can replace the card while its shared source request is still
+    // running. Every new surface subscribes to that same single-flight so it
+    // cannot remain stuck on the loading placeholder.
+    const pending = state.request;
+    if (pending) void pending.then(renderItems);
     const viewAll = surface.footer.createEl("button", {
       text: "查看该来源",
       cls: "okf-dashboard__ghost-action",
@@ -1582,6 +1738,7 @@ export class OkfDashboardView extends ItemView {
     // reordered beyond the visible page. Restarting the cursor chain avoids
     // silently retaining deleted cards or making new tail sources unreachable.
     this.subscriptionSources = mergeSubscriptionSources([], page.sources);
+    this.setSubscriptionLatestItemsPagination(page.latest_items_pagination === true);
     this.subscriptionSourceCursor = page.next_cursor;
     this.subscriptionSourceHasMore = page.has_more;
     this.subscriptionSourcePagesLoaded = 1;
@@ -1768,6 +1925,349 @@ export class OkfDashboardView extends ItemView {
     this.subscriptionDetailSourceId = sourceId;
   }
 
+  private readingSourceItemsState(source: FeedSubscriptionSource): ReadingSourceItemsState {
+    const current = this.readingSourceItems.get(source.source_id);
+    const revision = this.readingSourceRevision(source);
+    if (
+      current &&
+      current.digestId === source.latest_digest_id &&
+      current.revision === revision
+    ) {
+      current.itemCount = source.latest_item_count;
+      current.previewItems = this.mergeReadingSourceItems([], source.preview_items);
+      current.items = this.mergeReadingSourceItems(current.items, source.preview_items);
+      this.touchReadingSourceItems(source.source_id, current);
+      return current;
+    }
+    const items = this.mergeReadingSourceItems([], source.preview_items);
+    const complete = items.length >= source.latest_item_count;
+    const state: ReadingSourceItemsState = {
+      digestId: source.latest_digest_id,
+      revision,
+      itemCount: source.latest_item_count,
+      previewItems: items,
+      items,
+      nextCursor: null,
+      hasMore: !complete,
+      status: complete ? "ready" : "idle",
+      staleCursorRetried: false,
+    };
+    this.readingSourceItems.set(source.source_id, state);
+    this.touchReadingSourceItems(source.source_id, state);
+    return state;
+  }
+
+  private readingSourceRevision(
+    source: Pick<FeedSubscriptionSource, "latest_digest_id" | "latest_item_count" | "latest_revision">,
+  ): string {
+    return source.latest_revision ??
+      `legacy:${source.latest_digest_id}:${source.latest_item_count}`;
+  }
+
+  private touchReadingSourceItems(sourceId: string, state: ReadingSourceItemsState): void {
+    if (this.readingSourceItems.get(sourceId) !== state) return;
+    this.readingSourceItems.delete(sourceId);
+    this.readingSourceItems.set(sourceId, state);
+    while (this.readingSourceItems.size > READING_SOURCE_CACHE_LIMIT) {
+      const oldest = this.readingSourceItems.keys().next().value;
+      if (oldest === undefined) break;
+      const evicted = this.readingSourceItems.get(oldest);
+      this.readingSourceItems.delete(oldest);
+      if (evicted) this.cancelQueuedReadingSourceItemsState(oldest, evicted);
+    }
+  }
+
+  private cancelQueuedReadingSourceItemsState(
+    sourceId: string,
+    state: ReadingSourceItemsState,
+  ): void {
+    for (let index = this.readingSourceItemsRequestQueue.length - 1; index >= 0; index -= 1) {
+      const queued = this.readingSourceItemsRequestQueue[index];
+      if (queued?.sourceId !== sourceId || queued.state !== state) continue;
+      this.readingSourceItemsRequestQueue.splice(index, 1);
+      queued.reject(new ReadingSourceItemsUnavailableError());
+    }
+  }
+
+  private mergeReadingSourceItems(
+    current: readonly FeedDigestItem[],
+    incoming: readonly FeedDigestItem[],
+  ): FeedDigestItem[] {
+    const replacements = new Map(incoming.map((item) => [item.item_id, item]));
+    const merged = current.map((item) => replacements.get(item.item_id) ?? item);
+    const seen = new Set(merged.map((item) => item.item_id));
+    for (const item of incoming) {
+      if (seen.has(item.item_id)) continue;
+      seen.add(item.item_id);
+      merged.push(item);
+    }
+    return merged;
+  }
+
+  private loadReadingSourceItemsPage(
+    source: FeedSubscriptionSource,
+    state: ReadingSourceItemsState,
+  ): Promise<boolean> {
+    if (this.readingSourceItems.get(source.source_id) !== state) {
+      return Promise.resolve(false);
+    }
+    if (!this.canLoadReadingSourceItems()) return Promise.resolve(false);
+    if (state.request) return state.request;
+    if (state.status === "ready" && !state.hasMore) return Promise.resolve(false);
+    this.touchReadingSourceItems(source.source_id, state);
+    state.status = "loading";
+    delete state.error;
+    const request = this.performReadingSourceItemsLoad(source, state, state.nextCursor);
+    state.request = request;
+    void request.then(() => {
+      if (state.request === request) delete state.request;
+    });
+    return request;
+  }
+
+  private async performReadingSourceItemsLoad(
+    source: FeedSubscriptionSource,
+    state: ReadingSourceItemsState,
+    initialCursor: string | null,
+  ): Promise<boolean> {
+    let cursor = initialCursor;
+    while (true) {
+      let page: FeedSubscriptionSourceItemsPage;
+      try {
+        page = await this.enqueueReadingSourceItemsRequest(source, state, cursor);
+      } catch (error) {
+        if (this.readingSourceItems.get(source.source_id) !== state) return false;
+        if (
+          error instanceof FeedHttpError && error.status === 400 && cursor &&
+          !state.staleCursorRetried
+        ) {
+          state.staleCursorRetried = true;
+          state.items = this.mergeReadingSourceItems([], state.previewItems);
+          state.nextCursor = null;
+          state.hasMore = state.items.length < state.itemCount;
+          state.status = "loading";
+          delete state.error;
+          this.resetReadingSourceScroll(source.source_id, state.digestId);
+          cursor = null;
+          continue;
+        }
+        if (
+          error instanceof ReadingSourceItemsUnavailableError ||
+          (error instanceof FeedHttpError && error.status === 404)
+        ) {
+          state.nextCursor = null;
+          state.hasMore = false;
+          state.status = "ready";
+          delete state.error;
+          return true;
+        }
+        state.status = "error";
+        state.error = error instanceof Error ? error.message : "本期条目暂时无法继续加载。";
+        return true;
+      }
+      if (
+        this.readingSourceItems.get(source.source_id) !== state ||
+        !this.canLoadReadingSourceItems() ||
+        state.revision !== this.readingSourceRevision(source)
+      ) return false;
+      const pageRevision = page.latest_revision ?? (
+        source.latest_revision === undefined
+          ? `legacy:${page.digest_id}:${page.item_count}`
+          : undefined
+      );
+      if (
+        page.source_id !== source.source_id ||
+        page.digest_id !== state.digestId ||
+        pageRevision !== state.revision
+      ) {
+        state.status = "error";
+        state.error = "来源已更新；正在刷新 Reading 以显示新一期。";
+        this.markSubscriptionSourceOverviewStale();
+        return true;
+      }
+      if (page.item_count !== state.itemCount) {
+        state.status = "error";
+        state.error = "来源条目已更新；正在刷新 Reading 以显示最新内容。";
+        this.markSubscriptionSourceOverviewStale();
+        return true;
+      }
+      if (page.has_more && (!page.next_cursor || page.next_cursor === cursor || !page.items.length)) {
+        state.status = "error";
+        state.error = "本期条目分页没有继续位置";
+        return true;
+      }
+      if (!page.has_more && page.next_cursor) {
+        state.status = "error";
+        state.error = "本期条目分页返回了无效的继续位置";
+        return true;
+      }
+      const merged = cursor
+        ? this.mergeReadingSourceItems(state.items, page.items)
+        : this.mergeReadingSourceItems([], page.items);
+      if (!page.has_more && merged.length !== page.item_count) {
+        state.status = "error";
+        state.error = "本期条目数量与分页结果不一致";
+        return true;
+      }
+      state.items = merged;
+      state.nextCursor = page.next_cursor;
+      state.hasMore = page.has_more;
+      state.status = "ready";
+      delete state.error;
+      this.touchReadingSourceItems(source.source_id, state);
+      return true;
+    }
+  }
+
+  private enqueueReadingSourceItemsRequest(
+    source: FeedSubscriptionSource,
+    state: ReadingSourceItemsState,
+    cursor: string | null,
+  ): Promise<FeedSubscriptionSourceItemsPage> {
+    const loadItems = this.plugin.loadFeedSubscriptionSourceItems;
+    if (!this.canLoadReadingSourceItems() || typeof loadItems !== "function") {
+      return Promise.reject(new ReadingSourceItemsUnavailableError());
+    }
+    const generation = this.readingSourceItemsRequestGeneration;
+    return new Promise((resolve, reject) => {
+      this.readingSourceItemsRequestQueue.push({
+        generation,
+        sourceId: source.source_id,
+        state,
+        run: () => {
+          if (
+            generation !== this.readingSourceItemsRequestGeneration ||
+            this.readingSourceItems.get(source.source_id) !== state ||
+            !this.canLoadReadingSourceItems()
+          ) return Promise.reject(new ReadingSourceItemsUnavailableError());
+          return loadItems.call(this.plugin, source.source_id, {
+            limit: READING_SOURCE_ITEMS_PAGE_SIZE,
+            ...(cursor ? { cursor } : {}),
+          });
+        },
+        resolve,
+        reject,
+      });
+      this.pumpReadingSourceItemsRequests();
+    });
+  }
+
+  private pumpReadingSourceItemsRequests(): void {
+    const concurrency = this.readingSourceItemsEndpointConfirmed
+      ? READING_SOURCE_REQUEST_CONCURRENCY
+      : 1;
+    while (
+      this.readingSourceItemsActiveRequests < concurrency &&
+      this.readingSourceItemsRequestQueue.length
+    ) {
+      const queued = this.readingSourceItemsRequestQueue.shift();
+      if (!queued) break;
+      if (
+        queued.generation !== this.readingSourceItemsRequestGeneration ||
+        !this.canLoadReadingSourceItems()
+      ) {
+        queued.reject(new ReadingSourceItemsUnavailableError());
+        continue;
+      }
+      this.readingSourceItemsActiveRequests += 1;
+      let request: Promise<FeedSubscriptionSourceItemsPage>;
+      try {
+        request = queued.run();
+      } catch (error) {
+        request = Promise.reject(error);
+      }
+      void request.then((page) => {
+        if (
+          queued.generation !== this.readingSourceItemsRequestGeneration ||
+          !this.canLoadReadingSourceItems()
+        ) {
+          queued.reject(new ReadingSourceItemsUnavailableError());
+          return;
+        }
+        this.readingSourceItemsEndpointConfirmed = true;
+        queued.resolve(page);
+      }, (error: unknown) => {
+        if (
+          queued.generation === this.readingSourceItemsRequestGeneration &&
+          !this.readingSourceItemsRequestsCancelled
+        ) {
+          if (error instanceof FeedHttpError && error.status === 404) {
+            this.disableReadingSourceItemsEndpoint();
+          } else if (error instanceof FeedHttpError) {
+            // Any routed HTTP response other than 404 proves that the endpoint
+            // exists. Do not let one oversized or invalid source serialize all
+            // of the independent cards behind the compatibility probe.
+            this.readingSourceItemsEndpointConfirmed = true;
+          }
+        }
+        queued.reject(error);
+      }).finally(() => {
+        this.readingSourceItemsActiveRequests -= 1;
+        this.pumpReadingSourceItemsRequests();
+      });
+    }
+  }
+
+  private canLoadReadingSourceItems(): boolean {
+    return this.subscriptionLatestItemsPagination &&
+      !this.readingSourceItemsEndpointDisabled &&
+      !this.readingSourceItemsRequestsCancelled &&
+      typeof this.plugin.loadFeedSubscriptionSourceItems === "function";
+  }
+
+  private cancelReadingSourceItemRequests(): void {
+    this.readingSourceItemsRequestsCancelled = true;
+    this.readingSourceItemsRequestGeneration += 1;
+    const unavailable = new ReadingSourceItemsUnavailableError();
+    while (this.readingSourceItemsRequestQueue.length) {
+      this.readingSourceItemsRequestQueue.shift()?.reject(unavailable);
+    }
+    this.readingSourceItems.clear();
+  }
+
+  private setSubscriptionLatestItemsPagination(enabled: boolean): void {
+    const next = enabled && !this.readingSourceItemsEndpointDisabled;
+    if (this.subscriptionLatestItemsPagination === next) return;
+    this.subscriptionLatestItemsPagination = next;
+    this.readingSourceItemsRequestGeneration += 1;
+    if (!next) this.readingSourceItemsEndpointConfirmed = false;
+    const unavailable = new ReadingSourceItemsUnavailableError();
+    while (this.readingSourceItemsRequestQueue.length) {
+      this.readingSourceItemsRequestQueue.shift()?.reject(unavailable);
+    }
+    for (const state of this.readingSourceItems.values()) {
+      state.nextCursor = null;
+      state.hasMore = next ? state.items.length < state.itemCount : false;
+      state.status = next && state.hasMore ? "idle" : "ready";
+      state.staleCursorRetried = false;
+      delete state.error;
+    }
+    if (next) this.pumpReadingSourceItemsRequests();
+  }
+
+  private disableReadingSourceItemsEndpoint(): void {
+    if (this.readingSourceItemsEndpointDisabled) return;
+    this.readingSourceItemsEndpointDisabled = true;
+    this.setSubscriptionLatestItemsPagination(false);
+    this.markSubscriptionSourceOverviewStale();
+  }
+
+  private markSubscriptionSourceOverviewStale(): void {
+    this.subscriptionSourcesLoadedAt = 0;
+    if (this.section === "reading") this.scheduleExternalRefresh();
+  }
+
+  private resetReadingSourceScroll(sourceId: string, digestId: string): void {
+    if (this.readingSourceScrollDigest.get(sourceId) !== digestId) return;
+    this.readingSourceScroll.set(sourceId, 0);
+    this.persistReadingSourceScroll(sourceId);
+  }
+
+  private readingSourceNearBottom(element: HTMLElement): boolean {
+    return element.scrollHeight - element.scrollTop - element.clientHeight <=
+      READING_SOURCE_LOAD_THRESHOLD_PX;
+  }
+
   private attachFeedScroll(
     feed: DashboardFeed,
     element: HTMLElement,
@@ -1795,6 +2295,68 @@ export class OkfDashboardView extends ItemView {
       }, 120);
     }, { passive: true });
     return restore;
+  }
+
+  private attachReadingSourceScroll(
+    sourceId: string,
+    element: HTMLElement,
+  ): (digestId: string) => void {
+    element.dataset.sourceId = sourceId;
+    const restore = (digestId: string): void => {
+      element.dataset.digestId = digestId;
+      const previousDigest = this.readingSourceScrollDigest.get(sourceId);
+      if (previousDigest !== digestId) {
+        this.readingSourceScrollDigest.set(sourceId, digestId);
+        this.readingSourceScroll.set(sourceId, 0);
+        if (previousDigest !== undefined) this.persistReadingSourceScroll(sourceId);
+      }
+      this.touchReadingSourceScroll(sourceId, digestId);
+      element.scrollTop = this.readingSourceScroll.get(sourceId) ?? 0;
+    };
+    element.addEventListener("scroll", () => {
+      this.lastInteractionAt = Date.now();
+      this.readingSourceScroll.set(sourceId, element.scrollTop);
+      this.touchReadingSourceScroll(sourceId, element.dataset.digestId);
+      const pending = this.readingSourceScrollPersistTimers.get(sourceId);
+      if (pending !== undefined) window.clearTimeout(pending);
+      this.readingSourceScrollPersistTimers.set(sourceId, window.setTimeout(() => {
+        this.readingSourceScrollPersistTimers.delete(sourceId);
+        this.persistReadingSourceScroll(sourceId);
+      }, 120));
+    }, { passive: true });
+    return restore;
+  }
+
+  private touchReadingSourceScroll(sourceId: string, digestId?: string): void {
+    const currentDigest = digestId ?? this.readingSourceScrollDigest.get(sourceId);
+    if (!currentDigest) return;
+    const scrollTop = this.readingSourceScroll.get(sourceId) ?? 0;
+    this.readingSourceScroll.delete(sourceId);
+    this.readingSourceScrollDigest.delete(sourceId);
+    this.readingSourceScroll.set(sourceId, scrollTop);
+    this.readingSourceScrollDigest.set(sourceId, currentDigest);
+    while (this.readingSourceScroll.size > READING_SOURCE_CACHE_LIMIT) {
+      const oldest = this.readingSourceScroll.keys().next().value;
+      if (oldest === undefined) break;
+      const timer = this.readingSourceScrollPersistTimers.get(oldest);
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        this.readingSourceScrollPersistTimers.delete(oldest);
+        this.persistReadingSourceScroll(oldest);
+      }
+      this.readingSourceScroll.delete(oldest);
+      this.readingSourceScrollDigest.delete(oldest);
+    }
+  }
+
+  private persistReadingSourceScroll(sourceId: string): void {
+    const digestId = this.readingSourceScrollDigest.get(sourceId);
+    if (!digestId) return;
+    this.plugin.updateDashboardReadingSourceUiState(sourceId, {
+      digestId,
+      scrollTop: this.readingSourceScroll.get(sourceId) ?? 0,
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   private openFeedDigest(

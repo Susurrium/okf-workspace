@@ -105,6 +105,34 @@ describe("Dashboard Feed workflow", () => {
     }
   });
 
+  it("encodes one source and clamps its latest-item page", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({
+        source_id: "source/中文",
+        digest_id: "learning-1",
+        issued_at: "2026-08-23",
+        item_count: 0,
+        items: [],
+        next_cursor: null,
+        has_more: false,
+      }), { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const api = new HttpFeedApi("http://127.0.0.1:8765", "token");
+      await api.listSubscriptionSourceItems("source/中文", {
+        limit: 99,
+        cursor: "opaque+/=",
+      });
+
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "http://127.0.0.1:8765/dashboard/feeds/subscription-sources/source%2F%E4%B8%AD%E6%96%87/latest-items?limit=50&cursor=opaque%2B%2F%3D",
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps durable Feed decisions when a synchronization refreshes edition data", () => {
     const decision = {
       item_id: "learning-old:1",

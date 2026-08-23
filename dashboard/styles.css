@@ -1932,6 +1932,22 @@ button.okf-action-panel__action:focus-visible,
   flex: 1 1 auto;
 }
 
+.okf-reading-source-card__load-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 0;
+  border-top: 1px solid var(--okf-border);
+  font-size: var(--font-ui-smaller);
+}
+
+.okf-reading-source-card__load-state.is-error {
+  justify-content: space-between;
+  color: var(--text-error);
+}
+
 .okf-reading-source-footer,
 .okf-reading-source-detail__footer {
   display: flex;
