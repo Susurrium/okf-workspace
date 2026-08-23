@@ -92,7 +92,7 @@ def _projected_source_origin(value: object) -> str:
 
 
 def _projected_entry_url(value: object) -> str:
-    """Validate a public article URL without discarding functional query data."""
+    """Validate an HTTP(S) article URL without discarding functional query data."""
 
     url = _canonical_url(value)
     if urlsplit(url).fragment:

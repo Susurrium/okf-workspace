@@ -264,10 +264,18 @@ def test_subscription_preview_accepts_functional_article_query_parameters(
 
 
 @pytest.mark.parametrize(
-    "article_url",
+    ("article_url", "private_marker"),
     (
-        "https://reader:secret@mp.weixin.qq.com/s?mid=1234567890",
-        "https://mp.weixin.qq.com/s?mid=1234567890#private-fragment",
+        (
+            "https://reader:secret@mp.weixin.qq.com/s?mid=1234567890",
+            "secret",
+        ),
+        (
+            "https://mp.weixin.qq.com/s?mid=1234567890#private-fragment",
+            "private-fragment",
+        ),
+        ("ftp://entry.example.test/s?mid=1234567890", "entry.example.test"),
+        ("https:///s?private-marker=1234567890", "private-marker"),
     ),
 )
 def test_subscription_preview_still_rejects_unsafe_article_url_projections(
@@ -275,6 +283,7 @@ def test_subscription_preview_still_rejects_unsafe_article_url_projections(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     article_url: str,
+    private_marker: str,
 ) -> None:
     client, headers, _paths = _client(vault, tmp_path)
     revision = "a" * 64
@@ -302,8 +311,7 @@ def test_subscription_preview_still_rejects_unsafe_article_url_projections(
 
     assert response.status_code == 502
     assert response.json()["detail"]["code"] == "invalid_response"
-    assert "secret" not in response.text
-    assert "private-fragment" not in response.text
+    assert private_marker not in response.text
 
 
 @pytest.mark.parametrize(
