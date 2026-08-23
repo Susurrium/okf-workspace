@@ -91,6 +91,15 @@ def _projected_source_origin(value: object) -> str:
     return url
 
 
+def _projected_entry_url(value: object) -> str:
+    """Validate a public article URL without discarding functional query data."""
+
+    url = _canonical_url(value)
+    if urlsplit(url).fragment:
+        raise ValueError("projected entry URL must not contain a fragment")
+    return url
+
+
 def safe_remote_error_summary(value: object) -> str | None:
     if value is None:
         return None
@@ -668,7 +677,7 @@ class SubscriptionService:
                 raise SubscriptionError(502, "invalid_response", "订阅预览内容无效")
             try:
                 _required_string(entry.get("title"), field="entry.title", limit=500)
-                _projected_url(entry.get("url"))
+                _projected_entry_url(entry.get("url"))
                 _optional_time(entry.get("published_at"), field="entry.published_at")
             except ValueError as error:
                 raise SubscriptionError(

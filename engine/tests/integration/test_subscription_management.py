@@ -226,10 +226,55 @@ def test_subscription_preview_accepts_the_real_remote_duplicate_and_warning_fiel
     assert "super-secret" not in response.text
 
 
-def test_subscription_preview_rejects_a_source_path_projection(
+def test_subscription_preview_accepts_functional_article_query_parameters(
     vault: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, headers, _paths = _client(vault, tmp_path)
+    revision = "a" * 64
+    article_url = (
+        "https://mp.weixin.qq.com/s?"
+        "__biz=MzA1Example&mid=1234567890&idx=1&sn=abcdef123456"
+    )
+
+    def source_admin(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        action: str,
+        _payload: dict[str, object],
+    ) -> tuple[dict[str, object], str]:
+        assert action == "preview"
+        value = _preview(revision)
+        value.pop("_revision")
+        entries = cast(list[dict[str, object]], value["entries"])
+        entries[0]["url"] = article_url
+        return value, revision
+
+    monkeypatch.setattr(RemoteFeedPuller, "source_admin", source_admin)
+
+    response = client.post(
+        "/feeds/subscriptions/preview",
+        headers=headers,
+        json={"url": "https://feeds.example.test/example.xml"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["entries"][0]["url"] == article_url
+
+
+@pytest.mark.parametrize(
+    "article_url",
+    (
+        "https://reader:secret@mp.weixin.qq.com/s?mid=1234567890",
+        "https://mp.weixin.qq.com/s?mid=1234567890#private-fragment",
+    ),
+)
+def test_subscription_preview_still_rejects_unsafe_article_url_projections(
+    vault: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    article_url: str,
 ) -> None:
     client, headers, _paths = _client(vault, tmp_path)
     revision = "a" * 64
@@ -243,19 +288,63 @@ def test_subscription_preview_rejects_a_source_path_projection(
         assert action == "preview"
         value = _preview(revision)
         value.pop("_revision")
-        value["canonical_url"] = "https://feeds.example.test/PATH-SECRET"
+        entries = cast(list[dict[str, object]], value["entries"])
+        entries[0]["url"] = article_url
+        return value, revision
+
+    monkeypatch.setattr(RemoteFeedPuller, "source_admin", source_admin)
+
+    response = client.post(
+        "/feeds/subscriptions/preview",
+        headers=headers,
+        json={"url": "https://feeds.example.test/example.xml"},
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["code"] == "invalid_response"
+    assert "secret" not in response.text
+    assert "private-fragment" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("source_projection", "secret_marker"),
+    (
+        ("https://feeds.example.test/PATH-SECRET", "PATH-SECRET"),
+        ("https://feeds.example.test?token=QUERY-SECRET", "QUERY-SECRET"),
+    ),
+)
+def test_subscription_preview_rejects_a_non_origin_source_projection(
+    vault: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source_projection: str,
+    secret_marker: str,
+) -> None:
+    client, headers, _paths = _client(vault, tmp_path)
+    revision = "a" * 64
+
+    def source_admin(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        action: str,
+        _payload: dict[str, object],
+    ) -> tuple[dict[str, object], str]:
+        assert action == "preview"
+        value = _preview(revision)
+        value.pop("_revision")
+        value["canonical_url"] = source_projection
         return value, revision
 
     monkeypatch.setattr(RemoteFeedPuller, "source_admin", source_admin)
     response = client.post(
         "/feeds/subscriptions/preview",
         headers=headers,
-        json={"url": "https://feeds.example.test/PATH-SECRET"},
+        json={"url": source_projection},
     )
 
     assert response.status_code == 502
     assert response.json()["detail"]["code"] == "invalid_response"
-    assert "PATH-SECRET" not in response.text
+    assert secret_marker not in response.text
 
 
 def test_subscription_api_exposes_stale_mirror_and_mutations_preserve_tombstone(
