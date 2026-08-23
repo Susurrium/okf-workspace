@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import io
 import json
+import subprocess
+import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import cast
 
@@ -204,10 +209,24 @@ def test_remote_ai_daily_carries_unique_valid_registry_ids(
             {"source_id": "second-source", "source_name": "冲突来源"},
             {"source_id": "INVALID ID", "source_name": "无效来源"},
         ],
-        "registry_errors": ["/opt/seed.yaml: ValueError: bad seed"],
+        "registry_errors": [],
     }
     puller = RemoteFeedPuller(tmp_path)
     def remote_python(_alias: str, _script: str, *, sudo: bool = False) -> str:
+        if "requested = set" in _script:
+            return json.dumps(
+                {
+                    "hints": [
+                        {
+                            "url_digest": hashlib.sha256(
+                                b"https://weekly.example/legacy"
+                            ).hexdigest(),
+                            "source_name": "周刊",
+                        }
+                    ],
+                    "warnings": [],
+                }
+            )
         return json.dumps(payload)
 
     monkeypatch.setattr(puller, "_python", remote_python)
@@ -217,9 +236,34 @@ def test_remote_ai_daily_carries_unique_valid_registry_ids(
     assert len(documents) == 1
     assert documents[0][0] == "learning"
     assert puller.ai_daily_source_ids_by_name == {"周刊": "weekly-source"}
+    assert puller.ai_daily_registry_complete is True
+    hints, complete, unresolved_hashes = puller.ai_daily_history_source_hints(
+        "producer",
+        {"https://weekly.example/legacy"},
+    )
+    assert complete is True
+    assert unresolved_hashes == ()
+    assert hints == {
+        "https://weekly.example/legacy": ("weekly-source", "周刊")
+    }
     assert puller.ai_daily_registry_warnings == (
-        "/opt/seed.yaml: ValueError: bad seed",
         "source name maps to multiple ids: 冲突来源",
+    )
+
+    unresolved_url = "https://private.example/feed?token=do-not-log"
+    unresolved, complete, unresolved_hashes = puller.ai_daily_history_source_hints(
+        "producer",
+        {unresolved_url},
+    )
+    assert unresolved == {}
+    assert complete is True
+    assert unresolved_hashes == (
+        hashlib.sha256(unresolved_url.encode("utf-8")).hexdigest(),
+    )
+    assert unresolved_url not in "\n".join(puller.ai_daily_registry_warnings)
+    assert any(
+        warning.startswith("item URL hash has no stable source:")
+        for warning in puller.ai_daily_registry_warnings
     )
 
 
@@ -228,6 +272,104 @@ def test_remote_ai_script_reads_seed_and_runtime_source_registries() -> None:
     runtime = "/srv/ai-daily/bridge/config/sources.yaml"
 
     assert (seed, runtime) == feed_remote.AI_DAILY_REGISTRY_PATHS
+    remote_source = Path(feed_remote.__file__).read_text(encoding="utf-8")
+    assert "and source.get('enabled', True)" not in remote_source
+    assert "candidate.casefold() in allowed_sources" in remote_source
+
+
+def test_remote_ai_script_never_exposes_malformed_registry_content(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "token=must-not-escape"
+
+    class FakeYaml:
+        @staticmethod
+        def safe_load(_content: str) -> object:
+            raise ValueError(
+                f"invalid registry line https://private.example/rss?{secret}"
+            )
+
+    monkeypatch.setitem(sys.modules, "yaml", FakeYaml)
+    registry = tmp_path / "sources.yaml"
+    registry.write_text(
+        f"sources: [https://private.example/rss?{secret}\n",
+        encoding="utf-8",
+    )
+    outbox = tmp_path / "outbox"
+    outbox.mkdir()
+    (outbox / "ai-learning-2026-08-23.md").write_text(
+        "---\ndate: 2026-08-23\n---\n# AI 学习\n",
+        encoding="utf-8",
+    )
+    script = feed_remote._AI_DAILY_SCRIPT  # pyright: ignore[reportPrivateUsage]
+    script = script.replace(
+        "Path('/srv/ai-daily/bridge/outbox')",
+        f"Path({str(outbox)!r})",
+    ).replace(
+        repr(feed_remote.AI_DAILY_REGISTRY_PATHS),
+        repr((str(registry),)),
+    )
+    output = io.StringIO()
+    with redirect_stdout(output):
+        exec(compile(script, "<ai-daily>", "exec"), {})
+
+    payload = json.loads(output.getvalue())
+    rendered = json.dumps(payload, ensure_ascii=False)
+    assert payload["registry_errors"]
+    assert secret not in rendered
+    assert "https://private.example" not in rendered
+
+
+def test_remote_history_hint_does_not_leak_source_across_unknown_h2(
+    tmp_path: Path,
+) -> None:
+    target_url = "https://weekly.example/target"
+    (tmp_path / "ai-learning-2026-08-20.md").write_text(
+        """## Known Source
+
+#### 1. [Earlier](https://weekly.example/earlier)
+
+Earlier body.
+
+## Unregistered Source
+
+#### 2. [Target](https://weekly.example/target)
+
+Target body.
+""",
+        encoding="utf-8",
+    )
+    script = feed_remote._AI_DAILY_HISTORY_HINTS_SCRIPT  # pyright: ignore[reportPrivateUsage]
+    script = script.replace(
+        "Path('/srv/ai-daily/bridge/outbox')",
+        f"Path({str(tmp_path)!r})",
+    ).replace(
+        "__URL_DIGESTS__",
+        repr((hashlib.sha256(target_url.encode("utf-8")).hexdigest(),)),
+    ).replace("__SOURCE_NAMES__", repr(("known source",)))
+    output = io.StringIO()
+    with redirect_stdout(output):
+        exec(compile(script, "<history-hints>", "exec"), {})
+
+    payload = json.loads(output.getvalue())
+    assert payload["hints"] == []
+
+
+def test_remote_feed_timeout_is_reported_without_escaping_sync_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def timeout(*_args: object, **_kwargs: object) -> object:
+        raise subprocess.TimeoutExpired(cmd="ssh", timeout=60)
+
+    monkeypatch.setattr(feed_remote.subprocess, "run", timeout)
+    puller = RemoteFeedPuller(tmp_path)
+
+    with pytest.raises(RuntimeError, match="timed out after 60 seconds"):
+        puller._python(  # pyright: ignore[reportPrivateUsage]
+            "producer", "print('ok')", sudo=True
+        )
 
 
 def test_sync_upgrades_legacy_source_id_and_keeps_renamed_history(
@@ -342,6 +484,463 @@ date: {issue_date}
         "2026-08-21-learning",
         "2026-08-20-learning",
     ]
+
+
+def test_sync_repairs_unattributed_history_from_exact_remote_item_hint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "feed-producers.json").write_text(
+        json.dumps(
+            {
+                "ai-daily": {
+                    "remote_kind": "ai-daily-bridge-v1",
+                    "ssh_alias": "producer",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    legacy_url = "https://mp.weixin.qq.com/s?__biz=legacy&idx=1"
+    future_legacy_url = "https://mp.weixin.qq.com/s?__biz=future&idx=2"
+    legacy = ai_daily_markdown_from_v1(
+        f"""---
+title: AI 学习
+date: 2026-08-20
+---
+# AI 学习
+
+## 最新条目
+
+### 1. [历史条目]({legacy_url})
+
+历史正文。
+""",
+        stream="learning",
+    )
+    assert legacy.items[0].source_name is None
+    assert legacy.items[0].source_id == "mp.weixin.qq.com"
+    FeedCache(state).put(legacy)
+
+    current_markdown = """---
+title: AI 学习
+date: 2026-08-21
+---
+# AI 学习
+
+## 逛逛GitHub
+
+#### 1. [新条目](https://weekly.example/current)
+
+新正文。
+"""
+
+    def pull_current(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        _script: str,
+        *,
+        sudo: bool = False,
+    ) -> str:
+        assert sudo is True
+        if "requested = set" in _script:
+            return json.dumps(
+                {
+                    "hints": [
+                        {
+                            "url_digest": hashlib.sha256(
+                                legacy_url.encode("utf-8")
+                            ).hexdigest(),
+                            "source_name": "逛逛GitHub",
+                        },
+                        {
+                            "url_digest": hashlib.sha256(
+                                future_legacy_url.encode("utf-8")
+                            ).hexdigest(),
+                            "source_name": "逛逛GitHub",
+                        },
+                    ],
+                    "warnings": [],
+                }
+            )
+        return json.dumps(
+            {
+                "documents": [{"stream": "learning", "markdown": current_markdown}],
+                "sources": [
+                    {"source_id": "guangguang-github", "source_name": "逛逛GitHub"}
+                ],
+            }
+        )
+
+    monkeypatch.setattr(RemoteFeedPuller, "_python", pull_current)
+
+    FeedSyncer(state).sync(FeedKind.AI_DAILY)
+
+    repaired = FeedCache(state).get(FeedKind.AI_DAILY, legacy.edition_id)
+    assert repaired.items[0].source_id == "guangguang-github"
+    assert repaired.items[0].source_name == "逛逛GitHub"
+
+    future_legacy = ai_daily_markdown_from_v1(
+        f"""---
+title: AI 学习
+date: 2026-08-19
+---
+# AI 学习
+
+## 最新条目
+
+### 1. [稍后写入的历史条目]({future_legacy_url})
+
+稍后写入。
+""",
+        stream="learning",
+    )
+    FeedCache(state).put(future_legacy)
+    FeedSyncer(state).sync(FeedKind.AI_DAILY)
+    repaired_future = FeedCache(state).get(
+        FeedKind.AI_DAILY,
+        future_legacy.edition_id,
+    )
+    assert repaired_future.items[0].source_id == "guangguang-github"
+    assert repaired_future.items[0].source_name == "逛逛GitHub"
+
+    overview = subscription_sources_dashboard(state)
+    assert overview["total_sources"] == 1
+
+
+def test_source_migration_never_marks_corrupt_history_complete(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "feed-producers.json").write_text(
+        json.dumps(
+            {
+                "ai-daily": {
+                    "remote_kind": "ai-daily-bridge-v1",
+                    "ssh_alias": "producer",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    broken = state / "feed-cache/ai-daily/2026-08-19-learning.json"
+    broken.parent.mkdir(parents=True)
+    broken.write_text("{broken", encoding="utf-8")
+    current = """---
+title: AI 学习
+date: 2026-08-23
+---
+# AI 学习
+
+## 逛逛GitHub
+
+#### 1. [新条目](https://weekly.example/current)
+
+新正文。
+"""
+
+    def pull_current(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        _script: str,
+        *,
+        sudo: bool = False,
+    ) -> str:
+        assert sudo is True
+        return json.dumps(
+            {
+                "documents": [{"stream": "learning", "markdown": current}],
+                "sources": [
+                    {"source_id": "guangguang-github", "source_name": "逛逛GitHub"}
+                ],
+            }
+        )
+
+    monkeypatch.setattr(RemoteFeedPuller, "_python", pull_current)
+
+    syncer = FeedSyncer(state)
+    syncer.sync(FeedKind.AI_DAILY)
+
+    marker = (
+        state
+        / "feed-cache/metadata/migrations/ai-daily-learning-source-ids.json"
+    )
+    assert not marker.exists()
+    assert any(failure.stream == "learning" for failure in syncer.failures)
+
+
+def test_incomplete_registry_does_not_apply_partial_stable_ids(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "feed-producers.json").write_text(
+        json.dumps(
+            {
+                "ai-daily": {
+                    "remote_kind": "ai-daily-bridge-v1",
+                    "ssh_alias": "producer",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    current = """---
+title: AI 学习
+date: 2026-08-23
+---
+# AI 学习
+
+## Known Source
+
+#### 1. [当前条目](https://known.example/article)
+
+正文。
+"""
+
+    def pull_current(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        _script: str,
+        *,
+        sudo: bool = False,
+    ) -> str:
+        assert sudo is True
+        return json.dumps(
+            {
+                "documents": [{"stream": "learning", "markdown": current}],
+                "sources": [
+                    {"source_id": "known-source", "source_name": "Known Source"}
+                ],
+                "registry_errors": ["/srv/config/sources.yaml: ParserError"],
+            }
+        )
+
+    monkeypatch.setattr(RemoteFeedPuller, "_python", pull_current)
+
+    syncer = FeedSyncer(state)
+    syncer.sync(FeedKind.AI_DAILY)
+
+    stored = FeedCache(state).get(FeedKind.AI_DAILY, "2026-08-23-learning")
+    assert stored.items[0].source_id != "known-source"
+    assert stored.items[0].source_name == "Known Source"
+    marker = (
+        state
+        / "feed-cache/metadata/migrations/ai-daily-learning-source-ids.json"
+    )
+    assert not marker.exists()
+    assert any(failure.stream == "learning" for failure in syncer.failures)
+
+
+def test_incomplete_history_scan_does_not_apply_partial_source_hints(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "feed-producers.json").write_text(
+        json.dumps(
+            {
+                "ai-daily": {
+                    "remote_kind": "ai-daily-bridge-v1",
+                    "ssh_alias": "producer",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    candidate_url = "https://unknown.example/candidate"
+    current = f"""---
+title: AI 学习
+date: 2026-08-23
+---
+# AI 学习
+
+## 最新条目
+
+#### 1. [候选条目]({candidate_url})
+
+正文。
+"""
+
+    def pull_current(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        script: str,
+        *,
+        sudo: bool = False,
+    ) -> str:
+        assert sudo is True
+        if "requested = set" in script:
+            return json.dumps(
+                {
+                    "hints": [
+                        {
+                            "url_digest": hashlib.sha256(
+                                candidate_url.encode("utf-8")
+                            ).hexdigest(),
+                            "source_name": "Known Source",
+                        }
+                    ],
+                    "warnings": ["unreadable history file (sha256:deadbeef)"],
+                }
+            )
+        return json.dumps(
+            {
+                "documents": [{"stream": "learning", "markdown": current}],
+                "sources": [
+                    {"source_id": "known-source", "source_name": "Known Source"}
+                ],
+            }
+        )
+
+    monkeypatch.setattr(RemoteFeedPuller, "_python", pull_current)
+
+    syncer = FeedSyncer(state)
+    syncer.sync(FeedKind.AI_DAILY)
+
+    stored = FeedCache(state).get(FeedKind.AI_DAILY, "2026-08-23-learning")
+    assert stored.items[0].source_id == "unknown.example"
+    assert stored.items[0].source_name is None
+    marker = (
+        state
+        / "feed-cache/metadata/migrations/ai-daily-learning-source-ids.json"
+    )
+    assert not marker.exists()
+    assert any(failure.stream == "learning" for failure in syncer.failures)
+
+
+def test_unmatched_source_hint_is_not_rescanned_every_daily_sync(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "feed-producers.json").write_text(
+        json.dumps(
+            {
+                "ai-daily": {
+                    "remote_kind": "ai-daily-bridge-v1",
+                    "ssh_alias": "producer",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    unknown_url = "https://unknown.example/article"
+    current = f"""---
+title: AI 学习
+date: 2026-08-23
+---
+# AI 学习
+
+## 最新条目
+
+#### 1. [未知来源条目]({unknown_url})
+
+正文。
+"""
+    history_calls = 0
+
+    def pull_current(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        script: str,
+        *,
+        sudo: bool = False,
+    ) -> str:
+        nonlocal history_calls
+        assert sudo is True
+        if "requested = set" in script:
+            history_calls += 1
+            return json.dumps({"hints": [], "warnings": []})
+        return json.dumps(
+            {
+                "documents": [{"stream": "learning", "markdown": current}],
+                "sources": [
+                    {"source_id": "known-source", "source_name": "已知来源"}
+                ],
+            }
+        )
+
+    monkeypatch.setattr(RemoteFeedPuller, "_python", pull_current)
+
+    for _attempt in range(4):
+        FeedSyncer(state).sync(FeedKind.AI_DAILY)
+
+    assert history_calls == 2
+    marker = json.loads(
+        (
+            state
+            / "feed-cache/metadata/migrations/ai-daily-learning-source-ids.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert marker["unresolved_url_hashes"] == [
+        hashlib.sha256(unknown_url.encode("utf-8")).hexdigest()
+    ]
+
+
+def test_source_history_is_not_scanned_without_a_valid_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "feed-producers.json").write_text(
+        json.dumps(
+            {
+                "ai-daily": {
+                    "remote_kind": "ai-daily-bridge-v1",
+                    "ssh_alias": "producer",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    current = """---
+title: AI 学习
+date: 2026-08-23
+---
+# AI 学习
+
+## 最新条目
+
+#### 1. [尚无注册来源](https://unknown.example/article)
+
+正文。
+"""
+    history_calls = 0
+
+    def pull_current(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        script: str,
+        *,
+        sudo: bool = False,
+    ) -> str:
+        nonlocal history_calls
+        assert sudo is True
+        if "requested = set" in script:
+            history_calls += 1
+            return json.dumps({"hints": [], "warnings": []})
+        return json.dumps(
+            {
+                "documents": [{"stream": "learning", "markdown": current}],
+                "sources": [],
+            }
+        )
+
+    monkeypatch.setattr(RemoteFeedPuller, "_python", pull_current)
+
+    for _attempt in range(2):
+        FeedSyncer(state).sync(FeedKind.AI_DAILY)
+
+    assert history_calls == 0
 
 
 def test_feed_cli_ingest_list_and_open(vault: Path, tmp_path: Path, capsys: object) -> None:

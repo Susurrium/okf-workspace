@@ -253,6 +253,9 @@ describe("real Dashboard View source handoff", () => {
     ]);
     expect(loadFeedSubscriptionSources).toHaveBeenNthCalledWith(1, { limit: 8 });
     expect(root.descendants("okf-reading-source-card")).toHaveLength(1);
+    expect(root.descendants("okf-feed-card")).toHaveLength(1);
+    expect(root.descendants("okf-feed-card__body")).toHaveLength(1);
+    expect(root.descendants("okf-feed-card__footer")).toHaveLength(1);
     expect(root.descendants("okf-reading-source-search")).toHaveLength(1);
     expect(root.descendants("okf-reading-source-card__sections")[0]?.children.map((item) => item.textContent))
       .toEqual(["工具 3", "文章 2", "资源 2", "其他 2 类"]);
@@ -1023,9 +1026,15 @@ describe("real Dashboard View source handoff", () => {
       section: null,
     };
     const digest = { ai_daily: [hotspot, news, learning], treehole };
+    const state = normalizeDashboardUiState({
+      feeds: {
+        "ai-daily-hotspot": { scrollTop: 137, editionId: hotspot.digest_id },
+        "ai-daily-news": { scrollTop: 94, editionId: "older-news" },
+      },
+    });
     const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
     const view = new OkfDashboardView(leaf, {
-      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      getDashboardUiState: () => state,
       feedDashboardDigestSnapshot: () => digest,
       loadFeedDashboardDigest: async () => digest,
       feedDecisionSnapshot: () => undefined,
@@ -1043,15 +1052,27 @@ describe("real Dashboard View source handoff", () => {
     runtime.renderDailyFeeds(container as unknown as HTMLElement);
     await Promise.resolve();
 
-    const headings = container.descendants("okf-feed-project__heading")
+    const headings = container.descendants("okf-feed-card__header")
       .map((heading) => heading.children[0]?.textContent);
     expect(headings).toEqual(["中国热点", "AI 资讯", "树洞热榜"]);
     expect(headings).not.toContain("订阅阅读");
-    expect(container.descendants("okf-feed-digest__item")).toHaveLength(7);
+    expect(container.descendants("okf-feed-card")).toHaveLength(3);
+    expect(container.descendants("okf-feed-digest__item")).toHaveLength(9);
     expect(container.descendants("okf-feed-digest__item").every((item) => item.hasClass("is-compact")))
       .toBe(true);
     expect(container.descendants("okf-feed-project__preview")).toHaveLength(3);
-    expect(container.descendants().some((item) => item.textContent === "查看本期全部 7 条")).toBe(true);
+    expect(container.descendants().some((item) => item.textContent === "7. 热点 7")).toBe(true);
+    expect(container.descendants().some((item) => item.textContent === "打开本期原生笔记")).toBe(true);
+
+    const bodies = container.descendants("okf-feed-card__body");
+    expect(bodies.map((body) => body.dataset.feed)).toEqual([
+      "ai-daily-hotspot",
+      "ai-daily-news",
+      "treehole",
+    ]);
+    expect(bodies[0]?.scrollTop).toBe(137);
+    expect(bodies[1]?.scrollTop).toBe(0);
+    expect(bodies[0]?.listeners.get("scroll")).toHaveLength(1);
 
     container.descendants("okf-feed-digest__item")[0]?.click();
     await vi.waitFor(() => {

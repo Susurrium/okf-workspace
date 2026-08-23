@@ -153,6 +153,14 @@ def _exclusive_file_lock(path: Path) -> Generator[None]:
                 locker.flock(handle.fileno(), locker.LOCK_UN)
 
 
+@contextmanager
+def exclusive_feed_cache_lock(path: Path) -> Generator[None]:
+    """Expose the Feed cache lock primitive to adjacent transactional services."""
+
+    with _exclusive_file_lock(path):
+        yield
+
+
 def _write_json_atomic(path: Path, payload: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, name = tempfile.mkstemp(
@@ -1240,6 +1248,88 @@ class FeedCache:
                 continue
             if value.stream == stream:
                 yield value
+
+    def iter_stream_indexes_strict(
+        self,
+        feed: FeedKind,
+        stream: str,
+    ) -> Iterator[FeedEditionIndex]:
+        """Yield every stream index or fail instead of hiding corrupt history.
+
+        Maintenance transactions use this stricter variant before committing a
+        durable migration marker. Read-only Dashboard projections deliberately
+        keep the tolerant iterator above so one bad cache file cannot blank the
+        whole page.
+        """
+
+        if not stream or any(value in stream for value in ("/", "\\", "..")):
+            raise ValueError(f"unsafe feed stream: {stream!r}")
+        directory = self.root / feed.value
+        if not directory.is_dir():
+            return
+        for path in sorted(
+            directory.glob(f"*-{stream}.json"),
+            key=lambda value: value.stem,
+            reverse=True,
+        ):
+            value = self._load_or_repair_index(feed, path)
+            if value.stream == stream:
+                yield value
+
+    def stream_source_identity_generation(
+        self,
+        feed: FeedKind,
+        stream: str,
+    ) -> str:
+        """Fingerprint only entries that may still need source-ID migration."""
+
+        candidates: list[tuple[str, str, str, str | None, str]] = []
+        for edition in self.iter_stream_indexes_strict(feed, stream):
+            body: FeedEdition | None = None
+            for item in edition.items:
+                legacy_name_hash = (
+                    item.source_id.startswith("source:")
+                    and len(item.source_id) == 23
+                    and all(value in "0123456789abcdef" for value in item.source_id[7:])
+                )
+                if (
+                    item.source_id == UNATTRIBUTED_SOURCE_ID
+                    or item.source_name is None
+                    or legacy_name_hash
+                ):
+                    if body is None:
+                        body = self.get(feed, edition.edition_id)
+                    body_item = next(
+                        (
+                            value
+                            for value in body.items
+                            if value.item_id == item.item_id
+                        ),
+                        None,
+                    )
+                    if body_item is None:
+                        raise ValueError(
+                            "Feed source identity index does not match edition: "
+                            + edition.edition_id
+                        )
+                    url_hash = hashlib.sha256(
+                        (body_item.url or "").encode("utf-8")
+                    ).hexdigest()
+                    candidates.append(
+                        (
+                            edition.edition_id,
+                            item.item_id,
+                            item.source_id,
+                            item.source_name,
+                            url_hash,
+                        )
+                    )
+        encoded = json.dumps(
+            candidates,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(b"okf-feed-source-identity-v1\0" + encoded).hexdigest()
 
     def list_stream_source_page(
         self,

@@ -33,21 +33,18 @@ describe("Dashboard global styles", () => {
       /\.okf-today-action-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.35fr\)\s*minmax\(0,\s*\.75fr\)\s*minmax\(0,\s*1fr\)/isu,
     );
     expect(styles).toMatch(
-      /\.okf-feed-shelf--daily\s*\{[^}]*grid-template-columns:\s*repeat\(3,/isu,
+      /\.okf-feed-shelf--daily,\s*\.okf-reading-source-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,/isu,
     );
     expect(styles).toMatch(
-      /\.okf-feed-shelf--daily \.okf-feed-project__scroll\s*\{[^}]*height:\s*auto[^}]*overflow:\s*visible/isu,
+      /\.okf-feed-card--scrollable \.okf-feed-card__body\s*\{[^}]*height:\s*clamp\([^}]*overflow-y:\s*auto/isu,
     );
-    expect(styles).toMatch(
-      /\.okf-reading-source-grid\s*\{[^}]*grid-template-columns:\s*repeat\(3,/isu,
-    );
+    expect(styles).toContain(".okf-feed-card__header");
+    expect(styles).toContain(".okf-feed-card__body");
+    expect(styles).toContain(".okf-feed-card__footer");
     expect(styles).toContain(".okf-reading-source-card");
     expect(styles).toContain(".okf-feed-digest__item.is-full");
     expect(styles).toMatch(
-      /@container\s*\(max-width:\s*1119px\)[\s\S]*?\.okf-feed-shelf--daily\s*>\s*:last-child\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/iu,
-    );
-    expect(styles).toMatch(
-      /@container\s*\(max-width:\s*1179px\)[\s\S]*?\.okf-reading-source-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,/iu,
+      /@container\s*\(max-width:\s*1179px\)[\s\S]*?\.okf-feed-shelf--daily,\s*\.okf-reading-source-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,/iu,
     );
     expect(styles).toMatch(
       /@container\s*\(max-width:\s*759px\)[\s\S]*?\.okf-reading-source-grid\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/iu,

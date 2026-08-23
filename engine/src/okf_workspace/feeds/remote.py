@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import subprocess
@@ -62,14 +63,14 @@ else:
             for source in registry.get('sources', []):
                 if not isinstance(source, dict):
                     continue
-                if source.get('collection') == 'ai_learning' and source.get('enabled', True):
+                if source.get('collection') == 'ai_learning':
                     sources.append({
                         'source_id': source.get('id'),
                         'source_name': source.get('name'),
                     })
         except Exception as error:
             registry_errors.append(
-                str(registry_path) + ': ' + error.__class__.__name__ + ': ' + str(error)
+                str(registry_path) + ': ' + error.__class__.__name__
             )
 documents = []
 for stream, prefix in prefixes.items():
@@ -83,6 +84,50 @@ print(json.dumps({
     'registry_errors': registry_errors,
 }, ensure_ascii=False))
 """.replace("__REGISTRY_PATHS__", repr(AI_DAILY_REGISTRY_PATHS)).strip()
+
+_AI_DAILY_HISTORY_HINTS_SCRIPT = """
+import hashlib
+import json
+import re
+from pathlib import Path
+root = Path('/srv/ai-daily/bridge/outbox')
+requested = set(__URL_DIGESTS__)
+allowed_sources = set(__SOURCE_NAMES__)
+item_heading = re.compile(
+    r'^(?:#{2,4}\\s+)?\\d+\\.\\s+\\[(?P<title>.+)\\]\\((?P<url>https?://.+)\\)\\s*$'
+)
+markdown_heading = re.compile(r'^(?P<marks>#{2,4})\\s+(?P<title>.+?)\\s*$')
+matches = {}
+warnings = []
+for history_path in reversed(sorted(root.glob('ai-learning-*.md'))):
+    try:
+        lines = history_path.read_text(encoding='utf-8').splitlines()
+    except Exception as error:
+        warnings.append(
+            history_path.name + ': ' + error.__class__.__name__
+        )
+        continue
+    source_name = None
+    for line in lines:
+        item_match = item_heading.fullmatch(line)
+        if item_match is not None:
+            digest = hashlib.sha256(item_match.group('url').encode('utf-8')).hexdigest()
+            if source_name and digest in requested:
+                matches.setdefault(digest, set()).add(source_name)
+            continue
+        heading = markdown_heading.fullmatch(line)
+        if heading is not None and len(heading.group('marks')) == 2:
+            candidate = heading.group('title').strip()
+            source_name = candidate if candidate.casefold() in allowed_sources else None
+print(json.dumps({
+    'hints': [
+        {'url_digest': digest, 'source_name': source_name}
+        for digest, names in sorted(matches.items())
+        for source_name in sorted(names)
+    ],
+    'warnings': warnings[:20],
+}, ensure_ascii=False))
+""".strip()
 
 _TREEHOLE_SCRIPT = """
 import base64
@@ -114,6 +159,7 @@ class RemoteFeedPuller:
         self.state = state.resolve()
         self._ai_daily_source_ids_by_name: dict[str, str] = {}
         self._ai_daily_registry_warnings: tuple[str, ...] = ()
+        self._ai_daily_registry_complete = True
 
     @property
     def ai_daily_source_ids_by_name(self) -> Mapping[str, str]:
@@ -123,28 +169,37 @@ class RemoteFeedPuller:
     def ai_daily_registry_warnings(self) -> tuple[str, ...]:
         return self._ai_daily_registry_warnings
 
+    @property
+    def ai_daily_registry_complete(self) -> bool:
+        return self._ai_daily_registry_complete
+
     def _python(self, alias: str, script: str, *, sudo: bool = False) -> str:
         if not _SSH_ALIAS.fullmatch(alias):
             raise ValueError(f"unsafe SSH alias: {alias!r}")
         encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
         prefix = "sudo -n " if sudo else ""
         command = f"{prefix}python3 -c \"import base64;exec(base64.b64decode('{encoded}'))\""
-        result = subprocess.run(
-            [
-                "ssh",
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "ConnectTimeout=10",
-                alias,
-                command,
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=60,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "ssh",
+                    "-o",
+                    "BatchMode=yes",
+                    "-o",
+                    "ConnectTimeout=10",
+                    alias,
+                    command,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=60,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                f"{alias}: remote Feed request timed out after 60 seconds"
+            ) from exc
         if result.returncode != 0:
             detail = (
                 result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "SSH failed"
@@ -155,6 +210,7 @@ class RemoteFeedPuller:
     def ai_daily(self, alias: str) -> tuple[tuple[str, str], ...]:
         self._ai_daily_source_ids_by_name = {}
         self._ai_daily_registry_warnings = ()
+        self._ai_daily_registry_complete = True
         payload = _object(self._python(alias, _AI_DAILY_SCRIPT, sudo=True), label="AI Daily")
         documents = payload.get("documents")
         if not isinstance(documents, list):
@@ -164,11 +220,15 @@ class RemoteFeedPuller:
         warnings: list[str] = []
         registry_errors = payload.get("registry_errors", [])
         if isinstance(registry_errors, list):
+            self._ai_daily_registry_complete = not registry_errors
             warnings.extend(
                 str(value).strip()[:300]
                 for value in cast(list[object], registry_errors)
                 if isinstance(value, str) and value.strip()
             )
+        else:
+            self._ai_daily_registry_complete = False
+            warnings.append("registry_errors must be a list")
         if isinstance(sources, list):
             for value in cast(list[object], sources):
                 if not isinstance(value, dict):
@@ -183,11 +243,12 @@ class RemoteFeedPuller:
                     and source_name.strip()
                 ):
                     source_candidates[source_name.strip().casefold()].add(source_id.strip())
-        self._ai_daily_source_ids_by_name = {
-            name: next(iter(source_ids))
-            for name, source_ids in source_candidates.items()
-            if len(source_ids) == 1
-        }
+        if self._ai_daily_registry_complete:
+            self._ai_daily_source_ids_by_name = {
+                name: next(iter(source_ids))
+                for name, source_ids in source_candidates.items()
+                if len(source_ids) == 1
+            }
         warnings.extend(
             f"source name maps to multiple ids: {name}"
             for name, source_ids in source_candidates.items()
@@ -206,6 +267,98 @@ class RemoteFeedPuller:
         if not result:
             raise ValueError("AI Daily producer returned no readable stream")
         return tuple(result)
+
+    def ai_daily_history_source_hints(
+        self,
+        alias: str,
+        urls: set[str],
+    ) -> tuple[Mapping[str, tuple[str, str]], bool, tuple[str, ...]]:
+        """Resolve a bounded set of exact legacy URLs only during cache migration."""
+
+        normalized_urls = {
+            url.strip()
+            for url in urls
+            if url.strip().startswith(("http://", "https://")) and len(url.strip()) <= 4096
+        }
+        if not normalized_urls:
+            return {}, True, ()
+        if len(normalized_urls) > 512:
+            raise ValueError("AI Daily source migration has more than 512 unresolved URLs")
+        urls_by_digest = {
+            hashlib.sha256(url.encode("utf-8")).hexdigest(): url
+            for url in normalized_urls
+        }
+        script = _AI_DAILY_HISTORY_HINTS_SCRIPT.replace(
+            "__URL_DIGESTS__",
+            repr(tuple(sorted(urls_by_digest))),
+        ).replace(
+            "__SOURCE_NAMES__",
+            repr(tuple(sorted(self._ai_daily_source_ids_by_name))),
+        )
+        payload = _object(
+            self._python(alias, script, sudo=True),
+            label="AI Daily history hints",
+        )
+        warnings = list(self._ai_daily_registry_warnings)
+        raw_warnings = payload.get("warnings", [])
+        if isinstance(raw_warnings, list):
+            warnings.extend(
+                str(value).strip()[:300]
+                for value in cast(list[object], raw_warnings)
+                if isinstance(value, str) and value.strip()
+            )
+        candidates: defaultdict[str, set[tuple[str, str]]] = defaultdict(set)
+        raw_hints = payload.get("hints", [])
+        if isinstance(raw_hints, list):
+            for value in cast(list[object], raw_hints):
+                if not isinstance(value, dict):
+                    continue
+                hint = cast(Mapping[str, object], value)
+                digest = hint.get("url_digest")
+                source_name = hint.get("source_name")
+                normalized_name = (
+                    source_name.strip()
+                    if isinstance(source_name, str) and source_name.strip()
+                    else ""
+                )
+                stable_id = (
+                    self._ai_daily_source_ids_by_name.get(normalized_name.casefold())
+                    if normalized_name
+                    else None
+                )
+                if (
+                    isinstance(digest, str)
+                    and digest in urls_by_digest
+                    and stable_id is not None
+                ):
+                    candidates[digest].add((stable_id, normalized_name))
+        warnings.extend(
+            f"item URL hash maps to multiple sources: {digest[:16]}"
+            for digest, identities in candidates.items()
+            if len(identities) > 1
+        )
+        warnings.extend(
+            f"item URL hash has no stable source: {digest[:16]}"
+            for digest in urls_by_digest
+            if digest not in candidates
+        )
+        self._ai_daily_registry_warnings = tuple(dict.fromkeys(warnings))
+        unresolved_hashes = tuple(
+            sorted(
+                digest
+                for digest in urls_by_digest
+                if len(candidates.get(digest, ())) != 1
+            )
+        )
+        return (
+            {
+                urls_by_digest[digest]: next(iter(identities))
+                for digest, identities in candidates.items()
+                if len(identities) == 1
+            },
+            not raw_warnings,
+            unresolved_hashes,
+        )
 
     def treehole(self, alias: str) -> tuple[dict[str, object], Path]:
         result = _object(self._python(alias, _TREEHOLE_SCRIPT), label="TreeHole")

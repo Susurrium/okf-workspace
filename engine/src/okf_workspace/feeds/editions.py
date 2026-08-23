@@ -5,13 +5,16 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import os
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
 from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
 from okf_workspace.okf.paths import slugify
 
+from .markdown import markdown_link
 from .models import FeedComment, FeedEdition, FeedItem, FeedKind
 
 _DATA_IMAGE = re.compile(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$", re.DOTALL)
@@ -39,7 +42,7 @@ def _ai_daily_body(edition: FeedEdition) -> str:
         if item.published_at:
             metadata.append(f"- 发布时间：{item.published_at}")
         if item.url:
-            metadata.append(f"- 原文：{item.url}")
+            metadata.append(f"- 原文：{markdown_link('打开原文', item.url)}")
         if metadata:
             sections.append("\n".join(metadata) + "\n")
         sections.append(item.body.strip() + "\n")
@@ -202,7 +205,9 @@ def materialize_edition(vault: Path, edition: FeedEdition) -> Path:
     """Create/update the derived edition; this never creates Source records."""
     target = vault.resolve() / edition_relative_path(edition)
     if target.is_file():
-        if edition.feed is FeedKind.TREEHOLE:
+        if edition.feed is FeedKind.AI_DAILY:
+            _refresh_ai_daily_managed_links(target, edition)
+        elif edition.feed is FeedKind.TREEHOLE:
             content = target.read_text(encoding="utf-8")
             expected_blocks = {item_block_id(item) for item in edition.items}
             actual_blocks = set(re.findall(r"(?m)^\^([^\s]+)[ \t]*$", content))
@@ -235,6 +240,69 @@ def materialize_edition(vault: Path, edition: FeedEdition) -> Path:
         ),
     )
     return target
+
+
+def _refresh_ai_daily_managed_links(target: Path, edition: FeedEdition) -> None:
+    """Upgrade generated URL rows while preserving Digest content and human notes."""
+
+    content = target.read_text(encoding="utf-8")
+    updated = content
+    cursor = 0
+    for item in edition.items:
+        if not item.url:
+            continue
+        block = re.search(
+            rf"(?m)^\^{re.escape(item_block_id(item))}[ \t]*$",
+            updated[cursor:],
+        )
+        if block is None:
+            continue
+        block_end = cursor + block.end()
+        scope = updated[cursor:block_end]
+        heading = re.search(
+            rf"(?m)^## {re.escape(item.title)}[ \t]*$",
+            scope,
+        )
+        if heading is None:
+            cursor = block_end
+            continue
+        start = cursor + heading.start()
+        original_section = updated[start:block_end]
+        replacement = f"- 原文：{markdown_link('打开原文', item.url)}"
+        managed_prefix = re.compile(
+            rf"\A(?P<prefix>## {re.escape(item.title)}[ \t]*\r?\n"
+            rf"(?:[ \t]*\r?\n)*(?:- 发布时间：[^\r\n]*\r?\n"
+            rf"(?:[ \t]*\r?\n)*)?)- 原文：{re.escape(item.url)}[ \t]*(?=\r?$)",
+            re.MULTILINE,
+        )
+        section = managed_prefix.sub(
+            lambda match, value=replacement: f"{match.group('prefix')}{value}",
+            original_section,
+            count=1,
+        )
+        if section != original_section:
+            updated = updated[:start] + section + updated[block_end:]
+            block_end += len(section) - len(original_section)
+        cursor = block_end
+    if updated != content:
+        _write_text_atomic(target, updated)
+
+
+def _write_text_atomic(target: Path, content: str) -> None:
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}.",
+        suffix=".tmp",
+        dir=target.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _edition_frontmatter(

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import zipfile
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Event
@@ -15,7 +16,14 @@ from okf_workspace.dashboard.feeds import subscription_sources_dashboard
 from okf_workspace.feeds.cache import FeedCache, FeedEditionIndex
 from okf_workspace.feeds.decisions import FeedDecisionService
 from okf_workspace.feeds.editions import materialize_edition
-from okf_workspace.feeds.models import DecisionAction, FeedComment, FeedEdition, FeedItem, FeedKind
+from okf_workspace.feeds.models import (
+    UNATTRIBUTED_SOURCE_ID,
+    DecisionAction,
+    FeedComment,
+    FeedEdition,
+    FeedItem,
+    FeedKind,
+)
 from okf_workspace.feeds.sync import FeedSyncer
 from okf_workspace.git import GitCheckpointError, create_checkpoint, initialize_repository
 from okf_workspace.notes.web_captures import publish_web_capture
@@ -87,6 +95,211 @@ def _no_checkpoint(_vault: Path, _message: str) -> None:
     return None
 
 
+def test_reading_card_prefers_producer_summary_over_long_body(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    edition = FeedEdition(
+        edition_id="2026-08-23-learning",
+        feed=FeedKind.AI_DAILY,
+        edition_at="2026-08-23",
+        title="订阅阅读",
+        stream="learning",
+        items=(
+            FeedItem(
+                item_id="rss:summary",
+                feed=FeedKind.AI_DAILY,
+                edition_id="2026-08-23-learning",
+                title="带全文的 RSS",
+                body=(
+                    "**摘要：** 这是卡片应该显示的短摘要。\n\n"
+                    "**正文：**\n\n这是很长的完整正文，不应拼进卡片摘要。"
+                ),
+                url="https://example.test/rss",
+                stream="learning",
+                source_id="rss-source",
+                source_name="RSS 来源",
+            ),
+        ),
+    )
+    FeedCache(state).put(edition)
+
+    payload = subscription_sources_dashboard(state)
+    sources = cast(list[dict[str, object]], payload["sources"])
+    preview = cast(list[dict[str, object]], sources[0]["preview_items"])
+
+    assert preview[0]["summary"] == "这是卡片应该显示的短摘要。"
+
+
+def test_source_migration_does_not_mark_a_concurrent_unknown_item_complete(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = tmp_path / "state"
+    syncer = FeedSyncer(state)
+    snapshot_taken = Event()
+    allow_snapshot = Event()
+    original = syncer.cache.iter_stream_indexes_strict
+    call_count = 0
+
+    def delayed_indexes(
+        feed: FeedKind,
+        stream: str,
+    ) -> Iterator[FeedEditionIndex]:
+        nonlocal call_count
+        snapshot = tuple(original(feed, stream))
+        call_count += 1
+        if call_count == 1:
+            snapshot_taken.set()
+            assert allow_snapshot.wait(timeout=5)
+        return iter(snapshot)
+
+    monkeypatch.setattr(syncer.cache, "iter_stream_indexes_strict", delayed_indexes)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        migration = executor.submit(
+            syncer._reconcile_learning_source_ids,  # pyright: ignore[reportPrivateUsage]
+            [],
+            {"Known Source": "known-source"},
+            {},
+            migration_inputs_complete=True,
+            attempted_source_urls=set(),
+            unresolved_url_hashes=(),
+        )
+        assert snapshot_taken.wait(timeout=5)
+        legacy_url = "https://legacy.example/new"
+        FeedCache(state).put(
+            FeedEdition(
+                edition_id="2026-08-23-learning",
+                feed=FeedKind.AI_DAILY,
+                edition_at="2026-08-23",
+                title="并发写入",
+                stream="learning",
+                items=(
+                    FeedItem(
+                        item_id="legacy:concurrent",
+                        feed=FeedKind.AI_DAILY,
+                        edition_id="2026-08-23-learning",
+                        title="未归属条目",
+                        body="正文",
+                        url=legacy_url,
+                        stream="learning",
+                        source_id="legacy.example",
+                    ),
+                ),
+            )
+        )
+        allow_snapshot.set()
+        migration.result(timeout=5)
+
+    marker = (
+        state
+        / "feed-cache/metadata/migrations/ai-daily-learning-source-ids.json"
+    )
+    assert not marker.exists()
+
+
+def test_source_identity_generation_changes_when_only_candidate_url_changes(
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / "state"
+    cache = FeedCache(state)
+
+    def edition(url: str) -> FeedEdition:
+        return FeedEdition(
+            edition_id="2026-08-23-learning",
+            feed=FeedKind.AI_DAILY,
+            edition_at="2026-08-23",
+            title="待迁移来源",
+            stream="learning",
+            items=(
+                FeedItem(
+                    item_id="legacy:same-identity",
+                    feed=FeedKind.AI_DAILY,
+                    edition_id="2026-08-23-learning",
+                    title="未归属条目",
+                    body="正文",
+                    url=url,
+                    stream="learning",
+                    source_id="legacy.example",
+                ),
+            ),
+        )
+
+    cache.put(edition("https://legacy.example/first"))
+    before = cache.stream_source_identity_generation(
+        FeedKind.AI_DAILY,
+        "learning",
+    )
+
+    cache.put(edition("https://legacy.example/second"))
+    after = cache.stream_source_identity_generation(
+        FeedKind.AI_DAILY,
+        "learning",
+    )
+
+    assert after != before
+
+
+def test_source_migration_finishes_with_resolved_and_unresolved_items(
+    tmp_path: Path,
+) -> None:
+    state = tmp_path / "state"
+    cache = FeedCache(state)
+    resolved_url = "https://known.example/resolved"
+    unresolved_url = "https://unknown.example/unresolved"
+    edition = FeedEdition(
+        edition_id="2026-08-23-learning",
+        feed=FeedKind.AI_DAILY,
+        edition_at="2026-08-23",
+        title="混合来源",
+        stream="learning",
+        items=tuple(
+            FeedItem(
+                item_id=f"ai-daily:learning:{hashlib.sha256(url.encode('utf-8')).hexdigest()[:20]}",
+                feed=FeedKind.AI_DAILY,
+                edition_id="2026-08-23-learning",
+                title=title,
+                body="正文",
+                url=url,
+                stream="learning",
+                source_id=UNATTRIBUTED_SOURCE_ID,
+            )
+            for title, url in (
+                ("可识别来源", resolved_url),
+                ("无法识别来源", unresolved_url),
+            )
+        ),
+    )
+    cache.put(edition)
+    syncer = FeedSyncer(state)
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        migration = executor.submit(
+            syncer._reconcile_learning_source_ids,  # pyright: ignore[reportPrivateUsage]
+            [],
+            {"Known Source": "known-source"},
+            {resolved_url: ("known-source", "Known Source")},
+            migration_inputs_complete=True,
+            attempted_source_urls={resolved_url, unresolved_url},
+            unresolved_url_hashes=(
+                hashlib.sha256(unresolved_url.encode("utf-8")).hexdigest(),
+            ),
+        )
+        migration.result(timeout=5)
+
+    migrated = cache.get(FeedKind.AI_DAILY, edition.edition_id)
+    assert migrated.items[0].source_id == "known-source"
+    assert migrated.items[0].source_name == "Known Source"
+    assert migrated.items[1].source_id == UNATTRIBUTED_SOURCE_ID
+    marker = json.loads(
+        (
+            state
+            / "feed-cache/metadata/migrations/ai-daily-learning-source-ids.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert marker["unresolved_url_hashes"] == [
+        hashlib.sha256(unresolved_url.encode("utf-8")).hexdigest()
+    ]
+
+
 def test_cache_is_outside_vault_and_edition_is_lazy(vault: Path, tmp_path: Path) -> None:
     state = tmp_path / "state"
     edition = FeedEdition(
@@ -113,6 +326,54 @@ def test_cache_is_outside_vault_and_edition_is_lazy(vault: Path, tmp_path: Path)
     assert (
         materialize_edition(vault, edition).read_text(encoding="utf-8").endswith("我的阅读批注。\n")
     )
+
+
+def test_ai_daily_urls_are_safe_links_and_legacy_rows_refresh_in_place(vault: Path) -> None:
+    item = FeedItem(
+        item_id="daily:wechat",
+        feed=FeedKind.AI_DAILY,
+        edition_id="2026-08-21-learning",
+        title="微信 RSS 条目",
+        body="完整正文。\n\n## 正文小节\n\n- 原文：这是正文中的人工说明",
+        url="https://mp.weixin.qq.com/s?__biz=abc%3D%3D&idx=1",
+        stream="learning",
+    )
+    edition = FeedEdition(
+        edition_id=item.edition_id,
+        feed=item.feed,
+        edition_at="2026-08-21",
+        title="订阅阅读",
+        stream="learning",
+        items=(item,),
+    )
+    path = materialize_edition(vault, edition)
+    rendered = path.read_text(encoding="utf-8")
+    safe_row = (
+        "- 原文：[打开原文]"
+        "(<https://mp.weixin.qq.com/s?__biz=abc%3D%3D&idx=1>)"
+    )
+    assert safe_row in rendered
+
+    legacy_row = "- 原文：https://mp.weixin.qq.com/s?__biz=abc%3D%3D&idx=1"
+    path.write_text(
+        rendered.replace(safe_row, legacy_row) + "\n我的阅读批注。\n",
+        encoding="utf-8",
+    )
+
+    refreshed = materialize_edition(vault, edition).read_text(encoding="utf-8")
+
+    assert safe_row in refreshed
+    assert legacy_row not in refreshed
+    assert "- 原文：这是正文中的人工说明" in refreshed
+    assert refreshed.endswith("我的阅读批注。\n")
+
+    manually_edited = refreshed.replace(safe_row, "- 原文：我手工修改的来源说明")
+    path.write_text(manually_edited, encoding="utf-8")
+
+    preserved = materialize_edition(vault, edition).read_text(encoding="utf-8")
+
+    assert "- 原文：我手工修改的来源说明" in preserved
+    assert safe_row not in preserved
 
 
 def test_feed_cache_put_atomically_replaces_a_complete_json_file(

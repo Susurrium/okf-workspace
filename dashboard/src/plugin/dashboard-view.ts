@@ -81,8 +81,15 @@ type LearningContextFilter = "all" | DashboardLearningContext;
 const SUBSCRIPTION_FIRST_PAGE_TTL_MS = 120_000;
 const SUBSCRIPTION_SOURCE_PAGE_SIZE = 8;
 const SUBSCRIPTION_EDITION_PAGE_SIZE = 4;
-const TODAY_FEED_PREVIEW_LIMIT = 5;
 const READING_SOURCE_PREVIEW_LIMIT = 3;
+
+interface FeedCardSurface {
+  card: HTMLElement;
+  meta: HTMLElement;
+  context: HTMLElement;
+  body: HTMLElement;
+  footer: HTMLElement;
+}
 
 const NAVIGATION: readonly { id: Section; label: string }[] = [
   { id: "today", label: "Today" },
@@ -168,6 +175,7 @@ export class OkfDashboardView extends ItemView {
   private readonly selectedCaptures = new Set<string>();
   private readonly pageScroll = new Map<Section, number>();
   private readonly feedScroll: Partial<Record<DashboardFeed, number>> = {};
+  private readonly feedScrollEdition: Partial<Record<DashboardFeed, string>> = {};
   private readonly feedScrollPersistTimers: Partial<Record<DashboardFeed, number>> = {};
   private subscriptionEditions: FeedDigestEdition[] = [];
   private subscriptionCursor: string | null = null;
@@ -238,6 +246,10 @@ export class OkfDashboardView extends ItemView {
     this.feedScroll["ai-daily-news"] = state.feeds["ai-daily-news"].scrollTop;
     this.feedScroll["ai-daily-learning"] = state.feeds["ai-daily-learning"].scrollTop;
     this.feedScroll.treehole = state.feeds.treehole.scrollTop;
+    for (const feed of DASHBOARD_FEEDS) {
+      const editionId = state.feeds[feed].editionId;
+      if (editionId) this.feedScrollEdition[feed] = editionId;
+    }
     const todayPane = state.pages.today.tab;
     if (todayPane === "actions" || todayPane === "reading") this.todayPane = todayPane;
     const learningTab = state.pages.learning.tab;
@@ -335,7 +347,10 @@ export class OkfDashboardView extends ItemView {
       delete this.feedScrollPersistTimers[kind];
       const scrollTop = this.feedScroll[kind];
       if (scrollTop !== undefined) {
-        this.plugin.updateDashboardFeedUiState(kind, { scrollTop });
+        this.plugin.updateDashboardFeedUiState(kind, {
+          scrollTop,
+          editionId: this.feedScrollEdition[kind] ?? null,
+        });
       }
     }
     const scrollTop = this.contentEl.scrollTop;
@@ -982,11 +997,50 @@ export class OkfDashboardView extends ItemView {
     }
   }
 
+  private createFeedCardSurface(
+    parent: HTMLElement,
+    options: {
+      title: string;
+      meta: string;
+      cardClass?: string;
+      headerClass?: string;
+      metaClass?: string;
+      contextClass?: string;
+      bodyClass?: string;
+      footerClass?: string;
+      attributes?: Record<string, string>;
+    },
+  ): FeedCardSurface {
+    const appendClass = (base: string, extra?: string): string => extra ? `${base} ${extra}` : base;
+    const card = parent.createEl("article", {
+      cls: appendClass("okf-feed-card", options.cardClass),
+      attr: options.attributes ?? {},
+    });
+    const header = card.createEl("header", {
+      cls: appendClass("okf-feed-card__header", options.headerClass),
+    });
+    header.createEl("h3", { text: options.title });
+    const meta = header.createDiv({
+      cls: appendClass("okf-dashboard__muted okf-feed-card__meta", options.metaClass),
+      text: options.meta,
+    });
+    const context = card.createDiv({
+      cls: appendClass("okf-feed-card__context", options.contextClass),
+    });
+    const body = card.createDiv({
+      cls: appendClass("okf-feed-card__body", options.bodyClass),
+    });
+    const footer = card.createEl("footer", {
+      cls: appendClass("okf-feed-card__footer", options.footerClass),
+    });
+    return { card, meta, context, body, footer };
+  }
+
   private renderDailyFeeds(parent: HTMLElement): void {
     const reading = this.dashboardSection(
       parent,
       "每日更新",
-      "快速浏览中国热点、AI 资讯和树洞热榜；完整内容与判断仍在原生 Digest。",
+      "滚动浏览中国热点、AI 资讯和树洞热榜的本期全部条目；完整内容与判断仍在原生 Digest。",
       "okf-dashboard__reading",
     );
     const shelf = reading.createDiv({ cls: "okf-feed-shelf okf-feed-shelf--daily" });
@@ -1019,19 +1073,17 @@ export class OkfDashboardView extends ItemView {
       },
     ];
     const surfaces = definitions.map((definition) => {
-      const panel = shelf.createEl("section", {
-        cls: `okf-feed-project okf-feed-project--${definition.modifier}`,
+      const surface = this.createFeedCardSurface(shelf, {
+        title: definition.title,
+        meta: "正在读取最新一期…",
+        cardClass: `okf-feed-card--scrollable okf-feed-project okf-feed-project--${definition.modifier}`,
+        headerClass: "okf-feed-project__header",
+        bodyClass: "okf-feed-project__scroll okf-feed-project__preview",
+        footerClass: "okf-feed-project__footer",
       });
-      const header = panel.createDiv({ cls: "okf-feed-project__header" });
-      const heading = header.createDiv({ cls: "okf-feed-project__heading" });
-      heading.createEl("h3", { text: definition.title });
-      const meta = heading.createDiv({
-        cls: "okf-dashboard__muted",
-        text: "正在读取最新一期…",
-      });
-      const content = panel.createDiv({ cls: "okf-feed-project__scroll okf-feed-project__preview" });
-      content.createDiv({ cls: "okf-dashboard__muted", text: `正在读取${definition.title}…` });
-      return { ...definition, panel, header, meta, content };
+      surface.body.createDiv({ cls: "okf-dashboard__muted", text: `正在读取${definition.title}…` });
+      const restoreScroll = this.attachFeedScroll(definition.id, surface.body);
+      return { ...definition, ...surface, restoreScroll };
     });
     let rendered: FeedDashboardDigest | undefined;
     const renderDigest = (digest: FeedDashboardDigest): void => {
@@ -1041,29 +1093,30 @@ export class OkfDashboardView extends ItemView {
         const edition = surface.kind === "treehole"
           ? digest.treehole ?? undefined
           : latestAiDailyEdition(digest, surface.section!);
-        surface.content.empty();
+        surface.body.empty();
+        surface.footer.empty();
         if (!edition) {
           surface.meta.setText("当前没有可读内容");
-          surface.content.createDiv({
+          surface.body.createDiv({
             cls: "okf-dashboard__empty",
             text: `暂时没有${surface.title}内容。`,
           });
+          surface.restoreScroll(undefined);
           continue;
         }
         surface.meta.setText(`${formatFeedDate(edition.issued_at)} · ${edition.item_count} 条`);
-        this.renderFeedDigestEdition(surface.content, surface.kind, edition, {
+        this.renderFeedDigestEdition(surface.body, surface.kind, edition, {
           heading: false,
           mode: "compact",
-          limit: TODAY_FEED_PREVIEW_LIMIT,
         });
-        const footer = surface.content.createDiv({ cls: "okf-feed-project__footer" });
-        const openDigest = footer.createEl("button", {
-          text: `查看本期全部 ${edition.item_count} 条`,
+        const openDigest = surface.footer.createEl("button", {
+          text: "打开本期原生笔记",
           cls: "okf-dashboard__ghost-action okf-feed-project__digest-action",
         });
         openDigest.addEventListener("click", () => {
           this.openFeedDigest(openDigest, surface.kind, edition.digest_id);
         });
+        surface.restoreScroll(edition.digest_id);
       }
     };
     const cached = this.plugin.feedDashboardDigestSnapshot();
@@ -1077,9 +1130,10 @@ export class OkfDashboardView extends ItemView {
         const message = error instanceof Error ? error.message : "Feed 摘要暂时无法读取";
         for (const surface of surfaces) {
           surface.meta.setText("暂时无法读取");
-          surface.content.empty();
-          surface.content.createDiv({ cls: "okf-dashboard__muted", text: message });
-          const retry = surface.content.createEl("button", {
+          surface.body.empty();
+          surface.footer.empty();
+          surface.body.createDiv({ cls: "okf-dashboard__muted", text: message });
+          const retry = surface.body.createEl("button", {
             text: "重新读取",
             cls: "okf-dashboard__secondary-action",
           });
@@ -1257,31 +1311,34 @@ export class OkfDashboardView extends ItemView {
   }
 
   private renderSubscriptionSourceCard(parent: HTMLElement, source: FeedSubscriptionSource): void {
-    const card = parent.createEl("article", {
-      cls: "okf-reading-source-card",
-      attr: { "data-source-id": source.source_id },
-    });
-    const header = card.createDiv({ cls: "okf-reading-source-card__header" });
-    header.createEl("h3", { text: source.source_name });
-    header.createDiv({
-      cls: "okf-dashboard__muted okf-reading-source-card__meta",
-      text: [
+    const surface = this.createFeedCardSurface(parent, {
+      title: source.source_name,
+      meta: [
         formatFeedDate(source.latest_issued_at),
         `本期 ${source.latest_item_count} 条`,
         `待判断 ${source.pending_decision_count}`,
         `历史 ${source.edition_count} 期`,
       ].join(" · "),
+      cardClass: "okf-feed-card--source okf-reading-source-card",
+      headerClass: "okf-reading-source-card__header",
+      metaClass: "okf-reading-source-card__meta",
+      contextClass: "okf-reading-source-card__sections",
+      bodyClass: "okf-reading-source-card__preview",
+      footerClass: "okf-reading-source-card__footer",
+      attributes: { "data-source-id": source.source_id },
     });
     const sections = Object.entries(source.native_section_counts)
       .filter(([label, count]) => Boolean(label.trim()) && count > 0)
       .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "zh-CN"));
     if (sections.length) {
-      const badges = card.createDiv({ cls: "okf-reading-source-card__sections" });
       for (const [label, count] of sections.slice(0, 3)) {
-        badges.createSpan({ cls: "okf-dashboard__badge", text: `${label} ${count}` });
+        surface.context.createSpan({ cls: "okf-dashboard__badge", text: `${label} ${count}` });
       }
       if (sections.length > 3) {
-        badges.createSpan({ cls: "okf-dashboard__badge", text: `其他 ${sections.length - 3} 类` });
+        surface.context.createSpan({
+          cls: "okf-dashboard__badge",
+          text: `其他 ${sections.length - 3} 类`,
+        });
       }
     }
     const edition: FeedDigestEdition = {
@@ -1294,15 +1351,13 @@ export class OkfDashboardView extends ItemView {
       item_count: source.latest_item_count,
       items: source.preview_items,
     };
-    const preview = card.createDiv({ cls: "okf-reading-source-card__preview" });
-    this.renderFeedDigestEdition(preview, "ai-daily", edition, {
+    this.renderFeedDigestEdition(surface.body, "ai-daily", edition, {
       heading: false,
       mode: "compact",
       limit: READING_SOURCE_PREVIEW_LIMIT,
       suppressSourceMetadata: true,
     });
-    const footer = card.createDiv({ cls: "okf-reading-source-card__footer" });
-    const viewAll = footer.createEl("button", {
+    const viewAll = surface.footer.createEl("button", {
       text: "查看该来源",
       cls: "okf-dashboard__ghost-action",
       attr: { type: "button" },
@@ -1713,9 +1768,19 @@ export class OkfDashboardView extends ItemView {
     this.subscriptionDetailSourceId = sourceId;
   }
 
-  private attachFeedScroll(feed: DashboardFeed, element: HTMLElement): void {
+  private attachFeedScroll(
+    feed: DashboardFeed,
+    element: HTMLElement,
+  ): (editionId: string | undefined) => void {
     element.dataset.feed = feed;
-    element.scrollTop = this.feedScroll[feed] ?? 0;
+    const restore = (editionId: string | undefined): void => {
+      if (editionId && this.feedScrollEdition[feed] !== editionId) {
+        this.feedScrollEdition[feed] = editionId;
+        this.feedScroll[feed] = 0;
+        this.plugin.updateDashboardFeedUiState(feed, { scrollTop: 0, editionId });
+      }
+      element.scrollTop = this.feedScroll[feed] ?? 0;
+    };
     element.addEventListener("scroll", () => {
       this.lastInteractionAt = Date.now();
       this.feedScroll[feed] = element.scrollTop;
@@ -1725,9 +1790,11 @@ export class OkfDashboardView extends ItemView {
         delete this.feedScrollPersistTimers[feed];
         this.plugin.updateDashboardFeedUiState(feed, {
           scrollTop: this.feedScroll[feed] ?? 0,
+          editionId: this.feedScrollEdition[feed] ?? null,
         });
       }, 120);
     }, { passive: true });
+    return restore;
   }
 
   private openFeedDigest(

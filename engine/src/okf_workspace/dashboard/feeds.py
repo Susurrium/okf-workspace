@@ -25,15 +25,21 @@ from okf_workspace.feeds.models import (
 
 _MARKDOWN_LINK = re.compile(r"!?\[([^\]]*)\]\([^)]+\)")
 _MARKDOWN_DECORATION = re.compile(r"[#>*_`~-]+")
+_PRODUCER_SUMMARY = re.compile(r"(?m)^\*\*摘要：\*\*[ \t]*(?P<value>.+?)[ \t]*$")
 _CURSOR_VERSION = 1
 _CURSOR_DOMAIN = b"okf-feed-dashboard-cursor-v1\0"
 
 
 def _excerpt(body: str, *, limit: int = 220) -> str:
-    visible = " ".join(
-        line.strip()
-        for line in body.splitlines()
-        if line.strip() and not line.strip().startswith("<!--")
+    producer_summary = _PRODUCER_SUMMARY.search(body)
+    visible = (
+        producer_summary.group("value").strip()
+        if producer_summary is not None
+        else " ".join(
+            line.strip()
+            for line in body.splitlines()
+            if line.strip() and not line.strip().startswith("<!--")
+        )
     )
     visible = _MARKDOWN_LINK.sub(r"\1", visible)
     return _MARKDOWN_DECORATION.sub(" ", visible).strip()[:limit]

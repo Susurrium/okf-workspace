@@ -20,6 +20,7 @@ from okf_workspace.okf.paths import slugify
 from okf_workspace.sources import SourcePublisher
 
 from .editions import materialize_media_references, render_treehole_comments
+from .markdown import markdown_link
 from .models import (
     DecisionAction,
     DecisionResult,
@@ -77,7 +78,7 @@ def _feed_supplement(vault: Path, item: FeedItem) -> tuple[str, str, str]:
         f"- Feed item：{item.item_id}",
     ]
     if item.url:
-        metadata.append(f"- 原始链接：{item.url}")
+        metadata.append(f"- 原始链接：{markdown_link('打开原文', item.url)}")
     sections = [
         start,
         f"## Feed 补充 · {item.title}\n\n" + "\n".join(metadata),
@@ -268,7 +269,11 @@ class FeedDecisionService:
                     f"# {item.title}\n\n"
                     f"- 转换正文：[{text_relative}](/{text_relative})\n"
                     f"- Feed：{item.feed.value} / {item.edition_id}\n"
-                    + (f"- 原始链接：{item.url}\n" if item.url else "")
+                    + (
+                        f"- 原始链接：{markdown_link('打开原文', item.url)}\n"
+                        if item.url
+                        else ""
+                    )
                 ),
             )
             text_document = OkfDocument({}, "")
