@@ -9,6 +9,7 @@ __pycache__/
 .coverage
 .context/
 .tmp/
+.worktrees/
 .env*
 !.env.example
 !.env.*.example
