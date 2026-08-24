@@ -20,6 +20,7 @@ from okf_workspace.dashboard.feeds import (
 from okf_workspace.feeds.adapters import (
     ai_daily_from_v1,
     ai_daily_markdown_from_v1,
+    ai_papers_markdown_from_v1,
     treehole_from_v1,
 )
 from okf_workspace.feeds.cache import FeedCache
@@ -119,6 +120,98 @@ date: 2026-08-16
     assert treehole.items[0].metrics["like_count"] == 2
     assert [comment.text for comment in treehole.items[0].comments] == ["评论"]
     assert treehole.items[0].media[0].startswith("data:image/jpeg")
+
+
+def test_ai_papers_markdown_preserves_complete_ranked_issue_with_stable_ids() -> None:
+    markdown = """---
+title: "AI Papers of the Week"
+date: "2026-08-17"
+---
+
+> 以下标题与正文完整保留 AI Papers of the Week 最新一期。
+
+## Top AI Papers of the Week (August 11 - August 17) - 2026
+| **Paper** | **Links** |
+| --- | --- |
+| 1) **First Paper** - First description. | [Paper](https://arxiv.org/abs/2608.00001) |
+| 2) **Second Paper** - Second description. | [Paper](https://Example.org/paper?id=2#abstract) |
+"""
+    artifact_id = "ai-papers:2026-08-17"
+
+    edition = ai_papers_markdown_from_v1(markdown, artifact_id=artifact_id)
+
+    edition_hash = hashlib.sha256(artifact_id.encode("utf-8")).hexdigest()[:12]
+    assert edition.edition_id == f"2026-08-17-papers-{edition_hash}"
+    assert edition.edition_at == "2026-08-17"
+    assert edition.title == "Top AI Papers of the Week (August 11 - August 17) - 2026"
+    assert edition.stream == "papers"
+    assert [item.title for item in edition.items] == ["First Paper", "Second Paper"]
+    assert [item.body for item in edition.items] == [
+        "First description.",
+        "Second description.",
+    ]
+    assert [item.metrics["rank"] for item in edition.items] == [1, 2]
+    assert edition.items[1].url == "https://example.org/paper?id=2"
+    assert {item.source_id for item in edition.items} == {
+        "system:ai-papers-of-the-week"
+    }
+    assert {item.source_name for item in edition.items} == {"AI Papers of the Week"}
+    assert edition.items[0].item_id == (
+        "ai-daily:papers:"
+        + hashlib.sha256(
+            b"https://arxiv.org/abs/2608.00001"
+        ).hexdigest()[:24]
+    )
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        (
+            "| 1) **First** - Description. | [Paper](https://example.org/1) |\n"
+            "| 1) **Duplicate rank** - Description. | [Paper](https://example.org/2) |"
+        ),
+        (
+            "| 1) **First** - Description. | [Paper](https://example.org/1) |\n"
+            "| 3) **Gap** - Description. | [Paper](https://example.org/3) |"
+        ),
+        (
+            "| 1) **First** - Description. | [Paper](https://example.org/1) |\n"
+            "| 2) **Duplicate URL** - Description. | "
+            "[Paper](https://EXAMPLE.org/1#details) |"
+        ),
+        "| 1) **Missing description** | [Paper](https://example.org/1) |",
+    ],
+)
+def test_ai_papers_markdown_refuses_a_partial_or_ambiguous_issue(rows: str) -> None:
+    markdown = f"""---
+date: 2026-08-17
+---
+
+## Top AI Papers of the Week (August 11 - August 17) - 2026
+| **Paper** | **Links** |
+| --- | --- |
+{rows}
+"""
+
+    with pytest.raises(ValueError):
+        ai_papers_markdown_from_v1(markdown, artifact_id="ai-papers:2026-08-17")
+
+
+def test_ai_papers_markdown_refuses_more_than_one_issue_heading() -> None:
+    markdown = """---
+date: 2026-08-17
+---
+
+## Top AI Papers of the Week (August 11 - August 17) - 2026
+| 1) **First** - Description. | [Paper](https://example.org/1) |
+
+## Top AI Papers of the Week (August 4 - August 10) - 2026
+| 1) **Older** - Description. | [Paper](https://example.org/older) |
+"""
+
+    with pytest.raises(ValueError):
+        ai_papers_markdown_from_v1(markdown, artifact_id="ai-papers:2026-08-17")
 
 
 def test_learning_markdown_preserves_source_and_native_section_for_h4_items() -> None:

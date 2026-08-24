@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import cast
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 
 from .models import FeedComment, FeedEdition, FeedItem, FeedKind
 
@@ -17,6 +17,19 @@ _AI_ITEM_HEADING = re.compile(
 _MARKDOWN_HEADING = re.compile(r"^(?P<marks>#{2,4})\s+(?P<title>.+?)\s*$")
 _MARKDOWN_LINK = re.compile(r"\[(?P<label>[^]]+)\]\((?P<url>https?://[^)]+)\)")
 _GENERIC_SOURCE_HEADINGS = {"来源", "最新条目"}
+_AI_PAPERS_ISSUE = re.compile(
+    r"(?m)^##\s+(?P<title>Top AI Papers of the Week[^\r\n]*)\s*$"
+)
+_AI_PAPERS_ROW = re.compile(
+    r"^\|\s*(?P<rank>\d+)\)\s+\*\*(?P<title>.+?)\*\*\s+-\s+"
+    r"(?P<description>.+?)\s+\|\s+(?P<links>.+?)\s+\|\s*$"
+)
+_AI_PAPERS_LINK = re.compile(
+    r"\[Paper\]\((?P<url>https?://[^)\s]+)\)",
+    re.IGNORECASE,
+)
+_AI_PAPERS_SOURCE_ID = "system:ai-papers-of-the-week"
+_AI_PAPERS_SOURCE_NAME = "AI Papers of the Week"
 
 
 def legacy_source_identity(source_name: str | None, url: str | None) -> str | None:
@@ -45,6 +58,116 @@ def _frontmatter_value(markdown: str, key: str) -> str | None:
         if separator and name.strip() == key:
             return value.strip().strip('"').strip("'")
     return None
+
+
+def _plain_markdown(value: str) -> str:
+    value = re.sub(r"<br\s*/?>", " ", value, flags=re.IGNORECASE)
+    value = re.sub(r"!\[[^]]*]\([^)]+\)", "", value)
+    value = re.sub(r"\[([^]]+)]\([^)]+\)", r"\1", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _canonical_paper_url(value: str) -> str:
+    parsed = urlsplit(value)
+    scheme = parsed.scheme.casefold()
+    if scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("AI Papers paper URL must be HTTP(S)")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("AI Papers paper URL must not contain credentials")
+    try:
+        port = parsed.port
+    except ValueError as error:
+        raise ValueError("AI Papers paper URL has an invalid port") from error
+    hostname = parsed.hostname.casefold()
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    default_port = (scheme == "http" and port == 80) or (
+        scheme == "https" and port == 443
+    )
+    netloc = host if port is None or default_port else f"{host}:{port}"
+    return urlunsplit((scheme, netloc, parsed.path or "/", parsed.query, ""))
+
+
+def ai_papers_markdown_from_v1(
+    markdown: str,
+    *,
+    artifact_id: str,
+) -> FeedEdition:
+    """Convert one complete preserved AI Papers issue into a feed edition."""
+
+    if not artifact_id or artifact_id.strip() != artifact_id:
+        raise ValueError("AI Papers artifact id is invalid")
+    issue_date = _frontmatter_value(markdown, "date")
+    if not issue_date:
+        raise ValueError("AI Papers Markdown has no date")
+    try:
+        parsed_date = date.fromisoformat(issue_date)
+    except ValueError as error:
+        raise ValueError("AI Papers Markdown date is invalid") from error
+    if parsed_date.isoformat() != issue_date:
+        raise ValueError("AI Papers Markdown date is invalid")
+    issues = list(_AI_PAPERS_ISSUE.finditer(markdown))
+    if len(issues) != 1:
+        raise ValueError("AI Papers Markdown must contain exactly one issue")
+    issue = issues[0]
+    section = markdown[issue.start() :]
+    parsed_rows: list[tuple[int, str, str, str]] = []
+    for line in section.splitlines():
+        row = _AI_PAPERS_ROW.fullmatch(line)
+        if row is None:
+            continue
+        link = _AI_PAPERS_LINK.search(row.group("links"))
+        if link is None:
+            raise ValueError(f"AI Papers rank {row.group('rank')} has no Paper link")
+        title = _plain_markdown(row.group("title"))
+        description = _plain_markdown(row.group("description"))
+        if not title or not description:
+            raise ValueError("AI Papers row title and description are required")
+        parsed_rows.append(
+            (
+                int(row.group("rank")),
+                title,
+                description,
+                _canonical_paper_url(link.group("url")),
+            )
+        )
+    ranks = [rank for rank, _title, _description, _url in parsed_rows]
+    if not ranks or ranks != list(range(1, len(ranks) + 1)):
+        raise ValueError("AI Papers issue ranks must be unique and continuous")
+    paper_links = _AI_PAPERS_LINK.findall(section)
+    if len(paper_links) != len(parsed_rows):
+        raise ValueError("AI Papers issue contains unparsed paper links")
+    urls = [url for _rank, _title, _description, url in parsed_rows]
+    if len(set(urls)) != len(urls):
+        raise ValueError("AI Papers issue contains duplicate paper URLs")
+    edition_hash = hashlib.sha256(artifact_id.encode("utf-8")).hexdigest()[:12]
+    edition_id = f"{issue_date}-papers-{edition_hash}"
+    items = tuple(
+        FeedItem(
+            item_id=(
+                "ai-daily:papers:"
+                + hashlib.sha256(url.encode("utf-8")).hexdigest()[:24]
+            ),
+            feed=FeedKind.AI_DAILY,
+            edition_id=edition_id,
+            title=title,
+            body=description,
+            url=url,
+            published_at=issue_date,
+            stream="papers",
+            source_id=_AI_PAPERS_SOURCE_ID,
+            source_name=_AI_PAPERS_SOURCE_NAME,
+            metrics={"rank": rank},
+        )
+        for rank, title, description, url in parsed_rows
+    )
+    return FeedEdition(
+        edition_id=edition_id,
+        feed=FeedKind.AI_DAILY,
+        edition_at=issue_date,
+        title=issue.group("title").strip(),
+        stream="papers",
+        items=items,
+    )
 
 
 def ai_daily_markdown_from_v1(
