@@ -129,6 +129,19 @@ def _latest_ai_daily_streams(cache: FeedCache) -> list[dict[str, object]]:
     return latest
 
 
+def _latest_today_ai_daily(cache: FeedCache) -> dict[str, object] | None:
+    editions = [
+        edition
+        for stream in ("hotspot", "news")
+        if (edition := cache.latest_edition(FeedKind.AI_DAILY, stream=stream))
+        is not None
+    ]
+    if not editions:
+        return None
+    latest = max(editions, key=lambda edition: (edition.edition_at, edition.edition_id))
+    return _feed_summary(latest)
+
+
 def today_view(vault: Path, state: Path, target_date: date | None = None) -> dict[str, object]:
     root = vault.resolve()
     value = target_date or date.today()
@@ -160,7 +173,7 @@ def today_view(vault: Path, state: Path, target_date: date | None = None) -> dic
         ][:8],
         "open_inbox_count": len(waiting_decision),
         "inbox_by_ingested_via": _ingestion_counts(waiting_decision),
-        "latest_ai_daily": _latest_feed(cache, FeedKind.AI_DAILY),
+        "latest_ai_daily": _latest_today_ai_daily(cache),
         "latest_ai_daily_streams": _latest_ai_daily_streams(cache),
         "latest_treehole": _latest_feed(cache, FeedKind.TREEHOLE),
         "stale_knowledge": [_summary(note) for note in stale],

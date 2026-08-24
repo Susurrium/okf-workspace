@@ -531,6 +531,7 @@ def feed_dashboard(state: Path) -> dict[str, object]:
         for stream in ("hotspot", "news", "learning")
         if (edition := cache.latest_edition(FeedKind.AI_DAILY, stream=stream)) is not None
     ]
+    papers = cache.latest_edition(FeedKind.AI_DAILY, stream="papers")
     treehole = cache.latest_edition(FeedKind.TREEHOLE)
     ai_daily_sync: dict[str, object] | None = None
     sync_status_path = state / "feed-sync" / "ai-daily-stream-status.json"
@@ -554,6 +555,7 @@ def feed_dashboard(state: Path) -> dict[str, object]:
         pass
     return {
         "ai_daily": [_digest(edition, decisions) for edition in streams],
+        "ai_papers": _digest(papers, decisions) if papers else None,
         "ai_daily_sync": ai_daily_sync,
         "treehole": _digest(treehole, decisions) if treehole else None,
     }

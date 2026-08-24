@@ -155,6 +155,7 @@ def test_today_feed_projection_uses_latest_hotspot_and_news_independently(
         ("2026-08-16", "news"),
         ("2026-08-17", "hotspot"),
         ("2026-08-18", "learning"),
+        ("2026-08-19", "papers"),
     ):
         edition_id = f"{edition_date}-{stream}"
         cache.put(
@@ -185,3 +186,6 @@ def test_today_feed_projection_uses_latest_hotspot_and_news_independently(
         ("news", "2026-08-16"),
     ]
     assert all(item["item_count"] == 1 for item in streams)
+    latest = cast(dict[str, object], today["latest_ai_daily"])
+    assert latest["section"] == "hotspot"
+    assert latest["issued_at"] == "2026-08-17"

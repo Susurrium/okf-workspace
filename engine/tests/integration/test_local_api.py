@@ -462,6 +462,7 @@ def test_feed_dashboard_selects_each_latest_stream_and_pages_subscriptions_stabl
     put("learning", "2026-08-21", source_name="阮一峰《科技爱好者周刊》")
     put("learning", "2026-08-20")
     put("learning", "2026-08-19")
+    put("papers", "2026-08-22")
 
     summary = client.get("/dashboard/feeds/summary", headers=headers).json()
     assert [(edition["section"], edition["issued_at"]) for edition in summary["ai_daily"]] == [
@@ -469,6 +470,8 @@ def test_feed_dashboard_selects_each_latest_stream_and_pages_subscriptions_stabl
         ("news", "2026-08-19"),
         ("learning", "2026-08-21"),
     ]
+    assert summary["ai_papers"]["section"] == "papers"
+    assert summary["ai_papers"]["issued_at"] == "2026-08-22"
 
     first = client.get(
         "/dashboard/feeds/subscriptions?limit=2",
