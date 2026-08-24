@@ -15,6 +15,7 @@ export const DASHBOARD_FEEDS = [
   "ai-daily-hotspot",
   "ai-daily-news",
   "ai-daily-learning",
+  "ai-daily-papers",
   "treehole",
 ] as const;
 export type DashboardFeed = (typeof DASHBOARD_FEEDS)[number];
@@ -117,6 +118,7 @@ export function createDefaultDashboardUiState(): DashboardUiState {
       "ai-daily-hotspot": { scrollTop: 0 },
       "ai-daily-news": { scrollTop: 0 },
       "ai-daily-learning": { scrollTop: 0 },
+      "ai-daily-papers": { scrollTop: 0 },
       treehole: { scrollTop: 0 },
     },
     readingSources: {},
@@ -157,6 +159,10 @@ export function normalizeDashboardUiState(
     "ai-daily-learning": normalizeFeedState(
       storedFeeds?.["ai-daily-learning"],
       { scrollTop: aiDaily.scrollTop },
+    ),
+    "ai-daily-papers": normalizeFeedState(
+      storedFeeds?.["ai-daily-papers"],
+      undefined,
     ),
     treehole: normalizeFeedState(storedFeeds?.treehole, legacy?.treehole),
   };

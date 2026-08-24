@@ -30,6 +30,7 @@ describe("Dashboard UI state", () => {
       "ai-daily-hotspot": { scrollTop: 0 },
       "ai-daily-news": { scrollTop: 0 },
       "ai-daily-learning": { scrollTop: 0 },
+      "ai-daily-papers": { scrollTop: 0 },
       treehole: { scrollTop: 0 },
     });
     expect(state.readingSources).toEqual({});

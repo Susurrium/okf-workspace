@@ -1212,6 +1212,70 @@ export class OkfDashboardView extends ItemView {
       });
   }
 
+  private renderReadingPapers(parent: HTMLElement): void {
+    const shelf = parent.createEl("section", {
+      cls: "okf-feed-shelf okf-reading-papers",
+      attr: { "aria-label": "AI Papers of the Week" },
+    });
+    const surface = this.createFeedCardSurface(shelf, {
+      title: "AI Papers of the Week",
+      meta: "正在读取最新一期…",
+      cardClass: "okf-feed-card--scrollable okf-feed-project okf-feed-project--papers",
+      headerClass: "okf-feed-project__header",
+      bodyClass: "okf-feed-project__scroll okf-feed-project__preview",
+      footerClass: "okf-feed-project__footer",
+    });
+    const restoreScroll = this.attachFeedScroll("ai-daily-papers", surface.body);
+    let renderedEditionId: string | undefined;
+    const renderEdition = (edition: FeedDigestEdition | null | undefined): void => {
+      if (!shelf.isConnected) return;
+      surface.body.empty();
+      surface.footer.empty();
+      renderedEditionId = edition?.digest_id;
+      if (!edition) {
+        surface.meta.setText("当前没有可读内容");
+        surface.body.createDiv({
+          cls: "okf-dashboard__empty",
+          text: "暂时没有 AI Papers 周刊，远端发布新一期后会自动显示。",
+        });
+        restoreScroll(undefined);
+        return;
+      }
+      surface.meta.setText(`${formatFeedDate(edition.issued_at)} · ${edition.item_count} 篇`);
+      this.renderFeedDigestEdition(surface.body, "ai-daily", edition, {
+        heading: false,
+        mode: "compact",
+      });
+      const openDigest = surface.footer.createEl("button", {
+        text: "打开本期原生笔记",
+        cls: "okf-dashboard__ghost-action okf-feed-project__digest-action",
+      });
+      openDigest.addEventListener("click", () => {
+        this.openFeedDigest(openDigest, "ai-daily", edition.digest_id);
+      });
+      restoreScroll(edition.digest_id);
+    };
+    const snapshot = typeof this.plugin.feedDashboardDigestSnapshot === "function"
+      ? this.plugin.feedDashboardDigestSnapshot()
+      : undefined;
+    renderEdition(snapshot?.ai_papers);
+    if (typeof this.plugin.loadFeedDashboardDigest !== "function") return;
+    void this.plugin.loadFeedDashboardDigest()
+      .then((digest) => {
+        if (digest.ai_papers?.digest_id === renderedEditionId) return;
+        renderEdition(digest.ai_papers);
+      })
+      .catch((error: unknown) => {
+        if (renderedEditionId || !shelf.isConnected) return;
+        surface.meta.setText("暂时无法读取");
+        surface.body.empty();
+        surface.body.createDiv({
+          cls: "okf-dashboard__muted",
+          text: error instanceof Error ? error.message : "AI Papers 暂时无法读取",
+        });
+      });
+  }
+
   private async renderReading(container: HTMLElement): Promise<void> {
     const actions = container.createDiv({
       cls: "okf-dashboard__hero-actions okf-reading-actions",
@@ -1255,6 +1319,8 @@ export class OkfDashboardView extends ItemView {
       await this.renderReadingSourceDetail(container, this.selectedSubscriptionSource);
       return;
     }
+
+    this.renderReadingPapers(container);
 
     let refreshWarning = "";
     if (this.subscriptionSourcesNeedRefresh()) {
@@ -2482,7 +2548,11 @@ export class OkfDashboardView extends ItemView {
       cls: `okf-feed-digest__edition is-${mode}`,
     });
     const defaultHeading = kind === "ai-daily"
-      ? edition.section ? aiDailyPreviewStreamTitle(edition.section) : "其他"
+      ? edition.section === "papers"
+        ? "AI Papers of the Week"
+        : edition.section
+          ? aiDailyPreviewStreamTitle(edition.section)
+          : "其他"
       : "本期条目";
     const heading = options.heading === undefined ? defaultHeading : options.heading;
     if (heading !== false) section.createEl("h4", { text: heading });

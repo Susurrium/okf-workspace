@@ -67,7 +67,7 @@ export interface FeedDigestItem {
   source_name?: string | null;
   native_section?: string | null;
   published_at?: string | null;
-  section?: AiDailyStream | null;
+  section?: AiDailyStream | AiPapersStream | null;
   pid?: number | null;
   metrics: Record<string, number | string>;
   comment_count: number;
@@ -79,7 +79,7 @@ export interface FeedDigestEdition {
   digest_id: string;
   issued_at: string;
   title: string;
-  section?: AiDailyStream | null;
+  section?: AiDailyStream | AiPapersStream | null;
   quality?: string | null;
   quality_reason?: string | null;
   item_count: number;
@@ -88,6 +88,7 @@ export interface FeedDigestEdition {
 
 export interface FeedDashboardDigest {
   ai_daily: FeedDigestEdition[];
+  ai_papers?: FeedDigestEdition | null;
   treehole: FeedDigestEdition | null;
 }
 
@@ -322,6 +323,7 @@ export interface FeedDecisionResult {
 }
 
 export type AiDailyStream = "hotspot" | "news" | "learning";
+export type AiPapersStream = "papers";
 
 export interface AiDailyIssueStream {
   stream: AiDailyStream;

@@ -79,7 +79,7 @@ function operation(
 }
 
 function feedEdition(
-  section: AiDailyStream,
+  section: AiDailyStream | "papers",
   digestId: string,
   issuedAt: string,
 ): FeedDigestEdition {
@@ -926,6 +926,22 @@ describe("real Dashboard View source handoff", () => {
       has_more: false,
     }));
     const promptAddFeedSubscription = vi.fn();
+    const papersBase = feedEdition("papers", "papers-2026-08-24", "2026-08-24");
+    const papers = {
+      ...papersBase,
+      title: "AI Papers of the Week",
+      item_count: 2,
+      items: [
+        papersBase.items[0]!,
+        {
+          ...papersBase.items[0]!,
+          item_id: "papers-2026-08-24:2",
+          block_id: "papers-2026-08-24-2",
+          title: "第二篇论文",
+        },
+      ],
+    };
+    const feedDigest = { ai_daily: [], ai_papers: papers, treehole: null };
     const plugin = {
       getDashboardUiState: () => state,
       semanticOperationsSnapshot: () => [],
@@ -941,6 +957,8 @@ describe("real Dashboard View source handoff", () => {
       openFeedDigest: vi.fn(async () => undefined),
       ensureLocalServiceAvailable: vi.fn(async () => undefined),
       promptAddFeedSubscription,
+      feedDashboardDigestSnapshot: () => feedDigest,
+      loadFeedDashboardDigest: vi.fn(async () => feedDigest),
       updateDashboardFeedUiState: () => undefined,
       updateDashboardPageUiState: () => undefined,
     };
@@ -968,27 +986,37 @@ describe("real Dashboard View source handoff", () => {
     ]);
     expect(loadFeedSubscriptionSources).toHaveBeenNthCalledWith(1, { limit: 8 });
     expect(root.descendants("okf-reading-source-card")).toHaveLength(1);
-    expect(root.descendants("okf-feed-card")).toHaveLength(1);
-    expect(root.descendants("okf-feed-card__body")).toHaveLength(1);
-    expect(root.descendants("okf-feed-card__footer")).toHaveLength(1);
+    expect(root.descendants("okf-feed-card")).toHaveLength(2);
+    expect(root.descendants("okf-feed-card__body")).toHaveLength(2);
+    expect(root.descendants("okf-feed-card__footer")).toHaveLength(2);
+    const papersShelf = root.descendants("okf-reading-papers")[0]!;
+    const sourceGrid = root.descendants("okf-reading-source-grid")[0]!;
+    expect(papersShelf.parentElement?.children.indexOf(papersShelf)).toBeLessThan(
+      sourceGrid.parentElement!.children.indexOf(sourceGrid),
+    );
+    expect(root.descendants("okf-feed-project--papers")).toHaveLength(1);
+    expect(papersShelf.descendants("okf-feed-digest__item")).toHaveLength(2);
+    expect(papersShelf.descendants().some((item) => item.textContent === "停用")).toBe(false);
+    expect(papersShelf.descendants().some((item) => item.textContent === "移除")).toBe(false);
     expect(root.descendants("okf-reading-source-search")).toHaveLength(1);
     root.descendants().find((item) => item.textContent === "添加订阅")?.click();
     expect(promptAddFeedSubscription).toHaveBeenCalledOnce();
     expect(root.descendants("okf-reading-source-card__sections")[0]?.children.map((item) => item.textContent))
       .toEqual(["工具 3", "文章 2", "资源 2", "其他 2 类"]);
-    await vi.waitFor(() => expect(root.descendants("okf-feed-digest__item")).toHaveLength(5));
+    const sourceItems = (): TestElement[] => sourceGrid.descendants("okf-feed-digest__item");
+    await vi.waitFor(() => expect(sourceItems()).toHaveLength(5));
     expect(root.descendants("okf-reading-source-card")[0]?.hasClass("okf-feed-card--scrollable"))
       .toBe(true);
     expect(root.descendants("okf-reading-source-card__preview")[0]?.dataset.sourceId)
       .toBe("source-a");
     expect(root.descendants("okf-dashboard__feed-warning")[0]?.textContent)
       .toBe("采集不完整：部分内容缺失");
-    expect(root.descendants("okf-feed-digest__item").every((item) => item.hasClass("is-compact"))).toBe(true);
-    const firstPreviewMetadata = root.descendants("okf-feed-digest__item")[0]?.children
+    expect(sourceItems().every((item) => item.hasClass("is-compact"))).toBe(true);
+    const firstPreviewMetadata = sourceItems()[0]?.children
       .find((item) => item.hasClass("okf-dashboard__muted"))?.textContent;
     expect(firstPreviewMetadata).toBe("工具");
 
-    root.descendants("okf-feed-digest__item")[0]?.click();
+    sourceItems()[0]?.click();
     await vi.waitFor(() => {
       expect(openFeedItem).toHaveBeenCalledWith("ai-daily", "learning-3", "learning-3-1");
     });
@@ -1742,11 +1770,12 @@ describe("real Dashboard View source handoff", () => {
     };
     const news = feedEdition("news", "news", "2026-08-22");
     const learning = feedEdition("learning", "learning", "2026-08-22");
+    const papers = feedEdition("papers", "papers", "2026-08-22");
     const treehole = {
       ...feedEdition("learning", "treehole", "2026-08-22"),
       section: null,
     };
-    const digest = { ai_daily: [hotspot, news, learning], treehole };
+    const digest = { ai_daily: [hotspot, news, learning], ai_papers: papers, treehole };
     const state = normalizeDashboardUiState({
       feeds: {
         "ai-daily-hotspot": { scrollTop: 137, editionId: hotspot.digest_id },

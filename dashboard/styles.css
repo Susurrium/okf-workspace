@@ -773,6 +773,10 @@
   box-shadow: inset 3px 0 0 var(--okf-accent);
 }
 
+.okf-feed-project--papers {
+  box-shadow: inset 3px 0 0 var(--color-purple, #8b6cef);
+}
+
 .okf-feed-project__header,
 .okf-dashboard .feed-header {
   position: static;
@@ -1807,6 +1811,10 @@ button.okf-action-panel__action:focus-visible,
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: stretch;
   gap: 14px;
+}
+
+.okf-reading-papers {
+  margin: 16px 0 22px;
 }
 
 .okf-feed-card {
