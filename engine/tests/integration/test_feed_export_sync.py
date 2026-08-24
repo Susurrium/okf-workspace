@@ -66,7 +66,7 @@ def _source() -> dict[str, object]:
     }
 
 
-def _state(tmp_path: Path) -> Path:
+def _state(tmp_path: Path, *, papers_enabled: bool = False) -> Path:
     state = tmp_path / "state"
     state.mkdir()
     (state / "feed-producers.json").write_text(
@@ -76,12 +76,239 @@ def _state(tmp_path: Path) -> Path:
                     "remote_kind": "ai-daily-bridge-v1",
                     "feed_export_ssh_alias": "ai-daily-feed-export",
                     "source_admin_ssh_alias": "ai-daily-source-admin",
+                    "papers_enabled": papers_enabled,
                 }
             }
         ),
         encoding="utf-8",
     )
     return state
+
+
+def _papers_markdown(date: str) -> str:
+    return f"""---
+date: {date}
+title: AI Papers of the Week
+---
+
+## Top AI Papers of the Week (August 11 - August 17) - 2026
+| **Paper** | **Links** |
+| --- | --- |
+| 1) **First Paper** - First description. | [Paper](https://arxiv.org/abs/2608.00001) |
+| 2) **Second Paper** - Second description. | [Paper](https://example.org/paper?id=2) |
+"""
+
+
+def test_remote_feed_export_can_request_only_papers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def forced_json(
+        _puller: RemoteFeedPuller,
+        alias: str,
+        *,
+        protocol: str,
+        action: str,
+        payload: dict[str, object],
+        max_response_bytes: int,
+    ) -> tuple[dict[str, object], None]:
+        captured.update(
+            alias=alias,
+            protocol=protocol,
+            action=action,
+            payload=payload,
+            max_response_bytes=max_response_bytes,
+        )
+        return {"documents": []}, None
+
+    monkeypatch.setattr(RemoteFeedPuller, "_forced_json", forced_json)
+
+    RemoteFeedPuller(tmp_path).feed_export(
+        "ai-daily-feed-export",
+        after=None,
+        streams=("papers",),
+        include_registry=False,
+    )
+
+    assert captured["protocol"] == "feed-export.v1"
+    assert cast(dict[str, object], captured["payload"])["streams"] == ["papers"]
+    assert cast(dict[str, object], captured["payload"])["include_registry"] is False
+
+
+def test_papers_sync_uses_an_independent_cursor_and_does_not_replace_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _state(tmp_path, papers_enabled=True)
+    core_cursor_path = state / "feed-sync" / "ai-daily-export-cursor.json"
+    core_cursor_path.parent.mkdir(parents=True)
+    core_cursor_payload = {
+        "version": 1,
+        "producer_fingerprint": hashlib.sha256(
+            b"okf-feed-export-v1\0ai-daily-feed-export"
+        ).hexdigest(),
+        "cursor": _cursor(3),
+        "updated_at": "2026-08-23T07:00:00+00:00",
+    }
+    core_cursor_path.write_text(json.dumps(core_cursor_payload), encoding="utf-8")
+    SourceRegistryMirror(state).replace(
+        "a" * 64,
+        (ManagementSource.parse(_source()),),
+    )
+    calls: list[tuple[object, object, bool]] = []
+    papers = _document(1, "papers", _papers_markdown("2026-08-21"))
+
+    def export(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        *,
+        after: object,
+        limit: int,
+        include_registry: bool,
+        streams: tuple[str, ...] | None = None,
+    ) -> dict[str, object]:
+        assert limit == 30
+        calls.append((streams, after, include_registry))
+        if streams == ("papers",):
+            return {
+                "documents": [papers],
+                "next_cursor": _cursor(1),
+                "has_more": False,
+                "stream_status": {"papers": {"status": "ok", "sources": []}},
+            }
+        assert streams is None
+        assert after == _cursor(3)
+        return {
+            "documents": [],
+            "next_cursor": _cursor(3),
+            "has_more": False,
+            "stream_status": {
+                stream: {"status": "ok", "sources": []}
+                for stream in ("hotspot", "news", "learning")
+            },
+            "registry": {"revision": "a" * 64, "sources": [_source()]},
+        }
+
+    monkeypatch.setattr(RemoteFeedPuller, "feed_export", export)
+
+    editions = FeedSyncer(state).sync(FeedKind.AI_DAILY)
+
+    assert [edition.stream for edition in editions] == ["papers"]
+    assert calls == [
+        (None, _cursor(3), True),
+        (("papers",), None, False),
+    ]
+    assert json.loads(core_cursor_path.read_text(encoding="utf-8")) == core_cursor_payload
+    papers_cursor = json.loads(
+        (state / "feed-sync" / "ai-daily-papers-export-cursor.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert papers_cursor["cursor"] == _cursor(1)
+    assert FeedCache(state).latest_edition(
+        FeedKind.AI_DAILY,
+        stream="papers",
+    ) is not None
+    assert SourceRegistryMirror(state).load().registry_revision == "a" * 64
+
+
+def test_empty_papers_page_still_advances_only_the_papers_cursor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _state(tmp_path, papers_enabled=True)
+
+    def export(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        *,
+        after: object,
+        limit: int,
+        include_registry: bool,
+        streams: tuple[str, ...] | None = None,
+    ) -> dict[str, object]:
+        assert limit == 30
+        if streams == ("papers",):
+            assert after is None and include_registry is False
+            return {
+                "documents": [],
+                "next_cursor": _cursor(2),
+                "has_more": False,
+                "stream_status": {"papers": {"status": "ok", "sources": []}},
+            }
+        assert streams is None and after is None and include_registry is True
+        return {
+            "documents": [],
+            "next_cursor": None,
+            "has_more": False,
+            "stream_status": {
+                stream: {"status": "ok", "sources": []}
+                for stream in ("hotspot", "news", "learning")
+            },
+        }
+
+    monkeypatch.setattr(RemoteFeedPuller, "feed_export", export)
+
+    assert FeedSyncer(state).sync(FeedKind.AI_DAILY) == ()
+    assert not (state / "feed-sync" / "ai-daily-export-cursor.json").exists()
+    assert json.loads(
+        (state / "feed-sync" / "ai-daily-papers-export-cursor.json").read_text(
+            encoding="utf-8"
+        )
+    )["cursor"] == _cursor(2)
+
+
+def test_invalid_papers_page_does_not_discard_a_valid_core_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _state(tmp_path, papers_enabled=True)
+    news = _document(1, "news", _markdown("2026-08-21", "news", "AI 资讯"))
+    papers = _document(2, "papers", _papers_markdown("2026-08-22"))
+    papers["content_sha256"] = "0" * 64
+
+    def export(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        *,
+        after: object,
+        limit: int,
+        include_registry: bool,
+        streams: tuple[str, ...] | None = None,
+    ) -> dict[str, object]:
+        assert after is None and limit == 30
+        if streams == ("papers",):
+            assert include_registry is False
+            return {
+                "documents": [papers],
+                "next_cursor": _cursor(2),
+                "has_more": False,
+                "stream_status": {"papers": {"status": "ok", "sources": []}},
+            }
+        assert streams is None and include_registry is True
+        return {
+            "documents": [news],
+            "next_cursor": _cursor(1),
+            "has_more": False,
+            "stream_status": {
+                stream: {"status": "ok", "sources": []}
+                for stream in ("hotspot", "news", "learning")
+            },
+        }
+
+    monkeypatch.setattr(RemoteFeedPuller, "feed_export", export)
+    syncer = FeedSyncer(state)
+
+    editions = syncer.sync(FeedKind.AI_DAILY)
+
+    assert [edition.edition_id for edition in editions] == ["2026-08-21-news"]
+    assert [(failure.stream, failure.detail) for failure in syncer.failures] == [
+        ("papers", "AI Daily export document checksum is invalid")
+    ]
+    assert FeedCache(state).latest_edition(FeedKind.AI_DAILY, stream="news") is not None
+    assert FeedCache(state).latest_edition(FeedKind.AI_DAILY, stream="papers") is None
 
 
 def test_forced_json_transport_passes_no_remote_command_or_secret_in_errors(

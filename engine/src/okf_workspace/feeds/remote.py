@@ -10,7 +10,7 @@ import subprocess
 import uuid
 import zipfile
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypedDict, cast
@@ -408,18 +408,29 @@ class RemoteFeedPuller:
         alias: str,
         *,
         after: Mapping[str, str] | None,
+        streams: Sequence[str] | None = None,
         limit: int = 30,
         include_registry: bool = True,
     ) -> dict[str, object]:
         if not 1 <= limit <= 30:
             raise ValueError("Feed export limit must be between 1 and 30")
+        requested_streams = tuple(streams or ("hotspot", "news", "learning"))
+        if (
+            not requested_streams
+            or len(set(requested_streams)) != len(requested_streams)
+            or any(
+                stream not in {"hotspot", "news", "learning", "papers"}
+                for stream in requested_streams
+            )
+        ):
+            raise ValueError("Feed export streams are invalid")
         result, _revision = self._forced_json(
             alias,
             protocol="feed-export.v1",
             action="sync",
             payload={
                 "after": dict(after) if after is not None else None,
-                "streams": ["hotspot", "news", "learning"],
+                "streams": list(requested_streams),
                 "limit": limit,
                 "include_registry": include_registry,
             },
