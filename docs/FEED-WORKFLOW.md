@@ -4,11 +4,14 @@
 
 AI Daily 和 PkuHoleObserver 继续作为外部生产者。AI Daily 使用专用只读 forced-command SSH alias 和 `feed-export.v1` 游标，从上次成功位置增量补齐所有期次；只有一页中的文档全部校验并写入本机 cache 后才推进本机游标。任一 stream 暂时失败时保留其它 stream 与 last-good 内容，断网后由下次计划任务从原游标补拉。PkuHoleObserver 继续获取 JSON/ZIP 快照。原始 Feed cache 放在 Vault 外的 `Runtime State/feed-cache/`；同步不会确认、移动或删除远端文件。
 
-AI Daily 是内部生产器名称，不是一个单独的用户页面。它的三个 stream 在 Dashboard 中按真实用途分开：
+AI Daily 是内部生产器名称，不是一个单独的用户页面。它的四个导出 stream 在 Dashboard 中按真实用途分开：
 
 - `hotspot` → Today 的“中国热点”；
 - `news` → Today 的“AI 资讯”；
 - `learning` → Reading 的“订阅阅读”，包括 RSS、周刊、教程和工具更新。
+- `papers` → Reading 顶部固定的“AI Papers of the Week”系统卡片。
+
+远端 `ai_papers` collection 映射到 `feed-export.v1` 的 `papers` stream，但不进入可管理的 learning Registry。它在本地使用独立的 `Runtime State/feed-sync/ai-daily-papers-export-cursor.json`，因此首次回填历史周刊和后续增量同步都不会移动原有的 `ai-daily-export-cursor.json`。论文卡片保留最新一期的完整排名、标题、说明和原始链接，不提供启用、停用或移除等订阅操作。
 
 PkuHoleObserver 的 TreeHole 快照进入 Today 的“树洞热榜”。Today 只负责浏览三个最新的每日更新；Reading 使用同一套 Feed 期次、条目和判断界面浏览持续累积的订阅历史。Reading 不是第二个 Learning：只有用户明确选择“想学习”后，对应 Source 才会进入 Learning。
 
@@ -21,17 +24,20 @@ Reading 的订阅管理通过另一把专用 forced-command SSH alias 调用 `so
   "ai-daily": {
     "remote_kind": "ai-daily-bridge-v1",
     "feed_export_ssh_alias": "ai-daily-feed-export",
-    "source_admin_ssh_alias": "ai-daily-source-admin"
+    "source_admin_ssh_alias": "ai-daily-source-admin",
+    "papers_enabled": false
   }
 }
 ```
+
+`papers_enabled` 缺省或为 `false` 时保持旧行为；确认远端导出器已经支持 `papers` 后才能改为 `true`。回滚时只需重新设为 `false`，不要删除 papers cache、papers 游标或主游标。
 
 用户打开一期内容时，系统才创建 Obsidian 原生 `Digest`：
 
 - `feeds/ai-daily/YYYY/<digest>.md`
 - `feeds/treehole/YYYY/<digest>.md`
 
-Dashboard 的 Today、Reading 和原生 Digest 复用同一种条目语义与判断结果，不各自维护一套动作。Today 中三个每日更新区域独立加载、独立显示各自最近一期，只预览前几条，完整一期直接打开原生 Digest；某一路当天没有更新或同步失败时，不会隐藏或阻塞其它来源。Reading 按稳定的 `source_id` 把订阅组织成来源卡片；卡片只摘要该来源最近一期，进入来源后才按期分页加载它的历史。旧缓存没有来源身份时统一归入“来源未标注”，不按文章链接域名误拆为多个订阅。完整正文、TreeHole 评论和人工判断仍在原生 Digest 中完成。
+Dashboard 的 Today、Reading 和原生 Digest 复用同一种条目语义与判断结果，不各自维护一套动作。Today 中三个每日更新区域独立加载、独立显示各自最近一期，只预览前几条，完整一期直接打开原生 Digest；Today 明确排除 `learning` 和 `papers`，某一路当天没有更新或同步失败时，也不会隐藏或阻塞其它来源。Reading 顶部先显示可滚动浏览完整一期的 AI Papers 系统卡片，再按稳定的 `source_id` 把普通订阅组织成来源卡片；订阅卡只摘要该来源最近一期，进入来源后才按期分页加载它的历史。旧缓存没有来源身份时统一归入“来源未标注”，不按文章链接域名误拆为多个订阅。完整正文、TreeHole 评论和人工判断仍在原生 Digest 中完成。
 
 ## 2. 判断权属于用户
 
