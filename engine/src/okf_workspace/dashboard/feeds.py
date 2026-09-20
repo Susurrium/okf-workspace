@@ -17,6 +17,7 @@ from okf_workspace.feeds import FeedCache, FeedEdition, FeedItem, FeedKind
 from okf_workspace.feeds.cache import FeedSourceCatalogStale
 from okf_workspace.feeds.decisions import FeedDecisionStore
 from okf_workspace.feeds.editions import item_block_id
+from okf_workspace.feeds.health import stream_health
 from okf_workspace.feeds.models import (
     UNATTRIBUTED_SOURCE_ID,
     UNATTRIBUTED_SOURCE_NAME,
@@ -129,9 +130,7 @@ def _canonical_json_bytes(value: object) -> bytes:
 
 def _reading_item_snapshot(items: list[FeedItem]) -> str:
     payload = [item.item_id for item in items]
-    return hashlib.sha256(
-        _READING_SNAPSHOT_DOMAIN + _canonical_json_bytes(payload)
-    ).hexdigest()
+    return hashlib.sha256(_READING_SNAPSHOT_DOMAIN + _canonical_json_bytes(payload)).hexdigest()
 
 
 def _reading_projection_revision(
@@ -161,9 +160,7 @@ def _reading_projection_revision(
             for item in items
         ],
     }
-    return hashlib.sha256(
-        _READING_PROJECTION_DOMAIN + _canonical_json_bytes(payload)
-    ).hexdigest()
+    return hashlib.sha256(_READING_PROJECTION_DOMAIN + _canonical_json_bytes(payload)).hexdigest()
 
 
 def _bounded_reading_item_projection(
@@ -557,6 +554,7 @@ def feed_dashboard(state: Path) -> dict[str, object]:
         "ai_daily": [_digest(edition, decisions) for edition in streams],
         "ai_papers": _digest(papers, decisions) if papers else None,
         "ai_daily_sync": ai_daily_sync,
+        "stream_health": stream_health(state),
         "treehole": _digest(treehole, decisions) if treehole else None,
     }
 
@@ -581,9 +579,7 @@ def subscription_sources_dashboard(
     except (OSError, ValueError):
         registry = None
     registry_sources = (
-        {value.source_id: value for value in registry.sources}
-        if registry is not None
-        else {}
+        {value.source_id: value for value in registry.sources} if registry is not None else {}
     )
     for attempt in range(2):
         try:
@@ -605,9 +601,7 @@ def subscription_sources_dashboard(
                             latest_issued_at=value.latest_issued_at,
                             latest_digest_id=value.latest_digest_id,
                             latest_item_count=value.latest_item_count,
-                            latest_native_section_counts=dict(
-                                value.latest_native_section_counts
-                            ),
+                            latest_native_section_counts=dict(value.latest_native_section_counts),
                             edition_count=value.edition_count,
                             latest_quality=value.latest_quality,
                             latest_quality_reason=value.latest_quality_reason,
@@ -660,9 +654,7 @@ def subscription_sources_dashboard(
                         )
                     )
                 known = [
-                    value
-                    for value in all_sources
-                    if value.source_id != UNATTRIBUTED_SOURCE_ID
+                    value for value in all_sources if value.source_id != UNATTRIBUTED_SOURCE_ID
                 ]
                 known.sort(key=lambda value: value.source_id)
                 known.sort(
@@ -670,9 +662,7 @@ def subscription_sources_dashboard(
                     reverse=True,
                 )
                 unattributed = [
-                    value
-                    for value in all_sources
-                    if value.source_id == UNATTRIBUTED_SOURCE_ID
+                    value for value in all_sources if value.source_id == UNATTRIBUTED_SOURCE_ID
                 ]
                 all_sources = known + unattributed
                 matched = [
@@ -691,48 +681,48 @@ def subscription_sources_dashboard(
                 has_more = len(page) > limit
                 visible = page[:limit]
                 summaries_by_id = {value.source_id: value for value in summaries}
-                content_visible = [
-                    value for value in visible if value.source_id in summaries_by_id
-                ]
+                content_visible = [value for value in visible if value.source_id in summaries_by_id]
                 latest_editions = cache.load_source_latest_editions_locked(
                     FeedKind.AI_DAILY,
                     "learning",
                     catalog,
                     (summaries_by_id[value.source_id] for value in content_visible),
                 )
-                return _bounded_reading_page({
-                    "section": "learning",
-                    "latest_items_pagination": True,
-                    "registry_revision": (
-                        registry.registry_revision if registry is not None else None
-                    ),
-                    "registry_updated_at": (
-                        registry.updated_at if registry is not None else None
-                    ),
-                    "catalog_complete": catalog.complete,
-                    "catalog_indexing": catalog.indexing,
-                    "sources": [
-                        _source_card(
-                            decisions,
-                            source,
-                            (
-                                latest_editions[source.latest_digest_id]
-                                if source.latest_digest_id is not None
-                                else None
-                            ),
+                return _bounded_reading_page(
+                    {
+                        "section": "learning",
+                        "latest_items_pagination": True,
+                        "registry_revision": (
+                            registry.registry_revision if registry is not None else None
+                        ),
+                        "registry_updated_at": (
+                            registry.updated_at if registry is not None else None
+                        ),
+                        "catalog_complete": catalog.complete,
+                        "catalog_indexing": catalog.indexing,
+                        "sources": [
+                            _source_card(
+                                decisions,
+                                source,
+                                (
+                                    latest_editions[source.latest_digest_id]
+                                    if source.latest_digest_id is not None
+                                    else None
+                                ),
+                            )
+                            for source in visible
+                        ],
+                        "total_sources": len(all_sources),
+                        "matched_sources": matched_sources,
+                        "next_cursor": _encode_source_cursor(
+                            visible[-1],
+                            normalized_query,
                         )
-                        for source in visible
-                    ],
-                    "total_sources": len(all_sources),
-                    "matched_sources": matched_sources,
-                    "next_cursor": _encode_source_cursor(
-                        visible[-1],
-                        normalized_query,
-                    )
-                    if has_more and visible
-                    else None,
-                    "has_more": has_more,
-                })
+                        if has_more and visible
+                        else None,
+                        "has_more": has_more,
+                    }
+                )
         except FeedSourceCatalogStale:
             if attempt:
                 raise
@@ -757,9 +747,7 @@ def subscription_source_latest_items_dashboard(
     if not 1 <= limit <= 50:
         raise ValueError("Reading source item page limit must be between 1 and 50")
     decoded = (
-        _decode_source_items_cursor(cursor, normalized_source_id)
-        if cursor is not None
-        else None
+        _decode_source_items_cursor(cursor, normalized_source_id) if cursor is not None else None
     )
     cache = FeedCache(state)
     decisions = FeedDecisionStore(state)
@@ -770,11 +758,7 @@ def subscription_source_latest_items_dashboard(
                 "learning",
             ) as catalog:
                 summary = next(
-                    (
-                        value
-                        for value in catalog.sources
-                        if value.source_id == normalized_source_id
-                    ),
+                    (value for value in catalog.sources if value.source_id == normalized_source_id),
                     None,
                 )
                 if summary is None:
@@ -817,24 +801,26 @@ def subscription_source_latest_items_dashboard(
                 projected_items = [
                     _bounded_reading_item_projection(item, decisions) for item in page
                 ]
-                return _bounded_reading_page({
-                    "source_id": normalized_source_id,
-                    "digest_id": summary.latest_digest_id,
-                    "latest_revision": projection_revision,
-                    "issued_at": summary.latest_issued_at,
-                    "item_count": len(matching),
-                    "items": projected_items,
-                    "next_cursor": _encode_source_items_cursor(
-                        normalized_source_id,
-                        summary.latest_digest_id,
-                        next_index,
-                        item_snapshot,
-                        projection_revision,
-                    )
-                    if has_more and page
-                    else None,
-                    "has_more": has_more,
-                })
+                return _bounded_reading_page(
+                    {
+                        "source_id": normalized_source_id,
+                        "digest_id": summary.latest_digest_id,
+                        "latest_revision": projection_revision,
+                        "issued_at": summary.latest_issued_at,
+                        "item_count": len(matching),
+                        "items": projected_items,
+                        "next_cursor": _encode_source_items_cursor(
+                            normalized_source_id,
+                            summary.latest_digest_id,
+                            next_index,
+                            item_snapshot,
+                            projection_revision,
+                        )
+                        if has_more and page
+                        else None,
+                        "has_more": has_more,
+                    }
+                )
         except FeedSourceCatalogStale:
             if attempt:
                 raise

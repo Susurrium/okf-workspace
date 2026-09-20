@@ -157,7 +157,7 @@ def _health(
             expected = {
                 "healthy": True,
                 "status": "healthy",
-                "service_version": "1.3.0",
+                "service_version": "1.4.0",
                 "engine": "markitdown",
                 "engine_version": "0.1.6",
                 "engine_build_id": expected_build_id,
@@ -242,7 +242,7 @@ def _verify_bundle(
         expected_engine = {
             "name": "markitdown",
             "version": "0.1.6",
-            "service_version": "1.3.0",
+            "service_version": "1.4.0",
             "build_id": expected_build_id,
         }
         if manifest.get("engine") != expected_engine:

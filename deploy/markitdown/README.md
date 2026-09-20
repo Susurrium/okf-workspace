@@ -1,10 +1,10 @@
-# CLab 专用 MarkItDown 备用服务器部署与运维手册
+# CLab 专用 MarkItDown 服务器部署与运维手册
 
 本文档用于把本仓库中的 MarkItDown 服务部署到一台**专用 CLab 服务器**。服务只承担
 PDF/PPTX/DOCX 到 Markdown 的文本优先转换计算；源文档、下载后的结果 ZIP、转换账本、QC 结果和最终
 Obsidian 笔记仍以客户端本地副本为准。
 
-> 本仓库当前服务版本为 `1.3.0`，结果协议为 `markitdown-result/v3`，
+> 本仓库当前服务版本为 `1.4.0`，结果协议为 `markitdown-result/v3`，
 > build 为 `markitdown-0.1.6-py31213-assets-v3`。实际服务器版本必须通过健康接口确认；
 > 本文不把历史开发环境状态当作部署事实。
 > 新服务器部署仍必须先确认 SSH alias、Tailnet HTTPS FQDN、数据根、预期挂载点和
@@ -38,7 +38,7 @@ AUTHORIZED_TAILNET_IDENTITIES=REPLACE_ME
 
 ## 2. 服务定位与能力边界
 
-MarkItDown 是文本优先的备用解析器，不是 MinerU 的等价替代品：
+MarkItDown 是当前默认的文本优先解析器；暂不使用 MinerU，但这不改变其能力边界：
 
 - 适合有数字文本层的普通 PDF 和结构化 PPTX；
 - 二进制旧 PPT 必须由 Windows 客户端先转换并验证为派生 PPTX；
@@ -200,7 +200,7 @@ cd E:\code\okf-workspace
 工具只打包服务源码、锁文件和 MarkItDown 部署文件，不包含 `.env`、Token、Vault、测试缓存或
 本地账本。包内 `release-manifest.sha256` 固定每个文件，包外同名 `.sha256` 固定整个 tar.gz；
 输出还给出 release manifest SHA-256。该值在新部署中同时作为当前 bundle 和运行镜像的初始身份。
-`release-metadata.json` 还固定 service `1.3.0`、build
+`release-metadata.json` 还固定 service `1.4.0`、build
 `markitdown-0.1.6-py31213-assets-v3`、schema `markitdown-result/v3` 和默认 profile
 `fallback-assets-v2`，部署前应把这些值与 `.env`、compose 和 health 逐项对齐。
 
@@ -283,7 +283,7 @@ sudo bash ./prepare-runtime.sh \
 生成后的关键配置应为：
 
 ```dotenv
-MARKITDOWN_IMAGE=obsidian-markitdown-service:1.3.0
+MARKITDOWN_IMAGE=obsidian-markitdown-service:1.4.0
 MARKITDOWN_ENGINE_BUILD_ID=markitdown-0.1.6-py31213-assets-v3
 MARKITDOWN_BUNDLE_MANIFEST_SHA256=<当前release-manifest.sha256文件的SHA-256>
 MARKITDOWN_RELEASE_MANIFEST_SHA256=<运行镜像烘焙的release-manifest SHA-256>
@@ -726,6 +726,9 @@ Python 基础镜像、build 和双 manifest 身份，同时保留旧 `.env` 中�
 指向未改动的旧 bundle。此时旧 systemd 单元仍固定在旧实际目录；只有新版本完整验收后才被替换。
 
 `deploy.sh` 自身会自动执行固定文本真实 PDF Canary；`smoke-test.sh` 用代表性 PDF 做额外回归。
+构建时仅使用宿主机网络下载哈希锁定的 Python 依赖；API 运行时仍只接入内部网络，Worker
+运行时仍无网络。若镜像仓库暂时不可用，部署脚本会复用主机已有的指定 Python 基础镜像，
+否则主动拉取基础镜像。上线仍以完整 Canary 和运行镜像身份核对为准。
 升级后还要检查 health 中的 engine、service、build ID 和 result schema。新 build 必须形成新的
 客户端转换身份，不能复用旧 build 的成功缓存。
 

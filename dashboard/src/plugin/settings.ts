@@ -34,7 +34,7 @@ export const DEFAULT_SETTINGS: OkfBrainSettings = {
   pythonExecutable: "",
   deploymentConfig: "",
   serviceLogDirectory: "",
-  documentParserPolicy: "prefer-mineru",
+  documentParserPolicy: "markitdown-only",
   dashboardUiState: createDefaultDashboardUiState(),
   feedReadingPositions: {},
 };
@@ -60,12 +60,12 @@ export class OkfBrainSettingTab extends PluginSettingTab {
       );
     new Setting(this.containerEl)
       .setName("文档转换策略")
-      .setDesc("日常导入仍可选择快速文本；这里决定完整解析的默认行为。")
+      .setDesc("默认使用 MarkItDown。当前暂不使用 MinerU；仅在明确恢复该服务后切换高级策略。")
       .addDropdown((dropdown) =>
         dropdown
-          .addOption("prefer-mineru", "质量优先：MinerU 不可用时自动降级")
-          .addOption("mineru-required", "必须 MinerU：不可用时保留失败并重试")
-          .addOption("markitdown-only", "始终 MarkItDown：跳过 MinerU")
+          .addOption("markitdown-only", "MarkItDown（默认）")
+          .addOption("prefer-mineru", "高级：优先 MinerU，可降级")
+          .addOption("mineru-required", "高级：必须 MinerU")
           .setValue(this.plugin.settings.documentParserPolicy)
           .onChange(async (value) => {
             this.plugin.settings.documentParserPolicy = value as OkfBrainSettings["documentParserPolicy"];

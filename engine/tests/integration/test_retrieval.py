@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from okf_workspace.notes import NoteService
 from okf_workspace.okf.frontmatter import OkfDocument, write_document
 from okf_workspace.okf.templates import initialize_vault
@@ -18,6 +20,51 @@ def make_index(tmp_path: Path) -> tuple[Path, SearchIndex, NoteService]:
     index = SearchIndex(vault, tmp_path / "state" / "search.sqlite")
     service = NoteService(vault, clock=lambda: NOW)
     return vault, index, service
+
+
+@pytest.mark.parametrize("scope", ["technical", "auto"])
+def test_linked_expansion_cannot_escape_scope(tmp_path: Path, scope: str) -> None:
+    from typing import cast
+
+    from okf_workspace.retrieval.search import ScopeName
+
+    vault, index, service = make_index(tmp_path)
+    for relative in ("self/private.md", "life/reflections/private.md", "projects-old/private.md"):
+        write_document(
+            vault / relative,
+            OkfDocument({"type": "Custom", "title": "私密"}, "# 私密\n\n不应扩展的内容"),
+        )
+    service.create_wiki(
+        "Python 索引",
+        "Python index 的使用说明。",
+        sources=[
+            "self/private.md",
+            "life/reflections/private.md",
+            "projects-old/private.md",
+        ],
+    )
+    hits = HybridSearcher(index).search("Python", scope=cast(ScopeName, scope), limit=8)
+    assert hits
+    assert all(not hit.path.startswith(("self/", "life/", "projects-old/")) for hit in hits)
+    explicit = HybridSearcher(index).search(
+        "Python", scope="technical", explicit_paths=("self/private.md",)
+    )
+    assert any(hit.path == "self/private.md" for hit in explicit)
+
+
+def test_lexical_scope_uses_folder_boundary_and_literal_wildcards(tmp_path: Path) -> None:
+    vault, index, _ = make_index(tmp_path)
+    for relative in ("projects/note.md", "projects-old/note.md", "a_b/note.md", "axb/note.md"):
+        write_document(
+            vault / relative,
+            OkfDocument({"type": "Custom", "title": "ScopeNonce"}, "# ScopeNonce\n\nScopeNonce"),
+        )
+    index.sync()
+    for search in (index.exact_search, index.fts_search):
+        assert {h.path for h in search("ScopeNonce", include_prefixes=("projects/",))} == {
+            "projects/note.md"
+        }
+        assert {h.path for h in search("ScopeNonce", include_prefixes=("a_b/",))} == {"a_b/note.md"}
 
 
 def test_fts_exact_scope_and_one_hop_source_expansion(tmp_path: Path) -> None:

@@ -50,7 +50,7 @@ def test_markitdown_bundle_is_accepted_by_engine(tmp_path: Path) -> None:
         assert set(archive.namelist()) == {"document.md", "manifest.json"}
         manifest = json.loads(archive.read("manifest.json"))
     assert manifest["source_sha256"] == source_sha256
-    assert manifest["engine"]["service_version"] == "1.3.0"
+    assert manifest["engine"]["service_version"] == "1.4.0"
     assert manifest["engine"]["build_id"] == "markitdown-0.1.6-py31213-assets-v3"
     assert manifest["input"]["source_format"] == "pdf"
     assert manifest["warnings"] == ["pdf_text_only_images_not_extracted"]

@@ -15,7 +15,7 @@ from okf_workspace.notes.web_captures import (
     canonical_web_url,
     web_source_write_lock,
 )
-from okf_workspace.okf.frontmatter import OkfDocument, read_document
+from okf_workspace.okf.frontmatter import OkfDocument
 from okf_workspace.okf.paths import slugify
 from okf_workspace.sources import SourcePublisher
 
@@ -186,7 +186,7 @@ class FeedDecisionService:
         item: FeedItem,
         action: DecisionAction,
     ) -> tuple[Path, Path]:
-        with web_source_write_lock():
+        with web_source_write_lock(self.vault):
             return self._create_source_locked(item, action)
 
     def _create_source_locked(
@@ -238,8 +238,9 @@ class FeedDecisionService:
                     text_document,
                 )
                 return reused_source, reused_text
-        if source.is_file():
-            source_document = read_document(source)
+        source_existed = source.is_file()
+        if source_existed:
+            source_document = publisher.read_record(source)
             source_text, text_document = publisher.resolve_text(source_document)
             source_relative = source.relative_to(self.vault).as_posix()
             text_relative = source_text.relative_to(self.vault).as_posix()
@@ -269,11 +270,7 @@ class FeedDecisionService:
                     f"# {item.title}\n\n"
                     f"- 转换正文：[{text_relative}](/{text_relative})\n"
                     f"- Feed：{item.feed.value} / {item.edition_id}\n"
-                    + (
-                        f"- 原始链接：{markdown_link('打开原文', item.url)}\n"
-                        if item.url
-                        else ""
-                    )
+                    + (f"- 原始链接：{markdown_link('打开原文', item.url)}\n" if item.url else "")
                 ),
             )
             text_document = OkfDocument({}, "")
@@ -291,7 +288,26 @@ class FeedDecisionService:
                 "created_at": text_document.frontmatter.get("created_at") or now,
             }
         )
-        text_document.body = _render_feed_source_text(self.vault, item)
+        if source_existed:
+            # A Source Text can acquire Web clips, human corrections and other
+            # channel supplements after its first Feed publication. Only replace
+            # this item's explicit Feed region; never regenerate the whole note.
+            start, end, supplement = _feed_supplement(self.vault, item)
+            legacy_body = _render_feed_source_text(self.vault, item).lstrip("\n")
+            current_body = text_document.body.lstrip("\n")
+            if start not in current_body and current_body.startswith(legacy_body):
+                # Upgrade only an exact known generated prefix, retaining all
+                # following channel supplements and human annotations.
+                text_document.body = (
+                    f"# {item.title}\n\n{supplement}\n" + current_body[len(legacy_body) :]
+                )
+            else:
+                text_document.body = _merge_feed_supplement(
+                    text_document.body, start, end, supplement
+                )
+        else:
+            start, end, supplement = _feed_supplement(self.vault, item)
+            text_document.body = f"# {item.title}\n\n{supplement}\n"
         publisher.publish_pair(
             source,
             source_text,

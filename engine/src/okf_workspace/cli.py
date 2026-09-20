@@ -320,7 +320,7 @@ def build_parser() -> argparse.ArgumentParser:
     document_import.add_argument(
         "--quality",
         choices=("high", "quick"),
-        default="high",
+        default="quick",
     )
     document_import.add_argument(
         "--parser",

@@ -153,8 +153,8 @@ function splitMarkdown(markdown: string): { frontmatter: Record<string, unknown>
         parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {},
       body: markdown.slice(match[0].length),
     };
-  } catch {
-    return { frontmatter: {}, body: markdown.slice(match[0].length) };
+  } catch (error) {
+    throw new Error(`YAML 无法解析：${error instanceof Error ? error.message : "格式错误"}`);
   }
 }
 
@@ -290,7 +290,13 @@ function sourceUsesCourse(source: NoteSummary, coursePath: string): boolean {
 }
 
 export class VaultDashboardReader {
+  private readonly readWarnings = new Map<string, string>();
+
   public constructor(private readonly app: App) {}
+
+  public getReadWarnings(): readonly { path: string; message: string }[] {
+    return [...this.readWarnings].map(([path, message]) => ({ path, message }));
+  }
 
   private cache(): DashboardCache {
     const existing = DASHBOARD_CACHE.get(this.app);
@@ -432,57 +438,68 @@ export class VaultDashboardReader {
     for (const path of cache.scans.keys()) {
       if (!currentPaths.has(path)) cache.scans.delete(path);
     }
-    const results = await Promise.all(files.map(async (file): Promise<ScannedNote | undefined> => {
-      const fingerprint = this.fingerprint(file);
-      const cached = cache.scans.get(file.path);
-      if (cached?.fingerprint === fingerprint) return cached.note;
-      const markdown = await this.app.vault.cachedRead(file);
-      cache.reads.set(file.path, { fingerprint, markdown });
-      const parsed = splitMarkdown(markdown);
-      const frontmatter = parsed.frontmatter;
-      const body = parsed.body;
-      const noteType = textValue(frontmatter.type);
-      if (!noteType) {
-        cache.scans.set(file.path, { fingerprint, note: undefined });
+    for (const path of this.readWarnings.keys()) {
+      if (!this.app.vault.getAbstractFileByPath(path)) this.readWarnings.delete(path);
+    }
+    const results = await mapWithConcurrency(files, 8, async (file): Promise<ScannedNote | undefined> => {
+      try {
+        const fingerprint = `${this.fingerprint(file)}:${current}`;
+        const cached = cache.scans.get(file.path);
+        if (cached?.fingerprint === fingerprint) return cached.note;
+        const markdown = await this.app.vault.cachedRead(file);
+        this.readWarnings.delete(file.path);
+        cache.reads.set(file.path, { fingerprint: this.fingerprint(file), markdown });
+        const parsed = splitMarkdown(markdown);
+        const frontmatter = parsed.frontmatter;
+        const body = parsed.body;
+        const noteType = textValue(frontmatter.type);
+        if (!noteType) {
+          cache.scans.set(file.path, { fingerprint, note: undefined });
+          return undefined;
+        }
+        const staleAfter = textValue(frontmatter.stale_after);
+        const stale = staleAfter ? !/^\d{4}-\d{2}-\d{2}$/u.test(staleAfter) || staleAfter <= current : false;
+        const stat = (file as TFile & { stat?: { mtime?: number } }).stat;
+        const createdAt = textValue(frontmatter.created_at);
+        const fallbackTime = createdAt ? Date.parse(createdAt) : 0;
+        const summary: NoteSummary = {
+          path: file.path,
+          title: textValue(frontmatter.title) ?? file.basename,
+          note_type: noteType,
+          status: textValue(frontmatter.status) ?? "stable",
+          studied_at: textValue(frontmatter.studied_at),
+          material_ready: materialReady(body),
+          ai_unverified: aiUnverified(frontmatter),
+          project_status: textValue(frontmatter.project_status),
+          course_status: textValue(frontmatter.course_status),
+          capture_status: textValue(frontmatter.capture_status),
+          purpose: textValue(frontmatter.purpose),
+          ...(isIngestedVia(frontmatter.ingested_via)
+            ? { ingested_via: frontmatter.ingested_via }
+            : {}),
+          resource: textValue(frontmatter.resource),
+          kind: textValue(frontmatter.kind),
+          course: textValue(frontmatter.course),
+          project: textValue(frontmatter.project),
+          uses: sourceUses(frontmatter.uses),
+          created_at: createdAt,
+          modified_at: new Date(stat?.mtime ?? (Number.isFinite(fallbackTime) ? fallbackTime : 0)).toISOString(),
+          stale_after: staleAfter,
+          stale,
+          topics: textList(frontmatter.topics ?? frontmatter.tags),
+          source_paths: sourcePaths(frontmatter.sources),
+          excerpt: markdownExcerpt(body),
+        };
+        const note = { file, body, summary };
+        cache.scans.set(file.path, { fingerprint, note });
+        return note;
+      } catch (error) {
+        cache.scans.delete(file.path);
+        cache.reads.delete(file.path);
+        this.readWarnings.set(file.path, error instanceof Error ? error.message : "文件读取失败");
         return undefined;
       }
-      const staleAfter = textValue(frontmatter.stale_after);
-      const stale = staleAfter ? !/^\d{4}-\d{2}-\d{2}$/u.test(staleAfter) || staleAfter <= current : false;
-      const stat = (file as TFile & { stat?: { mtime?: number } }).stat;
-      const createdAt = textValue(frontmatter.created_at);
-      const fallbackTime = createdAt ? Date.parse(createdAt) : 0;
-      const summary: NoteSummary = {
-        path: file.path,
-        title: textValue(frontmatter.title) ?? file.basename,
-        note_type: noteType,
-        status: textValue(frontmatter.status) ?? "stable",
-        studied_at: textValue(frontmatter.studied_at),
-        material_ready: materialReady(body),
-        ai_unverified: aiUnverified(frontmatter),
-        project_status: textValue(frontmatter.project_status),
-        course_status: textValue(frontmatter.course_status),
-        capture_status: textValue(frontmatter.capture_status),
-        purpose: textValue(frontmatter.purpose),
-        ...(isIngestedVia(frontmatter.ingested_via)
-          ? { ingested_via: frontmatter.ingested_via }
-          : {}),
-        resource: textValue(frontmatter.resource),
-        kind: textValue(frontmatter.kind),
-        course: textValue(frontmatter.course),
-        project: textValue(frontmatter.project),
-        uses: sourceUses(frontmatter.uses),
-        created_at: createdAt,
-        modified_at: new Date(stat?.mtime ?? (Number.isFinite(fallbackTime) ? fallbackTime : 0)).toISOString(),
-        stale_after: staleAfter,
-        stale,
-        topics: textList(frontmatter.topics ?? frontmatter.tags),
-        source_paths: sourcePaths(frontmatter.sources),
-        excerpt: markdownExcerpt(body),
-      };
-      const note = { file, body, summary };
-      cache.scans.set(file.path, { fingerprint, note });
-      return note;
-    }));
+    });
     return results.filter((value): value is ScannedNote => value !== undefined);
   }
 
@@ -494,7 +511,7 @@ export class VaultDashboardReader {
       (note) => note.note_type === "Course" &&
         (!activeOnly || !note.course_status || note.course_status === "active"),
     );
-    const values = await Promise.all(courses.map(async (course): Promise<CourseSummary> => {
+    const values = await mapWithConcurrency(courses, 8, async (course): Promise<CourseSummary> => {
       const lessons = filterDashboardLearningScope(
         notes.filter((note) => note.note_type === "Lesson"),
         "course",
@@ -511,6 +528,8 @@ export class VaultDashboardReader {
         current_progress: section(body, "当前进度"),
         guide_count: guides.length,
         lesson_count: lessons.length,
+        related_learning: guides,
+        lessons,
         ...(lessons[0] ? { latest_lesson: lessons[0] } : {}),
         related_sources: notes.filter(
           (note) => note.note_type === "Source" && sourceUsesCourse(note, course.path),
@@ -519,7 +538,7 @@ export class VaultDashboardReader {
           (note) => isPendingCapture(note) && sameVaultPath(note.course, course.path),
         ),
       };
-    }));
+    });
     const order: Record<string, number> = { active: 0, paused: 1, completed: 2 };
     return values.sort(
       (left, right) =>
@@ -536,7 +555,7 @@ export class VaultDashboardReader {
     const projects = notes.filter(
       (note) => note.note_type === "Project" && (!activeOnly || note.project_status === "active"),
     );
-    const values = await Promise.all(projects.map(async (project): Promise<ProjectSummary> => {
+    const values = await mapWithConcurrency(projects, 8, async (project): Promise<ProjectSummary> => {
       const root = project.path.split("/").slice(0, -1).join("/");
       const body = splitMarkdown(await this.readPath(project.path)).body;
       const logPath = `${root}/log.md`;
@@ -550,7 +569,7 @@ export class VaultDashboardReader {
         modified_at: new Date(activityTime).toISOString(),
         current_state: section(body, "当前状态"),
         next_action: section(body, "下一步"),
-        recent_log: markdownExcerpt(await this.readPath(logPath), 500),
+        recent_log: markdownExcerpt(latestProjectLogEntry(await this.readPath(logPath)), 500),
         log_path: logPath,
         decisions: files.filter(
           (file) => file.path.startsWith(`${root}/decisions/`) && file.name !== "index.md",
@@ -568,7 +587,7 @@ export class VaultDashboardReader {
           (note) => isPendingCapture(note) && sameVaultPath(note.project, project.path),
         ),
       };
-    }));
+    });
     const order: Record<string, number> = { active: 0, paused: 1, completed: 2 };
     return values.sort(
       (left, right) =>
@@ -583,13 +602,46 @@ export class VaultDashboardReader {
     const fingerprint = this.fingerprint(file);
     const cached = this.cache().reads.get(path);
     if (cached?.fingerprint === fingerprint) return cached.markdown;
-    const markdown = await this.app.vault.cachedRead(file);
-    this.cache().reads.set(path, { fingerprint, markdown });
-    return markdown;
+    try {
+      const markdown = await this.app.vault.cachedRead(file);
+      this.readWarnings.delete(path);
+      this.cache().reads.set(path, { fingerprint, markdown });
+      return markdown;
+    } catch (error) {
+      this.readWarnings.set(path, error instanceof Error ? error.message : "文件读取失败");
+      return "";
+    }
   }
 
   private fingerprint(file: TFile): string {
     const stat = (file as TFile & { stat?: { mtime?: number; size?: number } }).stat;
     return `${file.path}:${stat?.mtime ?? 0}:${stat?.size ?? 0}`;
   }
+}
+
+export async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  limit: number,
+  transform: (value: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), values.length) }, async () => {
+    while (next < values.length) {
+      const index = next++;
+      results[index] = await transform(values[index]!);
+    }
+  }));
+  return results;
+}
+
+export function latestProjectLogEntry(markdown: string): string {
+  const headings = [...markdown.matchAll(/^## (\d{4}-\d{2}-\d{2})[ \t]*\r?$/gmu)];
+  const latest = headings.reduce<RegExpMatchArray | undefined>((found, entry) =>
+    !found || entry[1]! >= found[1]! ? entry : found, undefined);
+  if (!latest) return markdown;
+  const next = headings.find((heading) => heading.index! > latest.index!);
+  const section = markdown.slice(latest.index! + latest[0].length, next?.index).trim();
+  const entries = [...section.matchAll(/^- /gmu)];
+  return section.slice(entries.at(-1)?.index ?? 0).trim();
 }

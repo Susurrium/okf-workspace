@@ -512,6 +512,16 @@ export class OkfDashboardView extends ItemView {
       else if (this.section === "learning") await this.renderLearning(body);
       else if (this.section === "projects") await this.renderProjects(body);
       else await this.renderKnowledge(body);
+      const warnings = this.vaultReader.getReadWarnings();
+      if (warnings.length && renderVersion === this.renderVersion) {
+        const warning = body.createEl("details", { cls: "okf-dashboard__error" });
+        warning.createEl("summary", { text: `${warnings.length} 个文件暂时无法读取；其余内容仍可使用` });
+        for (const item of warnings.slice(0, 10)) {
+          warning.createDiv({ text: `${item.path}：${item.message}` });
+        }
+        const retry = warning.createEl("button", { text: "重新读取", attr: { type: "button" } });
+        retry.addEventListener("click", () => void this.render(true));
+      }
     } catch (error) {
       if (renderVersion !== this.renderVersion) return;
       const failure = body.createDiv({
@@ -1050,16 +1060,37 @@ export class OkfDashboardView extends ItemView {
     this.actionPanels.add(panel);
   }
 
-  private renderMetrics(parent: HTMLElement, metrics: readonly DashboardObjectMetric[]): void {
+  private renderMetrics(
+    parent: HTMLElement,
+    metrics: readonly DashboardObjectMetric[],
+    related: Partial<Record<DashboardObjectMetric["key"], readonly Pick<NoteSummary, "path" | "title">[]>> = {},
+  ): void {
     const strip = parent.createEl("span", {
       cls: "okf-work-item__metrics",
       attr: { "aria-label": "关联内容统计" },
     });
+    let expanded: HTMLElement | undefined;
+    let selected: string | undefined;
     for (const metric of metrics) {
-      strip.createSpan({
+      const notes = related[metric.key] ?? [];
+      const element = strip.createEl(notes.length ? "button" : "span", {
         cls: `okf-work-item__metric${metric.count === 0 ? " is-zero" : ""}`,
         text: `${metric.label} ${metric.count}`,
-        attr: { "data-metric": metric.key },
+        attr: { "data-metric": metric.key, ...(notes.length ? { type: "button", "aria-label": `查看${metric.label} ${metric.count} 条` } : {}) },
+      });
+      if (!notes.length) continue;
+      element.addEventListener("click", () => {
+        if (notes.length === 1) { void this.openPath(notes[0]!.path); return; }
+        expanded?.remove();
+        for (const button of strip.querySelectorAll("button")) button.setAttribute("aria-expanded", "false");
+        if (selected === metric.key) { selected = undefined; return; }
+        selected = metric.key;
+        element.setAttr("aria-expanded", "true");
+        expanded = parent.createDiv({ cls: "okf-work-item__related", attr: { "aria-label": metric.label } });
+        for (const note of notes) {
+          const link = expanded.createEl("button", { text: note.title, cls: "okf-dashboard__ghost-action", attr: { type: "button" } });
+          link.addEventListener("click", () => void this.openPath(note.path));
+        }
       });
     }
   }
@@ -1157,6 +1188,11 @@ export class OkfDashboardView extends ItemView {
       if (!shelf.isConnected) return;
       rendered = digest;
       for (const surface of surfaces) {
+        surface.context.empty();
+        const health = surface.section ? digest.stream_health?.[surface.section] : undefined;
+        if (health && (health.status === "error" || health.status === "degraded")) {
+          surface.context.createDiv({ cls: "okf-dashboard__error", text: `更新异常，当前内容可能不是最新：${health.message ?? "上游更新尚未成功"}${health.last_success_at ? ` · 上次成功 ${formatFeedDate(health.last_success_at)}` : ""}` });
+        }
         const edition = surface.kind === "treehole"
           ? digest.treehole ?? undefined
           : latestAiDailyEdition(digest, surface.section!);
@@ -1193,14 +1229,16 @@ export class OkfDashboardView extends ItemView {
         if (digest !== rendered) renderDigest(digest);
       })
       .catch((error: unknown) => {
-        if (rendered || !shelf.isConnected) return;
+        if (!shelf.isConnected) return;
         const message = error instanceof Error ? error.message : "Feed 摘要暂时无法读取";
         for (const surface of surfaces) {
-          surface.meta.setText("暂时无法读取");
-          surface.body.empty();
-          surface.footer.empty();
-          surface.body.createDiv({ cls: "okf-dashboard__muted", text: message });
-          const retry = surface.body.createEl("button", {
+          surface.context.empty();
+          surface.context.createDiv({ cls: "okf-dashboard__error", text: `${rendered ? "刷新失败，保留上次内容" : "暂时无法读取"}：${message}` });
+          if (!rendered) {
+            surface.meta.setText("暂时无法读取");
+            surface.body.empty();
+          }
+          const retry = surface.context.createEl("button", {
             text: "重新读取",
             cls: "okf-dashboard__secondary-action",
           });
@@ -1259,20 +1297,30 @@ export class OkfDashboardView extends ItemView {
       ? this.plugin.feedDashboardDigestSnapshot()
       : undefined;
     renderEdition(snapshot?.ai_papers);
+    const renderHealth = (digest: FeedDashboardDigest | undefined): void => {
+      surface.context.empty();
+      const health = digest?.stream_health?.papers;
+      if (health && (health.status === "error" || health.status === "degraded")) {
+        surface.context.createDiv({ cls: "okf-dashboard__error", text: `更新异常，当前内容可能不是最新：${health.message ?? "AI Papers 上游更新尚未成功"}` });
+      }
+    };
+    renderHealth(snapshot);
     if (typeof this.plugin.loadFeedDashboardDigest !== "function") return;
     void this.plugin.loadFeedDashboardDigest()
       .then((digest) => {
-        if (digest.ai_papers?.digest_id === renderedEditionId) return;
+        if (!shelf.isConnected) return;
+        renderHealth(digest);
         renderEdition(digest.ai_papers);
       })
       .catch((error: unknown) => {
-        if (renderedEditionId || !shelf.isConnected) return;
-        surface.meta.setText("暂时无法读取");
-        surface.body.empty();
-        surface.body.createDiv({
-          cls: "okf-dashboard__muted",
-          text: error instanceof Error ? error.message : "AI Papers 暂时无法读取",
+        if (!shelf.isConnected) return;
+        surface.context.empty();
+        surface.context.createDiv({
+          cls: "okf-dashboard__error",
+          text: `${renderedEditionId ? "刷新失败，保留上次内容" : "暂时无法读取"}：${error instanceof Error ? error.message : "AI Papers 暂时无法读取"}`,
         });
+        const retry = surface.context.createEl("button", { text: "重新读取", attr: { type: "button" } });
+        retry.addEventListener("click", () => { shelf.remove(); this.renderReadingPapers(parent); });
       });
   }
 
@@ -3054,7 +3102,7 @@ export class OkfDashboardView extends ItemView {
         }, true, "已从现有 Markdown 继续归档");
       });
     } else if (conversion.status === "failed") {
-      for (const parser of ["mineru", "markitdown"] as const) {
+      for (const parser of this.availableImportParsers()) {
         const retry = actions.createEl("button", { text: `用 ${parser} 重试` });
         retry.addEventListener("click", () => {
           void this.runButtonAction(retry, async () => {
@@ -3064,6 +3112,11 @@ export class OkfDashboardView extends ItemView {
         });
       }
     }
+  }
+
+  private availableImportParsers(): readonly ("markitdown" | "mineru")[] {
+    return (this.plugin.settings?.documentParserPolicy ?? "markitdown-only") === "markitdown-only"
+      ? ["markitdown"] : ["markitdown", "mineru"];
   }
 
   private async renderLearning(container: HTMLElement): Promise<void> {
@@ -3125,12 +3178,17 @@ export class OkfDashboardView extends ItemView {
       text: "导入学习资料",
       cls: "mod-cta okf-dashboard__primary-action",
     });
-    importMaterial.addEventListener("click", () => this.plugin.promptDocumentImport());
+    importMaterial.addEventListener("click", () => this.plugin.promptDocumentImport({
+      ...(selectedCourse ? { course: selectedCourse.path.split("/")[2] } : {}),
+      ...(selectedProject ? { project: selectedProject.path.split("/")[1] } : {}),
+    }));
     const classNote = actions.createEl("button", {
       text: "新建 Lesson",
       cls: "okf-dashboard__secondary-action",
     });
-    classNote.addEventListener("click", () => this.plugin.promptLesson());
+    classNote.addEventListener("click", () => selectedCourse
+      ? this.plugin.promptLessonForCourse(selectedCourse.path)
+      : this.plugin.promptLesson());
     const course = actions.createEl("button", { text: "新建 Course", cls: "okf-dashboard__ghost-action" });
     course.addEventListener("click", () => this.plugin.promptCourse());
     const nativeView = actions.createEl("button", { text: "完整学习目录", cls: "okf-dashboard__ghost-action" });
@@ -3376,7 +3434,12 @@ export class OkfDashboardView extends ItemView {
         course.latest_lesson ? `最近 Lesson：${course.latest_lesson.title}` : "",
       ].filter(Boolean).join(" · "),
     });
-    this.renderMetrics(main, dashboardCourseMetrics(course));
+    this.renderMetrics(main, dashboardCourseMetrics(course), {
+      "pending-captures": course.pending_captures,
+      "study-guides": course.related_learning ?? [],
+      sources: course.related_sources,
+      lessons: course.lessons ?? [],
+    });
 
     const actions = row.createDiv({ cls: "okf-work-item__actions" });
     const primary = actions.createEl("button", {
@@ -3458,7 +3521,11 @@ export class OkfDashboardView extends ItemView {
         relativeMoment(project.modified_at),
       ].filter(Boolean).join(" · "),
     });
-    this.renderMetrics(main, dashboardProjectMetrics(project));
+    this.renderMetrics(main, dashboardProjectMetrics(project), {
+      "pending-captures": project.pending_captures,
+      "study-guides": project.related_learning,
+      sources: project.related_materials,
+    });
 
     const actions = row.createDiv({ cls: "okf-work-item__actions" });
     const primary = actions.createEl("button", {
@@ -4383,7 +4450,7 @@ export class OkfDashboardView extends ItemView {
             });
         });
       }
-      for (const parser of ["mineru", "markitdown"] as const) {
+      for (const parser of this.availableImportParsers()) {
         const retry = actions.createEl("button", { text: "用 " + parser + " 重试" });
         retry.addEventListener("click", () => {
           retry.disabled = true;

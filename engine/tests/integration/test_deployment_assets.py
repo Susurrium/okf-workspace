@@ -93,9 +93,7 @@ def test_windows_scripts_parse_and_server_compose_contains_no_committed_secrets(
             encoding="utf-8",
             errors="replace",
         )
-        assert completed.returncode == 0, (
-            f"{executable}: {completed.stderr or completed.stdout}"
-        )
+        assert completed.returncode == 0, f"{executable}: {completed.stderr or completed.stdout}"
 
     yaml = YAML(typ="safe")
     compose = yaml.load((root / "deploy" / "server" / "compose.yml").read_text(encoding="utf-8"))
@@ -103,6 +101,75 @@ def test_windows_scripts_parse_and_server_compose_contains_no_committed_secrets(
     assert "caddy" in compose["services"]
     assert "5984:5984" not in json.dumps(compose)
     assert not (root / "deploy" / "server" / "secrets" / "couchdb.env").exists()
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell 7 is required")
+def test_deployment_receipt_verifies_real_artifact_layout_and_rejects_mismatch(
+    tmp_path: Path,
+) -> None:
+    root = Path(__file__).parents[3]
+    repository = tmp_path / "repository"
+    for relative in ("scripts/record-deployment.ps1", "deploy/windows/common.ps1"):
+        target = repository / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / relative, target)
+    vault = tmp_path / "vault"
+    state = tmp_path / "state"
+    for component, plugin_id in (
+        ("dashboard", "okf-workspace-dashboard"),
+        ("claudian", "okf-claudian"),
+    ):
+        for name in ("main.js", "styles.css", "manifest.json"):
+            build = repository / component / name
+            if component == "dashboard" and name == "main.js":
+                build = repository / component / "dist" / name
+            build.parent.mkdir(parents=True, exist_ok=True)
+            build.write_text(f"{component}/{name}\n", encoding="utf-8")
+            installed = vault / ".obsidian/plugins" / plugin_id / name
+            installed.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(build, installed)
+    engine_file = repository / "engine/src/okf_workspace/__init__.py"
+    engine_file.parent.mkdir(parents=True)
+    engine_file.write_text('__version__ = "test"\n', encoding="utf-8")
+    (repository / "release-manifest.yaml").write_text("release: test\n", encoding="utf-8")
+    for arguments in (
+        ["init"],
+        ["add", "."],
+        [
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "fixture",
+        ],
+    ):
+        subprocess.run(["git", "-C", str(repository), *arguments], check=True, capture_output=True)
+    config = tmp_path / "deployment.json"
+    config.write_text(json.dumps({"vault": str(vault), "state": str(state)}), encoding="utf-8")
+    command = (
+        f"& {_powershell_quote(repository / 'scripts/record-deployment.ps1')} "
+        f"-Config {_powershell_quote(config)}"
+    )
+    completed = _run_powershell(command)
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    receipt_path = state / "reports/deployment-receipt.json"
+    receipt_bytes = receipt_path.read_bytes()
+    receipt = json.loads(receipt_bytes)
+    assert len(receipt["installed_plugin_sha256"]) == 6
+    assert "okf_workspace/__init__.py" in receipt["engine_source_sha256"]
+    assert receipt["tracked_worktree_dirty"] is False
+
+    (vault / ".obsidian/plugins/okf-workspace-dashboard/main.js").write_text(
+        "stale installed build\n", encoding="utf-8"
+    )
+    rejected = _run_powershell(command)
+    assert rejected.returncode != 0
+    assert "Installed artifact differs from build" in rejected.stderr
+    assert receipt_path.read_bytes() == receipt_bytes
 
 
 @pytest.mark.parametrize("executable", _available_powershells())
@@ -154,8 +221,7 @@ def test_json_hashtable_reader_is_recursive_and_cross_version(
         (root / "scripts").glob("*.ps1")
     )
     assert all(
-        "ConvertFrom-Json -AsHashtable" not in path.read_text(encoding="utf-8")
-        for path in scripts
+        "ConvertFrom-Json -AsHashtable" not in path.read_text(encoding="utf-8") for path in scripts
     )
 
 
@@ -166,9 +232,7 @@ def test_dashboard_persists_only_external_token_file_path() -> None:
     manifest = json.loads((root / "dashboard" / "manifest.json").read_text(encoding="utf-8"))
     installer = (root / "deploy" / "windows" / "install.ps1").read_text(encoding="utf-8")
     quick_installer = (root / "scripts" / "install-dashboard.ps1").read_text(encoding="utf-8")
-    claudian_installer = (root / "scripts" / "install-okf-claudian.ps1").read_text(
-        encoding="utf-8"
-    )
+    claudian_installer = (root / "scripts" / "install-okf-claudian.ps1").read_text(encoding="utf-8")
     uninstaller = (root / "deploy" / "windows" / "uninstall.ps1").read_text(encoding="utf-8")
 
     assert "tokenFile" in settings
@@ -207,8 +271,7 @@ def test_dashboard_persists_only_external_token_file_path() -> None:
     assert "if ($explicitState -or -not $data.ContainsKey('tokenFile'))" in quick_installer
     assert "if ($explicitState -or -not $data.ContainsKey('deploymentConfig'))" in quick_installer
     assert (
-        "if ($explicitState -or -not $data.ContainsKey('serviceLogDirectory'))"
-        in quick_installer
+        "if ($explicitState -or -not $data.ContainsKey('serviceLogDirectory'))" in quick_installer
     )
     assert quick_installer.index("Read-OkfJsonHashtable -Path $dataPath") < (
         quick_installer.index("Install-OkfDashboardPluginAtomic")
@@ -230,9 +293,7 @@ def test_dashboard_persists_only_external_token_file_path() -> None:
 def test_windows_installers_enforce_safe_idempotent_boundaries() -> None:
     root = Path(__file__).parents[3]
     installer = (root / "deploy" / "windows" / "install.ps1").read_text(encoding="utf-8")
-    uninstaller = (root / "deploy" / "windows" / "uninstall.ps1").read_text(
-        encoding="utf-8"
-    )
+    uninstaller = (root / "deploy" / "windows" / "uninstall.ps1").read_text(encoding="utf-8")
 
     assert installer.index("Assert-OkfDataPathLayout") < installer.index(
         "New-Item -ItemType Directory -Force -Path $vaultPath"
@@ -380,8 +441,7 @@ def test_uninstall_validates_every_owned_path_before_mutating(tmp_path: Path) ->
     originals_marker.write_text(json.dumps(tampered), encoding="utf-8")
 
     rejected = _run_powershell(
-        f"& {_powershell_quote(uninstaller)} "
-        f"-Config {_powershell_quote(config_path)} -RemoveData"
+        f"& {_powershell_quote(uninstaller)} -Config {_powershell_quote(config_path)} -RemoveData"
     )
     assert rejected.returncode != 0
     assert (plugin_sentinel / "keep.txt").read_text(encoding="utf-8") == "keep"
@@ -681,9 +741,7 @@ def test_skill_installer_adopts_only_an_identical_legacy_install(tmp_path: Path)
     payload = json.loads(completed.stdout)
     source_names = sorted(path.name for path in source_root.iterdir() if path.is_dir())
     assert payload["adopted"] == source_names
-    ownership = json.loads(
-        (target / ".okf-managed-skills.json").read_text(encoding="utf-8-sig")
-    )
+    ownership = json.loads((target / ".okf-managed-skills.json").read_text(encoding="utf-8-sig"))
     assert ownership["skills"] == source_names
     assert user_marker.read_text(encoding="utf-8") == "user owned\n"
 

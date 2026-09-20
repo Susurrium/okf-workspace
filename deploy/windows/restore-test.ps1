@@ -49,7 +49,7 @@ try {
         throw "Restored Vault not found below $restoredVaultPath"
     }
 
-    $okf = Join-Path ([string]$deployment.repository_root) '.venv\Scripts\okf.exe'
+    $okf = Join-Path ([string]$deployment.repository_root) 'engine\.venv\Scripts\okf.exe'
     $reportText = & $okf backup verify-restore --vault $restoredVault.FullName --originals $restoredOriginals.FullName --json
     if ($LASTEXITCODE -ne 0) { throw "Restored data verification failed: $reportText" }
     $report = $reportText | ConvertFrom-Json

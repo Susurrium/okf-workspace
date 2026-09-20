@@ -274,7 +274,7 @@ def test_high_quality_import_rejects_truncated_embedded_images(tmp_path: Path) -
     assert not list((vault / "sources/records/documents").glob("*.md"))
 
 
-def test_default_high_quality_can_record_mineru_to_markitdown_fallback(
+def test_default_import_uses_markitdown_without_contacting_mineru(
     tmp_path: Path,
 ) -> None:
     vault = initialize_vault(tmp_path / "vault")
@@ -304,9 +304,11 @@ def test_default_high_quality_can_record_mineru_to_markitdown_fallback(
     )
 
     assert result.parser is ParserName.MARKITDOWN
-    assert not result.qc.checks["parser_not_degraded"]
+    assert result.qc.checks["parser_not_degraded"]
+    assert not mineru.calls
+    assert len(markitdown.calls) == 1
     manifest = json.loads((result.export_directory / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["degraded_from"] == "mineru"
+    assert "degraded_from" not in manifest
 
 
 def test_default_mineru_uses_managed_ssh_session(

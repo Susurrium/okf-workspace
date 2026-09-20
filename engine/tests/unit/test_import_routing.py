@@ -11,11 +11,11 @@ from okf_workspace.importers.routing import choose_parser
 @pytest.mark.parametrize(
     ("filename", "quality", "expected"),
     [
-        ("paper.pdf", ImportQuality.HIGH, ParserName.MINERU),
+        ("paper.pdf", ImportQuality.HIGH, ParserName.MARKITDOWN),
         ("paper.pdf", ImportQuality.QUICK, ParserName.MARKITDOWN),
         ("manual.docx", ImportQuality.HIGH, ParserName.MARKITDOWN),
         ("legacy.doc", ImportQuality.HIGH, ParserName.MARKITDOWN),
-        ("slides.pptx", ImportQuality.HIGH, ParserName.MINERU),
+        ("slides.pptx", ImportQuality.HIGH, ParserName.MARKITDOWN),
         ("slides.ppt", ImportQuality.QUICK, ParserName.MARKITDOWN),
     ],
 )

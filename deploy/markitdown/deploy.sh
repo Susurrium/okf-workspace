@@ -186,7 +186,15 @@ stop_unverified_release() {
   docker compose stop >/dev/null 2>&1 || true
 }
 
-docker compose build --pull
+python_image="$(env_value MARKITDOWN_PYTHON_IMAGE)"
+if docker image inspect "${python_image}" >/dev/null 2>&1; then
+  # Reuse the host's existing pinned base image if its registry is unreachable.
+  # The locked Python dependencies still install from this release's context.
+  echo "Using cached Python base image for the verified release build."
+  docker compose build
+else
+  docker compose build --pull
+fi
 if ! docker compose up -d --remove-orphans --wait --wait-timeout 180; then
   docker compose ps >&2 || true
   docker compose logs --tail 120 api worker >&2 || true

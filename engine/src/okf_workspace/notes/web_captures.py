@@ -12,7 +12,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from okf_workspace.git import GitCheckpointError, create_checkpoint
 from okf_workspace.ingestion import WEB_CLIP, normalize_ingested_via
-from okf_workspace.okf.frontmatter import OkfDocument, read_document
+from okf_workspace.okf.frontmatter import OkfDocument, read_document, render_document
 from okf_workspace.okf.paths import resolve_bundle_path, slugify
 from okf_workspace.sources import SourcePublisher, restore_file_bytes, source_write_lock
 
@@ -225,7 +225,7 @@ def _publish_web_capture(
         if isinstance(title_value, str) and title_value.strip()
         else capture.stem
     )
-    existing = find_source_by_canonical_web_url(vault, canonical)
+    existing = publisher.find_by_resource(canonical, normalize=canonical_web_url)
     reused = existing is not None
     if existing is None:
         slug, source, source_text = _new_source_pair(vault, title, canonical)
@@ -234,7 +234,7 @@ def _publish_web_capture(
     else:
         source, source_document = existing
         slug = source.stem
-        source_text, text_document = read_linked_source_text(vault, source_document)
+        source_text, text_document = publisher.resolve_text(source_document)
 
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     created_at = document.frontmatter.get("created_at") or now
@@ -305,6 +305,7 @@ def _publish_web_capture(
     previous_source = source.read_bytes() if source.is_file() else None
     previous_text = source_text.read_bytes() if source_text.is_file() else None
     _checkpoint(vault, "checkpoint before publishing Web Capture")
+    pair_committed = False
     try:
         publisher.publish_pair(
             source,
@@ -312,10 +313,26 @@ def _publish_web_capture(
             source_document,
             text_document,
         )
+        pair_committed = True
         capture.unlink()
     except Exception:
-        restore_file_bytes(source, previous_source)
-        restore_file_bytes(source_text, previous_text)
+        if pair_committed:
+            restore_file_bytes(
+                source,
+                previous_source,
+                expected_sha256=hashlib.sha256(
+                    render_document(source_document.frontmatter, source_document.body).encode(
+                        "utf-8"
+                    )
+                ).hexdigest(),
+            )
+            restore_file_bytes(
+                source_text,
+                previous_text,
+                expected_sha256=hashlib.sha256(
+                    render_document(text_document.frontmatter, text_document.body).encode("utf-8")
+                ).hexdigest(),
+            )
         raise
     _checkpoint(vault, f"capture: publish web source {slug}")
     return PublishedWebCapture(source, source_text, target, reused)
@@ -331,7 +348,7 @@ def publish_web_capture(
 ) -> PublishedWebCapture:
     """Serialize promotion so two Dashboard clicks cannot create duplicate Sources."""
 
-    with web_source_write_lock():
+    with web_source_write_lock(vault):
         return _publish_web_capture(
             vault,
             relative,

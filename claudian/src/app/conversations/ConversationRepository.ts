@@ -1068,11 +1068,13 @@ export class ConversationRepository {
     if (!this.isConversationCurrent(conversation, generation)) return null;
     await this.ensureSelectedModel(conversation);
     if (!this.isConversationCurrent(conversation, generation)) return null;
-    await this.hydrateProviderHistory(conversation);
+    const history = await this.hydrateProviderHistory(conversation);
     if (!this.isConversationCurrent(conversation, generation)) return null;
     await this.hydrateInputLedger(conversation);
     if (!this.isConversationCurrent(conversation, generation)) return null;
-    this.hydratedConversationIds.add(id);
+    // An empty native transcript may still be flushing. It is readable now,
+    // but opening it again must allow the provider to discover later messages.
+    if (history?.status !== 'empty') this.hydratedConversationIds.add(id);
     return conversation;
   }
 
@@ -1382,9 +1384,9 @@ export class ConversationRepository {
 
   private async hydrateProviderHistory(
     conversation: Conversation,
-  ): Promise<void> {
+  ): Promise<void | { status: 'loaded' | 'empty' }> {
     const vaultPath = this.deps.getVaultPath();
-    await ProviderRegistry
+    return ProviderRegistry
       .getConversationHistoryService(conversation.providerId)
       .hydrateConversationHistory(
         conversation,

@@ -7,6 +7,7 @@ FastEmbed model loading therefore cannot block the local API health endpoint.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -24,10 +25,16 @@ from okf_workspace.ai.provider import CodexSettings
 from okf_workspace.git import GitCheckpointError, create_checkpoint
 from okf_workspace.notes.organize import replace_managed_region
 from okf_workspace.okf.artifacts import render_artifact_body
-from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
+from okf_workspace.okf.file_io import FileWriteConflict, atomic_write_bytes, document_lock
+from okf_workspace.okf.frontmatter import (
+    OkfDocument,
+    parse_document,
+    read_document,
+    write_document,
+)
 from okf_workspace.okf.paths import resolve_bundle_path
 from okf_workspace.okf.relations import inherited_context_fields, source_paths
-from okf_workspace.okf.validator import validate_paths
+from okf_workspace.okf.validator import validate_document
 from okf_workspace.retrieval.index import SearchIndex
 
 from .models import SemanticKind, SemanticRequest, SemanticStage, SemanticStatus
@@ -200,8 +207,57 @@ class SemanticWorker:
 
     def _publish(self, request: SemanticRequest, content: str) -> None:
         path = resolve_bundle_path(self.vault, request.target)
-        existed = path.is_file()
-        document = read_document(path) if existed else self._new_document(request, content)
+        with suppress(GitCheckpointError):
+            create_checkpoint(self.vault, f"checkpoint before {request.kind.value}")
+        try:
+            with document_lock(path):
+                had_target = path.is_file()
+                for attempt in range(3):
+                    original = path.read_bytes() if path.is_file() else None
+                    if had_target and original is None:
+                        raise FileWriteConflict(f"Target was deleted during publication: {path}")
+                    document = (
+                        parse_document(original.decode("utf-8"), source=str(path))
+                        if original is not None
+                        else self._new_document(request, content)
+                    )
+                    self._prepare_document(request, path, document, content)
+                    report = validate_document(self.vault, path, document)
+                    if not report.valid:
+                        details = "; ".join(
+                            f"{issue.path}: {issue.message}" for issue in report.errors[:5]
+                        )
+                        raise RuntimeError(f"semantic output failed Vault validation: {details}")
+                    try:
+                        write_document(
+                            path,
+                            document,
+                            create_only=original is None,
+                            expected_sha256=hashlib.sha256(original).hexdigest()
+                            if original is not None
+                            else None,
+                        )
+                        break
+                    except FileWriteConflict:
+                        if attempt == 2:
+                            raise
+                        # Reread and merge into the latest human text, never roll
+                        # back an entire note using an old snapshot.
+        except Exception:
+            # Keep useful generated output outside the Vault for recovery.
+            recovery = self.state / "semantic-output" / f"{request.operation_id}.md"
+            atomic_write_bytes(recovery, content.encode("utf-8"))
+            raise
+        with suppress(GitCheckpointError):
+            create_checkpoint(self.vault, f"semantic: {request.kind.value} {request.target}")
+
+    def _prepare_document(
+        self,
+        request: SemanticRequest,
+        path: Path,
+        document: OkfDocument,
+        content: str,
+    ) -> None:
         if request.kind in {
             SemanticKind.GENERATE_STUDY_GUIDE,
             SemanticKind.REFRESH_STUDY_GUIDE,
@@ -213,9 +269,6 @@ class SemanticWorker:
             if document.type != "Wiki":
                 raise ValueError("Wiki target must use type: Wiki")
             region = "wiki-content"
-        original = path.read_text(encoding="utf-8") if existed else None
-        with suppress(GitCheckpointError):
-            create_checkpoint(self.vault, f"checkpoint before {request.kind.value}")
         document.body = replace_managed_region(document.body, region, content)
         context_sources = tuple(dict.fromkeys((*request.sources, *source_paths(document))))
         inherited = inherited_context_fields(
@@ -255,17 +308,6 @@ class SemanticWorker:
                 "by": "process:codex-background",
                 "at": now,
             }
-        write_document(path, document)
-        report = validate_paths(self.vault, [path])
-        if not report.valid:
-            if original is None:
-                path.unlink(missing_ok=True)
-            else:
-                path.write_text(original, encoding="utf-8", newline="\n")
-            details = "; ".join(f"{issue.path}: {issue.message}" for issue in report.errors[:5])
-            raise RuntimeError(f"semantic output failed Vault validation: {details}")
-        with suppress(GitCheckpointError):
-            create_checkpoint(self.vault, f"semantic: {request.kind.value} {request.target}")
 
     def _new_document(self, request: SemanticRequest, content: str) -> OkfDocument:
         if request.kind is SemanticKind.REFRESH_STUDY_GUIDE:

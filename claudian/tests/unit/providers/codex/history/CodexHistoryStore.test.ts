@@ -6,12 +6,17 @@ import {
   findCodexSessionFileAsync,
   parseCodexSessionContent,
   parseCodexSessionFile,
+  parseCodexSessionFileAsync,
   parseCodexSessionTurns,
 } from '@/providers/codex/history/CodexHistoryStore';
 
 const FIXTURES_DIR = path.join(__dirname, '..', 'fixtures');
 
 describe('CodexHistoryStore', () => {
+  it('rejects an unreadable native transcript instead of returning an empty history', async () => {
+    await expect(parseCodexSessionFileAsync(path.join(FIXTURES_DIR, 'does-not-exist.jsonl')))
+      .rejects.toThrow('Codex history could not be read');
+  });
   it('settles lookup at the deadline when a directory read never resolves', async () => {
     jest.useFakeTimers();
     try {

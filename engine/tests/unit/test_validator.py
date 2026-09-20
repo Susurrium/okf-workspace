@@ -4,7 +4,7 @@ from pathlib import Path
 
 from okf_workspace.notes import NoteService
 from okf_workspace.okf.frontmatter import OkfDocument, write_document
-from okf_workspace.okf.validator import validate_bundle, validate_paths
+from okf_workspace.okf.validator import validate_bundle, validate_document, validate_paths
 
 
 def test_template_bundle_is_valid(vault: Path) -> None:
@@ -12,6 +12,21 @@ def test_template_bundle_is_valid(vault: Path) -> None:
 
     assert report.valid, report.issues
     assert report.files_checked > 5
+
+
+def test_candidate_validation_checks_content_without_creating_target(vault: Path) -> None:
+    target = vault / "knowledge/wiki/candidate.md"
+    candidate = OkfDocument(
+        {"type": "Wiki", "title": "Candidate", "created_at": "2026-09-08T12:00:00Z"},
+        "# Candidate\n\nBody\n",
+    )
+    report = validate_document(vault, target, candidate)
+    assert not report.valid
+    assert any(issue.code == "missing-field" for issue in report.errors)
+    assert not target.exists()
+    candidate.frontmatter["description"] = "A useful candidate"
+    assert validate_document(vault, target, candidate).valid
+    assert not target.exists()
 
 
 def test_missing_type_is_an_error(vault: Path) -> None:
@@ -84,8 +99,7 @@ def test_missing_workspace_write_field_warns_without_rejecting_legacy_source(
 
     assert report.valid
     assert any(
-        issue.code == "workspace-write-field"
-        and issue.path == "sources/records/custom/legacy.md"
+        issue.code == "workspace-write-field" and issue.path == "sources/records/custom/legacy.md"
         for issue in report.warnings
     )
 
@@ -121,7 +135,7 @@ def test_nested_index_is_not_allowed(vault: Path) -> None:
     assert any(issue.code == "nested-index" for issue in report.errors)
 
 
-def test_log_dates_must_be_newest_first(vault: Path) -> None:
+def test_log_dates_allow_chronological_order_and_preserve_legacy_history(vault: Path) -> None:
     log = vault / "projects" / "log.md"
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text(
@@ -131,7 +145,11 @@ def test_log_dates_must_be_newest_first(vault: Path) -> None:
 
     report = validate_bundle(vault)
 
-    assert any(issue.code == "log-order" for issue in report.errors)
+    assert not any(issue.code == "log-order" for issue in report.issues)
+    log.write_text("# Log\n\n## 2026-02-01\n\n## 2026-01-01\n", encoding="utf-8")
+    report = validate_bundle(vault)
+    assert not any(issue.code == "log-order" for issue in report.errors)
+    assert any(issue.code == "log-order" for issue in report.warnings)
 
 
 def test_contract_catalog_rejects_required_fields_without_declared_types(vault: Path) -> None:

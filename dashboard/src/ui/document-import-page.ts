@@ -19,8 +19,8 @@ export class DocumentImportPageModel {
   public state: DocumentImportPageState = {
     options: {
       intent: "source",
-      quality: "high",
-      parser: "auto",
+      quality: "quick",
+      parser: "markitdown",
       generate: false,
     },
     running: false,

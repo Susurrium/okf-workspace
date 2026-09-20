@@ -7,8 +7,19 @@ import zipfile
 from pathlib import Path
 
 import httpx
+import pytest
 
 from okf_workspace.importers.clients import MarkItDownClient
+
+
+def test_parser_client_does_not_inherit_unrelated_desktop_proxies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+        monkeypatch.setenv(name, "unsupported-proxy://localhost:1")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    with MarkItDownClient("https://parser.example.test", "fixture-token") as client:
+        assert client.request_headers == {"Authorization": "Bearer fixture-token"}
 
 
 def result_zip() -> bytes:

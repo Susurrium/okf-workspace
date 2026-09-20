@@ -513,7 +513,7 @@ export interface ProviderConversationHistoryService {
     conversation: Conversation,
     vaultPath: string | null,
     pathContext?: ProviderHistoryPathContext,
-  ): Promise<void>;
+  ): Promise<void | { status: 'loaded' | 'empty' }>;
   resolveSessionIdForConversation(conversation: Conversation | null): string | null;
   isPendingForkConversation(conversation: Conversation): boolean;
   /** Builds opaque provider state for a forked conversation. */

@@ -26,7 +26,7 @@ class RecordingApi implements DocumentImportApi {
 }
 
 describe("DocumentImportPageModel", () => {
-  it("defaults to high quality and publishes without an approval step", async () => {
+  it("defaults to MarkItDown without invoking the advanced parser", async () => {
     const api = new RecordingApi();
     const page = new DocumentImportPageModel(api);
     page.selectFile(new File(["fixture"], "manual.docx"));
@@ -36,8 +36,8 @@ describe("DocumentImportPageModel", () => {
 
     expect(api.options).toEqual({
       intent: "wiki",
-      quality: "high",
-      parser: "auto",
+      quality: "quick",
+      parser: "markitdown",
       generate: false,
     });
     expect(result.status).toBe("imported");

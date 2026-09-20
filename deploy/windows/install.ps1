@@ -376,7 +376,12 @@ if (-not $SkipScheduledTasks) {
 
     $maintenanceAction = New-ScheduledTaskAction -Execute $maintenanceShell -Argument "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot 'maintenance.ps1')`" -Config `"$configPath`""
     $maintenanceTrigger = New-ScheduledTaskTrigger -Daily -At '02:30'
-    Register-ScheduledTask -TaskName 'OKF Workspace Daily Maintenance' -Action $maintenanceAction -Trigger $maintenanceTrigger -Description 'Refresh indexes; run optional backup and restore checks when enabled.' -Force | Out-Null
+    $maintenanceSettings = New-ScheduledTaskSettingsSet `
+        -StartWhenAvailable `
+        -RestartCount 3 `
+        -RestartInterval (New-TimeSpan -Minutes 10) `
+        -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName 'OKF Workspace Daily Maintenance' -Action $maintenanceAction -Trigger $maintenanceTrigger -Settings $maintenanceSettings -Description 'Refresh indexes; catch up missed runs and retry transient failures; run optional backup and restore checks when enabled.' -Force | Out-Null
 
     $feedSyncAction = New-ScheduledTaskAction -Execute $maintenanceShell -Argument "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot 'feed-sync.ps1')`" -Config `"$configPath`""
     $feedSyncTrigger = New-ScheduledTaskTrigger -Daily -At '06:50'

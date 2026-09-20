@@ -10,6 +10,8 @@ x-common-environment: &common-environment
   MARKITDOWN_MAX_PAGES: ${MARKITDOWN_MAX_PAGES:-500}
   MARKITDOWN_MAX_ACTIVE_TASKS: ${MARKITDOWN_MAX_ACTIVE_TASKS:-3}
   MARKITDOWN_MAX_CONCURRENT_UPLOADS: ${MARKITDOWN_MAX_CONCURRENT_UPLOADS:-1}
+  MARKITDOWN_UPLOAD_TIMEOUT_SECONDS: ${MARKITDOWN_UPLOAD_TIMEOUT_SECONDS:-600}
+  MARKITDOWN_UPLOAD_IDLE_TIMEOUT_SECONDS: ${MARKITDOWN_UPLOAD_IDLE_TIMEOUT_SECONDS:-60}
   MARKITDOWN_MAX_SPOOL_BYTES: ${MARKITDOWN_MAX_SPOOL_BYTES:-2147483648}
   MARKITDOWN_MIN_FREE_BYTES: ${MARKITDOWN_MIN_FREE_BYTES:-2147483648}
   MARKITDOWN_CONVERSION_TIMEOUT_SECONDS: ${MARKITDOWN_CONVERSION_TIMEOUT_SECONDS:-600}
@@ -24,10 +26,13 @@ x-common-environment: &common-environment
   MARKITDOWN_RELEASE_MANIFEST_SHA256: ${MARKITDOWN_RELEASE_MANIFEST_SHA256}
 
 x-common-service: &common-service
-  image: ${MARKITDOWN_IMAGE:-obsidian-markitdown-service:1.3.0}
+  image: ${MARKITDOWN_IMAGE:-obsidian-markitdown-service:1.4.0}
   build:
     context: ../../services/markitdown
     dockerfile: Dockerfile
+    # Build-time package installation uses host egress; runtime networks below
+    # remain internal-only for API and absent for Worker.
+    network: host
     args:
       PYTHON_IMAGE: ${MARKITDOWN_PYTHON_IMAGE:-docker.m.daocloud.io/library/python:3.12.13-slim-bookworm}
       SERVICE_UID: ${MARKITDOWN_UID:-10002}

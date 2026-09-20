@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
-import tempfile
 import threading
 import time
 import uuid
@@ -16,12 +16,14 @@ from pathlib import Path
 from typing import Literal
 
 from okf_workspace.git import GitCheckpointError, create_checkpoint
+from okf_workspace.okf.file_io import atomic_write_bytes, document_lock
 from okf_workspace.okf.frontmatter import OkfDocument, read_document
 from okf_workspace.okf.paths import resolve_bundle_path
 from okf_workspace.okf.relations import normalize_context_reference
 from okf_workspace.sources import restore_file_bytes
 
 from .create import NoteService
+from .project_logs import render_project_log_append
 
 CaptureDestination = Literal[
     "reflection",
@@ -43,24 +45,6 @@ class _ProjectLogMutation:
     before: bytes
     after: bytes
     marker_id: str
-
-
-def _write_bytes_atomic(path: Path, content: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        dir=path.parent,
-    )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 @contextmanager
@@ -200,35 +184,23 @@ def _project_log_markers(identity: str) -> tuple[str, str]:
 
 
 def _render_project_log_append(text: str, heading: str, entry: str) -> str:
-    """Render the same human log shape as NoteService, before one atomic replace."""
-
-    if heading in text:
-        return text.replace(heading, f"{heading}\n\n- {entry.strip()}", 1)
-    first_line, _, remainder = text.partition("\n")
-    prefix = first_line if first_line.startswith("# ") else "# 项目日志"
-    existing = remainder.lstrip() if first_line.startswith("# ") else text.lstrip()
-    intro, separator, history = existing.partition("\n")
-    if intro.startswith("该文件按时间记录"):
-        tail = history.lstrip() if separator else ""
-        rendered = f"{prefix}\n\n{intro}\n\n{heading}\n\n- {entry.strip()}"
-        return f"{rendered}\n\n{tail}" if tail else rendered
-    rendered = f"{prefix}\n\n{heading}\n\n- {entry.strip()}"
-    return f"{rendered}\n\n{existing}" if existing else rendered
+    return render_project_log_append(text, heading, entry)
 
 
 def _append_marked_project_log(
     target: Path,
     entry: str,
 ) -> _ProjectLogMutation:
-    before = target.read_bytes()
     marker_id = uuid.uuid4().hex
     start, end = _project_log_markers(marker_id)
     heading = f"## {datetime.now().astimezone().date()}"
     marked_entry = f"{start}{entry.strip()}{end}"
-    after = _render_project_log_append(before.decode("utf-8"), heading, marked_entry).encode(
-        "utf-8"
-    )
-    _write_bytes_atomic(target, after)
+    with document_lock(target):
+        before = target.read_bytes()
+        after = _render_project_log_append(before.decode("utf-8"), heading, marked_entry).encode(
+            "utf-8"
+        )
+        atomic_write_bytes(target, after, expected_sha256=hashlib.sha256(before).hexdigest())
     return _ProjectLogMutation(target, before, after, marker_id)
 
 
@@ -253,21 +225,40 @@ def _remove_marked_project_entry(text: str, marker_id: str) -> str:
 def _rollback_project_log_mutation(mutation: _ProjectLogMutation) -> None:
     """Undo only this append while preserving unrelated edits made meanwhile."""
 
+    with document_lock(mutation.target):
+        _rollback_project_log_mutation_locked(mutation)
+
+
+def _rollback_project_log_mutation_locked(mutation: _ProjectLogMutation) -> None:
+
     current = mutation.target.read_bytes()
     if current == mutation.after:
-        _write_bytes_atomic(mutation.target, mutation.before)
+        atomic_write_bytes(
+            mutation.target, mutation.before, expected_sha256=hashlib.sha256(current).hexdigest()
+        )
         return
     rendered = current.decode("utf-8")
     updated = _remove_marked_project_entry(rendered, mutation.marker_id)
     if updated == rendered:
         raise RuntimeError("cannot safely locate this Capture's Project Log entry")
-    _write_bytes_atomic(mutation.target, updated.encode("utf-8"))
+    atomic_write_bytes(
+        mutation.target,
+        updated.encode("utf-8"),
+        expected_sha256=hashlib.sha256(current).hexdigest(),
+    )
 
 
 def _finalize_project_log_mutation(mutation: _ProjectLogMutation) -> None:
     """Remove transaction markers after the Capture has been consumed."""
 
-    current = mutation.target.read_text(encoding="utf-8")
+    with document_lock(mutation.target):
+        _finalize_project_log_mutation_locked(mutation)
+
+
+def _finalize_project_log_mutation_locked(mutation: _ProjectLogMutation) -> None:
+
+    before = mutation.target.read_bytes()
+    current = before.decode("utf-8")
     start, end = _project_log_markers(mutation.marker_id)
     has_start = start in current
     has_end = end in current
@@ -276,7 +267,9 @@ def _finalize_project_log_mutation(mutation: _ProjectLogMutation) -> None:
     if has_start != has_end:
         raise RuntimeError("incomplete Capture transaction marker in Project Log")
     updated = current.replace(start, "", 1).replace(end, "", 1)
-    _write_bytes_atomic(mutation.target, updated.encode("utf-8"))
+    atomic_write_bytes(
+        mutation.target, updated.encode("utf-8"), expected_sha256=hashlib.sha256(before).hexdigest()
+    )
 
 
 def process_capture(

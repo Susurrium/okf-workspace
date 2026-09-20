@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -333,7 +334,7 @@ class Worker:
             self._failure_path(task_id).unlink(missing_ok=True)
         self.store.purge_tombstones(older_than=now - self.settings.tombstone_ttl_seconds)
 
-        active = self.store.active_task_ids()
+        active = self.store.protected_task_ids(now=now)
         cutoff = now - self.settings.orphan_ttl_seconds
         for directory in (
             self.settings.incoming_dir,
@@ -341,9 +342,16 @@ class Worker:
             self.settings.failed_dir,
         ):
             for candidate in directory.iterdir():
-                if not candidate.is_file() or candidate.name.startswith("."):
+                if candidate.is_symlink() or not candidate.is_file():
                     continue
-                task_id = candidate.name.split(".", maxsplit=1)[0]
+                match = re.fullmatch(
+                    r"\.?([a-f0-9]{32})\.(?:pdf|pptx|docx|zip|json|upload)"
+                    r"(?:\.[A-Za-z0-9_-]+\.tmp)?",
+                    candidate.name,
+                )
+                if match is None:
+                    continue
+                task_id = match.group(1)
                 try:
                     modified = candidate.stat().st_mtime
                 except OSError:

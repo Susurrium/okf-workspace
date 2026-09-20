@@ -48,6 +48,8 @@ export interface ProjectSummary extends NoteSummary {
 }
 
 export interface CourseSummary extends NoteSummary {
+  related_learning?: NoteSummary[];
+  lessons?: NoteSummary[];
   current_progress: string;
   guide_count: number;
   lesson_count: number;

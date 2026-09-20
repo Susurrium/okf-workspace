@@ -202,15 +202,16 @@ def test_papers_sync_uses_an_independent_cursor_and_does_not_replace_registry(
     ]
     assert json.loads(core_cursor_path.read_text(encoding="utf-8")) == core_cursor_payload
     papers_cursor = json.loads(
-        (state / "feed-sync" / "ai-daily-papers-export-cursor.json").read_text(
-            encoding="utf-8"
-        )
+        (state / "feed-sync" / "ai-daily-papers-export-cursor.json").read_text(encoding="utf-8")
     )
     assert papers_cursor["cursor"] == _cursor(1)
-    assert FeedCache(state).latest_edition(
-        FeedKind.AI_DAILY,
-        stream="papers",
-    ) is not None
+    assert (
+        FeedCache(state).latest_edition(
+            FeedKind.AI_DAILY,
+            stream="papers",
+        )
+        is not None
+    )
     assert SourceRegistryMirror(state).load().registry_revision == "a" * 64
 
 
@@ -254,9 +255,7 @@ def test_empty_papers_page_still_advances_only_the_papers_cursor(
     assert FeedSyncer(state).sync(FeedKind.AI_DAILY) == ()
     assert not (state / "feed-sync" / "ai-daily-export-cursor.json").exists()
     assert json.loads(
-        (state / "feed-sync" / "ai-daily-papers-export-cursor.json").read_text(
-            encoding="utf-8"
-        )
+        (state / "feed-sync" / "ai-daily-papers-export-cursor.json").read_text(encoding="utf-8")
     )["cursor"] == _cursor(2)
 
 
@@ -309,6 +308,80 @@ def test_invalid_papers_page_does_not_discard_a_valid_core_page(
     ]
     assert FeedCache(state).latest_edition(FeedKind.AI_DAILY, stream="news") is not None
     assert FeedCache(state).latest_edition(FeedKind.AI_DAILY, stream="papers") is None
+    health = cast(dict[str, object], feed_dashboard(state)["stream_health"])
+    assert cast(dict[str, object], health["papers"])["phase"] == "parse"
+    assert cast(dict[str, object], health["news"])["status"] == "ok"
+
+
+def test_papers_health_survives_other_lane_updates_and_recovers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _state(tmp_path, papers_enabled=True)
+    fail_papers = True
+
+    def export(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        *,
+        streams: tuple[str, ...] | None = None,
+        **_arguments: object,
+    ) -> dict[str, object]:
+        if streams == ("papers",) and fail_papers:
+            raise OSError("remote transport unavailable")
+        selected = streams or ("hotspot", "news", "learning")
+        return {
+            "documents": [],
+            "next_cursor": None,
+            "has_more": False,
+            "stream_status": {stream: {"status": "ok", "sources": []} for stream in selected},
+        }
+
+    monkeypatch.setattr(RemoteFeedPuller, "feed_export", export)
+    FeedSyncer(state).sync(FeedKind.AI_DAILY)
+    health = cast(dict[str, object], feed_dashboard(state)["stream_health"])
+    papers = cast(dict[str, object], health["papers"])
+    assert papers["status"] == "error" and papers["phase"] == "transport"
+    assert papers["last_error_at"] is not None
+    from okf_workspace.feeds.health import commit_stream_status
+
+    commit_stream_status(state, {"news": {"status": "ok", "sources": []}})
+    assert cast(dict[str, object], feed_dashboard(state)["stream_health"])["papers"] == papers
+    fail_papers = False
+    FeedSyncer(state).sync(FeedKind.AI_DAILY)
+    healthy = cast(
+        dict[str, object], cast(dict[str, object], feed_dashboard(state)["stream_health"])["papers"]
+    )
+    assert healthy["status"] == "ok" and healthy["message"] is None
+    assert healthy["last_success_at"] is not None
+
+
+def test_core_transport_failure_still_attempts_papers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _state(tmp_path, papers_enabled=True)
+
+    def export(
+        _puller: RemoteFeedPuller,
+        _alias: str,
+        *,
+        streams: tuple[str, ...] | None = None,
+        **_arguments: object,
+    ) -> dict[str, object]:
+        if streams is None:
+            raise OSError("core transport unavailable")
+        return {
+            "documents": [_document(1, "papers", _papers_markdown("2026-08-21"))],
+            "next_cursor": _cursor(1),
+            "has_more": False,
+            "stream_status": {"papers": {"status": "ok", "sources": []}},
+        }
+
+    monkeypatch.setattr(RemoteFeedPuller, "feed_export", export)
+    syncer = FeedSyncer(state)
+    assert [edition.stream for edition in syncer.sync(FeedKind.AI_DAILY)] == ["papers"]
+    assert {failure.stream for failure in syncer.failures} == {"hotspot", "news", "learning"}
 
 
 def test_forced_json_transport_passes_no_remote_command_or_secret_in_errors(
@@ -349,9 +422,10 @@ def test_forced_json_transport_passes_no_remote_command_or_secret_in_errors(
     assert cast(list[str], invocation)[-1] == "source-admin-alias"
     assert "source-admin.sh" not in cast(list[str], invocation)
     assert cast(dict[str, object], captured["kwargs"])["shell"] is False
-    assert json.loads(cast(str, cast(dict[str, object], captured["kwargs"])["input"]))[
-        "action"
-    ] == "list"
+    assert (
+        json.loads(cast(str, cast(dict[str, object], captured["kwargs"])["input"]))["action"]
+        == "list"
+    )
 
     def rejected(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         request = json.loads(cast(str, kwargs["input"]))
@@ -601,9 +675,7 @@ def test_incremental_export_commits_partial_stream_health_without_losing_documen
 
     monkeypatch.setattr(RemoteFeedPuller, "feed_export", export)
     syncer = FeedSyncer(state)
-    assert [value.edition_id for value in syncer.sync(FeedKind.AI_DAILY)] == [
-        "2026-08-21-news"
-    ]
+    assert [value.edition_id for value in syncer.sync(FeedKind.AI_DAILY)] == ["2026-08-21-news"]
     assert [(failure.stream, failure.detail) for failure in syncer.failures] == [
         ("learning", "AI Daily remote stream is error")
     ]
@@ -622,9 +694,7 @@ def test_incremental_export_accepts_a_later_sequence_with_an_earlier_timestamp(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _state(tmp_path)
-    fingerprint = hashlib.sha256(
-        b"okf-feed-export-v1\0ai-daily-feed-export"
-    ).hexdigest()
+    fingerprint = hashlib.sha256(b"okf-feed-export-v1\0ai-daily-feed-export").hexdigest()
     cursor_path = state / "feed-sync" / "ai-daily-export-cursor.json"
     cursor_path.parent.mkdir(parents=True)
     cursor_path.write_text(
@@ -669,9 +739,7 @@ def test_incremental_export_rejects_documents_without_cursor_progress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = _state(tmp_path)
-    fingerprint = hashlib.sha256(
-        b"okf-feed-export-v1\0ai-daily-feed-export"
-    ).hexdigest()
+    fingerprint = hashlib.sha256(b"okf-feed-export-v1\0ai-daily-feed-export").hexdigest()
     cursor_path = state / "feed-sync" / "ai-daily-export-cursor.json"
     cursor_path.parent.mkdir(parents=True)
     cursor_path.write_text(
@@ -716,9 +784,7 @@ def test_incremental_export_rejects_documents_without_cursor_progress(
         FeedSyncer(state).sync(FeedKind.AI_DAILY)
 
     assert json.loads(cursor_path.read_text(encoding="utf-8"))["cursor"] == _cursor(3)
-    assert not (
-        state / "feed-cache" / "ai-daily" / "2026-08-24-learning.json"
-    ).exists()
+    assert not (state / "feed-cache" / "ai-daily" / "2026-08-24-learning.json").exists()
 
 
 def test_legacy_duplicate_source_names_are_omitted_without_blocking_sync() -> None:

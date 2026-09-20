@@ -842,6 +842,26 @@ describe('ConversationRepository hydration', () => {
     expect(hydrateConversationHistory).toHaveBeenCalledTimes(2);
   });
 
+  it('retries a provider-reported empty transcript until native history is loaded', async () => {
+    const hydrateConversationHistory = jest.fn()
+      .mockResolvedValueOnce({ status: 'empty' })
+      .mockImplementationOnce(async (target: Conversation) => {
+        target.messages.push({ id: 'native-message', role: 'user', content: 'Restored', timestamp: 1 });
+        return { status: 'loaded' };
+      });
+    jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+      hydrateConversationHistory,
+    } as any);
+    const conversation = createConversation();
+    const { repository } = createRepository(conversation);
+    await repository.ensureHydrated(conversation.id);
+    expect(conversation.messages).toHaveLength(0);
+    await repository.ensureHydrated(conversation.id);
+    expect(conversation.messages[0]?.content).toBe('Restored');
+    await repository.ensureHydrated(conversation.id);
+    expect(hydrateConversationHistory).toHaveBeenCalledTimes(2);
+  });
+
   it('does not return a conversation deleted while hydration is in flight', async () => {
     let releaseHydration!: () => void;
     const hydrateConversationHistory = jest.fn(async () => {

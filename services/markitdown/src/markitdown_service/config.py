@@ -100,6 +100,8 @@ class Settings:
     max_pages: int = 500
     max_active_tasks: int = 3
     max_concurrent_uploads: int = 1
+    upload_timeout_seconds: float = 600.0
+    upload_idle_timeout_seconds: float = 60.0
     max_spool_bytes: int = 2 * 1024 * 1024 * 1024
     min_free_bytes: int = 2 * 1024 * 1024 * 1024
     conversion_timeout_seconds: int = 600
@@ -216,6 +218,10 @@ class Settings:
             max_pages=_positive_int("MARKITDOWN_MAX_PAGES", 500),
             max_active_tasks=_positive_int("MARKITDOWN_MAX_ACTIVE_TASKS", 3),
             max_concurrent_uploads=_positive_int("MARKITDOWN_MAX_CONCURRENT_UPLOADS", 1),
+            upload_timeout_seconds=_positive_float("MARKITDOWN_UPLOAD_TIMEOUT_SECONDS", 600.0),
+            upload_idle_timeout_seconds=_positive_float(
+                "MARKITDOWN_UPLOAD_IDLE_TIMEOUT_SECONDS", 60.0
+            ),
             max_spool_bytes=_positive_int("MARKITDOWN_MAX_SPOOL_BYTES", 2 * 1024 * 1024 * 1024),
             min_free_bytes=_positive_int("MARKITDOWN_MIN_FREE_BYTES", 2 * 1024 * 1024 * 1024),
             conversion_timeout_seconds=_positive_int("MARKITDOWN_CONVERSION_TIMEOUT_SECONDS", 600),

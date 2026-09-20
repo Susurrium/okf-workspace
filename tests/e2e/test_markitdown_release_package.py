@@ -54,7 +54,7 @@ def test_markitdown_release_contains_public_example_but_no_private_environment(
     assert "deploy/markitdown/install-release-bundle.sh" in names
     assert "deploy/markitdown/release_bundle.py" in names
     assert "deploy/markitdown/rollback-release-bundle.sh" in names
-    assert metadata["service_version"] == "1.3.0"
+    assert metadata["service_version"] == "1.4.0"
     assert metadata["engine_build_id"] == "markitdown-0.1.6-py31213-assets-v3"
     assert metadata["result_schema"] == "markitdown-result/v3"
     assert metadata["default_profile"] == "fallback-assets-v2"
@@ -174,7 +174,7 @@ def test_release_upgrade_environment_preserves_site_values_and_uses_new_identity
         if line and not line.startswith("#")
         for key, _, value in [line.partition("=")]
     }
-    assert values["MARKITDOWN_IMAGE"] == "obsidian-markitdown-service:1.3.0"
+    assert values["MARKITDOWN_IMAGE"] == "obsidian-markitdown-service:1.4.0"
     assert values["MARKITDOWN_ENGINE_BUILD_ID"] == (
         "markitdown-0.1.6-py31213-assets-v3"
     )

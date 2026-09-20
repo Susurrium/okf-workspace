@@ -91,7 +91,9 @@ bash ./verify-release.sh "${repository_root}"
 current_bundle_sha256="$(sha256sum "${repository_root}/release-manifest.sha256" | awk '{print $1}')"
 [[ "${current_bundle_sha256}" =~ ^[0-9a-f]{64}$ ]] || fail "current bundle digest is invalid"
 
-environment_tmp="$(mktemp --tmpdir="${script_dir}" .env.rollback.XXXXXX)"
+# A runtime environment staged inside the manifest tree fails the release
+# verifier invoked by preflight. Keep this private temporary file outside it.
+environment_tmp="$(mktemp --tmpdir="$(dirname -- "$(dirname -- "${repository_root}")")" .env.rollback.XXXXXX)"
 awk \
   -v image="${rollback_image}" \
   -v bundle_sha256="${current_bundle_sha256}" '

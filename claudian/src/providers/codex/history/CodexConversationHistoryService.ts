@@ -32,8 +32,8 @@ async function readSessionTurns(sessionFilePath: string): Promise<CodexParsedTur
       signal: controller.signal,
     });
     return parseCodexSessionTurns(content);
-  } catch {
-    return [];
+  } catch (error) {
+    throw new Error('Codex history could not be read. Retry when the session file is available.', { cause: error });
   } finally {
     window.clearTimeout(timer);
   }
@@ -141,7 +141,7 @@ export class CodexConversationHistoryService implements ProviderConversationHist
     conversation: Conversation,
     _vaultPath: string | null,
     pathContext?: ProviderHistoryPathContext,
-  ): Promise<void> {
+  ): Promise<void | { status: 'loaded' | 'empty' }> {
     const lookupDeadline = Date.now() + CODEX_HISTORY_LOOKUP_TIMEOUT_MS;
     const state = getCodexState(conversation.providerState);
     const transcriptRootPath = resolveCodexTranscriptRootHint(
@@ -243,7 +243,10 @@ export class CodexConversationHistoryService implements ProviderConversationHist
 
     if (!sessionFilePath) {
       this.hydratedConversationPaths.delete(conversation.id);
-      return;
+      if (threadId) {
+        throw new Error('Codex session history is temporarily unavailable. Retry after restoring access to the session file.');
+      }
+      return { status: 'empty' };
     }
 
     const hydrationKey = `${threadId ?? ''}::${sessionFilePath}`;
@@ -273,12 +276,13 @@ export class CodexConversationHistoryService implements ProviderConversationHist
     const sdkMessages = await parseCodexSessionFileAsync(sessionFilePath);
     if (sdkMessages.length === 0) {
       this.hydratedConversationPaths.delete(conversation.id);
-      return;
+      return { status: 'empty' };
     }
 
     conversation.messages = sdkMessages;
     this.hydratedConversationPaths.set(conversation.id, hydrationKey);
     this.markNativeConversationContextEstablished(conversation);
+    return { status: 'loaded' };
   }
 
   resolveSessionIdForConversation(conversation: Conversation | null): string | null {

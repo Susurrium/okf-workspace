@@ -189,10 +189,7 @@ def test_source_migration_does_not_mark_a_concurrent_unknown_item_complete(
         allow_snapshot.set()
         migration.result(timeout=5)
 
-    marker = (
-        state
-        / "feed-cache/metadata/migrations/ai-daily-learning-source-ids.json"
-    )
+    marker = state / "feed-cache/metadata/migrations/ai-daily-learning-source-ids.json"
     assert not marker.exists()
 
 
@@ -279,9 +276,7 @@ def test_source_migration_finishes_with_resolved_and_unresolved_items(
             {resolved_url: ("known-source", "Known Source")},
             migration_inputs_complete=True,
             attempted_source_urls={resolved_url, unresolved_url},
-            unresolved_url_hashes=(
-                hashlib.sha256(unresolved_url.encode("utf-8")).hexdigest(),
-            ),
+            unresolved_url_hashes=(hashlib.sha256(unresolved_url.encode("utf-8")).hexdigest(),),
         )
         migration.result(timeout=5)
 
@@ -290,10 +285,9 @@ def test_source_migration_finishes_with_resolved_and_unresolved_items(
     assert migrated.items[0].source_name == "Known Source"
     assert migrated.items[1].source_id == UNATTRIBUTED_SOURCE_ID
     marker = json.loads(
-        (
-            state
-            / "feed-cache/metadata/migrations/ai-daily-learning-source-ids.json"
-        ).read_text(encoding="utf-8")
+        (state / "feed-cache/metadata/migrations/ai-daily-learning-source-ids.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert marker["unresolved_url_hashes"] == [
         hashlib.sha256(unresolved_url.encode("utf-8")).hexdigest()
@@ -348,10 +342,7 @@ def test_ai_daily_urls_are_safe_links_and_legacy_rows_refresh_in_place(vault: Pa
     )
     path = materialize_edition(vault, edition)
     rendered = path.read_text(encoding="utf-8")
-    safe_row = (
-        "- 原文：[打开原文]"
-        "(<https://mp.weixin.qq.com/s?__biz=abc%3D%3D&idx=1>)"
-    )
+    safe_row = "- 原文：[打开原文](<https://mp.weixin.qq.com/s?__biz=abc%3D%3D&idx=1>)"
     assert safe_row in rendered
 
     legacy_row = "- 原文：https://mp.weixin.qq.com/s?__biz=abc%3D%3D&idx=1"
@@ -1372,6 +1363,17 @@ def test_feed_then_web_reuses_source_without_replacing_feed_text(
     assert text_after.body.count("Web 后续补充的独有选区") == 1
     assert text_after.body.count("<!-- okf:web-clip:start") == 1
 
+    text_after.body += "\n人工补充的独有批注。\n"
+    write_document(text_path, text_after)
+    service = FeedDecisionService(vault, tmp_path / "state")
+    service.decide(item, DecisionAction.LEARN_NOW, checkpoint=False)
+    service.decide(item, DecisionAction.WIKI_NOW, checkpoint=False)
+    final = read_document(text_path)
+    assert final.body.count("Web 后续补充的独有选区") == 1
+    assert final.body.count("人工补充的独有批注") == 1
+    assert final.body.count("Feed 首次保存的独有正文") == 1
+    assert final.body.count("Feed 首次保存的独有评论") == 1
+
 
 @pytest.mark.parametrize(
     ("text_link", "linked_type"),
@@ -1513,12 +1515,18 @@ def test_cross_channel_feed_pair_rolls_back_when_source_write_fails(
     original_write = source_publisher.write_document
     calls = 0
 
-    def fail_source_write(path: Path, document: OkfDocument) -> None:
+    def fail_source_write(
+        path: Path,
+        document: OkfDocument,
+        *,
+        create_only: bool = False,
+        expected_sha256: str | None = None,
+    ) -> None:
         nonlocal calls
         calls += 1
         if calls == 2:
             raise OSError("simulated Source write failure")
-        original_write(path, document)
+        original_write(path, document, create_only=create_only, expected_sha256=expected_sha256)
 
     monkeypatch.setattr(source_publisher, "write_document", fail_source_write)
     service = FeedDecisionService(vault, tmp_path / "state")

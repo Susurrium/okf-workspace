@@ -119,18 +119,17 @@ def test_system_status_can_require_livesync_later(
     assert "Setup URI" in str(items["livesync"]["action"])
 
 
-def test_system_status_shows_mineru_fallback_as_non_blocking(
+def test_system_status_defers_mineru_without_probing_it(
     vault: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class UnhealthyResponse:
-        status_code = 503
+    calls: list[str] = []
 
-    responses = iter((UnhealthyResponse(), HealthyResponse()))
-
-    def get(*_args: object, **_kwargs: object) -> UnhealthyResponse | HealthyResponse:
-        return next(responses)
+    def get(url: str, **kwargs: object) -> HealthyResponse:
+        calls.append(url)
+        assert kwargs["trust_env"] is False
+        return HealthyResponse()
 
     codex = tmp_path / "codex.cmd"
     codex.write_text("", encoding="utf-8")
@@ -142,8 +141,10 @@ def test_system_status_shows_mineru_fallback_as_non_blocking(
     status = system_status(vault, tmp_path / "state")
     items = {item["item_id"]: item for item in cast(list[dict[str, object]], status["items"])}
 
-    assert items["mineru"]["status"] == "configured"
-    assert "按需通过 SSH" in str(items["mineru"]["detail"])
+    assert len(calls) == 1 and calls[0].endswith("/v1/health")
+    assert items["markitdown"]["status"] == "available"
+    assert items["mineru"]["status"] == "deferred"
+    assert "当前暂不使用" in str(items["mineru"]["detail"])
     assert items["mineru"]["action"] is None
 
 
@@ -208,7 +209,7 @@ def test_system_status_caches_service_probes_but_can_force_refresh(
 
     system_status(vault, state)
     system_status(vault, state)
-    assert calls == 2
+    assert calls == 1
 
     system_status(vault, state, refresh_services=True)
-    assert calls == 4
+    assert calls == 2

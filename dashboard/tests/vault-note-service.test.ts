@@ -26,6 +26,11 @@ describe("VaultNoteService", () => {
       modify: async (file: TFile, content: string) => {
         markdown.set(file.path, content);
       },
+      process: async (file: TFile, transform: (content: string) => string) => {
+        const result = transform(markdown.get(file.path) ?? "");
+        markdown.set(file.path, result);
+        return result;
+      },
       getMarkdownFiles: () => [...files.values()].filter((file) => file.name.endsWith(".md")),
       getFiles: () => [...files.values()],
     };

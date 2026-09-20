@@ -161,7 +161,7 @@ def mirror_web_source_images(vault: Path, relative: str) -> tuple[str, ...]:
 
     if not replacements:
         return ()
-    with web_source_write_lock():
+    with web_source_write_lock(vault):
         # Re-read after downloads so a repeated clip that arrived meanwhile is never
         # overwritten by the older snapshot used to discover image URLs.
         document = read_document(source_text)

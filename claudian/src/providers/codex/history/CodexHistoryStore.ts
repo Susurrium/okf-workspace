@@ -1640,8 +1640,8 @@ export async function parseCodexSessionFileAsync(
   try {
     const content = await fsp.readFile(filePath, { encoding: 'utf-8', signal: controller.signal });
     return parseCodexSessionContent(content);
-  } catch {
-    return [];
+  } catch (error) {
+    throw new Error('Codex history could not be read. Retry when the session file is available.', { cause: error });
   } finally {
     window.clearTimeout(timer);
   }

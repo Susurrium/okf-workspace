@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
 from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import dataclass
 from io import StringIO
@@ -12,6 +10,8 @@ from typing import Any, cast
 
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
+
+from .file_io import atomic_write_bytes
 
 
 class FrontmatterError(ValueError):
@@ -102,24 +102,12 @@ def write_document(
     document: OkfDocument,
     *,
     create_only: bool = False,
+    expected_sha256: str | None = None,
 ) -> None:
-    if create_only and path.exists():
-        raise FileExistsError(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     content = render_document(document.frontmatter, document.body)
-    fd, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        dir=path.parent,
+    atomic_write_bytes(
+        path,
+        content.encode("utf-8"),
+        create_only=create_only,
+        expected_sha256=expected_sha256,
     )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if create_only and path.exists():
-            raise FileExistsError(path)
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)

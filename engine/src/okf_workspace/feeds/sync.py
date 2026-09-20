@@ -23,6 +23,7 @@ from .adapters import (
     treehole_from_v1,
 )
 from .cache import FeedCache, FeedEditionIndex, exclusive_feed_cache_lock
+from .health import commit_stream_status
 from .models import (
     UNATTRIBUTED_SOURCE_ID,
     FeedEdition,
@@ -49,9 +50,7 @@ _EXPORT_MAX_PAGES = 1_000
 
 def _write_json_atomic(path: Path, payload: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
-    )
+    descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     temporary = Path(name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
@@ -107,9 +106,7 @@ def _needs_exact_source_hint(item: FeedItem) -> bool:
     if source_id == UNATTRIBUTED_SOURCE_ID:
         return True
     return bool(
-        item.url
-        and not item.source_name
-        and source_id == legacy_source_identity(None, item.url)
+        item.url and not item.source_name and source_id == legacy_source_identity(None, item.url)
     )
 
 
@@ -126,6 +123,7 @@ class FeedSyncer:
         self.config_path = self.state / "feed-producers.json"
         self.cache = FeedCache(self.state)
         self._failures: list[FeedSyncFailure] = []
+        self._export_phase = "parse"
 
     @property
     def failures(self) -> tuple[FeedSyncFailure, ...]:
@@ -139,9 +137,7 @@ class FeedSyncer:
         stream: str | None = None,
     ) -> None:
         detail = " ".join(str(error).split()) or error.__class__.__name__
-        self._failures.append(
-            FeedSyncFailure(feed=feed, stream=stream, detail=detail[:300])
-        )
+        self._failures.append(FeedSyncFailure(feed=feed, stream=stream, detail=detail[:300]))
 
     def _config(self) -> Mapping[str, object]:
         if not self.config_path.is_file():
@@ -240,9 +236,7 @@ class FeedSyncer:
         urls: set[str] = set()
         complete = True
         try:
-            indexes = tuple(
-                self.cache.iter_stream_indexes_strict(FeedKind.AI_DAILY, "learning")
-            )
+            indexes = tuple(self.cache.iter_stream_indexes_strict(FeedKind.AI_DAILY, "learning"))
         except (KeyError, OSError, ValueError) as error:
             self._record_failure(FeedKind.AI_DAILY, error, stream="learning")
             return urls, False
@@ -259,9 +253,7 @@ class FeedSyncer:
                 self._record_failure(FeedKind.AI_DAILY, error, stream="learning")
                 continue
             urls.update(
-                item.url
-                for item in edition.items
-                if _needs_exact_source_hint(item) and item.url
+                item.url for item in edition.items if _needs_exact_source_hint(item) and item.url
             )
         return urls, complete
 
@@ -315,26 +307,20 @@ class FeedSyncer:
                 incoming[position] = upgraded
 
         hinted_item_ids = {
-            "ai-daily:learning:"
-            + hashlib.sha256(url.encode("utf-8")).hexdigest()[:20]
+            "ai-daily:learning:" + hashlib.sha256(url.encode("utf-8")).hexdigest()[:20]
             for url in item_source_hints
         }
 
         def index_needs_upgrade(index: FeedEditionIndex) -> bool:
             return any(
                 (
-                    (
-                        item.source_id == UNATTRIBUTED_SOURCE_ID
-                        or item.source_name is None
-                    )
+                    (item.source_id == UNATTRIBUTED_SOURCE_ID or item.source_name is None)
                     and bool(hinted_item_ids)
                 )
                 or (
                     item.source_name
-                    and (stable_id := stable_ids.get(item.source_name.casefold()))
-                    is not None
-                    and item.source_id
-                    == legacy_source_identity(item.source_name, None)
+                    and (stable_id := stable_ids.get(item.source_name.casefold())) is not None
+                    and item.source_id == legacy_source_identity(item.source_name, None)
                     and item.source_id != stable_id
                 )
                 for item in index.items
@@ -396,8 +382,7 @@ class FeedSyncer:
                     if isinstance(value, str):
                         prior_unresolved.add(value)
             hinted_hashes = {
-                hashlib.sha256(url.encode("utf-8")).hexdigest()
-                for url in item_source_hints
+                hashlib.sha256(url.encode("utf-8")).hexdigest() for url in item_source_hints
             }
             repairs_prior_unresolved = bool(prior_unresolved & hinted_hashes)
             if (
@@ -483,9 +468,9 @@ class FeedSyncer:
                                 retry = True
                                 break
                         if not retry:
-                            unresolved = (
-                                prior_unresolved - hinted_hashes
-                            ) | set(unresolved_url_hashes)
+                            unresolved = (prior_unresolved - hinted_hashes) | set(
+                                unresolved_url_hashes
+                            )
                             known_url_hashes = unresolved | hinted_hashes
                             has_unknown_candidate = False
                             for index in final_indexes:
@@ -502,20 +487,20 @@ class FeedSyncer:
                                 for item in edition.items:
                                     if not _needs_exact_source_hint(item):
                                         continue
-                                    if not item.url or hashlib.sha256(
-                                        item.url.encode("utf-8")
-                                    ).hexdigest() not in known_url_hashes:
+                                    if (
+                                        not item.url
+                                        or hashlib.sha256(item.url.encode("utf-8")).hexdigest()
+                                        not in known_url_hashes
+                                    ):
                                         has_unknown_candidate = True
                                         break
                                 if has_unknown_candidate:
                                     break
                             if has_unknown_candidate:
                                 return
-                            final_generation = (
-                                self.cache.stream_source_identity_generation(
-                                    FeedKind.AI_DAILY,
-                                    "learning",
-                                )
+                            final_generation = self.cache.stream_source_identity_generation(
+                                FeedKind.AI_DAILY,
+                                "learning",
                             )
                             write_marker(unresolved, final_generation)
                 except (KeyError, OSError, ValueError) as error:
@@ -536,9 +521,7 @@ class FeedSyncer:
 
     @staticmethod
     def _export_alias_fingerprint(alias: str) -> str:
-        return hashlib.sha256(
-            b"okf-feed-export-v1\0" + alias.encode("utf-8")
-        ).hexdigest()
+        return hashlib.sha256(b"okf-feed-export-v1\0" + alias.encode("utf-8")).hexdigest()
 
     def _load_export_cursor(
         self,
@@ -617,18 +600,12 @@ class FeedSyncer:
         for source in sources:
             if source.status == "removed":
                 continue
-            candidates.setdefault(source.source_name.casefold(), set()).add(
-                source.source_id
-            )
+            candidates.setdefault(source.source_name.casefold(), set()).add(source.source_id)
         # A legacy or externally edited Registry can still contain duplicate
         # display names.  Do not let that ambiguity block unrelated hotspot or
         # news documents in the same export page: omit only the unsafe name
         # mapping and let the learning adapter fall back to its legacy identity.
-        return {
-            name: next(iter(ids))
-            for name, ids in candidates.items()
-            if len(ids) == 1
-        }
+        return {name: next(iter(ids)) for name, ids in candidates.items() if len(ids) == 1}
 
     @staticmethod
     def _validate_stream_health(
@@ -678,9 +655,7 @@ class FeedSyncer:
                     if not isinstance(field_value, str) or len(field_value) > 80:
                         raise ValueError("AI Daily export source health is invalid")
                     try:
-                        parsed = datetime.fromisoformat(
-                            field_value.replace("Z", "+00:00")
-                        )
+                        parsed = datetime.fromisoformat(field_value.replace("Z", "+00:00"))
                     except ValueError as error:
                         raise ValueError(
                             "AI Daily export source health timestamp is invalid"
@@ -695,9 +670,7 @@ class FeedSyncer:
                     safe_last_error_type = safe_remote_error_type(last_error_type)
                     safe_last_error = safe_remote_error_summary(last_error)
                 except ValueError as error:
-                    raise ValueError(
-                        "AI Daily export source health is invalid"
-                    ) from error
+                    raise ValueError("AI Daily export source health is invalid") from error
                 if last_error_type is not None and safe_last_error_type is None:
                     raise ValueError("AI Daily export source health is invalid")
                 projected_sources.append(
@@ -719,13 +692,19 @@ class FeedSyncer:
         return tuple(failures), projection
 
     def _commit_stream_health(self, streams: Mapping[str, object]) -> None:
-        _write_json_atomic(
-            self.state / "feed-sync" / "ai-daily-stream-status.json",
-            {
-                "version": 1,
-                "updated_at": datetime.now(UTC).isoformat(),
-                "streams": dict(streams),
-            },
+        commit_stream_status(self.state, streams)
+
+    def _commit_lane_failure(self, streams: tuple[str, ...], error: BaseException) -> None:
+        labels = {
+            "transport": "连接远端失败，请检查网络后重试。",
+            "parse": "同步内容校验失败，已保留上次成功的内容。",
+            "storage": "本地保存失败，已保留同步进度以便重试。",
+        }
+        commit_stream_status(
+            self.state,
+            {stream: {"status": "error", "error_type": type(error).__name__} for stream in streams},
+            phase=self._export_phase,
+            message=labels.get(self._export_phase, labels["parse"]),
         )
 
     @staticmethod
@@ -744,11 +723,7 @@ class FeedSyncer:
             raise ValueError("AI Daily export documents are invalid")
         editions: list[FeedEdition] = []
         seen_cursors: set[tuple[str, str]] = set()
-        after_key = (
-            (after["recorded_at"], after["artifact_id"])
-            if after is not None
-            else None
-        )
+        after_key = (after["recorded_at"], after["artifact_id"]) if after is not None else None
         total_markdown_bytes = 0
         for raw_document in document_values:
             if not isinstance(raw_document, dict):
@@ -798,9 +773,7 @@ class FeedSyncer:
                 else ai_daily_markdown_from_v1(
                     markdown,
                     stream=cast(str, stream),
-                    source_ids_by_name=(
-                        source_ids_by_name if stream == "learning" else None
-                    ),
+                    source_ids_by_name=(source_ids_by_name if stream == "learning" else None),
                 )
             )
             if issued_at != edition.edition_at and not issued_at.startswith(
@@ -820,12 +793,27 @@ class FeedSyncer:
         stored: list[FeedEdition] = []
         sync_lock = self.state / "feed-sync" / ".ai-daily-export.lock"
         with exclusive_feed_cache_lock(sync_lock):
-            stored.extend(self._sync_incremental_ai_daily_core_locked(alias, puller))
+            self._export_phase = "parse"
+            try:
+                stored.extend(self._sync_incremental_ai_daily_core_locked(alias, puller))
+            except (
+                KeyError,
+                OSError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                httpx.HTTPError,
+                subprocess.SubprocessError,
+            ) as error:
+                self._commit_lane_failure(_AI_DAILY_STREAMS, error)
+                if not papers_enabled:
+                    raise
+                for stream in _AI_DAILY_STREAMS:
+                    self._record_failure(FeedKind.AI_DAILY, error, stream=stream)
             if papers_enabled:
+                self._export_phase = "parse"
                 try:
-                    stored.extend(
-                        self._sync_incremental_ai_papers_locked(alias, puller)
-                    )
+                    stored.extend(self._sync_incremental_ai_papers_locked(alias, puller))
                 except (
                     KeyError,
                     OSError,
@@ -835,6 +823,7 @@ class FeedSyncer:
                     httpx.HTTPError,
                     subprocess.SubprocessError,
                 ) as error:
+                    self._commit_lane_failure(_AI_PAPERS_STREAMS, error)
                     self._record_failure(FeedKind.AI_DAILY, error, stream="papers")
         return tuple(stored)
 
@@ -852,12 +841,14 @@ class FeedSyncer:
             seen_page_cursors.add((cursor["recorded_at"], cursor["artifact_id"]))
         for _page_number in range(_EXPORT_MAX_PAGES):
             with mirror.locked() as locked_mirror:
+                self._export_phase = "transport"
                 result = puller.feed_export(
                     alias,
                     after=cursor,
                     limit=_EXPORT_PAGE_LIMIT,
                     include_registry=True,
                 )
+                self._export_phase = "parse"
                 next_cursor = _export_cursor(result.get("next_cursor"), nullable=True)
                 has_more = result.get("has_more")
                 if not isinstance(has_more, bool):
@@ -865,9 +856,7 @@ class FeedSyncer:
                 current_sources = locked_mirror.load().sources
                 exported_registry = self._registry_from_export(result.get("registry"))
                 registry_sources = (
-                    exported_registry[1]
-                    if exported_registry is not None
-                    else current_sources
+                    exported_registry[1] if exported_registry is not None else current_sources
                 )
                 source_ids_by_name = self._source_ids_by_name(registry_sources)
                 editions = self._validate_export_documents(
@@ -888,6 +877,7 @@ class FeedSyncer:
                 )
                 if exported_registry is not None:
                     locked_mirror.replace(exported_registry[0], exported_registry[1])
+            self._export_phase = "storage"
             for edition in editions:
                 self.cache.put(edition)
                 stored.append(edition)
@@ -943,6 +933,7 @@ class FeedSyncer:
         if cursor is not None:
             seen_page_cursors.add((cursor["recorded_at"], cursor["artifact_id"]))
         for _page_number in range(_EXPORT_MAX_PAGES):
+            self._export_phase = "transport"
             result = puller.feed_export(
                 alias,
                 after=cursor,
@@ -950,6 +941,7 @@ class FeedSyncer:
                 limit=_EXPORT_PAGE_LIMIT,
                 include_registry=False,
             )
+            self._export_phase = "parse"
             next_cursor = _export_cursor(result.get("next_cursor"), nullable=True)
             has_more = result.get("has_more")
             if not isinstance(has_more, bool):
@@ -961,7 +953,7 @@ class FeedSyncer:
                 source_ids_by_name={},
                 allowed_streams=_AI_PAPERS_STREAMS,
             )
-            health_failures, _health_projection = self._validate_stream_health(
+            health_failures, health_projection = self._validate_stream_health(
                 result.get("stream_status"),
                 expected_streams=_AI_PAPERS_STREAMS,
             )
@@ -972,9 +964,11 @@ class FeedSyncer:
                 has_documents=bool(editions),
                 seen_page_cursors=seen_page_cursors,
             )
+            self._export_phase = "storage"
             for edition in editions:
                 self.cache.put(edition)
                 stored.append(edition)
+            self._commit_stream_health(health_projection)
             if next_cursor is not None and next_cursor != cursor:
                 self._commit_export_cursor(alias, next_cursor, lane="papers")
             cursor = next_cursor
@@ -982,9 +976,7 @@ class FeedSyncer:
                 reported_health = True
                 self._record_failure(
                     FeedKind.AI_DAILY,
-                    ValueError(
-                        f"AI Daily remote stream is {health_failures[0][1]}"
-                    ),
+                    ValueError(f"AI Daily remote stream is {health_failures[0][1]}"),
                     stream="papers",
                 )
             if not has_more:
@@ -1050,9 +1042,7 @@ class FeedSyncer:
                                 markdown,
                                 stream=stream,
                                 source_ids_by_name=(
-                                    source_ids_by_name
-                                    if stream == "learning"
-                                    else None
+                                    source_ids_by_name if stream == "learning" else None
                                 ),
                             )
                         )
@@ -1087,9 +1077,7 @@ class FeedSyncer:
                             TypeError("AI Daily stream must be an object"),
                         )
                         continue
-                    stream_name = (
-                        str(cast(Mapping[str, object], stream_object).get("stream") or "")
-                    )
+                    stream_name = str(cast(Mapping[str, object], stream_object).get("stream") or "")
                     isolated_payload = dict(payload)
                     isolated_payload["streams"] = [stream_object]
                     try:
@@ -1137,10 +1125,9 @@ class FeedSyncer:
                     for edition in editions
                     if edition.stream == "learning"
                     for item in edition.items
-                    if item.url and item.source_name
-                    and (
-                        stable_id := stable_ids.get(item.source_name.strip().casefold())
-                    )
+                    if item.url
+                    and item.source_name
+                    and (stable_id := stable_ids.get(item.source_name.strip().casefold()))
                     is not None
                 }
             )
@@ -1155,9 +1142,7 @@ class FeedSyncer:
                 not in previously_unresolved
             }
             if stable_ids and current_marker is None:
-                historical_urls, history_complete = (
-                    self._cached_unattributed_learning_urls()
-                )
+                historical_urls, history_complete = self._cached_unattributed_learning_urls()
                 unresolved_urls.update(historical_urls)
                 migration_inputs_complete = history_complete
             if (

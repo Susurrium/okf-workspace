@@ -73,6 +73,7 @@ def _probe_service(
                 endpoint,
                 headers=dict(headers),
                 timeout=timeout_seconds,
+                trust_env=False,
             )
             status_code = response.status_code
             if status_code == 200:
@@ -275,13 +276,11 @@ def system_status(
     runtime = state.resolve()
     settings = ImportSettings.from_env()
     cache_namespace = str(runtime)
-    mineru = _service_item(
+    mineru = SystemItem(
         "mineru",
         "MinerU",
-        settings.mineru_url,
-        cache_namespace=cache_namespace,
-        refresh=refresh_services,
-        failure_ttl_seconds=60.0 if settings.mineru_ssh_managed else 15.0,
+        "deferred",
+        "当前暂不使用；文档默认由 MarkItDown 转换，仅保留显式高级调用能力",
     )
     markitdown = _service_item(
         "markitdown",
@@ -293,24 +292,7 @@ def system_status(
         probe_timeouts=(1.5, 4.0),
         refresh=refresh_services,
     )
-    if mineru.status != "available" and settings.mineru_ssh_managed:
-        mineru = SystemItem(
-            "mineru",
-            "MinerU",
-            "configured",
-            (
-                f"按需通过 SSH 主机 {settings.mineru_ssh_host} 启动并建立回环隧道；"
-                "不可用时自动降级 MarkItDown"
-            ),
-        )
-    elif mineru.status != "available" and markitdown.status == "available":
-        mineru = SystemItem(
-            "mineru",
-            "MinerU",
-            "fallback-ready",
-            "共享服务当前未连接；自动降级为 MarkItDown，不阻塞导入",
-        )
-    items = [mineru, markitdown]
+    items = [markitdown, mineru]
     ai_mode = os.environ.get("OKF_AI_MODE", "codex").strip().casefold()
     if ai_mode == "codex":
         configured_command = os.environ.get("OKF_CODEX_COMMAND", "").strip()

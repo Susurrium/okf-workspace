@@ -109,6 +109,11 @@ class JobStore:
                     updated_at REAL NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS upload_leases (
+                    task_id TEXT PRIMARY KEY,
+                    expires_at REAL NOT NULL
+                );
+
                 PRAGMA user_version = 1;
                 """
             )
@@ -465,4 +470,29 @@ class JobStore:
             rows = connection.execute(
                 "SELECT task_id FROM jobs WHERE status != 'expired'"
             ).fetchall()
+        return {str(row["task_id"]) for row in rows}
+
+    def hold_upload(self, task_id: str, *, expires_at: float) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO upload_leases (task_id, expires_at) VALUES (?, ?)",
+                (task_id, expires_at),
+            )
+
+    def release_upload(self, task_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM upload_leases WHERE task_id = ?", (task_id,))
+
+    def protected_task_ids(self, *, now: float) -> set[str]:
+        """One snapshot covers the upload-to-pending-task handoff without a gap."""
+
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("DELETE FROM upload_leases WHERE expires_at <= ?", (now,))
+            rows = connection.execute(
+                "SELECT task_id FROM jobs WHERE status != 'expired' "
+                "UNION SELECT task_id FROM upload_leases WHERE expires_at > ?",
+                (now,),
+            ).fetchall()
+            connection.commit()
         return {str(row["task_id"]) for row in rows}

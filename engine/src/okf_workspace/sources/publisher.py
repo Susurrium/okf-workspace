@@ -8,30 +8,37 @@ idempotent list so they remain durable without turning Source into a state machi
 
 from __future__ import annotations
 
-import os
-import threading
+import hashlib
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
-from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
+from okf_workspace.okf.file_io import FileWriteConflict, atomic_write_bytes, document_lock
+from okf_workspace.okf.frontmatter import (
+    OkfDocument,
+    parse_document,
+    render_document,
+    write_document,
+)
 from okf_workspace.okf.paths import resolve_bundle_path
 from okf_workspace.okf.relations import explicit_context_fields
 
 ResourceNormalizer = Callable[[str], str]
 
-_SOURCE_WRITE_LOCK = threading.RLock()
 _SOURCE_PURPOSES = {"study", "wiki", "reference", "undecided"}
 _SOURCE_USE_FIELDS = {"purpose", "course", "project"}
 
 
 @contextmanager
-def source_write_lock() -> Generator[None]:
-    """Serialize Source lookup and pair publication in the local process."""
+def source_write_lock(vault: Path) -> Generator[None]:
+    """Serialize Source identity lookup and mutations across API/CLI processes.
 
-    with _SOURCE_WRITE_LOCK:
+    The virtual path is only a lock identity; the lock file lives outside Vault.
+    """
+
+    with document_lock(vault.resolve() / ".source-identity"):
         yield
 
 
@@ -41,16 +48,24 @@ class PublishedSourcePair:
     source_text: Path
 
 
-def restore_file_bytes(path: Path, previous: bytes | None) -> None:
+def restore_file_bytes(
+    path: Path,
+    previous: bytes | None,
+    *,
+    expected_sha256: str | None = None,
+) -> None:
     """Atomically restore a Source authority file after a pair-write failure."""
 
-    if previous is None:
-        path.unlink(missing_ok=True)
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.rollback")
-    temporary.write_bytes(previous)
-    os.replace(temporary, path)
+    with document_lock(path):
+        if previous is None:
+            if expected_sha256 is not None and (
+                not path.is_file()
+                or hashlib.sha256(path.read_bytes()).hexdigest() != expected_sha256
+            ):
+                raise FileWriteConflict(f"File changed before rollback: {path}")
+            path.unlink(missing_ok=True)
+            return
+        atomic_write_bytes(path, previous, expected_sha256=expected_sha256)
 
 
 class SourcePublisher:
@@ -60,6 +75,42 @@ class SourcePublisher:
         self.vault = vault.resolve()
         self.records_root = (self.vault / "sources" / "records").resolve()
         self.text_root = (self.vault / "sources" / "text").resolve()
+        self._snapshots: dict[Path, bytes] = {}
+
+    def read_record(self, path: Path) -> OkfDocument:
+        """Read exactly the bytes whose version must still exist at publication."""
+
+        resolved = path.resolve()
+        payload = resolved.read_bytes()
+        document = parse_document(payload.decode("utf-8"), source=str(resolved))
+        self._snapshots[resolved] = payload
+        return document
+
+    @contextmanager
+    def transaction(self) -> Generator[None]:
+        """Keep lookup, latest read, merge and publication in one transaction."""
+
+        with source_write_lock(self.vault):
+            yield
+
+    def update_use(
+        self,
+        source: Path,
+        *,
+        purpose: str,
+        course: str | None = None,
+        project: str | None = None,
+    ) -> PublishedSourcePair:
+        """Apply a human decision to the latest Source, never a caller snapshot."""
+
+        source = source.resolve()
+        if not source.is_relative_to(self.records_root):
+            raise ValueError("only a Source Record can be routed")
+        with self.transaction():
+            document = self.read_record(source)
+            source_text, text_document = self.resolve_text(document)
+            self.resolve_use(document, purpose=purpose, course=course, project=project)
+            return self.publish_pair(source, source_text, document, text_document)
 
     def find_by_resource(
         self,
@@ -74,12 +125,14 @@ class SourcePublisher:
         expected = normalize(resource) if normalize is not None else resource
         for path in sorted(self.records_root.rglob("*.md")):
             with suppress(OSError, ValueError):
-                document = read_document(path)
+                payload = path.read_bytes()
+                document = parse_document(payload.decode("utf-8"), source=str(path))
                 current = document.frontmatter.get("resource")
                 if document.type != "Source" or not isinstance(current, str):
                     continue
                 identity = normalize(current) if normalize is not None else current
                 if identity == expected:
+                    self._snapshots[path.resolve()] = payload
                     return path, document
         return None
 
@@ -91,13 +144,15 @@ class SourcePublisher:
             return None
         for path in sorted(self.records_root.rglob("*.md")):
             with suppress(OSError, ValueError):
-                document = read_document(path)
+                payload = path.read_bytes()
+                document = parse_document(payload.decode("utf-8"), source=str(path))
                 current = document.frontmatter.get("sha256")
                 if (
                     document.type == "Source"
                     and isinstance(current, str)
                     and current.casefold() == value
                 ):
+                    self._snapshots[path.resolve()] = payload
                     return path, document
         return None
 
@@ -107,7 +162,7 @@ class SourcePublisher:
     ) -> tuple[Path, OkfDocument]:
         """Resolve and validate the Source Text linked by one Source."""
 
-        document = read_document(source) if isinstance(source, Path) else source
+        document = self.read_record(source) if isinstance(source, Path) else source
         if document.type != "Source":
             raise ValueError("Source Text can only be resolved from a Source")
         text_value = document.frontmatter.get("text")
@@ -118,7 +173,7 @@ class SourcePublisher:
             raise ValueError("Source Text link is outside sources/text")
         if not source_text.is_file():
             raise ValueError("Source Text link does not exist")
-        text_document = read_document(source_text)
+        text_document = self.read_record(source_text)
         if text_document.type != "Source Text":
             raise ValueError("Source text link does not point to a Source Text")
         return source_text, text_document
@@ -135,17 +190,52 @@ class SourcePublisher:
         source = source.resolve()
         source_text = source_text.resolve()
         self._validate_pair(source, source_text, source_document, text_document)
-        with source_write_lock():
-            previous_source = source.read_bytes() if source.is_file() else None
-            previous_text = source_text.read_bytes() if source_text.is_file() else None
+        with self.transaction(), document_lock(source), document_lock(source_text):
+            previous_source = self._snapshots.get(source)
+            if previous_source is None and source.is_file():
+                previous_source = source.read_bytes()
+            previous_text = self._snapshots.get(source_text)
+            if previous_text is None and source_text.is_file():
+                previous_text = source_text.read_bytes()
+            text_written = False
+            rendered_text = render_document(text_document.frontmatter, text_document.body).encode(
+                "utf-8"
+            )
+            # Check both snapshots before mutating either half of the pair.
+            for path, previous in ((source, previous_source), (source_text, previous_text)):
+                if previous is not None and (not path.is_file() or path.read_bytes() != previous):
+                    raise FileWriteConflict(f"Source changed after it was read: {path}")
             try:
                 # Source points to Source Text, so make the target durable first.
-                write_document(source_text, text_document)
-                write_document(source, source_document)
+                write_document(
+                    source_text,
+                    text_document,
+                    create_only=previous_text is None,
+                    expected_sha256=hashlib.sha256(previous_text).hexdigest()
+                    if previous_text is not None
+                    else None,
+                )
+                text_written = True
+                write_document(
+                    source,
+                    source_document,
+                    create_only=previous_source is None,
+                    expected_sha256=hashlib.sha256(previous_source).hexdigest()
+                    if previous_source is not None
+                    else None,
+                )
             except Exception:
-                restore_file_bytes(source, previous_source)
-                restore_file_bytes(source_text, previous_text)
+                if text_written:
+                    restore_file_bytes(
+                        source_text,
+                        previous_text,
+                        expected_sha256=hashlib.sha256(rendered_text).hexdigest(),
+                    )
                 raise
+            self._snapshots[source] = render_document(
+                source_document.frontmatter, source_document.body
+            ).encode("utf-8")
+            self._snapshots[source_text] = rendered_text
         return PublishedSourcePair(source=source, source_text=source_text)
 
     def add_use(

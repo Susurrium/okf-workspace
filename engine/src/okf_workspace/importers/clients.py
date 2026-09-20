@@ -109,6 +109,9 @@ class _AsyncClient:
         self.client = client or httpx.Client(
             timeout=120.0,
             follow_redirects=False,
+            # Explicit authenticated parser endpoints are reached directly;
+            # unrelated desktop proxy variables must not reroute Vault uploads.
+            trust_env=False,
         )
 
     def close(self) -> None:

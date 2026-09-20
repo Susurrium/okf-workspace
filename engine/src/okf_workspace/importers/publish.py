@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from okf_workspace.ingestion import FILE_IMPORT
-from okf_workspace.okf.frontmatter import OkfDocument, read_document
+from okf_workspace.okf.frontmatter import OkfDocument
 from okf_workspace.okf.paths import slugify
 from okf_workspace.sources import SourcePublisher
 
@@ -92,6 +92,16 @@ def _route_draft(
 
 
 def publish_import(
+    vault: Path,
+    request: ImportRequest,
+    original: OriginalRecord,
+    export: ParserExport,
+) -> tuple[Path, Path, Path | None]:
+    with SourcePublisher(vault).transaction():
+        return _publish_import_locked(vault, request, original, export)
+
+
+def _publish_import_locked(
     vault: Path,
     request: ImportRequest,
     original: OriginalRecord,
@@ -189,16 +199,6 @@ def route_existing_import(
 ) -> tuple[Path, Path, Path | None]:
     vault = vault.resolve()
     source = source.resolve()
-    document = read_document(source)
-    if document.type != "Source" or not source.is_relative_to(vault / "sources" / "records"):
-        raise ValueError("only a Source Record can be routed")
-    text_value = document.frontmatter.get("text")
-    if not isinstance(text_value, str) or not text_value.strip():
-        raise ValueError("Source has no converted Source Text")
-    text_relative = text_value.strip().lstrip("/")
-    source_text = vault.joinpath(*Path(text_relative).parts)
-    if not source_text.is_file():
-        raise FileNotFoundError(source_text)
     request = ImportRequest(
         source=source,
         intent=intent,
@@ -211,12 +211,10 @@ def route_existing_import(
         slug=source.stem,
     )
     publisher = SourcePublisher(vault)
-    source_text, text_document = publisher.resolve_text(document)
-    publisher.resolve_use(
-        document,
+    pair = publisher.update_use(
+        source,
         purpose=_purpose(intent),
         course=course,
         project=project,
     )
-    publisher.publish_pair(source, source_text, document, text_document)
-    return source, source_text, draft
+    return pair.source, pair.source_text, draft

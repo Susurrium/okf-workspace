@@ -151,6 +151,37 @@ async def _upload_slot(request: Request) -> AsyncIterator[None]:
 UploadSlotDependency = Annotated[None, Depends(_upload_slot)]
 
 
+async def _bounded_upload(request: Request, settings: Settings) -> AsyncIterator[bytes]:
+    deadline = time.monotonic() + settings.upload_timeout_seconds
+    stream = request.stream()
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            total_limit = remaining <= settings.upload_idle_timeout_seconds
+            try:
+                if remaining <= 0:
+                    raise TimeoutError
+                chunk = await asyncio.wait_for(
+                    anext(stream),
+                    timeout=min(remaining, settings.upload_idle_timeout_seconds),
+                )
+            except StopAsyncIteration:
+                return
+            except TimeoutError as exc:
+                raise HTTPException(
+                    status_code=408,
+                    detail=(
+                        "document upload exceeded its total time limit"
+                        if total_limit
+                        else "document upload exceeded its idle time limit"
+                    ),
+                    headers={"Retry-After": "2"},
+                ) from exc
+            yield chunk
+    finally:
+        await stream.aclose()
+
+
 def _authorized(
     request: Request,
     authorization: str | None = Header(default=None),
@@ -302,10 +333,16 @@ def create_app(configured_settings: Settings | None = None) -> FastAPI:
         total = 0
         prefix = bytearray()
         stored = False
+        # The lease is durable so the separate Worker can distinguish an active
+        # hidden upload from files left behind by a killed API process.
+        store.hold_upload(
+            task_id,
+            expires_at=time.time() + settings.upload_timeout_seconds + 30,
+        )
         try:
             with temporary_path.open("xb") as output:
                 temporary_path.chmod(0o600)
-                async for chunk in request.stream():
+                async for chunk in _bounded_upload(request, settings):
                     total += len(chunk)
                     if total > settings.max_upload_bytes:
                         raise HTTPException(
@@ -367,6 +404,7 @@ def create_app(configured_settings: Settings | None = None) -> FastAPI:
             temporary_path.unlink(missing_ok=True)
             if not stored:
                 final_path.unlink(missing_ok=True)
+            store.release_upload(task_id)
 
         return JSONResponse(_submission_payload(create_result.job), status_code=202)
 

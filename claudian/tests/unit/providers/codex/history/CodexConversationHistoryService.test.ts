@@ -1,8 +1,11 @@
+import type * as fspType from 'node:fs/promises';
+
 import type * as fsType from 'fs';
 import type * as osType from 'os';
 import type * as pathType from 'path';
 
 const fs = jest.requireActual<typeof fsType>('fs');
+const fsp = jest.requireActual<typeof fspType>('node:fs/promises');
 const os = jest.requireActual<typeof osType>('os');
 const path = jest.requireActual<typeof pathType>('path');
 
@@ -121,6 +124,24 @@ describe('CodexConversationHistoryService', () => {
     await expect(new CodexConversationHistoryService()
       .recoverConversationModelSelection?.(conversation, null))
       .resolves.toBe('openai-codex/gpt-5.5');
+  });
+
+  it('retries the same native transcript after its first read fails', async () => {
+    const transcriptPath = path.join(tempHome, 'retry-history.jsonl');
+    fs.writeFileSync(transcriptPath, JSON.stringify({ type: 'response_item', payload: {
+      type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Native history' }],
+    } }), 'utf8');
+    const conversation: Conversation = { id: 'retry-history', providerId: 'codex', title: 'Retry',
+      createdAt: 1, lastActivityAt: 2, sessionId: 'retry-thread',
+      providerState: { threadId: 'retry-thread', sessionFilePath: transcriptPath }, messages: [] };
+    const service = new CodexConversationHistoryService();
+    const read = jest.spyOn(fsp, 'readFile').mockRejectedValueOnce(new Error('temporary read failure'));
+    try {
+      await expect(service.hydrateConversationHistory(conversation, null)).rejects.toThrow('Codex history could not be read');
+      expect(conversation.messages).toEqual([]);
+      await expect(service.hydrateConversationHistory(conversation, null)).resolves.toEqual({ status: 'loaded' });
+      expect(conversation.messages[0]?.content).toBe('Native history');
+    } finally { read.mockRestore(); }
   });
 
   it('does not recover a Codex model past a missing rewind checkpoint', async () => {

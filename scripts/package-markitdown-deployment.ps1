@@ -52,7 +52,7 @@ try {
     $metadata = [ordered]@{
         schema = 'okf-markitdown-release/v1'
         created_at = [DateTimeOffset]::UtcNow.ToString('o')
-        service_version = '1.3.0'
+        service_version = '1.4.0'
         engine_build_id = 'markitdown-0.1.6-py31213-assets-v3'
         result_schema = 'markitdown-result/v3'
         default_profile = 'fallback-assets-v2'

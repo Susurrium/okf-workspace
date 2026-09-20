@@ -31,7 +31,7 @@ ENV PATH="/opt/venv/bin:${PATH}" \
     MARKITDOWN_IMAGE_RELEASE_MANIFEST_SHA256=${RELEASE_MANIFEST_SHA256}
 
 LABEL org.opencontainers.image.title="Obsidian MarkItDown Fallback Service" \
-      org.opencontainers.image.version="1.3.0" \
+      org.opencontainers.image.version="1.4.0" \
       io.obsidian-markitdown.engine-build-id="${ENGINE_BUILD_ID}" \
       io.obsidian-markitdown.release-manifest-sha256="${RELEASE_MANIFEST_SHA256}"
 

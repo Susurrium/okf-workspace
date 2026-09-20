@@ -37,7 +37,7 @@ def test_cli_exposes_m1_commands() -> None:
         == "wiki"
     )
     assert parser.parse_args(["test", "retrieval"]).test_command == "retrieval"
-    assert parser.parse_args(["import", "paper.pdf", "--intent", "learn"]).quality == "high"
+    assert parser.parse_args(["import", "paper.pdf", "--intent", "learn"]).quality == "quick"
     assert (
         parser.parse_args(
             ["conversion", "retry", "conv-example", "--parser", "markitdown"]

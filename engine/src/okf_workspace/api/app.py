@@ -818,7 +818,7 @@ def create_app(
     async def import_document(
         file: Annotated[UploadFile, File()],
         intent: Annotated[str, Form()],
-        quality: Annotated[str, Form()] = "high",
+        quality: Annotated[str, Form()] = "quick",
         parser: Annotated[str, Form()] = "auto",
         course: Annotated[str | None, Form()] = None,
         project: Annotated[str | None, Form()] = None,

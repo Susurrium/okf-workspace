@@ -2185,6 +2185,76 @@ describe("real Dashboard View source handoff", () => {
     ]);
   });
 
+  it("opens the exact related note from Project statistics without moving primary actions", async () => {
+    const openVaultPath = vi.fn(async () => undefined);
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, { getDashboardUiState: () => normalizeDashboardUiState(undefined), openVaultPath } as never);
+    const runtime = view as unknown as { renderProjectWorkItem: (container: HTMLElement, value: ProjectSummary) => void; attachActionPanel: () => void };
+    runtime.attachActionPanel = () => undefined;
+    const value = project();
+    value.pending_captures = [note({ path: "inbox/captures/exact.md", title: "待整理想法" })];
+    value.related_materials = [note({ path: "sources/a.md", title: "资料 A" }), note({ path: "sources/b.md", title: "资料 B" })];
+    const root = new TestElement(); runtime.renderProjectWorkItem(root as unknown as HTMLElement, value);
+    root.descendants("okf-work-item__metric")[0]!.click();
+    expect(openVaultPath).toHaveBeenCalledWith("inbox/captures/exact.md");
+    root.descendants("okf-work-item__metric")[2]!.click();
+    const list = root.descendants("okf-work-item__related")[0]!;
+    expect(list.children.map((entry) => entry.textContent)).toEqual(["资料 A", "资料 B"]);
+    list.children[1]!.click(); expect(openVaultPath).toHaveBeenCalledWith("sources/b.md");
+    expect(root.descendants("okf-work-item__actions")[0]!.children.map((entry) => entry.textContent)).toEqual(["记录进展", "其他操作 ▾"]);
+  });
+
+  it("inherits the selected Course when importing and creating a Lesson from Learning", async () => {
+    const coursePath = "learning/courses/algebra/course.md";
+    const selectedCourse = { ...note({ path: coursePath, title: "Algebra", note_type: "Course" }),
+      course_status: "active", current_progress: "", guide_count: 0, lesson_count: 0, related_sources: [], pending_captures: [] };
+    const promptDocumentImport = vi.fn(); const promptLessonForCourse = vi.fn();
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, { getDashboardUiState: () => normalizeDashboardUiState({
+      pages: { learning: { filters: { context: "course", relation: coursePath } } } }),
+      semanticOperationsSnapshot: () => [], promptDocumentImport, promptLessonForCourse } as never);
+    const runtime = view as unknown as { renderLearning: (el: HTMLElement) => Promise<void>; attachActionPanel: () => void; vaultReader: unknown };
+    runtime.attachActionPanel = () => undefined;
+    runtime.vaultReader = { learning: async () => ({ pending_guides: [], ready_guides: [], completed_guides: [], courses: [selectedCourse], projects: [] }) };
+    const root = new TestElement(); await runtime.renderLearning(root as unknown as HTMLElement);
+    root.descendants().find((entry) => entry.textContent === "导入学习资料")!.click();
+    root.descendants().find((entry) => entry.textContent === "新建 Lesson")!.click();
+    expect(promptDocumentImport).toHaveBeenCalledWith({ course: "algebra" });
+    expect(promptLessonForCourse).toHaveBeenCalledWith(coursePath);
+    expect(root.descendants("okf-course-work-item")[0]?.descendants("okf-work-item__actions")[0]?.children.map((entry) => entry.textContent)).toEqual(["新建 Lesson", "其他操作 ▾"]);
+  });
+
+  it("keeps cached Daily and Papers items visible while making a refresh failure actionable", async () => {
+    const digest = { ai_daily: [feedEdition("news", "news", "2026-09-08")], ai_papers: feedEdition("papers", "papers", "2026-09-08"), treehole: null };
+    const load = vi.fn(async () => { throw new Error("service offline"); });
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, { getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      feedDashboardDigestSnapshot: () => digest, loadFeedDashboardDigest: load,
+      feedDecisionSnapshot: () => undefined, feedReadingPosition: () => undefined,
+      updateDashboardFeedUiState: () => undefined } as never);
+    const runtime = view as unknown as { renderDailyFeeds: (el: HTMLElement) => void; renderReadingPapers: (el: HTMLElement) => void };
+    const root = new TestElement(); runtime.renderDailyFeeds(root as unknown as HTMLElement); runtime.renderReadingPapers(root as unknown as HTMLElement);
+    await vi.waitFor(() => expect(root.descendants("okf-dashboard__error")).toHaveLength(4));
+    expect(root.descendants("okf-feed-digest__item")).toHaveLength(2);
+    expect(root.descendants("okf-dashboard__error").every((entry) => entry.textContent.includes("保留上次内容"))).toBe(true);
+    root.descendants().find((entry) => entry.textContent === "重新读取")!.click();
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(3));
+  });
+
+  it("updates Papers health even when the digest identity has not changed", async () => {
+    const edition = feedEdition("papers", "same-id", "2026-09-08");
+    const digest = { ai_daily: [], ai_papers: edition, treehole: null };
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, { getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      feedDashboardDigestSnapshot: () => digest, loadFeedDashboardDigest: async () => ({ ...digest,
+        stream_health: { papers: { status: "error", message: "producer unavailable", last_success_at: null, last_error_at: "2026-09-08" } } }),
+      feedDecisionSnapshot: () => undefined, feedReadingPosition: () => undefined, updateDashboardFeedUiState: () => undefined } as never);
+    const runtime = view as unknown as { renderReadingPapers: (el: HTMLElement) => void };
+    const root = new TestElement(); runtime.renderReadingPapers(root as unknown as HTMLElement);
+    await vi.waitFor(() => expect(root.descendants("okf-dashboard__error")[0]?.textContent).toContain("producer unavailable"));
+    expect(root.descendants("okf-feed-digest__item")).toHaveLength(1);
+  });
+
   it("uses one Learning work-item grammar across pending, ready, and completed states", () => {
     const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
     const view = new OkfDashboardView(leaf, {

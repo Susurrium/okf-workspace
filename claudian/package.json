@@ -1,6 +1,6 @@
 {
   "name": "okf-claudian",
-  "version": "2.1.4-okf.2",
+  "version": "2.1.4-okf.3",
   "private": true,
   "description": "OKF Claudian - Codex embedded in an OKF Workspace Vault",
   "main": "main.js",

@@ -90,6 +90,16 @@ export interface FeedDashboardDigest {
   ai_daily: FeedDigestEdition[];
   ai_papers?: FeedDigestEdition | null;
   treehole: FeedDigestEdition | null;
+  stream_health?: Partial<Record<AiDailyStream | "papers", FeedStreamHealth>>;
+}
+
+export interface FeedStreamHealth {
+  status: "ok" | "degraded" | "error" | "unknown";
+  last_success_at: string | null;
+  last_error_at: string | null;
+  message: string | null;
+  phase?: "producer" | "transport" | "parse" | "storage";
+  last_attempt_at?: string;
 }
 
 export interface FeedSubscriptionPage {

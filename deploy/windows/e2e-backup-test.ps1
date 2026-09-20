@@ -13,7 +13,7 @@ $config = Join-Path $state 'config\deployment.json'
 New-Item -ItemType Directory -Force -Path $testRoot, $originals, (Split-Path -Parent $password) | Out-Null
 
 try {
-    $okf = Join-Path $repo '.venv\Scripts\okf.exe'
+    $okf = Join-Path $repo 'engine\.venv\Scripts\okf.exe'
     & $okf fixtures generate --output $vault
     if ($LASTEXITCODE -ne 0) { throw 'Synthetic Vault generation failed' }
 

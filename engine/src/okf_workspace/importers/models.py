@@ -39,7 +39,7 @@ class ImportRequest:
     source: Path
     intent: ImportIntent
     source_filename: str | None = None
-    quality: ImportQuality = ImportQuality.HIGH
+    quality: ImportQuality = ImportQuality.QUICK
     parser: ParserName | None = None
     course: str | None = None
     project: str | None = None

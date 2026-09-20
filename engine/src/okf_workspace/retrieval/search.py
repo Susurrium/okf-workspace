@@ -8,6 +8,7 @@ from typing import Literal
 
 from .index import SearchIndex
 from .models import SearchHit
+from .scope import path_in_scope
 from .vector import Embedder, VectorIndex
 
 ScopeName = Literal["auto", "all", "technical", "learning", "projects", "life"]
@@ -141,6 +142,8 @@ class HybridSearcher:
         limit: int = 8,
         refresh_index: bool = True,
     ) -> list[SearchHit]:
+        if limit <= 0:
+            return []
         if mode == "vector" and (self.vector_index is None or self.embedder is None):
             raise ValueError("vector retrieval mode requires a vector index and embedder")
         if refresh_index:
@@ -204,6 +207,7 @@ class HybridSearcher:
         expanded = [
             hit
             for path in sorted(related - existing_paths)
+            if path_in_scope(path, boundaries.include_prefixes, boundaries.exclude_prefixes)
             if (hit := self.index.first_chunk(path)) is not None
         ]
         reserved = min(2, len(expanded), max(0, limit - 1))

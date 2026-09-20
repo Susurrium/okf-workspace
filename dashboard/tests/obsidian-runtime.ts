@@ -1,3 +1,10 @@
+import { StateField } from "@codemirror/state";
+
+export const editorInfoField = StateField.define<{ file: TFile | null }>({
+  create: () => ({ file: null }), update: (value) => value,
+});
+export const editorLivePreviewField = StateField.define<boolean>({ create: () => true, update: (value) => value });
+
 export class TFile {
   public readonly name: string;
   public readonly basename: string;
@@ -76,6 +83,8 @@ export class TestElement {
     if (name.startsWith("data-")) delete this.dataset[dataAttributeKey(name)];
   }
   public setText(value: string): void { this.textContent = value; }
+  public setAttribute(name: string, value: string): void { this.setAttr(name, value); }
+  public replaceChildren(): void { this.empty(); }
   public empty(): void { this.children.length = 0; this.textContent = ""; }
   public remove(): void {
     if (this.parentElement) {

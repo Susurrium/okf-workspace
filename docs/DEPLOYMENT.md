@@ -43,6 +43,8 @@ cd E:\code\okf-workspace
 6. 构建全文及可选向量索引；
 7. 注册两个相互独立的计划任务：02:30 的每日维护负责索引、可选备份与恢复检查；06:50 的 Feed Sync 在远端发布窗口后执行增量同步，支持错过启动后补跑和 10 分钟间隔的三次临时故障重试。
 
+每日维护同样支持错过时间后补跑、10 分钟间隔三次重试，并禁止同任务重叠运行。
+
 安装器不会创建登录常驻 API 任务。Dashboard 插件在 Obsidian 加载后启动自己持有的本地
 Engine 子进程，Obsidian 退出后服务随之停止。
 
@@ -86,9 +88,9 @@ Templater、QuickAdd、Dataview 等推荐社区插件如果已被用户禁用，
 
 ## 4. MinerU 与 MarkItDown
 
-- 高质量默认先用共享 MinerU；不可用时自动降级 MarkItDown。
-- 快速模式直接使用 MarkItDown。
-- “必须 MinerU”会等待/失败而不降级。
+- 所有默认文档导入直接使用 MarkItDown，不自动启动或探测 MinerU。
+- 质量检查级别与解析器选择分开；历史隐式 `high` 请求也默认使用 MarkItDown。
+- 仅显式指定 `parser=mineru` 的高级调用保留 MinerU 能力；当前暂停其专项维护。
 - 转换器只返回 Markdown bundle；Source/Source Text 发布由 Engine 统一完成。
 
 MarkItDown 源码位于 `services/markitdown/`，服务器部署资产位于
@@ -112,6 +114,11 @@ MinerU 是共享外部服务；本仓库只保存 `integrations/mineru/` 中的�
 
 完成后在 Obsidian 中重新加载应用。生产切换应使用完整安装器，以保证 Python 路径、token
 文件和 plugin settings 一致。
+
+发布后运行 `scripts/record-deployment.ps1 -Config <deployment.json>`：逐项核对两插件
+实际安装文件与构建 SHA-256，记录 Engine Python 源码哈希和 Git 版本到 State 的
+`reports/deployment-receipt.json`。当前本地 Engine 仍采用 editable-source 运行，回执是
+部署时证据，不把其伪装成不可变镜像；之后的源码修改需要重新验收并记录回执。
 
 插件安装器只管理 `okf-workspace-dashboard`、`okf-claudian` 以及历史误复制目录
 `.obsidian/plugins/claudian`。官方社区插件 `realclaudian` 的启用状态和文件不会被修改；如两者

@@ -4,6 +4,6 @@ import { DASHBOARD_VERSION } from "../src/version";
 
 describe("dashboard scaffold", () => {
   it("exposes a semver version", () => {
-    expect(DASHBOARD_VERSION).toBe("1.14.0");
+    expect(DASHBOARD_VERSION).toBe("1.15.0");
   });
 });

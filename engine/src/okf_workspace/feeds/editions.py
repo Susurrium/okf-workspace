@@ -8,6 +8,7 @@ import hashlib
 import os
 import re
 import tempfile
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
@@ -89,9 +90,7 @@ def _format_comment_time(value: str | None) -> str | None:
     try:
         # Keep the timestamp's declared offset. Converting through the host
         # timezone makes the same Digest render differently on Windows and CI.
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime(
-            "%Y-%m-%d %H:%M"
-        )
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M")
     except ValueError:
         return value
 
@@ -196,6 +195,8 @@ def edition_relative_path(edition: FeedEdition) -> Path:
     if len(year) != 4 or not year.isdigit():
         raise ValueError(f"edition date must start with a year: {edition.edition_at!r}")
     if edition.feed is FeedKind.AI_DAILY:
+        if edition.stream == "papers":
+            return Path("feeds") / "ai-daily" / year / f"{slugify(edition.edition_id)}.md"
         stream = slugify(edition.stream or "edition")
         return Path("feeds") / "ai-daily" / year / f"{edition.edition_at[:10]}-{stream}.md"
     return Path("feeds") / "treehole" / year / f"{slugify(edition.edition_id)}.md"
@@ -204,7 +205,30 @@ def edition_relative_path(edition: FeedEdition) -> Path:
 def materialize_edition(vault: Path, edition: FeedEdition) -> Path:
     """Create/update the derived edition; this never creates Source records."""
     target = vault.resolve() / edition_relative_path(edition)
+    if edition.feed is FeedKind.AI_DAILY and edition.stream == "papers" and not target.exists():
+        legacy = target.with_name(f"{edition.edition_at[:10]}-papers.md")
+        if legacy.is_file():
+            # Copy only a positively identified old edition, retaining unknown
+            # fields and all human content. Keep the old path for existing links.
+            existing = None
+            with suppress(OSError, ValueError):
+                existing = read_document(legacy)
+            if (
+                existing is not None
+                and existing.type == "Digest"
+                and existing.frontmatter.get("digest_id") == edition.edition_id
+                and existing.frontmatter.get("feed") == FeedKind.AI_DAILY.value
+            ):
+                with suppress(FileExistsError):
+                    write_document(target, existing, create_only=True)
     if target.is_file():
+        if edition.stream == "papers":
+            existing = read_document(target)
+            if (
+                existing.type != "Digest"
+                or existing.frontmatter.get("digest_id") != edition.edition_id
+            ):
+                raise ValueError("papers target already belongs to a different note")
         if edition.feed is FeedKind.AI_DAILY:
             _refresh_ai_daily_managed_links(target, edition)
         elif edition.feed is FeedKind.TREEHOLE:
@@ -230,15 +254,17 @@ def materialize_edition(vault: Path, edition: FeedEdition) -> Path:
                     OkfDocument(existing.frontmatter, _treehole_body(vault, edition)),
                 )
         return target
-    write_document(
-        target,
-        OkfDocument(
-            _edition_frontmatter(edition),
-            _ai_daily_body(edition)
-            if edition.feed is FeedKind.AI_DAILY
-            else _treehole_body(vault, edition),
-        ),
-    )
+    with suppress(FileExistsError):
+        write_document(
+            target,
+            OkfDocument(
+                _edition_frontmatter(edition),
+                _ai_daily_body(edition)
+                if edition.feed is FeedKind.AI_DAILY
+                else _treehole_body(vault, edition),
+            ),
+            create_only=True,
+        )
     return target
 
 
@@ -316,9 +342,7 @@ def _edition_frontmatter(
         "feed": edition.feed.value,
         "digest_id": edition.edition_id,
         "issued_at": edition.edition_at,
-        "items": [
-            {"id": item.item_id, "block_id": item_block_id(item)} for item in edition.items
-        ],
+        "items": [{"id": item.item_id, "block_id": item_block_id(item)} for item in edition.items],
         "created_at": created_at or datetime.now().astimezone().isoformat(timespec="seconds"),
     }
     if edition.stream:

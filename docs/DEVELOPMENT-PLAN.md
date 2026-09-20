@@ -86,7 +86,7 @@ MarkItDown 在 `release-manifest.yaml` 中锁定兼容版本。
 ### 阶段 C：Intake 与转换
 
 - Capture、Web Clipper、文件上传统一进入 Intake，但保留真实渠道字段。
-- 默认 MinerU，失败自动降级 MarkItDown；支持直接 MarkItDown 与必须 MinerU。
+- 默认直接使用 MarkItDown；质量检查不再隐式启动 MinerU。显式 MinerU 高级能力保留，但当前暂停其专项维护。
 - 修复 parser 切换重试 ID、原始文件名、上传超时/取消、转换完成通知与目标跳转。
 - 识别转换结果中的无效图片占位；快速转换丢图时明确降级质量而非静默通过。
 - 导入前选择已有 Course/Project 或不关联；关系传给后续目标而不污染 Source 身份。

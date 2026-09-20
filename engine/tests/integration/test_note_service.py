@@ -106,7 +106,7 @@ def test_course_lesson_project_and_wiki_flow(tmp_path: Path) -> None:
     assert project.relative_to(vault).as_posix() == "projects/workspace/project.md"
     log_body = log.read_text(encoding="utf-8")
     assert "完成 Vault 初始化与校验器。" in log_body
-    assert log_body.index("该文件按时间记录") < log_body.index(f"## {NOW.date()}")
+    assert log_body.index("按时间正序追加") < log_body.index(f"## {NOW.date()}")
 
     document = read_document(knowledge)
     assert "status" not in document.frontmatter

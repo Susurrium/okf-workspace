@@ -24,6 +24,6 @@ def choose_parser(
         if extension in {".doc", ".docx"} and override is ParserName.MINERU:
             raise ValueError("DOC/DOCX uses MarkItDown after Word normalization")
         return override
-    if extension in {".doc", ".docx"}:
-        return ParserName.MARKITDOWN
-    return ParserName.MINERU if quality is ImportQuality.HIGH else ParserName.MARKITDOWN
+    # Quality controls verification, not an implicit remote MinerU launch.
+    # Retain the explicit override for users who deliberately opt back in.
+    return ParserName.MARKITDOWN

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import calendar
+import hashlib
 from collections.abc import Callable, Sequence
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -10,9 +11,12 @@ from typing import Any, Literal
 
 from okf_workspace.ingestion import DIRECT_ENTRY
 from okf_workspace.okf.artifacts import render_artifact_body
+from okf_workspace.okf.file_io import atomic_write_bytes, document_lock
 from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
 from okf_workspace.okf.paths import slugify
 from okf_workspace.okf.relations import explicit_context_fields, inherited_context_fields
+
+from .project_logs import render_project_log_append
 
 Clock = Callable[[], datetime]
 ReviewPeriod = Literal["weekly", "monthly", "yearly"]
@@ -248,11 +252,7 @@ class NoteService:
             raise FileNotFoundError(course_home)
         value = lesson_date or self.clock().date()
         relative = (
-            Path("learning")
-            / "courses"
-            / course
-            / "lessons"
-            / f"{value}-{slugify(title)}.md"
+            Path("learning") / "courses" / course / "lessons" / f"{value}-{slugify(title)}.md"
         )
         body = render_artifact_body(
             self.vault,
@@ -297,25 +297,12 @@ class NoteService:
         if not log.is_file():
             raise FileNotFoundError(log)
         heading = f"## {self.clock().date()}"
-        text = log.read_text(encoding="utf-8")
-        entry = content.strip()
-        if heading in text:
-            text = text.replace(heading, f"{heading}\n\n- {entry}", 1)
-        else:
-            first_line, _, remainder = text.partition("\n")
-            prefix = first_line if first_line.startswith("# ") else "# 项目日志"
-            existing = remainder.lstrip() if first_line.startswith("# ") else text.lstrip()
-            intro, separator, history = existing.partition("\n")
-            if intro.startswith("该文件按时间记录"):
-                tail = history.lstrip() if separator else ""
-                text = f"{prefix}\n\n{intro}\n\n{heading}\n\n- {entry}"
-                if tail:
-                    text = f"{text}\n\n{tail}"
-            else:
-                text = f"{prefix}\n\n{heading}\n\n- {entry}"
-                if existing:
-                    text = f"{text}\n\n{existing}"
-        log.write_text(text, encoding="utf-8", newline="\n")
+        with document_lock(log):
+            before = log.read_bytes()
+            text = render_project_log_append(before.decode("utf-8"), heading, content)
+            atomic_write_bytes(
+                log, text.encode("utf-8"), expected_sha256=hashlib.sha256(before).hexdigest()
+            )
         return log
 
     def create_decision(

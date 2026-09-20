@@ -1,4 +1,5 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
+# pyright: reportPrivateUsage=false
 
 from __future__ import annotations
 
@@ -12,10 +13,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 import okf_workspace.semantic.runner as semantic_runner
+import okf_workspace.semantic.worker as semantic_worker
 from okf_workspace.ai.provider import CodexSettings
 from okf_workspace.api import LocalTokenStore, create_app
 from okf_workspace.config import BrainPaths
 from okf_workspace.notes import NoteService
+from okf_workspace.okf.file_io import FileWriteConflict
 from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
 from okf_workspace.okf.templates import initialize_vault
 from okf_workspace.semantic import (
@@ -121,6 +124,85 @@ def _wiki_source(vault: Path) -> Path:
         ),
     )
     return path
+
+
+def test_publish_remerges_when_editor_changes_note_before_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    target = _learning_note(vault)
+    real_write = write_document
+    attempts = 0
+
+    def racing_write(
+        path: Path,
+        document: OkfDocument,
+        *,
+        create_only: bool = False,
+        expected_sha256: str | None = None,
+    ) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            current = read_document(path)
+            current.body += "\n刚刚输入的用户笔记。\n"
+            current.frontmatter["custom_extension"] = "keep me"
+            real_write(path, current)
+        real_write(path, document, create_only=create_only, expected_sha256=expected_sha256)
+
+    monkeypatch.setattr(semantic_worker, "write_document", racing_write)
+    SemanticWorker(vault, tmp_path / "state", FixedRunner())._publish(
+        SemanticRequest("race-test", SemanticKind.GENERATE_STUDY_GUIDE, "learning/guides/vpn.md"),
+        "## 新学习材料\n\nAI 正文。",
+    )
+    result = read_document(target)
+    assert attempts == 2
+    assert "刚刚输入的用户笔记" in result.body
+    assert "AI 正文" in result.body
+    assert result.frontmatter["custom_extension"] == "keep me"
+
+
+def test_repeated_publish_conflict_preserves_note_and_generated_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    target = _learning_note(vault)
+    before = target.read_bytes()
+
+    def conflict(*args: object, **kwargs: object) -> None:
+        raise FileWriteConflict("editor is still writing")
+
+    monkeypatch.setattr(semantic_worker, "write_document", conflict)
+    with pytest.raises(FileWriteConflict):
+        SemanticWorker(vault, tmp_path / "state", FixedRunner())._publish(
+            SemanticRequest(
+                "conflict-test", SemanticKind.GENERATE_STUDY_GUIDE, "learning/guides/vpn.md"
+            ),
+            "## 可恢复材料\n\n生成的正文。",
+        )
+    assert target.read_bytes() == before
+    assert "生成的正文" in (tmp_path / "state/semantic-output/conflict-test.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_invalid_semantic_candidate_never_replaces_existing_note(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    target = _learning_note(vault)
+    before = target.read_bytes()
+    with pytest.raises(RuntimeError, match="validation"):
+        SemanticWorker(vault, tmp_path / "state", FixedRunner())._publish(
+            SemanticRequest(
+                "invalid-test",
+                SemanticKind.GENERATE_STUDY_GUIDE,
+                "learning/guides/vpn.md",
+                project="/projects/missing/project.md",
+            ),
+            "## 生成正文\n\n正文。",
+        )
+    assert target.read_bytes() == before
 
 
 def test_prepare_study_operation_is_persistent_and_preserves_human_text(tmp_path: Path) -> None:

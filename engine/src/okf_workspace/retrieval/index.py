@@ -309,12 +309,20 @@ class SearchIndex:
     ) -> tuple[str, list[str]]:
         clauses: list[str] = []
         parameters: list[str] = []
+
+        def bind(prefix: str) -> None:
+            base = prefix.rstrip("/")
+            escaped = base.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+            parameters.extend((base, f"{escaped}/%"))
+
+        boundary = f"({column} = ? OR {column} LIKE ? ESCAPE '!')"
         if include_prefixes:
-            clauses.append("(" + " OR ".join(f"{column} LIKE ?" for _ in include_prefixes) + ")")
-            parameters.extend(f"{prefix.rstrip('/')}%" for prefix in include_prefixes)
+            clauses.append("(" + " OR ".join(boundary for _ in include_prefixes) + ")")
+            for prefix in include_prefixes:
+                bind(prefix)
         for prefix in exclude_prefixes:
-            clauses.append(f"{column} NOT LIKE ?")
-            parameters.append(f"{prefix.rstrip('/')}%")
+            clauses.append(f"NOT {boundary}")
+            bind(prefix)
         return (" AND " + " AND ".join(clauses) if clauses else ""), parameters
 
     def exact_search(

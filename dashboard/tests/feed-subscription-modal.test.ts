@@ -229,6 +229,28 @@ describe("FeedSubscriptionAddModal", () => {
     expect(confirmAction).not.toHaveBeenCalled();
   });
 
+  it("blocks Back while saving and publishes a committed result even after closing", async () => {
+    const result = { registry_revision: "revision-2", source: managedSource(), existing_items_marked_seen: 0, next_run_will_include_current: false };
+    let finish!: (value: typeof result) => void;
+    const confirm = vi.fn(() => new Promise<typeof result>((resolve) => { finish = resolve; }));
+    const confirmed = vi.fn();
+    const modal = new FeedSubscriptionAddModal({} as App, { preview: async () => preview(), confirm, confirmed });
+    modal.open();
+    const root = rootOf(modal);
+    enter(root, "okf-subscription-url", "https://example.com/feed.xml");
+    submitCurrentForm(root);
+    await vi.waitFor(() => expect(buttonWithText(root, "确认添加")).toBeDefined());
+    submitCurrentForm(root);
+    const back = buttonWithText(root, "返回修改");
+    expect(back.disabled).toBe(true);
+    back.click();
+    expect(buttonWithText(root, "正在保存…")).toBeDefined();
+    modal.close();
+    finish(result);
+    await vi.waitFor(() => expect(confirmed).toHaveBeenCalledWith(result));
+    expect(confirm).toHaveBeenCalledOnce();
+  });
+
   it("preserves input and focuses the optional source name after a name conflict", async () => {
     const previewAction = vi.fn(async () => {
       throw new FeedHttpError(409, JSON.stringify({

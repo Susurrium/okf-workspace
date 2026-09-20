@@ -1355,6 +1355,29 @@
   color: var(--text-faint);
 }
 
+.okf-work-item__metrics button.okf-work-item__metric {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  height: auto;
+  padding: 0;
+  color: var(--text-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.okf-work-item__metrics button.okf-work-item__metric:hover {
+  text-decoration: underline;
+}
+
+.okf-work-item__related {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+  margin-top: 0.45rem;
+}
+
 .okf-work-item__actions {
   display: flex;
   min-width: max-content;

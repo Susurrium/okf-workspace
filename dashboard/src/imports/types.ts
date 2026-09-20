@@ -35,8 +35,8 @@ export const intentLabels: Record<ImportIntent, string> = {
 };
 
 export const qualityLabels: Record<ImportQuality, string> = {
-  high: "高质量（默认）",
-  quick: "快速文本",
+  high: "高级完整解析",
+  quick: "MarkItDown 文本转换（默认）",
 };
 
 export const parserLabels: Record<ImportParser, string> = {

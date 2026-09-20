@@ -50,10 +50,7 @@ import type {
   ImportParser,
   ImportQuality,
 } from "../imports/types.js";
-import {
-  FEED_DECISION_ACTIONS,
-  feedDecisionFeedback,
-} from "../ui/ai-daily-inline-decision.js";
+import { renderFeedDecisionFlow } from "../ui/feed-decision-flow.js";
 import { OkfDashboardView, OKF_DASHBOARD_VIEW } from "./dashboard-view.js";
 import {
   DASHBOARD_COMMAND_ID,
@@ -159,6 +156,7 @@ export default class OkfBrainPlugin extends Plugin {
     this.registerIndexSync();
     this.registerEditorExtension(
       feedLivePreviewExtension(this.app, {
+        load: (feed, itemId) => this.loadFeedDecision(feed, itemId),
         decide: (feed, itemId, action) => this.decideFeed(feed, itemId, action),
         openPath: (path) => this.openVaultPath(path),
       }),
@@ -1673,91 +1671,12 @@ export default class OkfBrainPlugin extends Plugin {
     feed: FeedKind,
     itemId: string,
   ): void {
-    const choose = (action: FeedDecisionAction): void => {
-      const definition = FEED_DECISION_ACTIONS.find((candidate) => candidate.action === action);
-      if (!definition) return;
-      for (const candidate of controls.querySelectorAll<HTMLButtonElement>("button")) candidate.disabled = true;
-      status.setText(`正在执行：${definition.label}…`);
-      void this.decideFeed(feed, itemId, action)
-        .then((result) => {
-          const warning = result.warnings?.join("；");
-          const feedback = feedDecisionFeedback(result);
-          renderResult(result);
-          new Notice(warning ? `${feedback.message}；${warning}` : feedback.message, 10_000);
-        })
-        .catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : "Feed 操作失败";
-          status.setText(`处理失败：${message}`);
-          renderPrimary();
-          new Notice(message, 10_000);
-        });
-    };
-    const button = (label: string, handler: () => void): void => {
-      const element = controls.createEl("button", { text: label, attr: { type: "button" } });
-      element.addEventListener("click", handler);
-    };
-    const renderResult = (result: FeedDecisionResult): void => {
-      const feedback = feedDecisionFeedback(result);
-      const warning = result.warnings?.join("；");
-      const operation = result.semantic_operation;
-      const operationText = operation
-        ? operation.status === "queued"
-          ? "任务已排队，等待 Codex 开始生成。"
-          : operation.status === "running"
-            ? "Codex 正在后台生成；切换页面不会中断。"
-            : operation.status === "orphaned"
-              ? "后台生成已中断，可在 Learning 或 System 中重新生成。"
-            : operation.status === "completed"
-              ? "后台生成已完成。"
-              : operation.status === "failed"
-                ? "后台生成失败，可在 Learning 或 System 中重试。"
-                : "后台任务已取消。"
-        : "";
-      status.setText(
-        [feedback.message, operationText, warning].filter(Boolean).join(" "),
-      );
-      controls.replaceChildren();
-      if (feedback.target && feedback.targetLabel) {
-        button(feedback.targetLabel, () => void this.openVaultPath(feedback.target!));
-      }
-      if (result.action === "learn-later") {
-        button("现在生成学习材料", () => choose("learn-now"));
-      }
-      const active = operation && isSemanticOperationActive(operation.status);
-      if (!active) button("更改判断", renderPrimary);
-    };
-    const renderLearning = (): void => {
-      controls.replaceChildren();
-      status.setText("你想学习：现在生成 Study Guide，还是先放进 Learning？");
-      button("现在生成 Study Guide", () => choose("learn-now"));
-      button("稍后学习", () => choose("learn-later"));
-      button("返回", renderPrimary);
-    };
-    const renderNoLearning = (): void => {
-      controls.replaceChildren();
-      status.setText("你不打算学习：它仍有长期参考价值吗？");
-      button("直接整理成 Wiki", () => choose("wiki-now"));
-      button("只保留原始资料", () => choose("source-only"));
-      button("不保留", () => choose("ignore"));
-      button("返回", renderPrimary);
-    };
-    function renderPrimary(): void {
-      controls.replaceChildren();
-      status.setText("先判断你是否想学习这条内容；暂时不处理时直接离开即可。");
-      button("想学习", renderLearning);
-      button("不打算学习", renderNoLearning);
-    }
-    controls.replaceChildren();
-    status.setText("正在读取你之前的判断…");
-    void this.loadFeedDecision(feed, itemId)
-      .then((result) => {
-        if (!controls.isConnected) return;
-        if (result) renderResult(result);
-        else renderPrimary();
-      })
-      .catch(() => {
-        if (controls.isConnected) renderPrimary();
-      });
+    renderFeedDecisionFlow(controls, status, {
+      load: () => this.loadFeedDecision(feed, itemId),
+      decide: (action) => this.decideFeed(feed, itemId, action),
+      openPath: (path) => this.openVaultPath(path),
+      notify: (message) => { new Notice(message, 10_000); },
+    });
   }
 
   private registerIndexSync(): void {

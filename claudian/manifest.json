@@ -1,7 +1,7 @@
 {
   "id": "okf-claudian",
   "name": "OKF Claudian",
-  "version": "2.1.4-okf.2",
+  "version": "2.1.4-okf.3",
   "minAppVersion": "1.7.2",
   "description": "Embeds Codex in Obsidian as the interactive AI layer for OKF Workspace, with minimal prompt mode and structured Dashboard handoffs.",
   "author": "susurrus, based on Claudian by Yishen Tu",

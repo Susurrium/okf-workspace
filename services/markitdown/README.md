@@ -1,10 +1,11 @@
-# Obsidian MarkItDown fallback service
+# Obsidian MarkItDown service
 
 This subproject is a deliberately narrow boundary around MarkItDown. It accepts only a raw PDF,
 PPTX, or DOCX request body, never accepts a URI or server-side path, disables plugins, and runs each
 conversion in a time-limited child process owned by the network-isolated worker container.
 
 The API contract is documented in [`../../deploy/markitdown/README.md`](../../deploy/markitdown/README.md).
+MarkItDown is currently the workstation's default parser; MinerU-specific work is deferred.
 The service is not a durable source of record: uploaded documents, results, and task rows are
 deleted by TTL. The calling workstation must retain the source document and downloaded result.
 
@@ -19,8 +20,16 @@ deleted by TTL. The calling workstation must retain the source document and down
 - SVG and unsupported embedded image formats are not published. The bundle records an omitted
   image warning; the workstation accepts it only in quick quality mode and rejects it in strict
   high-quality mode.
-- `PDF` is deliberately text-only in this fallback service and always returns the
-  `pdf_text_only_images_not_extracted` warning. Use MinerU when PDF images or OCR matter.
+- `PDF` is deliberately text-only and always returns the
+  `pdf_text_only_images_not_extracted` warning. PDF image extraction and OCR are not supplied
+  by this parser; retain the original document for review.
+
+## Upload recovery
+
+Uploads have a 600-second total limit and a 60-second idle limit by default. Interrupted or
+timed-out uploads release their temporary files and upload slots. Durable upload ownership
+prevents the separate worker's TTL cleanup from removing an active upload; abandoned hidden
+upload files and temporary result files are reclaimed after their configured orphan TTL.
 
 The workstation client selects the v3 profile from `/v1/health` and still accepts legacy
 `markitdown-result/v2` bundles. Previously imported Source Text is not mutated automatically:
@@ -35,5 +44,6 @@ uv run pytest
 uv run ruff check .
 ```
 
-Do not run the API with an internet-facing bind. The supported deployment publishes the container
-port only on the host loopback interface and puts authentication in front of every `/v1` route.
+Do not run the API with an internet-facing bind. The supported deployment uses a host-loopback
+systemd socket proxy to the internal-only API container (no Docker published ports), with
+authentication in front of every `/v1` route.

@@ -113,6 +113,9 @@ function document(
 
 /** Fast, Vault-native writes for user-authored notes; no local API is required. */
 export class VaultNoteService {
+  private readonly pendingProjects = new Map<string, Map<string, string>>();
+  private readonly projectCreates = new Map<string, Promise<{ path: string }>>();
+  private readonly dailyCreates = new Map<string, Promise<{ path: string }>>();
   public constructor(private readonly app: App) {}
 
   public async createCapture(
@@ -165,6 +168,15 @@ export class VaultNoteService {
 
   public async createDaily(): Promise<{ path: string }> {
     const date = localDate();
+    const pending = this.dailyCreates.get(date);
+    if (pending) return pending;
+    const request = this.publishDaily(date);
+    this.dailyCreates.set(date, request);
+    try { return await request; }
+    finally { this.dailyCreates.delete(date); }
+  }
+
+  private async publishDaily(date: string): Promise<{ path: string }> {
     const path = `life/daily/${date.slice(0, 4)}/${date.slice(5, 7)}/${date}.md`;
     if (this.app.vault.getAbstractFileByPath(path) instanceof TFile) return { path };
     const body = await this.renderBody(
@@ -182,18 +194,19 @@ export class VaultNoteService {
     const { path } = await this.createDaily();
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) throw new Error(`今日日记不存在：${path}`);
-    const current = await this.app.vault.read(file);
-    const heading = "## 随手记录";
-    const start = current.indexOf(heading);
-    if (start < 0) throw new Error("今日日记缺少“随手记录”区域");
-    const contentStart = start + heading.length;
-    const next = current.indexOf("\n## ", contentStart);
-    const insertion = next >= 0 ? next : current.length;
-    const now = new Date();
-    const stamp = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    const prefix = current.slice(0, insertion).trimEnd();
-    const suffix = current.slice(insertion).replace(/^\n+/u, "");
-    await this.app.vault.modify(file, `${prefix}\n\n- **${stamp}** ${entry}\n\n${suffix}`);
+    await this.app.vault.process(file, (current) => {
+      const heading = "## 随手记录";
+      const start = current.indexOf(heading);
+      if (start < 0) throw new Error("今日日记缺少“随手记录”区域");
+      const contentStart = start + heading.length;
+      const next = current.indexOf("\n## ", contentStart);
+      const insertion = next >= 0 ? next : current.length;
+      const now = new Date();
+      const stamp = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      const prefix = current.slice(0, insertion).trimEnd();
+      const suffix = current.slice(insertion).replace(/^\n+/u, "");
+      return `${prefix}\n\n- **${stamp}** ${entry}\n\n${suffix}`;
+    });
     return { path };
   }
 
@@ -299,24 +312,50 @@ export class VaultNoteService {
 
   public async createProject(title: string, requestedSlug?: string): Promise<{ path: string }> {
     const slug = slugify(requestedSlug || title);
+    const inFlight = this.projectCreates.get(slug);
+    if (inFlight) return inFlight;
+    const request = this.publishProject(title, slug);
+    this.projectCreates.set(slug, request);
+    try {
+      return await request;
+    } finally {
+      this.projectCreates.delete(slug);
+    }
+  }
+
+  private async publishProject(title: string, slug: string): Promise<{ path: string }> {
     const root = `projects/${slug}`;
-    if (this.app.vault.getAbstractFileByPath(root)) throw new Error(`项目目录已存在：${root}`);
+    const pending = this.pendingProjects.get(root);
+    if (this.app.vault.getAbstractFileByPath(root) && !pending) throw new Error(`项目目录已存在：${root}`);
     const logBody = await this.renderBody(
       "project-log",
       { title },
       `# ${title} · 项目日志\n\n该文件按时间记录实际进展、讨论、决定与阻塞；project.md 只保留当前状态。`,
     );
-    await this.create(`${root}/log.md`, logBody);
     const path = `${root}/project.md`;
     const body = await this.renderBody(
       "project",
       { title },
       `# ${title}\n\n## 目标与完成标准\n\n## 约束与范围\n\n<!-- ai:auto:start name="project-current-state" -->\n## 当前状态\n\n## 下一步\n<!-- ai:auto:end name="project-current-state" -->\n\n## 任务\n\n## 相关资料与输出`,
     );
-    await this.create(
-      path,
-      document("Project", title, body, { project_status: "active" }),
-    );
+    // Render every template before publishing any part of the project. Retain
+    // this operation's payload for retry, but never overwrite user edits.
+    const files = pending ?? new Map([
+      [`${root}/log.md`, logBody],
+      [path, document("Project", title, body, { project_status: "active" })],
+    ]);
+    this.pendingProjects.set(root, files);
+    for (const [target, content] of files) {
+      const existing = this.app.vault.getAbstractFileByPath(target);
+      if (existing) {
+        if (!(existing instanceof TFile) || await this.app.vault.read(existing) !== content) {
+          throw new Error(`创建尚未完成，但文件已经更改，已保留：${target}`);
+        }
+        continue;
+      }
+      await this.create(target, content);
+    }
+    this.pendingProjects.delete(root);
     return { path };
   }
 
@@ -330,11 +369,7 @@ export class VaultNoteService {
     const now = new Date();
     const stamp = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
     const line = `**${stamp}** ${entry.replace(/\r?\n/gu, "\n  ")}`;
-    const current = await this.app.vault.read(file);
-    const updated = current.includes(heading)
-      ? current.replace(heading, `${heading}\n\n- ${line}`)
-      : this.prependProjectLogEntry(current, heading, line);
-    await this.app.vault.modify(file, updated);
+    await this.app.vault.process(file, (current) => appendProjectLogEntry(current, heading, line));
     return { path };
   }
 
@@ -404,18 +439,6 @@ export class VaultNoteService {
     return heading || file.parent?.name || file.basename;
   }
 
-  private prependProjectLogEntry(current: string, heading: string, entry: string): string {
-    const [first = "# 项目日志", ...rest] = current.split("\n");
-    const title = first.startsWith("# ") ? first : "# 项目日志";
-    const existing = (first.startsWith("# ") ? rest.join("\n") : current).trimStart();
-    const [intro = "", ...historyParts] = existing.split("\n");
-    if (intro.startsWith("该文件按时间记录")) {
-      const history = historyParts.join("\n").trimStart();
-      return `${title}\n\n${intro}\n\n${heading}\n\n- ${entry}${history ? `\n\n${history}` : ""}`;
-    }
-    return `${title}\n\n${heading}\n\n- ${entry}${existing ? `\n\n${existing}` : ""}`;
-  }
-
   private async renderBody(
     name: string,
     values: Record<string, string>,
@@ -443,7 +466,27 @@ export class VaultNoteService {
     let current = "";
     for (const part of path.split("/").filter(Boolean)) {
       current = current ? `${current}/${part}` : part;
-      if (!this.app.vault.getAbstractFileByPath(current)) await this.app.vault.createFolder(current);
+      if (!this.app.vault.getAbstractFileByPath(current)) {
+        try { await this.app.vault.createFolder(current); }
+        catch (error) {
+          if (!this.app.vault.getAbstractFileByPath(current)) throw error;
+        }
+      }
     }
   }
+}
+
+/** Append new dates and entries in order without rewriting historical sections. */
+export function appendProjectLogEntry(current: string, heading: string, entry: string): string {
+  const matches = [...current.matchAll(/^## (\d{4}-\d{2}-\d{2})[ \t]*\r?$/gmu)];
+  const prefix = current.slice(0, matches[0]?.index ?? current.length).trimEnd();
+  const sections = matches.map((match, index) => ({
+    date: match[1]!,
+    text: current.slice(match.index, matches[index + 1]?.index ?? current.length).trimEnd(),
+  }));
+  const date = heading.slice(3);
+  const section = sections.at(-1)?.date === date ? sections.at(-1) : undefined;
+  if (section) section.text += `\n\n- ${entry}`;
+  else sections.push({ date, text: `${heading}\n\n- ${entry}` });
+  return [prefix, ...sections.map((item) => item.text)].filter(Boolean).join("\n\n") + "\n";
 }

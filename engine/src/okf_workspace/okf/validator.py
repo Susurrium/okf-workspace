@@ -106,8 +106,15 @@ def _validate_log(path: Path, vault: Path, report: ValidationReport) -> None:
     if text.startswith(("---\n", "---\r\n")):
         _issue(report, relative, "log-frontmatter", "log.md is reserved without frontmatter")
     dates = [match.group(1) for line in text.splitlines() if (match := _DATE_HEADING.match(line))]
-    if dates != sorted(dates, reverse=True):
-        _issue(report, relative, "log-order", "log.md date headings must be newest first")
+    if dates != sorted(dates):
+        report.issues.append(
+            ValidationIssue(
+                relative,
+                "log-order",
+                "Historical dates are not chronological; preserve history and append new entries",
+                severity="warning",
+            )
+        )
     if not any(line.startswith("# ") for line in text.splitlines()):
         _issue(report, relative, "log-heading", "log.md must contain an H1 heading")
 
@@ -328,6 +335,16 @@ def _validate_artifact(
     except (FrontmatterError, OSError) as exc:
         _issue(report, relative, "frontmatter", str(exc))
         return
+    _validate_document_artifact(document, relative, vault, report, catalog)
+
+
+def _validate_document_artifact(
+    document: OkfDocument,
+    relative: str,
+    vault: Path,
+    report: ValidationReport,
+    catalog: ContractCatalog,
+) -> None:
     if not document.type:
         _issue(report, relative, "missing-type", "frontmatter requires a non-empty type")
         return
@@ -479,6 +496,24 @@ def validate_paths(
             _validate_artifact(path, root, report, catalog)
         elif not _is_skipped(path, root):
             _validate_standard_artifact(path, root, report)
+    return report
+
+
+def validate_document(vault: Path, path: Path, document: OkfDocument) -> ValidationReport:
+    """Validate a candidate Artifact before publication, without creating its file."""
+
+    root = vault.resolve()
+    report = ValidationReport()
+    candidate = path if path.is_absolute() else root / path
+    try:
+        relative = candidate.resolve().relative_to(root).as_posix()
+    except ValueError:
+        _issue(report, str(path), "outside-vault", "validation target is outside the Vault")
+        return report
+    catalog = _catalog(root, report)
+    if catalog is not None:
+        report.files_checked = 1
+        _validate_document_artifact(document, relative, root, report, catalog)
     return report
 
 

@@ -65,6 +65,7 @@ export class FeedSubscriptionAddModal extends Modal {
   private idempotencyKey = "";
   private requestGeneration = 0;
   private submitting = false;
+  private backButton: HTMLButtonElement | undefined;
 
   public constructor(app: App, private readonly actions: FeedSubscriptionAddActions) {
     super(app);
@@ -330,10 +331,12 @@ export class FeedSubscriptionAddModal extends Modal {
       attr: { type: "button" },
     });
     back.addEventListener("click", () => {
+      if (this.submitting) return;
       this.requestGeneration += 1;
       this.preview = undefined;
       this.renderInput();
     });
+    this.backButton = back;
     const confirm = actions.createEl("button", {
       text: "确认添加",
       cls: "mod-cta okf-dashboard__primary-action",
@@ -363,6 +366,7 @@ export class FeedSubscriptionAddModal extends Modal {
     this.submitting = true;
     button.disabled = true;
     button.setText("正在保存…");
+    if (this.backButton) this.backButton.disabled = true;
     feedback.removeClass("is-error");
     feedback.setText("正在保存订阅设置…");
     try {
@@ -374,18 +378,27 @@ export class FeedSubscriptionAddModal extends Modal {
         content_mode: this.contentMode,
         ...(contentMaxChars === undefined ? {} : { content_max_chars: contentMaxChars }),
       });
-      if (generation !== this.requestGeneration) return;
-      await this.actions.confirmed(result);
-      this.close();
+      // Closing a view cannot undo an accepted server mutation. Always publish
+      // its result so the Reading catalog refreshes even after the modal closes.
+      try {
+        await this.actions.confirmed(result);
+      } catch {
+        new Notice("订阅已保存，但列表刷新失败；请重新打开 Reading 查看。", 10_000);
+      }
+      if (generation === this.requestGeneration) this.close();
     } catch (error) {
-      if (generation !== this.requestGeneration) return;
+      if (generation !== this.requestGeneration) {
+        new Notice(`订阅保存未确认：${feedSubscriptionErrorMessage(error)}，请先检查 Reading 中的来源列表。`, 10_000);
+        return;
+      }
       feedback.addClass("is-error");
       feedback.setText(feedSubscriptionErrorMessage(error));
     } finally {
+      this.submitting = false;
       if (generation === this.requestGeneration) {
-        this.submitting = false;
         button.disabled = false;
         button.setText("确认添加");
+        if (this.backButton) this.backButton.disabled = false;
       }
     }
   }

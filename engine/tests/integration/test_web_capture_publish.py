@@ -434,12 +434,18 @@ def test_web_capture_pair_write_rolls_back_before_removing_capture(
     original_write = source_publisher.write_document
     calls = 0
 
-    def fail_second_write(path: Path, document: OkfDocument) -> None:
+    def fail_second_write(
+        path: Path,
+        document: OkfDocument,
+        *,
+        create_only: bool = False,
+        expected_sha256: str | None = None,
+    ) -> None:
         nonlocal calls
         calls += 1
         if calls == 2:
             raise OSError("simulated Source write failure")
-        original_write(path, document)
+        original_write(path, document, create_only=create_only, expected_sha256=expected_sha256)
 
     def no_checkpoint(_vault: Path, _message: str) -> None:
         return None

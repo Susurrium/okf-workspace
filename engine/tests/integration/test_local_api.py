@@ -47,7 +47,8 @@ def _client(
 
 
 class StaticParser:
-    parser = ParserName.MINERU
+    def __init__(self, parser: ParserName = ParserName.MINERU) -> None:
+        self.parser = parser
 
     def convert(
         self,
@@ -60,7 +61,7 @@ class StaticParser:
         return ParserExport(
             markdown="# API 导入文档\n\n这是通过本地 API 导入的完整正文。",
             assets={},
-            parser=ParserName.MINERU,
+            parser=self.parser,
             parser_version="api-fixture",
         )
 
@@ -1307,9 +1308,11 @@ def test_system_can_list_and_retry_failed_conversions(vault: Path, tmp_path: Pat
     assert retried.json()["status"] == "imported"
 
 
+@pytest.mark.parametrize("quality", [None, "high", "quick"])
 def test_document_import_endpoint_accepts_upload_and_returns_vault_relative_results(
     vault: Path,
     tmp_path: Path,
+    quality: str | None,
 ) -> None:
     paths = BrainPaths(
         vault=vault,
@@ -1320,7 +1323,7 @@ def test_document_import_endpoint_accepts_upload_and_returns_vault_relative_resu
         vault=paths.vault,
         originals=paths.originals,
         state=paths.state,
-        clients={ParserName.MINERU: StaticParser()},
+        clients={ParserName.MARKITDOWN: StaticParser(ParserName.MARKITDOWN)},
     )
     token = LocalTokenStore(paths.state).ensure()
     client = TestClient(create_app(paths, document_importer=importer))
@@ -1328,13 +1331,14 @@ def test_document_import_endpoint_accepts_upload_and_returns_vault_relative_resu
     response = client.post(
         "/documents/import",
         headers={"Authorization": f"Bearer {token}"},
-        data={"intent": "wiki", "quality": "high", "parser": "auto"},
+        data={"intent": "wiki", "parser": "auto", **({"quality": quality} if quality else {})},
         files={"file": ("manual.pdf", b"synthetic-pdf", "application/pdf")},
     )
 
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "imported"
+    assert payload["parser"] == "markitdown"
     assert payload["source"].startswith("sources/records/documents/")
     assert payload["source_text"].startswith("sources/text/documents/")
     assert "originals" not in str(payload)

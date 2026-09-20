@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import cast
 
+from .archive_paths import UnsafeParserArchive, safe_relative_path
 from .models import ParserExport, ParserName
 
 MAX_ARCHIVE_BYTES = 1024 * 1024 * 1024
@@ -26,10 +27,6 @@ ASSET_SUFFIXES = {
     ".tiff",
     ".webp",
 }
-
-
-class UnsafeParserArchive(ValueError):
-    """Raised when a parser ZIP can escape or exhaust the conversion directory."""
 
 
 def _integer(value: object, *, name: str) -> int:
@@ -148,11 +145,7 @@ def _markitdown_metadata(
 
 
 def _safe_name(value: str) -> PurePosixPath:
-    normalized = value.replace("\\", "/")
-    path = PurePosixPath(normalized)
-    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
-        raise UnsafeParserArchive(f"unsafe ZIP member: {value!r}")
-    return path
+    return safe_relative_path(value)
 
 
 def _is_symlink(info: zipfile.ZipInfo) -> bool:
@@ -170,6 +163,7 @@ def normalize_zip(
     assets: dict[str, bytes] = {}
     markitdown_manifest: bytes | None = None
     total = 0
+    seen: set[str] = set()
     with zipfile.ZipFile(archive) as bundle:
         entries = bundle.infolist()
         if len(entries) > MAX_ARCHIVE_ENTRIES:
@@ -180,6 +174,10 @@ def normalize_zip(
             if _is_symlink(info):
                 raise UnsafeParserArchive(f"parser ZIP contains a symlink: {info.filename}")
             path = _safe_name(info.filename)
+            identity = path.as_posix().casefold()
+            if identity in seen:
+                raise UnsafeParserArchive(f"duplicate parser ZIP path: {info.filename!r}")
+            seen.add(identity)
             total += info.file_size
             if total > MAX_ARCHIVE_BYTES:
                 raise UnsafeParserArchive("parser ZIP expands beyond the size limit")

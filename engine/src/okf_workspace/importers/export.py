@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
+from .archive_paths import contained_output_path, safe_relative_path
 from .models import OriginalRecord, ParserExport, ParserName, QCReport
 
 
@@ -34,6 +35,10 @@ def write_export_contract(
     export: ParserExport,
     qc: QCReport,
 ) -> Path:
+    # Validate the entire set before publishing even the Markdown output.
+    asset_root = directory / "assets"
+    for relative in export.assets:
+        contained_output_path(asset_root, relative)
     directory.mkdir(parents=True, exist_ok=True)
     document = directory / "document.md"
     document.write_text(
@@ -41,13 +46,12 @@ def write_export_contract(
         encoding="utf-8",
         newline="\n",
     )
-    asset_root = directory / "assets"
     asset_paths: list[str] = []
     for relative, data in sorted(export.assets.items()):
-        target = _io_path(asset_root.joinpath(*Path(relative).parts))
+        target = _io_path(contained_output_path(asset_root, relative))
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
-        asset_paths.append((Path("assets") / relative).as_posix())
+        asset_paths.append(f"assets/{safe_relative_path(relative).as_posix()}")
     manifest: dict[str, object] = {
         "conversion_id": conversion_id,
         "source_sha256": original.sha256,
@@ -107,8 +111,8 @@ def load_export_contract(directory: Path) -> tuple[ParserExport, QCReport]:
         for value in cast(list[object], asset_values):
             if not isinstance(value, str):
                 continue
-            asset_path = _io_path(directory.joinpath(*Path(value).parts))
-            relative = Path(value).relative_to("assets").as_posix()
+            asset_path = _io_path(contained_output_path(directory, value))
+            relative = safe_relative_path(value).relative_to("assets").as_posix()
             assets[relative] = asset_path.read_bytes()
     checks_value = qc_payload.get("checks")
     checks = (
@@ -129,7 +133,7 @@ def load_export_contract(directory: Path) -> tuple[ParserExport, QCReport]:
     parser_profile = manifest.get("parser_profile")
     return (
         ParserExport(
-            markdown=directory.joinpath(markdown_name).read_text(encoding="utf-8"),
+            markdown=contained_output_path(directory, markdown_name).read_text(encoding="utf-8"),
             assets=assets,
             parser=ParserName(str(manifest["parser"])),
             parser_version=str(manifest.get("parser_version", "unknown")),

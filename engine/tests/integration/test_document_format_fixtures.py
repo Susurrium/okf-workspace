@@ -108,13 +108,13 @@ def test_committed_office_and_pdf_fixtures_are_structurally_real() -> None:
 @pytest.mark.parametrize(
     ("filename", "quality", "expected"),
     [
-        ("text.pdf", ImportQuality.HIGH, ParserName.MINERU),
-        ("scan.pdf", ImportQuality.HIGH, ParserName.MINERU),
-        ("two-column.pdf", ImportQuality.HIGH, ParserName.MINERU),
-        ("formula.pdf", ImportQuality.HIGH, ParserName.MINERU),
+        ("text.pdf", ImportQuality.HIGH, ParserName.MARKITDOWN),
+        ("scan.pdf", ImportQuality.HIGH, ParserName.MARKITDOWN),
+        ("two-column.pdf", ImportQuality.HIGH, ParserName.MARKITDOWN),
+        ("formula.pdf", ImportQuality.HIGH, ParserName.MARKITDOWN),
         ("text.pdf", ImportQuality.QUICK, ParserName.MARKITDOWN),
         ("simple.docx", ImportQuality.HIGH, ParserName.MARKITDOWN),
-        ("slides.pptx", ImportQuality.HIGH, ParserName.MINERU),
+        ("slides.pptx", ImportQuality.HIGH, ParserName.MARKITDOWN),
         ("legacy.doc", ImportQuality.HIGH, ParserName.MARKITDOWN),
     ],
 )

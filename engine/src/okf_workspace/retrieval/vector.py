@@ -15,6 +15,7 @@ from typing import Any, Protocol, cast
 
 from .index import SearchIndex
 from .models import SearchHit
+from .scope import path_in_scope
 
 
 class Embedder(Protocol):
@@ -287,11 +288,7 @@ class VectorIndex:
         candidates = [
             index
             for index, (path, _heading, _start, _end, _hash) in enumerate(cache.metadata)
-            if (
-                not include_prefixes
-                or any(path.startswith(prefix.rstrip("/")) for prefix in include_prefixes)
-            )
-            and not any(path.startswith(prefix.rstrip("/")) for prefix in exclude_prefixes)
+            if path_in_scope(path, include_prefixes, exclude_prefixes)
         ]
         if not candidates:
             return []
@@ -354,11 +351,7 @@ class VectorIndex:
         scored: list[tuple[float, sqlite3.Row]] = []
         for row in rows:
             path = str(row["path"])
-            if include_prefixes and not any(
-                path.startswith(prefix.rstrip("/")) for prefix in include_prefixes
-            ):
-                continue
-            if any(path.startswith(prefix.rstrip("/")) for prefix in exclude_prefixes):
+            if not path_in_scope(path, include_prefixes, exclude_prefixes):
                 continue
             similarity = _cosine(query_vector, _vector(cast(bytes, row["vector"])))
             scored.append((similarity, row))

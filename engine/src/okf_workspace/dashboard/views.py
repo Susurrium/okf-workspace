@@ -9,6 +9,7 @@ from pathlib import Path
 
 from okf_workspace.feeds import FeedCache, FeedEdition, FeedKind
 from okf_workspace.ingestion import INGESTED_VIA_VALUES, normalize_ingested_via
+from okf_workspace.notes.project_logs import latest_project_log_section
 from okf_workspace.okf.frontmatter import FrontmatterError, read_document
 from okf_workspace.projections.tasks import collect_tasks
 
@@ -70,10 +71,7 @@ def _recent_project_log(path: Path) -> str:
         text = path.read_text(encoding="utf-8")
     except OSError:
         return ""
-    headings = list(re.finditer(r"(?m)^##\s+.+$", text))
-    if headings:
-        text = text[headings[0].start() : headings[1].start() if len(headings) > 1 else None]
-    return _plain(text, limit=500)
+    return _plain(latest_project_log_section(text), limit=500)
 
 
 def _project_summary(vault: Path, note: NoteSummary) -> dict[str, object]:
@@ -133,8 +131,7 @@ def _latest_today_ai_daily(cache: FeedCache) -> dict[str, object] | None:
     editions = [
         edition
         for stream in ("hotspot", "news")
-        if (edition := cache.latest_edition(FeedKind.AI_DAILY, stream=stream))
-        is not None
+        if (edition := cache.latest_edition(FeedKind.AI_DAILY, stream=stream)) is not None
     ]
     if not editions:
         return None
@@ -191,13 +188,9 @@ def dashboard_view(vault: Path, area: str) -> dict[str, object]:
         captures.sort(key=lambda item: item.modified_at, reverse=True)
         open_captures = [note for note in captures if note.capture_status == "open"]
         undecided_sources = [
-            note
-            for note in notes
-            if note.note_type == "Source" and note.purpose == "undecided"
+            note for note in notes if note.note_type == "Source" and note.purpose == "undecided"
         ]
-        generated = [
-            note for note in notes if note.note_type in {"Study Guide", "Wiki"}
-        ]
+        generated = [note for note in notes if note.note_type in {"Study Guide", "Wiki"}]
         linked_sources = {source for note in generated for source in note.source_paths}
         pending_generation = [
             note
