@@ -61,9 +61,9 @@ Obsidian 的 Inline Title 和正文 Properties 已默认隐藏，因此不会再
 在 Dashboard 点“导入资料”，依次选择文件、解析策略、用途和归属：
 
 1. **解析策略**
-   - 默认：优先 MinerU，不可用时自动降级 MarkItDown；
-   - 快速：直接使用 MarkItDown；
-   - 设置可改为必须 MinerU，或全局始终 MarkItDown。
+   - 当前默认：直接使用 MarkItDown，不自动启动或探测 MinerU；
+   - MinerU 原本用于复杂版面、图片和 OCR 优先的高质量解析，但因服务问题暂时停用自动路由；
+   - 系统仍保留显式 MinerU 高级能力，待服务恢复并重新验收后再考虑启用。当前普通导入不要选择它。
 2. **用途**
    - 学习并现在生成 Study Guide；
    - 学习但稍后生成；
@@ -91,7 +91,8 @@ Source 的 `resource/kind/text` 只描述来源身份与正文位置。你的用
 
 MarkItDown 的能力按格式明确区分：DOCX/PPTX 中可识别的内嵌 PNG、JPEG 等图片会提取为
 哈希命名附件并写入 Source Text；PDF 的快速 MarkItDown 路径是文本模式，不承诺提取图片或
-扫描 OCR。需要保留 PDF/PPTX 的复杂版式、公式和图片时继续选择默认 MinerU。无法安全发布的
+扫描 OCR。遇到扫描 PDF、复杂多栏、公式密集或依赖图片内容的资料时，应检查转换结果；结果
+不足时保留原件，等待 MinerU 恢复后重新导入，或只对少量关键页面人工处理。无法安全发布的
 特殊图片格式或外链图片会给出明确警告，不再静默生成不存在的 `.jpg` 链接。
 
 ## 5. 网页剪藏
