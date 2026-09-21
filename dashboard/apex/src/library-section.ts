@@ -1060,7 +1060,7 @@ async function managedMutation(
 	const host = getRegisteredApexHost();
 	if (!host?.mutateManagedArtifact) return { outcome: 'allow' };
 	const artifactType = String(app.metadataCache.getFileCache(file)?.frontmatter?.type ?? '');
-	return host.mutateManagedArtifact({ ...mutation, path: file.path, artifactType } as ArtifactMutation);
+	return host.mutateManagedArtifact({ ...mutation, path: file.path, artifactType });
 }
 
 function renderGridView(container: HTMLElement, results: LibraryFileResult[], app: App, showTags: boolean, config: LibraryConfig): void {
