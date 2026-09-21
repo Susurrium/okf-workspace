@@ -1,5 +1,10 @@
 # OKF Apex Workbench release and rollback
 
+> **Release hold (2026-09-21):** do not deploy the current unified build as a replacement for the former
+> OKF Dashboard. Data-safety checks passed, but the functional-parity audit found missing reachable
+> Learning, Inbox, Knowledge, Project, Today, Life, System, and Reading behaviors. This document describes
+> the intended cutover only after gates P01–P08 in `APEX-OKF-ACCEPTANCE-LEDGER.md` pass.
+
 ## Release identity
 
 The only installed plugin is `okf-workspace-dashboard`, displayed as **OKF Apex Workbench**. The package is

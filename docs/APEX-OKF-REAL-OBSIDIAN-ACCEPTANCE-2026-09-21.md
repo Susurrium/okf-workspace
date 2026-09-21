@@ -1,5 +1,10 @@
 # OKF Apex Workbench real-Obsidian acceptance
 
+> **Scope correction (2026-09-21):** this report remains evidence for the exact A01–A19 scenarios below,
+> but it does not establish feature parity with the former OKF Dashboard or release readiness. Several
+> complete old surfaces are no longer reachable from the registered Apex view. See
+> `APEX-OKF-FUNCTIONAL-PARITY-GAP-AUDIT-2026-09-21.md`; the release gate is reopened.
+
 ## Environment
 
 Acceptance ran against an isolated disposable Vault, an isolated Obsidian profile, Obsidian 1.13.7, and

@@ -1,5 +1,10 @@
 # Apex × OKF acceptance ledger
 
+> **2026-09-21 functional-parity correction:** the original completion statement was too broad. The
+> recorded data-safety and lifecycle scenarios remain valid, but the new Apex sections do not yet preserve
+> the full reachable behavior of the former OKF Dashboard. M4–M8 are reopened as partial and M9 is reopened.
+> This build is not release-ready. See `APEX-OKF-FUNCTIONAL-PARITY-GAP-AUDIT-2026-09-21.md`.
+
 This ledger is the implementation authority for the staged work described in
 `APEX-DASHBOARD-DEVELOPMENT-PLAN-2026-09-21.md`. A row is complete only when its named automated evidence
 passes and, where required, its disposable-Vault interaction has been recorded. Production user data is
@@ -35,14 +40,28 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 | M1 | Apex subtree and one outer plugin build/identity | Complete: locked subtree, all 28 baseline scripts, independent/outer builds, one installed identity, and real Obsidian load passed |
 | M2 | Existing OKF services, settings, commands, and plugin lifecycle exposed to new host | Complete: one outer plugin owns native services and OKF workflows; 22 commands, reload, two-pane, pane-close timer, Engine-offline, and Claudian-absent runs passed |
 | M3 | Stable section IDs, lossless board repository, registry, pane-local state | Complete: stable IDs, lossless schema/body round-trip, shared write coordination, and real two-pane save/reload passed |
-| M4 | Full Project experience and managed-artifact edit policy | Complete: Project summary/actions, expandable related content, two-workbench synchronization, typed status mutation, and Source mutation denial passed |
-| M5 | Unified task/calendar/Daily/Capture loop | Complete: shared task identity, three independent editable dates, exact-date Daily routing, cross-view completion, and idempotent sticky conversion passed |
-| M6 | Learning/Knowledge/Inbox/Import sections and details | Complete: native projections expose their underlying Vault details and existing create/complete/route/generate/import actions; offline and workflow tests passed |
-| M7 | Feed/Reading and default workbench presets | Complete: Digest/source history, pagination, decision receipts, position, presets, and global search are reachable; position survived a real theme/reload cycle |
-| M8 | Native-data takeover, UX, capability, and performance work | Complete for the declared desktop release: original JSON formats, plugin-lifetime services, per-pane UI, guarded writes, and real takeover/reload passed; no mobile-support claim is made |
-| M9 | Full release, rollback, real Obsidian, and upstream-update exercise | Complete: release/rollback guide, 19-row real acceptance report, root validation, and isolated Apex 3.6.0 subtree exercise recorded |
+| M4 | Full Project experience and managed-artifact edit policy | **Partial:** data policy and the new summary/actions passed, but contextual Capture/import, Claudian, catalog, exact related-item navigation, and state-aware primary actions are missing |
+| M5 | Unified task/calendar/Daily/Capture loop | **Partial:** shared task identity/date writes and sticky conversion passed; the former Today and Life surfaces, continuation lanes, attention queues, and global entry points are incomplete or absent |
+| M6 | Learning/Knowledge/Inbox/Import sections and details | **Partial:** thin projections and some actions exist, but scope/context, operation states, failure recovery, filters, verification, bulk decisions, and Claudian workflows were not migrated |
+| M7 | Feed/Reading and default workbench presets | **Partial:** basic Reading projection and presets exist; full item loading, request lifecycle, cache/scroll continuity, refresh recovery, and truthful contextual preset behavior remain incomplete |
+| M8 | Native-data takeover, UX, capability, and performance work | **Partial:** native JSON takeover and lifecycle safeguards passed; full OKF UX parity and System/background-operation access did not |
+| M9 | Full release, rollback, real Obsidian, and upstream-update exercise | **Reopened:** the recorded 19 scenarios and upstream exercise are valid but insufficient; release remains blocked until the functional-parity gate passes |
 
 ## Final acceptance matrix
+
+The A01–A19 statuses below report only the named scenario. They are necessary regression evidence, not a
+claim of complete Dashboard replacement. The following additional release gate is currently open:
+
+| ID | Scenario | Required evidence | Status |
+| --- | --- | --- | --- |
+| P01 | Learning feature parity | Registered Apex section exposes the former scope, context, workflow states, recovery, Claudian, completion, and Wiki actions | Gap |
+| P02 | Inbox/import feature parity | Registered Apex section exposes decisions, bulk handling, conversion progress, fallback, retry, cancel, and recovery | Gap |
+| P03 | Knowledge feature parity | Registered Apex section exposes catalog, search, filters, verification, lifecycle badges, and operation states | Gap |
+| P04 | Project feature parity | Registered Apex section exposes contextual capture/import, Claudian, catalog, status-aware action, and precise related navigation | Gap |
+| P05 | Today/Life feature parity | Registered Apex sections expose continuation, attention, Feed, reflection/review, calendar, and capture organization | Gap |
+| P06 | System/global controls | Registered surface exposes diagnostics, task center, failed-operation recovery, settings, search, quick create, and Ask Notes | Gap |
+| P07 | Reading controller parity | Registered Apex section passes full-load, pagination, cache, stale-response, scroll, refresh-failure, and sync scenarios | Gap |
+| P08 | Reachable-surface acceptance | Nonempty real Obsidian run verifies every inventory action through the registered Apex surfaces | Gap |
 
 | ID | Scenario | Required evidence | Status |
 | --- | --- | --- | --- |
