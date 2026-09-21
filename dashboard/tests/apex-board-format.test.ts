@@ -2,6 +2,7 @@ import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
 
 import { parse, serialize } from "../apex/src/parser.js";
+import { registerSectionDefinition } from "../apex/src/section-registry.js";
 
 function frontmatter(markdown: string): Record<string, unknown> {
   const end = markdown.indexOf("---", 3);
@@ -99,5 +100,37 @@ two
     const saved = serialize(data);
     expect(saved).toContain(`<!-- okf-section:${data.columns[0]?.id} -->`);
     expect(saved).toContain(`<!-- okf-section:${data.columns[1]?.id} -->`);
+  });
+
+  it("round-trips registered section config without treating its body as opaque", () => {
+    const unregister = registerSectionDefinition({
+      type: "workspace-projects",
+      icon: "folder-kanban",
+      label: "项目（OKF）",
+      defaultName: "项目",
+      render: () => undefined,
+    });
+    try {
+      const data = parse(`---
+dashboard: true
+columns:
+  - id: project-active
+    name: 项目
+    type: workspace-projects
+    config:
+      statuses: [active, paused]
+---
+## 项目
+<!-- okf-section:project-active -->
+`);
+
+      expect(data.columns[0]?.extensionConfig).toEqual({ statuses: ["active", "paused"] });
+      expect(data.columns[0]?.rawContent).toBeUndefined();
+
+      const saved = serialize(data);
+      expect(parse(saved).columns[0]?.extensionConfig).toEqual({ statuses: ["active", "paused"] });
+    } finally {
+      unregister();
+    }
   });
 });

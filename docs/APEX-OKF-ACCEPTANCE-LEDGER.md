@@ -35,7 +35,7 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 | M1 | Apex subtree and one outer plugin build/identity | In progress: subtree imported at locked SHA; 28 upstream scripts, independent build, outer Vitest/typecheck/build, and single `dist/` package pass; disposable-Vault interaction remains |
 | M2 | Existing OKF services, settings, commands, and plugin lifecycle exposed to new host | Pending |
 | M3 | Stable section IDs, lossless board repository, registry, pane-local state | In progress: stable IDs/anchors, duplicate-name routing, unknown YAML/body preservation, shared in-process state/write queue, and three-way pre-write merge implemented; pane-local workspace selection and real Obsidian interaction remain |
-| M4 | Full Project experience and managed-artifact edit policy | Pending |
+| M4 | Full Project experience and managed-artifact edit policy | In progress: registered `workspace-projects` Vault projection, independent persisted status filters, and existing create/open/log/Decision/status actions are connected; detail routing, related-content actions, and managed database/drag policy remain |
 | M5 | Unified task/calendar/Daily/Capture loop | Pending |
 | M6 | Learning/Knowledge/Inbox/Import sections and details | Pending |
 | M7 | Feed/Reading and default workbench presets | Pending |
@@ -47,7 +47,7 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 | ID | Scenario | Required evidence | Status |
 | --- | --- | --- | --- |
 | A01 | Create a dated Project action | One task body appears through Project, Today, and Calendar; completion from any view updates all | Pending |
-| A02 | Put one Project in two workbenches | Status synchronizes; removing one reference keeps the Project; filters remain independent | Pending |
+| A02 | Put one Project in two workbenches | Status synchronizes; removing one reference keeps the Project; filters remain independent | Automated filter/config and reference-only section coverage: `dashboard/tests/project-section.test.ts` and `dashboard/tests/apex-board-format.test.ts`; multi-workbench disposable-Vault run pending |
 | A03 | Rename/reorder same-named sections | Stable IDs retain config, collapse, scroll, and body association | Automated format/identity coverage: `dashboard/tests/apex-board-format.test.ts`; DOM scroll and disposable-Vault run pending |
 | A04 | Complete a board checklist from Calendar, then save layout | Completion remains after layout save/reload | Automated three-way merge coverage: `dashboard/tests/apex-board-merge.test.ts`; calendar UI run pending |
 | A05 | Checkboxes in fences/YAML/Source Text/Digest | Formal-task query excludes them; explicit ordinary-checklist filter can still expose ordinary lists | Pending |

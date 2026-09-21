@@ -38,6 +38,7 @@ import { renderSidebarMusicWidget } from './music-widget';
 import { SUPPORTED_FILE_EXTS, iconForExtension } from './file-types';
 import type { HolidayInfo } from './holiday-service';
 import { CountdownSettingsModal } from './countdown-modal';
+import { getSectionDefinition } from './section-registry';
 import { Chart, LineController, LineElement, PointElement, BarController, BarElement, LinearScale, CategoryScale, Filler, Tooltip } from 'chart.js';
 
 Chart.register(LineController, LineElement, PointElement, BarController, BarElement, LinearScale, CategoryScale, Filler, Tooltip);
@@ -2000,6 +2001,36 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	});
 
 		const headerActions = header.createDiv({ cls: 'dashboard-section-header-actions' });
+
+	const customDefinition = getSectionDefinition(sectionType);
+	if (customDefinition) {
+		const deleteSectionBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
+			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
+		});
+		setIcon(deleteSectionBtn, 'trash-2');
+		deleteSectionBtn.addEventListener('click', (event) => {
+			event.stopPropagation();
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
+		});
+
+		const body = el.createDiv({ cls: 'dashboard-custom-section' });
+		void Promise.resolve(customDefinition.render({
+			container: body,
+			column,
+			app,
+			callbacks,
+			setConfig: (config) => callbacks.onExtensionConfigChange(reference, config),
+		})).catch((error: unknown) => {
+			console.error(`[apex-dashboard] custom section ${sectionType} failed`, error);
+			body.empty();
+			body.createDiv({
+				cls: 'dashboard-library-empty dashboard-section-compatibility',
+				text: `${customDefinition.label}加载失败，请查看开发者控制台。`,
+			});
+		});
+		return el;
+	}
 
 	if (!SUPPORTED_SECTION_TYPES.has(sectionType)) {
 		const deleteSectionBtn = headerActions.createEl('button', {

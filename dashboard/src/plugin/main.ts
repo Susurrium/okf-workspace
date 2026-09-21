@@ -53,7 +53,9 @@ import type {
 import { renderFeedDecisionFlow } from "../ui/feed-decision-flow.js";
 import { DashboardSettingTab } from "../../apex/src/settings.js";
 import { DashboardView, DASHBOARD_VIEW_TYPE } from "../../apex/src/view.js";
+import { registerSectionDefinition } from "../../apex/src/section-registry.js";
 import { ApexHostAdapter } from "../adapters/apex-host.js";
+import { createProjectSectionDefinition } from "../features/projects/project-section.js";
 import {
   DASHBOARD_COMMAND_ID,
   registerDashboardRibbon,
@@ -126,6 +128,7 @@ export default class OkfBrainPlugin extends Plugin {
   private conversionLastIdlePoll = 0;
   private readonly watchedConversionIds = new Set<string>();
   private dashboardUiStateStore: DashboardUiStateStore | undefined;
+  private readonly unregisterApexSections: Array<() => void> = [];
 
   public async onload(): Promise<void> {
     await this.loadSettings();
@@ -138,6 +141,9 @@ export default class OkfBrainPlugin extends Plugin {
       },
     });
     await this.apexHost.initialize();
+    this.unregisterApexSections.push(
+      registerSectionDefinition(createProjectSectionDefinition(this)),
+    );
     this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new DashboardView(leaf, this.apexHost!));
     registerDashboardRibbon(this, () => void this.openDashboard());
     this.dashboardUiStateStore = new DashboardUiStateStore(
@@ -187,6 +193,7 @@ export default class OkfBrainPlugin extends Plugin {
     if (this.dashboardRefreshTimer !== undefined) window.clearTimeout(this.dashboardRefreshTimer);
     this.watchedConversionIds.clear();
     this.app.workspace.detachLeavesOfType(DASHBOARD_VIEW_TYPE);
+    for (const unregister of this.unregisterApexSections.splice(0)) unregister();
     this.apexHost?.destroy();
     void this.dashboardUiStateStore?.dispose().catch((error: unknown) => {
       console.error("[okf-workspace] could not flush Dashboard UI state", error);

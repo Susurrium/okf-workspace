@@ -684,6 +684,8 @@ export interface DashboardColumn {
 	dataviewConfig?: DataviewConfig;
 	/** Web embed section config (sectionType 'web'). */
 	webConfig?: WebEmbedConfig;
+	/** Namespaced declaration owned by a registered custom section. */
+	extensionConfig?: Record<string, unknown>;
 	/** User-set max height in px (drag-resize, desktop only). */
 	height?: number;
 	/** Side-by-side pairing: two adjacent `half` columns render as one row
@@ -776,6 +778,7 @@ export interface RenderCallbacks {
 	onArchiveTasks(columnName: string): void;
 	onLibraryConfigChange(columnName: string, config: LibraryConfig): void;
 	onDataviewConfigChange(columnName: string, config: DataviewConfig): void;
+	onExtensionConfigChange(columnName: string, config: Record<string, unknown>): void;
 	onQuickNoteCreate(preset: QuickNotePreset): void;
 	onQuickNoteCapture(text: string): void;
 	onOpenPinnedNote(note: PinnedNote): void;

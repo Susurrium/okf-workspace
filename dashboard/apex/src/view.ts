@@ -1170,6 +1170,12 @@ export class DashboardView extends ItemView implements HoverParent {
 						this.refreshSectionInPlace(columnName);
 					});
 				},
+				onExtensionConfigChange: (columnName: string, config: Record<string, unknown>) => {
+					this.suppressNextRender = true;
+					void this.sync.updateExtensionConfig(columnName, config).then(() => {
+						this.refreshSectionInPlace(columnName);
+					});
+				},
 		};
 	}
 

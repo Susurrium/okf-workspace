@@ -544,6 +544,18 @@ export class SyncEngine {
 		await this.writeToDisk();
 	}
 
+	async updateExtensionConfig(columnName: string, config: Record<string, unknown>): Promise<void> {
+		if (!this.data) return;
+
+		this.data = {
+			...this.data,
+			columns: this.data.columns.map(col =>
+				this.columnMatches(col, columnName) ? { ...col, extensionConfig: config } : col
+			),
+		};
+		await this.writeToDisk();
+	}
+
 	async updateWebConfig(columnName: string, config: import('./types').WebEmbedConfig): Promise<void> {
 		if (!this.data) return;
 

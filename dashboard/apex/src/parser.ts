@@ -24,6 +24,7 @@ import type {
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { t } from './i18n';
 import { normalizeColumnPairs } from './column-pairs';
+import { isRegisteredSection } from './section-registry';
 
 const KNOWN_METADATA_KEYS = new Set(['id', 'link', 'progress', 'due', 'streak', 'type', 'color', 'cover', 'width', 'size', 'lat', 'lon', 'city', 'track', 'days', 'cols', 'rows', 'gcol', 'grow', 'noteStyle']);
 const SECTION_TYPES = new Set(['memo', 'todo', 'projects', 'notes', 'dashboard', 'library', 'folder', 'images', 'videos', 'alltasks', 'calendar', 'dataview', 'weread', 'ticktick', 'sticky', 'web']);
@@ -33,7 +34,7 @@ const ROOT_MANAGED_KEYS = new Set([
 	'dashboard', 'workbench_schema', 'banner', 'quickActions', 'quickActionOrder', 'hiddenPresets', 'columns',
 ]);
 const COLUMN_MANAGED_KEYS = new Set([
-	'id', 'name', 'color', 'type', 'library', 'weread', 'ticktick', 'dataview', 'web', 'height', 'half', 'width',
+	'id', 'name', 'color', 'type', 'library', 'weread', 'ticktick', 'dataview', 'web', 'config', 'height', 'half', 'width',
 ]);
 const BANNER_MANAGED_KEYS = new Set([
 	'quote', 'author', 'image', 'quoteColor', 'quoteFont', 'quotes', 'images', 'mode', 'statsConfig',
@@ -65,6 +66,7 @@ interface ColumnDef {
 	ticktickConfig?: TickTickConfig;
 	dataviewConfig?: DataviewConfig;
 	webConfig?: WebEmbedConfig;
+	extensionConfig?: Record<string, unknown>;
 	height?: number;
 	half?: boolean;
 	width?: number;
@@ -390,6 +392,10 @@ export function serialize(data: DashboardData): string {
 				lines.push(`      zoom: ${wc.zoom}`);
 			}
 		}
+		if (col.extensionConfig && Object.keys(col.extensionConfig).length > 0) {
+			const configLines = stringifyYaml({ config: col.extensionConfig }, { lineWidth: 0 }).trimEnd().split('\n');
+			for (const line of configLines) lines.push(`    ${line}`);
+		}
 	}
 
 	lines.push('---');
@@ -403,7 +409,8 @@ export function serialize(data: DashboardData): string {
 		lines.push(`## ${column.name}`);
 		lines.push(`<!-- okf-section:${column.id ?? ''} -->`);
 		lines.push('');
-		if (column.rawContent !== undefined && column.sectionType && !SECTION_TYPES.has(column.sectionType)) {
+		if (column.rawContent !== undefined && column.sectionType
+			&& !SECTION_TYPES.has(column.sectionType) && !isRegisteredSection(column.sectionType)) {
 			if (column.rawContent) lines.push(column.rawContent);
 			lines.push('');
 			continue;
@@ -996,6 +1003,7 @@ function parseColumnDefs(fm: Record<string, unknown>): ColumnDef[] {
 		ticktickConfig: item.ticktick ? parseTickTickConfig(item.ticktick as Record<string, unknown>) : undefined,
 		dataviewConfig: item.dataview ? parseDataviewConfig(item.dataview as Record<string, unknown>) : undefined,
 		webConfig: item.web ? parseWebConfig(item.web as Record<string, unknown>) : undefined,
+		extensionConfig: isRecord(item.config) ? item.config : undefined,
 		height: typeof item.height === 'number' ? item.height : undefined,
 		half: item.half === true ? true : undefined,
 		width: typeof item.width === 'number' && item.width >= 20 && item.width <= 80 ? Math.round(item.width) : undefined,
@@ -1040,7 +1048,10 @@ function parseColumns(
 			half: def?.half,
 			width: def?.half ? def?.width : undefined,
 			leadingContent: leadingContent || undefined,
-			rawContent: resolvedType && !SECTION_TYPES.has(resolvedType) ? section.content : undefined,
+			extensionConfig: def?.extensionConfig,
+			rawContent: resolvedType && !SECTION_TYPES.has(resolvedType) && !isRegisteredSection(resolvedType)
+				? section.content
+				: undefined,
 		};
 	});
 	// Self-heal hand-edited frontmatter: a lone `half: true` (or an odd run)

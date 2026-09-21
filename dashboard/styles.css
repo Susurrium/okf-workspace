@@ -1355,6 +1355,128 @@
   color: var(--text-faint);
 }
 
+/* OKF Project is a Vault-backed projection hosted by the Apex section shell. */
+.okf-project-section__toolbar,
+.okf-project-card__heading,
+.okf-project-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.okf-project-section__toolbar {
+  justify-content: space-between;
+  padding: 0 16px 12px;
+}
+
+.okf-project-section__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.okf-project-section__filter {
+  color: var(--text-muted);
+}
+
+.okf-project-section__filter.is-active {
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.okf-project-section__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+  gap: 12px;
+  padding: 0 16px 16px;
+}
+
+.okf-project-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+
+.okf-project-card__heading {
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.okf-project-card__title {
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-normal);
+  font-size: var(--font-ui-medium);
+  font-weight: var(--font-semibold);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.okf-project-card__status {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.okf-project-card__status.is-active { color: var(--color-green); }
+.okf-project-card__status.is-paused { color: var(--color-orange); }
+.okf-project-card__status.is-completed { color: var(--color-blue); }
+
+.okf-project-card__fields {
+  display: grid;
+  gap: 7px;
+}
+
+.okf-project-card__field {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.okf-project-card__field-label {
+  color: var(--text-faint);
+}
+
+.okf-project-card__field-value {
+  overflow-wrap: anywhere;
+}
+
+.okf-project-card__counts {
+  margin: 11px 0;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
+.okf-project-card__actions {
+  flex-wrap: wrap;
+}
+
+.okf-project-card__actions button {
+  font-size: var(--font-ui-smaller);
+}
+
+@media (max-width: 700px) {
+  .okf-project-section__toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .okf-project-section__create {
+    width: 100%;
+  }
+}
+
 .okf-work-item__metrics button.okf-work-item__metric {
   appearance: none;
   border: 0;
