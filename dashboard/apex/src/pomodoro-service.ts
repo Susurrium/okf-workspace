@@ -129,6 +129,8 @@ export class PomodoroService {
 	private tickInterval: number | null = null;
 	private onTickCallback: (() => void) | null = null;
 	private onCompleteCallback: (() => void) | null = null;
+	private tickListeners = new Set<() => void>();
+	private completeListeners = new Set<() => void>();
 	private data: PomodoroData = emptyData();
 	private loaded = false;
 	private loadFailed = false;
@@ -387,14 +389,26 @@ export class PomodoroService {
 		this.onTickCallback = cb;
 	}
 
+	subscribeTick(cb: () => void): () => void {
+		this.tickListeners.add(cb);
+		return () => this.tickListeners.delete(cb);
+	}
+
 	setOnComplete(cb: (() => void) | null): void {
 		this.onCompleteCallback = cb;
+	}
+
+	subscribeComplete(cb: () => void): () => void {
+		this.completeListeners.add(cb);
+		return () => this.completeListeners.delete(cb);
 	}
 
 	destroy(): void {
 		this.clearTickInterval();
 		this.onTickCallback = null;
 		this.onCompleteCallback = null;
+		this.tickListeners.clear();
+		this.completeListeners.clear();
 		this.listeners.clear();
 		this.focusDoc?.removeEventListener('visibilitychange', this.focusHandler);
 		this.focusDoc = null;
@@ -424,6 +438,7 @@ export class PomodoroService {
 
 	private notifyTick(): void {
 		this.onTickCallback?.();
+		for (const listener of [...this.tickListeners]) listener();
 	}
 
 	/** Actual focused ms for the current work phase, including the running stretch. */
@@ -459,6 +474,7 @@ export class PomodoroService {
 		}
 
 		this.onCompleteCallback?.();
+		for (const listener of [...this.completeListeners]) listener();
 		this.transitionToNextPhase();
 	}
 

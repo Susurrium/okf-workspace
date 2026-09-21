@@ -8,6 +8,7 @@ import { renderLibrarySection } from './library-section';
 import { renderMediaSection, destroyMediaSection } from './media-section';
 import { getMediaTagService } from './media-tags';
 import { renderWereadSection } from './weread-section';
+import { getRegisteredApexHost } from './host';
 import { renderTickTickSection } from './ticktick-section';
 import { renderDataviewSection, setDataviewApp } from './dataview-section';
 import { renderWebSection } from './web-section';
@@ -702,12 +703,24 @@ export function renderSidebarPomodoro(
 		statsHint.textContent = t('pomodoro.today') + ' ' + tc;
 	}
 
-	service.setOnTick(() => {
+	let unsubscribeTick: (() => void) | undefined;
+	unsubscribeTick = service.subscribeTick(() => {
+		if (!widget.isConnected) {
+			unsubscribeTick?.();
+			return;
+		}
 		const s = service.getState();
 		updateRing(s.remainingSeconds, s.totalSeconds);
 	});
 
-	service.setOnComplete(() => updateUI());
+	let unsubscribeComplete: (() => void) | undefined;
+	unsubscribeComplete = service.subscribeComplete(() => {
+		if (!widget.isConnected) {
+			unsubscribeComplete?.();
+			return;
+		}
+		updateUI();
+	});
 
 	mainBtn.addEventListener('click', () => {
 		if (service.getState().status === 'running') {
@@ -848,7 +861,9 @@ export function renderSidebarCountdown(
 	settingsBtn.addEventListener('click', (e) => {
 		e.stopPropagation();
 		const modal = new CountdownSettingsModal(app, cd, (updated) => {
-			const plugin = (app as unknown as { plugins: { plugins: Record<string, { settings?: import('./types').DashboardSettings; saveSettings?: () => Promise<void>; refreshAllDashboards?: () => void }> } }).plugins?.plugins?.['apex-dashboard'];
+			const plugin = getRegisteredApexHost()
+				?? (app as unknown as { plugins: { plugins: Record<string, { settings?: import('./types').DashboardSettings; saveSettings?: () => Promise<void>; refreshAllDashboards?: () => void }> } })
+					.plugins?.plugins?.['apex-dashboard'];
 			if (plugin?.settings) {
 				plugin.settings = {
 					...plugin.settings,
@@ -1077,7 +1092,12 @@ export function renderSidebarReading(
 	}
 
 	// Timer tick - update active timer display
-	service.setOnTick(() => {
+	let unsubscribeTick: (() => void) | undefined;
+	unsubscribeTick = service.subscribeTick(() => {
+		if (!widget.isConnected) {
+			unsubscribeTick?.();
+			return;
+		}
 		const s = service.getState();
 		if (s.status === 'running') {
 			const activeTime = scrollArea.querySelector('.dashboard-reading-book-card-time--active');
@@ -1112,7 +1132,6 @@ export function renderSidebarReading(
 export function refreshSidebarReadingWidget(doc: Document, service: ReadingService): void {
 	const widgets = Array.from(doc.querySelectorAll<HTMLElement>('.dashboard-sidebar-reading'));
 	if (widgets.length === 0) return;
-	service.setOnTick(null);
 	for (const w of widgets) {
 		const parent = w.parentElement;
 		if (!parent) continue;

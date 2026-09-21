@@ -1,5 +1,6 @@
 import type { App } from 'obsidian';
 import type { WereadReadingState } from './weread-shelf-model';
+import { getRegisteredApexHost } from './host';
 
 /**
  * Cross-session persistence for per-book weread progress
@@ -89,7 +90,8 @@ export class WereadProgressStore {
 	constructor(private readonly app: App) {}
 
 	private get path(): string {
-		return `${this.app.vault.configDir}/plugins/apex-dashboard/${DATA_FILE}`;
+		const pluginId = getRegisteredApexHost()?.manifest.id ?? 'apex-dashboard';
+		return `${this.app.vault.configDir}/plugins/${pluginId}/${DATA_FILE}`;
 	}
 
 	async load(): Promise<void> {

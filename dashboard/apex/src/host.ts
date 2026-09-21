@@ -2,6 +2,8 @@ import type { App } from 'obsidian';
 
 import type { DashboardSettings } from './types';
 import type { TaskInsertTarget } from './daily-notes';
+import type { PomodoroService } from './pomodoro-service';
+import type { ReadingService } from './reading-service';
 
 /**
  * Generic host surface used by the Apex workbench UI and native services.
@@ -14,6 +16,8 @@ export interface ApexHost {
 	app: App;
 	manifest: { id: string };
 	settings: DashboardSettings;
+	pomodoroService?: PomodoroService;
+	readingService?: ReadingService;
 	backupService?: {
 		runBackupNow(): Promise<void>;
 		restoreLatestNow(): Promise<boolean>;

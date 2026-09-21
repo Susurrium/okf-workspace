@@ -140,6 +140,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	private pomodoroMiniPanel: PomodoroMiniPanel | null = null;
 	private readingMiniTimer: ReadingMiniTimer | null = null;
 	private readingService: ReadingService | null = null;
+	private ownsNativeTimerServices = false;
 	private habitUnsubscribe: (() => void) | null = null;
 	private expenseUnsubscribe: (() => void) | null = null;
 	private musicUnsubscribe: (() => void) | null = null;
@@ -265,8 +266,9 @@ export class DashboardView extends ItemView implements HoverParent {
 			this.bannerStatsResolvedOnce = true;
 			this.debouncedRefreshBannerStats();
 		}));
-		this.pomodoroService = new PomodoroService(this.plugin);
-		this.readingService = new ReadingService(this.plugin);
+		this.ownsNativeTimerServices = !this.plugin.pomodoroService || !this.plugin.readingService;
+		this.pomodoroService = this.plugin.pomodoroService ?? new PomodoroService(this.plugin);
+		this.readingService = this.plugin.readingService ?? new ReadingService(this.plugin);
 		const holidayDataPromise = loadHolidayData(this.app);
 		// Load both data files in parallel — on mobile either can block on an
 		// iCloud download, and the old serial awaits stacked both waits into
@@ -279,17 +281,21 @@ export class DashboardView extends ItemView implements HoverParent {
 		if (revision !== this.lifecycleRevision) return;
 		// Body-level floating countdown pill; polls the service on its own so
 		// it survives sidebar re-renders and stays up while other tabs show.
-		this.pomodoroMiniPanel = createPomodoroMiniPanel(
-			this.plugin,
-			this.pomodoroService,
-			this.containerEl.ownerDocument,
-		);
+		if (this.ownsNativeTimerServices) {
+			this.pomodoroMiniPanel = createPomodoroMiniPanel(
+				this.plugin,
+				this.pomodoroService,
+				this.containerEl.ownerDocument,
+			);
+		}
 		// Tiny top-right elapsed-time pill while a reading session runs; its
 		// stop button opens the same end-of-reading flow as the sidebar card.
-		this.readingMiniTimer = createReadingMiniTimer(
-			this.readingService,
-			this.containerEl.ownerDocument,
-		);
+		if (this.ownsNativeTimerServices) {
+			this.readingMiniTimer = createReadingMiniTimer(
+				this.readingService,
+				this.containerEl.ownerDocument,
+			);
+		}
 		// Habit data is plugin-level: every open view subscribes so a check-in
 		// in one view refreshes the widget and banner in all of them.
 		this.habitUnsubscribe = getHabitService()?.subscribe(() => this.onHabitChanged()) ?? null;
@@ -332,10 +338,11 @@ export class DashboardView extends ItemView implements HoverParent {
 		this.pomodoroMiniPanel = null;
 		this.readingMiniTimer?.destroy();
 		this.readingMiniTimer = null;
-		this.pomodoroService?.destroy();
+		if (this.ownsNativeTimerServices) this.pomodoroService?.destroy();
 		this.pomodoroService = null;
-		this.readingService?.destroy();
+		if (this.ownsNativeTimerServices) this.readingService?.destroy();
 		this.readingService = null;
+		this.ownsNativeTimerServices = false;
 		this.habitUnsubscribe?.();
 		this.habitUnsubscribe = null;
 		this.expenseUnsubscribe?.();

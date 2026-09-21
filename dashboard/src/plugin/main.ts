@@ -55,6 +55,10 @@ import { DashboardSettingTab } from "../../apex/src/settings.js";
 import { DashboardView, DASHBOARD_VIEW_TYPE } from "../../apex/src/view.js";
 import { registerSectionDefinition } from "../../apex/src/section-registry.js";
 import { ApexHostAdapter } from "../adapters/apex-host.js";
+import {
+  readLegacyApexSettings,
+  takeoverApexNativeData,
+} from "../adapters/apex-native-data.js";
 import { createProjectSectionDefinition } from "../features/projects/project-section.js";
 import { createTodaySectionDefinition } from "../features/today/today-section.js";
 import { createReadingSectionDefinition } from "../features/reading/reading-section.js";
@@ -144,6 +148,18 @@ export default class OkfBrainPlugin extends Plugin {
 
   public async onload(): Promise<void> {
     await this.loadSettings();
+    const takeover = await takeoverApexNativeData(this.app, this.manifest.id);
+    const copied = takeover.entries.filter((entry) => entry.status === "copied");
+    const conflicts = takeover.entries.filter((entry) => entry.status === "target-kept");
+    if (copied.length) {
+      console.info(`[okf-workspace] adopted ${copied.length} Apex native data files`);
+    }
+    if (conflicts.length) {
+      new Notice(
+        `Apex 原数据接管保留了 ${conflicts.length} 个已有目标文件；旧文件未被覆盖，可在诊断记录中核对。`,
+        10_000,
+      );
+    }
     this.apexHost = new ApexHostAdapter({
       owner: this,
       settings: this.settings.apex,
@@ -1969,6 +1985,19 @@ export default class OkfBrainPlugin extends Plugin {
       : {};
     this.persistedSettings = { ...loaded };
     delete this.persistedSettings.token;
+    let apexSettings = loaded.apex;
+    let importedLegacyApexSettings = false;
+    if (!apexSettings || typeof apexSettings !== "object") {
+      try {
+        const legacy = await readLegacyApexSettings(this.app);
+        if (legacy && typeof legacy === "object") {
+          apexSettings = legacy as OkfBrainSettings["apex"];
+          importedLegacyApexSettings = true;
+        }
+      } catch (error) {
+        console.warn("[okf-workspace] could not read legacy Apex settings", error);
+      }
+    }
     this.settings = {
       ...DEFAULT_SETTINGS,
       ...loaded,
@@ -1977,9 +2006,10 @@ export default class OkfBrainPlugin extends Plugin {
         loaded?.feedReadingPositions,
       ),
       feedReadingPositions: { ...DEFAULT_SETTINGS.feedReadingPositions, ...loaded?.feedReadingPositions },
-      apex: normalizeApexSettings(loaded.apex),
+      apex: normalizeApexSettings(apexSettings),
     };
     await this.reloadLocalToken();
+    if (importedLegacyApexSettings) await this.saveSettings();
   }
 }
 

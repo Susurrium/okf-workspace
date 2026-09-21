@@ -7,6 +7,16 @@ import { type ApexHost, registerApexHost } from "../../apex/src/host.js";
 import { setLanguage, t } from "../../apex/src/i18n.js";
 import { MediaTagService, registerMediaTagService } from "../../apex/src/media-tags.js";
 import { MusicService, registerMusicService } from "../../apex/src/music-service.js";
+import { PomodoroService } from "../../apex/src/pomodoro-service.js";
+import { ReadingService } from "../../apex/src/reading-service.js";
+import {
+  createPomodoroMiniPanel,
+  type PomodoroMiniPanel,
+} from "../../apex/src/pomodoro-mini-panel.js";
+import {
+  createReadingMiniTimer,
+  type ReadingMiniTimer,
+} from "../../apex/src/reading-mini-timer.js";
 import { generateDefaultMarkdown } from "../../apex/src/parser.js";
 import { teardownBasenameIndex } from "../../apex/src/renderer.js";
 import { type DashboardSettings } from "../../apex/src/types.js";
@@ -50,7 +60,11 @@ export class ApexHostAdapter implements ApexHost {
   private readonly mediaTagService: MediaTagService;
   private readonly habitService: HabitService;
   private readonly expenseService: ExpenseService;
+  public readonly pomodoroService: PomodoroService;
+  public readonly readingService: ReadingService;
   private musicService: MusicService | undefined;
+  private pomodoroMiniPanel: PomodoroMiniPanel | undefined;
+  private readingMiniTimer: ReadingMiniTimer | undefined;
   private workspaceOps: Promise<void> = Promise.resolve();
   private destroyed = false;
 
@@ -67,6 +81,8 @@ export class ApexHostAdapter implements ApexHost {
     this.mediaTagService = new MediaTagService(this);
     this.habitService = new HabitService(this);
     this.expenseService = new ExpenseService(this);
+    this.pomodoroService = new PomodoroService(this);
+    this.readingService = new ReadingService(this);
   }
 
   public async initialize(): Promise<void> {
@@ -75,7 +91,12 @@ export class ApexHostAdapter implements ApexHost {
 
     this.mediaTagService.load();
     registerMediaTagService(this.mediaTagService);
-    await Promise.all([this.habitService.load(), this.expenseService.load()]);
+    await Promise.all([
+      this.habitService.load(),
+      this.expenseService.load(),
+      this.pomodoroService.loadSessions(),
+      this.readingService.loadSessions(),
+    ]);
     registerHabitService(this.habitService);
     registerExpenseService(this.expenseService);
 
@@ -84,6 +105,8 @@ export class ApexHostAdapter implements ApexHost {
       await this.musicService.load();
       registerMusicService(this.musicService);
     }
+    this.pomodoroMiniPanel = createPomodoroMiniPanel(this, this.pomodoroService, activeDocument);
+    this.readingMiniTimer = createReadingMiniTimer(this.readingService, activeDocument);
 
     this.owner.registerInterval(window.setInterval(() => void this.backupService.tick(), 60_000));
     this.owner.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
@@ -107,6 +130,12 @@ export class ApexHostAdapter implements ApexHost {
     this.habitService.destroy();
     registerExpenseService(null);
     this.expenseService.destroy();
+    this.pomodoroMiniPanel?.destroy();
+    this.pomodoroMiniPanel = undefined;
+    this.readingMiniTimer?.destroy();
+    this.readingMiniTimer = undefined;
+    this.pomodoroService.destroy();
+    this.readingService.destroy();
     registerMusicService(null);
     this.musicService?.destroy();
   }
