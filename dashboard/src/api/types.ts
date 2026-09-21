@@ -45,6 +45,7 @@ export interface ProjectSummary extends NoteSummary {
   /** Source notes linked to this Project; never Study Guides, Decisions, or Outputs. */
   related_materials: NoteSummary[];
   pending_captures: NoteSummary[];
+  open_tasks: TaskItem[];
 }
 
 export interface CourseSummary extends NoteSummary {

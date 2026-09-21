@@ -1,0 +1,93 @@
+import { TFile, type App } from "obsidian";
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+
+import {
+  matchesCalendarFilter,
+  scanFileTasks,
+  toggleTaskInFile,
+} from "../apex/src/alltasks-scan.js";
+import { todayFormalTasks } from "../src/features/today/today-section.js";
+
+function file(path: string): TFile {
+  return Object.assign(new (TFile as unknown as new (path: string) => TFile)(path), {
+    stat: { mtime: 1, ctime: 1, size: 0 },
+  });
+}
+
+describe("unified Markdown task identity", () => {
+  it("matches the shared cross-language task fixture", () => {
+    const cases = JSON.parse(readFileSync(
+      new URL("../../tests/fixtures/tasks/task-cases.json", import.meta.url),
+      "utf8",
+    )) as Array<{ path: string; markdown: string; formal_open: string[]; checkbox_count: number }>;
+
+    for (const fixture of cases) {
+      const tasks = scanFileTasks(file(fixture.path), fixture.markdown);
+      expect(tasks).toHaveLength(fixture.checkbox_count);
+      expect(tasks.filter((task) => task.formal && !task.checked).map((task) => task.text)).toEqual(fixture.formal_open);
+    }
+  });
+
+  it("separates reminder, due, and scheduled while excluding YAML, fences, and Source text from formal tasks", () => {
+    const project = scanFileTasks(file("projects/demo/project.md"), `---
+type: Project
+sample: "- [ ] #task yaml example"
+---
+\`\`\`markdown
+- [ ] #task fenced example [scheduled:: 2026-10-01]
+\`\`\`
+- [ ] #task Ship it ⏰ 2026-09-28 08:00 [due:: 2026-09-30] [scheduled:: 2026-09-29 09:00] ^task-ship
+`);
+    const source = scanFileTasks(file("sources/example.md"), `---
+type: Source
+---
+- [ ] #task quoted source task [scheduled:: 2026-09-29]
+- [ ] ordinary source checklist [scheduled:: 2026-09-29]
+`);
+
+    expect(project).toHaveLength(1);
+    expect(project[0]).toEqual(expect.objectContaining({
+      text: "Ship it",
+      formal: true,
+      blockId: "task-ship",
+      reminder: "2026-09-28 08:00",
+      scheduled: "2026-09-29",
+      scheduledTime: "09:00",
+      due: "2026-09-30",
+    }));
+    expect(source).toHaveLength(2);
+    expect(source.every((task) => !task.formal)).toBe(true);
+    expect(matchesCalendarFilter(project[0]!, "formal", "2026-09-29")).toBe(true);
+    expect(matchesCalendarFilter(source[0]!, "formal", "2026-09-29")).toBe(false);
+    expect(matchesCalendarFilter(source[1]!, "all", "2026-09-29")).toBe(true);
+  });
+
+  it("uses a unique block ID after line movement and preserves concurrent text edits", async () => {
+    const source = "- [ ] #task Original [scheduled:: 2026-09-29] ^task-stable";
+    const task = scanFileTasks(file("projects/demo/project.md"), source)[0]!;
+    let markdown = `intro\n- [ ] #task Edited elsewhere [scheduled:: 2026-09-29] ^task-stable\n`;
+    const app = {
+      vault: {
+        process: async (_file: TFile, transform: (value: string) => string) => {
+          markdown = transform(markdown);
+          return markdown;
+        },
+      },
+    } as unknown as App;
+
+    await expect(toggleTaskInFile(app, task, true)).resolves.toBe(true);
+    expect(markdown).toContain("- [x] #task Edited elsewhere");
+    expect(markdown).not.toContain("Original");
+  });
+
+  it("projects the same formal source task into Today by its calendar date", () => {
+    const tasks = scanFileTasks(file("projects/demo/project.md"), [
+      "- [ ] #task Today [scheduled:: 2026-09-29] ^task-today",
+      "- [ ] #task Later [scheduled:: 2026-09-30] ^task-later",
+      "- [ ] ordinary [scheduled:: 2026-09-29]",
+    ].join("\n"));
+
+    expect(todayFormalTasks(tasks, "2026-09-29").map((task) => task.text)).toEqual(["Today"]);
+  });
+});

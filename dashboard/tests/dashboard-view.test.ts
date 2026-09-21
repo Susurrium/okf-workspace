@@ -59,6 +59,7 @@ function project(status: "active" | "paused" | "completed" = "active"): ProjectS
     related_learning: [],
     related_materials: [],
     pending_captures: [],
+    open_tasks: [],
   };
 }
 
@@ -2100,6 +2101,7 @@ describe("real Dashboard View source handoff", () => {
             related_learning: [],
             related_materials: [],
             pending_captures: [],
+            open_tasks: [],
           }],
         }),
       },

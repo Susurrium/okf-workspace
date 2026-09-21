@@ -261,7 +261,7 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
 	widgetYearProgressEnabled: false,
 	widgetCalendarEnabled: false,
 	calendarExcludeFolders: [],
-	calendarTaskFilter: 'all',
+	calendarTaskFilter: 'formal',
 	calendarTaskInsertPosition: 'start',
 	widgetHabitEnabled: false,
 	widgetExpenseEnabled: false,

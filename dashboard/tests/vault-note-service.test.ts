@@ -56,6 +56,11 @@ describe("VaultNoteService", () => {
     const oneLineCapture = await notes.createCapture("不会重复的单行", "不会重复的单行");
     const daily = await notes.createDaily();
     await notes.appendDailyCapture("这条内容属于今天，而不是 Inbox。");
+    const scheduledTask = await notes.appendDailyTask(
+      "2026-09-30",
+      "- [ ] #task 准备月底复盘 [scheduled:: 2026-09-30 09:30]",
+      "start",
+    );
     const weeklyReview = await notes.createReview("weekly", new Date(2026, 7, 17, 12));
     const monthlyReview = await notes.createReview("monthly", new Date(2026, 7, 17, 12));
     const yearlyReview = await notes.createReview("yearly", new Date(2026, 7, 17, 12));
@@ -99,6 +104,10 @@ describe("VaultNoteService", () => {
     expect(markdown.get("projects/test-project/log.md")).toContain("测试项目 · 项目日志");
     expect(markdown.get("projects/test-project/log.md")).toMatch(/- \*\*\d{2}:\d{2}\*\* 完成第一步\n  继续第二步/u);
     expect(markdown.get(daily.path)).toContain("这条内容属于今天，而不是 Inbox。");
+    expect(scheduledTask.file.path).toBe("life/daily/2026/09/2026-09-30.md");
+    expect(scheduledTask.kind).toBe("daily-created");
+    expect(scheduledTask.writtenLine).toMatch(/#task 准备月底复盘 \[scheduled:: 2026-09-30 09:30\] \^task-/u);
+    expect(markdown.get(scheduledTask.file.path)).toContain(scheduledTask.writtenLine);
     expect(weeklyReview.path).toBe("life/reviews/weekly/2026-W34.md");
     expect(monthlyReview.path).toBe("life/reviews/monthly/2026-08.md");
     expect(yearlyReview.path).toBe("life/reviews/yearly/2026.md");

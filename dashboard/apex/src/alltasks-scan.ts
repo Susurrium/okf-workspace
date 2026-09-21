@@ -17,6 +17,10 @@ export interface VaultTask {
 	line: number;
 	/** Full raw source line (indent + `- [ ]`/`- [x]` + text + markers), kept verbatim so toggling can match it exactly even if the file shifted. */
 	originalLine: string;
+	/** Stable Markdown block identity when the task line ends in `^id`. */
+	blockId?: string;
+	/** True only for explicit user tasks outside Source/Digest artifacts. */
+	formal: boolean;
 	checked: boolean;
 	/** Display text with all markers (collapsed/reminder/due/priority) stripped. */
 	text: string;
@@ -53,8 +57,8 @@ interface CacheEntry {
 const moduleCache = new Map<string, CacheEntry>();
 
 const COLLAPSED_REGEX = /\s*<!--collapsed-->\s*$/;
-/** Plugin's own reminder marker: `⏰ YYYY-MM-DD( HH:MM)` at end of line (time optional). */
-const REMINDER_REGEX = /\s*⏰\s*(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2}))?\s*$/;
+/** Plugin's own reminder marker: `⏰ YYYY-MM-DD( HH:MM)` (time optional). */
+const REMINDER_REGEX = /\s*⏰\s*(\d{4}-\d{2}-\d{2})(?:\s+(\d{2}:\d{2}))?/;
 /** Dataview-style due date inline field, anywhere in the text. */
 const DUE_FIELD_REGEX = /\s*\[due::\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)\s*\]/i;
 /** Tasks-plugin calendar emoji due date, anywhere in the text. */
@@ -79,6 +83,16 @@ const COMPLETION_EMOJI_REGEX = /\s*✅\s*(\d{4}-\d{2}-\d{2})/;
 const PRIORITY_FIELD_REGEX = /\s*\[priority::\s*([^\]]+?)\s*\]/i;
 /** Any checkbox line, allowing leading indentation so subtasks are aggregated too. */
 const TASK_LINE_REGEX = /^(\s*)- \[([ xX])\]\s*(.+)$/;
+const FORMAL_TASK_REGEX = /(?:^|\s)#task(?=\s|$)/i;
+const BLOCK_ID_REGEX = /\s+\^([a-zA-Z0-9-]+)\s*$/;
+
+function frontmatterEnd(lines: string[]): number {
+	if (lines[0]?.trim() !== '---') return -1;
+	for (let index = 1; index < lines.length; index++) {
+		if (lines[index]?.trim() === '---') return index;
+	}
+	return -1;
+}
 
 /** Normalize a raw `[priority:: ...]` value to a known level. */
 function normalizePriority(raw: string): Priority | undefined {
@@ -100,14 +114,33 @@ function hhmm(s: string | undefined): string | undefined {
  */
 export function scanFileTasks(file: TFile, content: string): VaultTask[] {
 	const lines = content.split('\n');
+	const yamlEnd = frontmatterEnd(lines);
+	const yaml = yamlEnd > 0 ? lines.slice(1, yamlEnd).join('\n') : '';
+	const artifactType = /^type:\s*["']?([^\n"']+)/imu.exec(yaml)?.[1]?.trim().toLocaleLowerCase();
+	const excludesFormalTasks = artifactType === 'source' || artifactType === 'digest';
 	const out: VaultTask[] = [];
+	let fence: '`' | '~' | undefined;
 	for (let i = 0; i < lines.length; i++) {
 		const raw = lines[i]!;
+		if (i <= yamlEnd) continue;
+		const fenceMatch = /^\s*(`{3,}|~{3,})/u.exec(raw);
+		if (fenceMatch?.[1]) {
+			const marker = fenceMatch[1][0] as '`' | '~';
+			if (!fence) fence = marker;
+			else if (fence === marker) fence = undefined;
+			continue;
+		}
+		if (fence) continue;
 		const m = raw.match(TASK_LINE_REGEX);
 		if (!m) continue;
 		const [, , mark, rest] = m;
 		let text = rest ?? '';
 		text = text.replace(COLLAPSED_REGEX, '');
+		const blockMatch = text.match(BLOCK_ID_REGEX);
+		const blockId = blockMatch?.[1];
+		if (blockMatch) text = text.replace(BLOCK_ID_REGEX, '');
+		const formal = !excludesFormalTasks && FORMAL_TASK_REGEX.test(text);
+		text = text.replace(FORMAL_TASK_REGEX, ' ');
 
 		let reminder: string | undefined;
 		const rm = text.match(REMINDER_REGEX);
@@ -130,9 +163,6 @@ export function scanFileTasks(file: TFile, content: string): VaultTask[] {
 				text = text.replace(CALENDAR_REGEX, '');
 			}
 		}
-		// The plugin's ⏰ reminder is the canonical due source when present.
-		if (reminder) due = reminder.slice(0, 10);
-
 		let priority: Priority | undefined;
 		const pf = text.match(PRIORITY_FIELD_REGEX);
 		if (pf) {
@@ -185,6 +215,8 @@ export function scanFileTasks(file: TFile, content: string): VaultTask[] {
 			path: file.path,
 			line: i,
 			originalLine: raw,
+			blockId,
+			formal,
 			checked: (mark ?? ' ') !== ' ',
 			text: text.trim(),
 			reminder,
@@ -198,8 +230,8 @@ export function scanFileTasks(file: TFile, content: string): VaultTask[] {
 			time,
 			endTime,
 			priority,
-			mtime: file.stat.mtime,
-			ctime: file.stat.ctime,
+			mtime: file.stat?.mtime ?? 0,
+			ctime: file.stat?.ctime ?? 0,
 		});
 	}
 	return out;
@@ -288,19 +320,13 @@ export async function toggleTaskInFile(app: App, task: VaultTask, nextChecked: b
 		await app.vault.process(task.file, (data: string) => {
 			const lines = data.split('\n');
 			const target = task.originalLine;
-			const wantOpen = target.indexOf('- [ ]');
-			const wantDone = target.indexOf('- [x]');
-			let replacement: string;
-			if (nextChecked) {
-				replacement = wantOpen === -1 ? target : target.slice(0, wantOpen) + '- [x]' + target.slice(wantOpen + 5);
-			} else {
-				replacement = wantDone === -1 ? target : target.slice(0, wantDone) + '- [ ]' + target.slice(wantDone + 5);
-			}
-			if (replacement === target) {
-				wrote = false;
-				return data;
-			}
 			let idx = lines[task.line] === target ? task.line : -1;
+			if (idx === -1 && task.blockId) {
+				const escaped = task.blockId.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+				const block = new RegExp(`\\^${escaped}\\s*$`, 'u');
+				const hits = lines.flatMap((line, index) => block.test(line) ? [index] : []);
+				if (hits.length === 1) idx = hits[0]!;
+			}
 			if (idx === -1) {
 				const hits: number[] = [];
 				for (let i = 0; i < lines.length; i++) {
@@ -309,6 +335,12 @@ export async function toggleTaskInFile(app: App, task: VaultTask, nextChecked: b
 				if (hits.length === 1) idx = hits[0]!;
 			}
 			if (idx === -1) {
+				wrote = false;
+				return data;
+			}
+			const current = lines[idx]!;
+			const replacement = current.replace(/- \[[ xX]\]/u, nextChecked ? '- [x]' : '- [ ]');
+			if (replacement === current) {
 				wrote = false;
 				return data;
 			}
@@ -414,7 +446,7 @@ const MAX_SPAN_DAYS = 366;
  * completion-day one (see indexTasksByDay).
  */
 export function isCalendarRelevant(task: VaultTask): boolean {
-	return Boolean(task.due || task.start || task.end || task.scheduled);
+	return Boolean(task.reminder || task.due || task.start || task.end || task.scheduled);
 }
 
 /** Why a task occupies a given calendar day. Renderers use this to pick the
@@ -479,6 +511,7 @@ export function indexTasksByDay(tasks: VaultTask[]): Map<string, VaultTask[]> {
 		}
 		if (task.scheduled) days.add(task.scheduled);
 		if (task.due) days.add(task.due);
+		if (task.reminder) days.add(task.reminder.slice(0, 10));
 		if (task.completion) days.add(task.completion);
 		for (const iso of days) {
 			const list = byDay.get(iso);
@@ -500,9 +533,9 @@ export function toIsoDate(d: Date): string {
 /* ------------------------- task view filters ------------------------- */
 
 /** Mutually-exclusive task filters for the full-screen calendar. */
-export type CalendarTaskFilter = 'all' | 'due' | 'start' | 'active' | 'open';
+export type CalendarTaskFilter = 'formal' | 'all' | 'due' | 'start' | 'active' | 'open';
 /** Display order of the filter options. */
-export const CALENDAR_TASK_FILTERS: readonly CalendarTaskFilter[] = ['all', 'due', 'start', 'active', 'open'];
+export const CALENDAR_TASK_FILTERS: readonly CalendarTaskFilter[] = ['formal', 'all', 'due', 'start', 'active', 'open'];
 
 /**
  * Task-level filter predicate. `todayIso` (YYYY-MM-DD) is injected so the
@@ -516,6 +549,7 @@ export const CALENDAR_TASK_FILTERS: readonly CalendarTaskFilter[] = ['all', 'due
  */
 export function matchesCalendarFilter(task: VaultTask, filter: CalendarTaskFilter, todayIso: string): boolean {
 	switch (filter) {
+		case 'formal': return task.formal;
 		case 'all': return true;
 		case 'due': return Boolean(task.due);
 		case 'start': return Boolean(task.start);

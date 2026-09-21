@@ -371,15 +371,16 @@ export class DayAgendaModal extends Modal {
 		const title = titleInput.value.trim();
 		if (!title) return;
 		const time = timeInput.value; // '' or 'HH:MM'
-		const reminder = time ? `${this.iso} ${time}` : undefined;
-		// Timed tasks use the plugin's ⏰ reminder; date-only tasks use 📅 so they
-		// still land on this calendar day (a task with no date marker wouldn't
-		// be calendar-relevant and would never show up).
-		const line = reminder ? `- [ ] ${title} ⏰ ${reminder}` : `- [ ] ${title} 📅 ${this.iso}`;
+		const scheduled = time ? `${this.iso} ${time}` : this.iso;
+		const line = `- [ ] #task ${title} [scheduled:: ${scheduled}]`;
 
 		let target: TaskInsertTarget | null = null;
 		try {
-			target = await insertTaskForDay(this.app, this.iso, line, this.dashboardFile, readTaskInsertPosition(this.app));
+			const position = readTaskInsertPosition(this.app);
+			const host = getRegisteredApexHost();
+			target = host?.insertCalendarTask
+				? await host.insertCalendarTask(this.iso, line, position)
+				: await insertTaskForDay(this.app, this.iso, line, this.dashboardFile, position);
 		} catch (err) {
 			console.error('[Dashboard] add task failed:', err);
 			new Notice(t('calendar.taskAddFailed'), 4000);
@@ -398,7 +399,8 @@ export class DayAgendaModal extends Modal {
 		// calendar section also re-scans automatically on the vault write event.
 		this.tasks = [...this.tasks, {
 			file: target.file, path: target.file.path, line: target.line, originalLine: target.writtenLine, checked: false,
-			text: title, reminder, due: this.iso, time: time || undefined,
+			blockId: /\s\^([a-zA-Z0-9-]+)\s*$/u.exec(target.writtenLine)?.[1], formal: true,
+			text: title, scheduled: this.iso, scheduledTime: time || undefined, time: time || undefined,
 			priority: undefined, mtime: Date.now(), ctime: Date.now(),
 		}].sort(byDayTaskTime(this.iso));
 		titleInput.value = '';

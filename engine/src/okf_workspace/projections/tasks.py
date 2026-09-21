@@ -8,6 +8,14 @@ from pathlib import Path
 
 _TASK = re.compile(r"^\s*-\s+\[ \]\s+(.+?)\s*$")
 _FORMAL_TASK = re.compile(r"(?:^|\s)#task(?:\s|$)", re.IGNORECASE)
+_TYPE = re.compile(r'^type:\s*["\']?([^"\']+?)["\']?\s*$', re.IGNORECASE)
+_TASK_METADATA = [
+    re.compile(r"\s*⏰\s*\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?"),
+    re.compile(r"\s*\[(?:due|start|end|scheduled|completion|priority)::[^\]]+\]", re.IGNORECASE),
+    re.compile(r"\s*[📅🛫🛬⏳✅]\s*\d{4}-\d{2}-\d{2}"),
+    re.compile(r"\s*<!--collapsed-->\s*$"),
+    re.compile(r"\s+\^[a-zA-Z0-9-]+\s*$"),
+]
 _SKIPPED_DIRECTORIES = {".agents", ".claudian", ".git", ".obsidian", ".trash"}
 _SKIPPED_SYSTEM_SECTIONS = {"contracts", "reports", "templates", "views"}
 
@@ -21,10 +29,26 @@ class TaskItem:
 
 def _tasks_in_file(path: Path, vault: Path) -> list[TaskItem]:
     relative = path.relative_to(vault).as_posix()
+    lines = path.read_text(encoding="utf-8").splitlines()
+    yaml_end = -1
+    artifact_type = ""
+    if lines and lines[0].strip() == "---":
+        for index, line in enumerate(lines[1:], start=1):
+            if line.strip() == "---":
+                yaml_end = index
+                break
+        for line in lines[1:yaml_end] if yaml_end > 0 else []:
+            match = _TYPE.match(line.strip())
+            if match:
+                artifact_type = match.group(1).strip().lower()
+                break
+    excludes_formal_tasks = artifact_type in {"source", "digest"}
     tasks: list[TaskItem] = []
     in_fence = False
     fence_marker: str | None = None
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for number, line in enumerate(lines, start=1):
+        if number - 1 <= yaml_end:
+            continue
         stripped = line.lstrip()
         marker = stripped[:3]
         if marker in {"```", "~~~"}:
@@ -38,8 +62,11 @@ def _tasks_in_file(path: Path, vault: Path) -> list[TaskItem]:
         if in_fence:
             continue
         match = _TASK.match(line)
-        if match and _FORMAL_TASK.search(match.group(1)):
+        if match and not excludes_formal_tasks and _FORMAL_TASK.search(match.group(1)):
             visible = _FORMAL_TASK.sub(" ", match.group(1)).strip()
+            for metadata in _TASK_METADATA:
+                visible = metadata.sub("", visible).strip()
+            visible = re.sub(r"\s+", " ", visible)
             tasks.append(TaskItem(path=relative, line=number, text=visible))
     return tasks
 

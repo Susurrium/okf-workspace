@@ -56,6 +56,7 @@ import { DashboardView, DASHBOARD_VIEW_TYPE } from "../../apex/src/view.js";
 import { registerSectionDefinition } from "../../apex/src/section-registry.js";
 import { ApexHostAdapter } from "../adapters/apex-host.js";
 import { createProjectSectionDefinition } from "../features/projects/project-section.js";
+import { createTodaySectionDefinition } from "../features/today/today-section.js";
 import {
   DASHBOARD_COMMAND_ID,
   registerDashboardRibbon,
@@ -140,10 +141,13 @@ export default class OkfBrainPlugin extends Plugin {
         this.settings.apex = settings;
         await this.saveSettings();
       },
+      insertCalendarTask: (date, taskLine, position) =>
+        this.notes().appendDailyTask(date, taskLine, position),
     });
     await this.apexHost.initialize();
     this.unregisterApexSections.push(
       registerSectionDefinition(createProjectSectionDefinition(this)),
+      registerSectionDefinition(createTodaySectionDefinition(this)),
     );
     this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new DashboardView(leaf, this.apexHost!));
     registerDashboardRibbon(this, () => void this.openDashboard());

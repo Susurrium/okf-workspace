@@ -1355,6 +1355,49 @@
   color: var(--text-faint);
 }
 
+.okf-today-section__actions,
+.okf-today-task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.okf-today-section__actions {
+  padding: 0 16px 12px;
+}
+
+.okf-today-section__tasks {
+  display: grid;
+  gap: 6px;
+  padding: 0 16px 16px;
+}
+
+.okf-today-task {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+}
+
+.okf-today-task__title {
+  flex: 1;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-normal);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.okf-today-task__source {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+
 /* OKF Project is a Vault-backed projection hosted by the Apex section shell. */
 .okf-project-section__toolbar,
 .okf-project-card__heading,
@@ -1450,6 +1493,30 @@
 
 .okf-project-card__field-value {
   overflow-wrap: anywhere;
+}
+
+.okf-project-card__task-list {
+  display: grid;
+  gap: 4px;
+}
+
+.okf-project-card__task {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.okf-project-card__task button {
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .okf-project-card__counts {

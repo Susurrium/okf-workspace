@@ -24,5 +24,6 @@ describe("Apex integration settings", () => {
     expect(settings.widgetExpenseEnabled).toBe(false);
     expect(settings.readingEnabled).toBe(false);
     expect(settings.dashboardFile).toBe("dashboard");
+    expect(settings.calendarTaskFilter).toBe("formal");
   });
 });

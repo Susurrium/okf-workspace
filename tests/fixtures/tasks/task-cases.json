@@ -1,0 +1,26 @@
+[
+  {
+    "path": "projects/demo/project.md",
+    "markdown": "---\ntype: Project\nsample: \"- [ ] #task YAML example\"\n---\n\n```markdown\n- [ ] #task fenced example [scheduled:: 2026-09-29]\n```\n\n- [ ] #task Ship release ⏰ 2026-09-28 08:00 [scheduled:: 2026-09-29 09:00] [due:: 2026-09-30] ^task-ship\n- [x] #task Already done [completion:: 2026-09-27] ^task-done\n- [ ] ordinary project checklist [scheduled:: 2026-09-29]\n",
+    "formal_open": ["Ship release"],
+    "checkbox_count": 3
+  },
+  {
+    "path": "sources/source.md",
+    "markdown": "---\ntype: Source\n---\n\n- [ ] #task quoted source action [scheduled:: 2026-09-29]\n- [ ] ordinary source checklist [scheduled:: 2026-09-29]\n",
+    "formal_open": [],
+    "checkbox_count": 2
+  },
+  {
+    "path": "feeds/ai-daily/2026/digest.md",
+    "markdown": "---\ntype: Digest\n---\n\n- [ ] #task generated suggestion [due:: 2026-09-30]\n",
+    "formal_open": [],
+    "checkbox_count": 1
+  },
+  {
+    "path": "life/daily/2026/09/2026-09-29.md",
+    "markdown": "---\ntype: Daily\n---\n\n- [ ] #task Same text [scheduled:: 2026-09-29] ^task-first\n- [ ] #task Same text [scheduled:: 2026-09-29] ^task-second\n",
+    "formal_open": ["Same text", "Same text"],
+    "checkbox_count": 2
+  }
+]

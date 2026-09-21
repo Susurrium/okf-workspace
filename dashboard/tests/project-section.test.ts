@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { TFile } from "obsidian";
 
 import type { ProjectSummary } from "../src/api/types.js";
 import {
   filterProjects,
   normalizeProjectSectionConfig,
+  projectFormalTasks,
   projectLifecycleStatus,
 } from "../src/features/projects/project-section.js";
+import { scanFileTasks } from "../apex/src/alltasks-scan.js";
 
 function project(title: string, status: string | null): ProjectSummary {
   return {
@@ -25,6 +28,7 @@ function project(title: string, status: string | null): ProjectSummary {
     related_learning: [],
     related_materials: [],
     pending_captures: [],
+    open_tasks: [],
   };
 }
 
@@ -46,5 +50,23 @@ describe("OKF Project section", () => {
       "two",
       "three",
     ]);
+  });
+
+  it("projects only open formal tasks from the project's own directory", () => {
+    const projectSummary = project("one", "active");
+    const taskFile = Object.assign(
+      new (TFile as unknown as new (path: string) => TFile)("projects/one/project.md"),
+      { stat: { mtime: 1, ctime: 1, size: 0 } },
+    );
+    const otherFile = Object.assign(
+      new (TFile as unknown as new (path: string) => TFile)("projects/two/project.md"),
+      { stat: { mtime: 1, ctime: 1, size: 0 } },
+    );
+    const tasks = [
+      ...scanFileTasks(taskFile, "- [ ] #task Keep ^task-keep\n- [ ] ordinary"),
+      ...scanFileTasks(otherFile, "- [ ] #task Other ^task-other"),
+    ];
+
+    expect(projectFormalTasks(projectSummary, tasks).map((task) => task.text)).toEqual(["Keep"]);
   });
 });

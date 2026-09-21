@@ -36,7 +36,7 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 | M2 | Existing OKF services, settings, commands, and plugin lifecycle exposed to new host | In progress: one outer plugin owns Apex native services plus existing OKF commands, Engine/operation lifecycle, Digest integration, Claudian bridge, and a single combined settings entry; multi-pane/disposable-Vault lifecycle run remains |
 | M3 | Stable section IDs, lossless board repository, registry, pane-local state | In progress: stable IDs/anchors, duplicate-name routing, unknown YAML/body preservation, section registry, per-board shared state/write queues, three-way pre-write merge, and persisted pane-local workspace/collapse/scroll state implemented; real Obsidian interaction remains |
 | M4 | Full Project experience and managed-artifact edit policy | In progress: registered `workspace-projects` Vault projection, independent persisted status filters, and existing create/open/log/Decision/status actions are connected; detail routing, related-content actions, and managed database/drag policy remain |
-| M5 | Unified task/calendar/Daily/Capture loop | Pending |
+| M5 | Unified task/calendar/Daily/Capture loop | In progress: shared formal-task scanner/fixture, stable block identity, independent reminder/scheduled/due fields, exact-date OKF Daily creation, and Project/Today/Calendar projections and toggles implemented; full edit/move/archive and sticky-to-Capture recovery remain |
 | M6 | Learning/Knowledge/Inbox/Import sections and details | Pending |
 | M7 | Feed/Reading and default workbench presets | Pending |
 | M8 | Native-data takeover, UX, capability, and performance work | Pending |
@@ -46,15 +46,15 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 
 | ID | Scenario | Required evidence | Status |
 | --- | --- | --- | --- |
-| A01 | Create a dated Project action | One task body appears through Project, Today, and Calendar; completion from any view updates all | Pending |
+| A01 | Create a dated Project action | One task body appears through Project, Today, and Calendar; completion from any view updates all | Automated shared-source projection/toggle coverage: `dashboard/tests/apex-task-identity.test.ts`, `dashboard/tests/project-section.test.ts`, and `dashboard/tests/vault-dashboard.test.ts`; disposable-Vault three-view run pending |
 | A02 | Put one Project in two workbenches | Status synchronizes; removing one reference keeps the Project; filters remain independent | Automated filter/config and reference-only section coverage: `dashboard/tests/project-section.test.ts` and `dashboard/tests/apex-board-format.test.ts`; multi-workbench disposable-Vault run pending |
 | A03 | Rename/reorder same-named sections | Stable IDs retain config, collapse, scroll, and body association | Automated format/identity coverage: `dashboard/tests/apex-board-format.test.ts`; DOM scroll and disposable-Vault run pending |
 | A04 | Complete a board checklist from Calendar, then save layout | Completion remains after layout save/reload | Automated three-way merge coverage: `dashboard/tests/apex-board-merge.test.ts`; calendar UI run pending |
-| A05 | Checkboxes in fences/YAML/Source Text/Digest | Formal-task query excludes them; explicit ordinary-checklist filter can still expose ordinary lists | Pending |
-| A06 | Reminder before due and scheduled distinct from due | All values render and edit independently; reminder never overwrites due | Pending |
-| A07 | Duplicate text, file rename, and line movement | Mutation finds the same anchored task or requests reread; never changes its twin | Pending |
+| A05 | Checkboxes in fences/YAML/Source Text/Digest | Formal-task query excludes them; explicit ordinary-checklist filter can still expose ordinary lists | Shared TS/Python fixture and scanner coverage: `tests/fixtures/tasks/task-cases.json`, `dashboard/tests/apex-task-identity.test.ts`, `engine/tests/integration/test_projections.py`; UI filter run pending |
+| A06 | Reminder before due and scheduled distinct from due | All values render and edit independently; reminder never overwrites due | Parser/index coverage proves three independent fields in `dashboard/tests/apex-task-identity.test.ts`; edit UI coverage pending |
+| A07 | Duplicate text, file rename, and line movement | Mutation finds the same anchored task or requests reread; never changes its twin | Stable block-ID relocation and concurrent-text preservation covered by `dashboard/tests/apex-task-identity.test.ts`; file-rename/disposable-Vault run pending |
 | A08 | Database edits or drags a Project/Source | Legal action is used; identity, pair, managed regions, and path contract remain valid | Pending |
-| A09 | Calendar creates task for a missing Daily | A valid Daily for the clicked date is created; no fallback to today or a board list | Pending |
+| A09 | Calendar creates task for a missing Daily | A valid Daily for the clicked date is created; no fallback to today or a board list | Integrated Calendar delegates to exact-date `VaultNoteService.appendDailyTask`; creation/contract path covered in `dashboard/tests/vault-note-service.test.ts`; disposable-Vault run pending |
 | A10 | Feed to study/wiki/reference with one Source in several Projects | One Source, independent idempotent uses, correct context, no inferred interest | Pending |
 | A11 | Finish a book/timer or generate Study Guide | `studied_at` is unchanged until explicit human confirmation | Pending |
 | A12 | Convert sticky note to Capture with interruption/repeated click | Text is recoverable and idempotent; no long-lived duplicate body | Pending |

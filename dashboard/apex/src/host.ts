@@ -1,6 +1,7 @@
 import type { App } from 'obsidian';
 
 import type { DashboardSettings } from './types';
+import type { TaskInsertTarget } from './daily-notes';
 
 /**
  * Generic host surface used by the Apex workbench UI and native services.
@@ -26,6 +27,11 @@ export interface ApexHost {
 	removeWorkspace(path: string): Promise<void>;
 	reorderWorkspaces(from: number, to: number): Promise<void>;
 	retargetWorkspace(oldPath: string, newPath: string): Promise<void>;
+	insertCalendarTask?(
+		date: string,
+		taskLine: string,
+		position: 'start' | 'end',
+	): Promise<TaskInsertTarget | null>;
 }
 
 let registeredHost: ApexHost | null = null;

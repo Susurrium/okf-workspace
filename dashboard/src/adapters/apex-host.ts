@@ -10,6 +10,7 @@ import { MusicService, registerMusicService } from "../../apex/src/music-service
 import { generateDefaultMarkdown } from "../../apex/src/parser.js";
 import { teardownBasenameIndex } from "../../apex/src/renderer.js";
 import { type DashboardSettings } from "../../apex/src/types.js";
+import type { TaskInsertTarget } from "../../apex/src/daily-notes.js";
 import { DashboardView, DASHBOARD_VIEW_TYPE } from "../../apex/src/view.js";
 import {
   alignWorkspaceNames,
@@ -22,6 +23,11 @@ export interface ApexHostAdapterOptions {
   owner: Plugin;
   settings: DashboardSettings;
   persist: (settings: DashboardSettings) => Promise<void>;
+  insertCalendarTask?: (
+    date: string,
+    taskLine: string,
+    position: "start" | "end",
+  ) => Promise<TaskInsertTarget | null>;
 }
 
 /**
@@ -35,6 +41,7 @@ export class ApexHostAdapter implements ApexHost {
 
   private readonly owner: Plugin;
   private readonly persist: (settings: DashboardSettings) => Promise<void>;
+  private readonly calendarTaskWriter: ApexHostAdapterOptions["insertCalendarTask"];
   public readonly backupService: BackupService;
   private readonly mediaTagService: MediaTagService;
   private readonly habitService: HabitService;
@@ -49,6 +56,7 @@ export class ApexHostAdapter implements ApexHost {
     this.manifest = options.owner.manifest;
     this.settings = options.settings;
     this.persist = options.persist;
+    this.calendarTaskWriter = options.insertCalendarTask;
     this.backupService = new BackupService(this);
     this.mediaTagService = new MediaTagService(this);
     this.habitService = new HabitService(this);
@@ -99,6 +107,15 @@ export class ApexHostAdapter implements ApexHost {
 
   public async saveSettings(): Promise<void> {
     await this.persist(this.settings);
+  }
+
+  public insertCalendarTask(
+    date: string,
+    taskLine: string,
+    position: "start" | "end",
+  ): Promise<TaskInsertTarget | null> {
+    if (!this.calendarTaskWriter) return Promise.resolve(null);
+    return this.calendarTaskWriter(date, taskLine, position);
   }
 
   public refreshAllDashboards(): void {

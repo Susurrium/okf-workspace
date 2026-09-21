@@ -641,7 +641,14 @@ function renderTaskCell(td: HTMLElement, task: NonNullable<ResultRow['task']>, a
 				checkbox.disabled = true;
 				const file = app.vault.getAbstractFileByPath(task.path);
 				if (file instanceof TFile) {
-					const wrote = await toggleTaskInFile(app, { ...task, file, mtime: file.stat.mtime, ctime: file.stat.ctime }, next);
+					const wrote = await toggleTaskInFile(app, {
+						...task,
+						file,
+						formal: /(?:^|\s)#task(?:\s|$)/iu.test(task.originalLine),
+						blockId: /\s\^([a-zA-Z0-9-]+)\s*$/u.exec(task.originalLine)?.[1],
+						mtime: file.stat.mtime,
+						ctime: file.stat.ctime,
+					}, next);
 					if (wrote) invalidatePath(task.path);
 				}
 				checkbox.disabled = false;
