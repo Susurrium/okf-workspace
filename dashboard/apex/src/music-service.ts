@@ -2,7 +2,7 @@ import { NeteaseAccount } from './netease-account';
 import { Notice } from 'obsidian';
 // createEl is an ambient global declared by the Obsidian typings, not a
 // module export — it creates a detached element, exactly what the player needs.
-import type DashboardPlugin from './main';
+import type { ApexHost } from './host';
 import type { MusicRepeatMode, MusicTrack } from './types';
 import { t } from './i18n';
 import {
@@ -112,7 +112,7 @@ export class MusicService {
 	private lastTimeNotify = 0;
 	private persistTimer: number | null = null;
 
-	constructor(private plugin: DashboardPlugin) {
+	constructor(private plugin: ApexHost) {
 		this.account = new NeteaseAccount(`persist:apex-netease-${encodeURIComponent(plugin.app.vault.getName())}`);
 		this.audio = createEl('audio');
 		this.audio.preload = 'auto';

@@ -1,5 +1,5 @@
 import { setIcon } from 'obsidian';
-import type DashboardPlugin from './main';
+import type { ApexHost } from './host';
 import { t } from './i18n';
 import { applyModalTheme } from './modal-theme';
 import { restoreFloatingPos, wireFloatingDrag } from './floating-panel-utils';
@@ -66,7 +66,7 @@ function phaseLabel(phase: PomodoroPhase, paused: boolean): string {
  * progress); any hover, tap or focus unfolds it again.
  */
 export function createPomodoroMiniPanel(
-	plugin: DashboardPlugin,
+	plugin: ApexHost,
 	service: PomodoroService,
 	doc: Document,
 ): PomodoroMiniPanel {

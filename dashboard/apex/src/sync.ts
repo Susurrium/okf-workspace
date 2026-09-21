@@ -904,7 +904,8 @@ export class SyncEngine {
 			}
 		});
 
-		this.renameEventRef = this.app.vault.on('rename', (file: TFile, oldPath: string) => {
+		this.renameEventRef = this.app.vault.on('rename', (file, oldPath: string) => {
+			if (!(file instanceof TFile)) return;
 			if (!this.data) return;
 			this.handleFileRename(file, oldPath);
 		});

@@ -12,6 +12,7 @@ import {
 } from './alltasks-scan';
 import { insertTaskForDay, type TaskInsertTarget } from './daily-notes';
 import { applyModalTheme } from './modal-theme';
+import { getRegisteredApexHost } from './host';
 import type { DashboardSettings } from './types';
 
 interface CalendarModalCallbacks {
@@ -28,6 +29,8 @@ type DashboardPluginHandle = {
 
 /** Live plugin lookup (same pattern as renderer.ts's countdown settings path). */
 function lookupDashboardPlugin(app: App): DashboardPluginHandle | undefined {
+	const registered = getRegisteredApexHost();
+	if (registered) return registered;
 	return (app as unknown as { plugins?: { plugins?: Record<string, DashboardPluginHandle> } })
 		.plugins?.plugins?.['apex-dashboard'];
 }

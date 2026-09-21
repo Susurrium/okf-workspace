@@ -1,5 +1,5 @@
 import { App, FuzzySuggestModal, Modal, setIcon } from 'obsidian';
-import type DashboardPlugin from './main';
+import type { ApexHost } from './host';
 import type { BgSize, CustomColors, DashboardSettings } from './types';
 import { CUSTOM_COLOR_TOKENS, refreshAppearanceLive } from './appearance';
 import { showConfirmDialog } from './confirm-dialog';
@@ -39,7 +39,7 @@ interface AdvancedDefaults {
  * (via refreshAppearanceLive, no full re-render) and persist on a short debounce.
  */
 export class ThemeStudioModal extends Modal {
-	private plugin: DashboardPlugin;
+	private plugin: ApexHost;
 	private colors: CustomColors;
 	private bgImage: string;
 	private bgDim: number;
@@ -54,7 +54,7 @@ export class ThemeStudioModal extends Modal {
 	private readonly colorInputs = new Map<keyof CustomColors, HTMLInputElement>();
 	private saveTimer: number | null = null;
 
-	constructor(app: App, plugin: DashboardPlugin) {
+	constructor(app: App, plugin: ApexHost) {
 		super(app);
 		this.plugin = plugin;
 		const s = plugin.settings;

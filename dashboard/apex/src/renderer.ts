@@ -173,8 +173,12 @@ function ensureBasenameIndex(app: App): Map<string, TFile> {
 	basenameIndexApp = app;
 	// Register invalidation hooks exactly once per app; store refs so the plugin
 	// can detach them on unload (matches the sync.ts EventRef pattern).
-	basenameEventRefs.push(app.vault.on('create', indexFile));
-	basenameEventRefs.push(app.vault.on('delete', unindexFile));
+	basenameEventRefs.push(app.vault.on('create', (file) => {
+		if (file instanceof TFile) indexFile(file);
+	}));
+	basenameEventRefs.push(app.vault.on('delete', (file) => {
+		if (file instanceof TFile) unindexFile(file);
+	}));
 	basenameEventRefs.push(app.vault.on('rename', (file, oldPath) => {
 		// Rename keeps the TFile identity but Obsidian has already updated
 		// file.basename/path to the NEW values by the time this fires. Drop the

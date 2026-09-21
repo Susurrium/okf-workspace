@@ -1,6 +1,6 @@
 import { renderMusicAccountSettings } from './music-account-settings';
-import { App, Notice, PluginSettingTab, setIcon, Setting, type SettingDefinitionItem, type TextComponent } from 'obsidian';
-import type DashboardPlugin from './main';
+import { App, Notice, Plugin, PluginSettingTab, setIcon, Setting, type SettingDefinitionItem, type TextComponent } from 'obsidian';
+import type { ApexHost } from './host';
 import { type DashboardSettings, type CountdownConfig, type BackupPeriod } from './types';
 import { t, setLanguage, type Language } from './i18n';
 import { geocodeCity } from './weather-service';
@@ -25,10 +25,10 @@ export type { DashboardSettings };
 type SettingsPage = 'general' | 'widgets' | 'coffee';
 
 export class DashboardSettingTab extends PluginSettingTab {
-	plugin: DashboardPlugin;
+	plugin: ApexHost;
 
-	constructor(app: App, plugin: DashboardPlugin) {
-		super(app, plugin);
+	constructor(app: App, plugin: ApexHost, owner: Plugin = plugin as unknown as Plugin) {
+		super(app, owner);
 		this.plugin = plugin;
 	}
 

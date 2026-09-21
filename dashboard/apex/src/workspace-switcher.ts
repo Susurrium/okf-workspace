@@ -1,5 +1,5 @@
 import { Menu, setIcon } from 'obsidian';
-import type DashboardPlugin from './main';
+import type { ApexHost } from './host';
 import { t } from './i18n';
 import { showPromptDialog } from './prompt-dialog';
 import { showConfirmDialog } from './confirm-dialog';
@@ -11,7 +11,7 @@ function workspaceLabel(name: string, path: string): string {
 }
 
 /** Open the "new workspace" dialog and create the workspace on confirm. */
-async function promptNewWorkspace(plugin: DashboardPlugin): Promise<void> {
+async function promptNewWorkspace(plugin: ApexHost): Promise<void> {
 	const files = plugin.settings.workspaceFiles;
 	const fallback = t('workspace.defaultName', { n: files.length + 1 });
 	const name = await showPromptDialog(plugin.app, {
@@ -24,7 +24,7 @@ async function promptNewWorkspace(plugin: DashboardPlugin): Promise<void> {
 }
 
 /** Long-press / right-click management menu for one workspace button. */
-function openWorkspaceMenu(plugin: DashboardPlugin, file: string, name: string, ev: Event): void {
+function openWorkspaceMenu(plugin: ApexHost, file: string, name: string, ev: Event): void {
 	const menu = new Menu();
 	menu.addItem((item) => {
 		item.setTitle(t('workspace.renameTitle'))
@@ -62,7 +62,7 @@ function openWorkspaceMenu(plugin: DashboardPlugin, file: string, name: string, 
  * on mobile there is no hover, so the pills stay visible. Rebuilt on every
  * render so the active highlight always matches the current settings.
  */
-export function renderWorkspaceSwitcher(container: HTMLElement, plugin: DashboardPlugin): void {
+export function renderWorkspaceSwitcher(container: HTMLElement, plugin: ApexHost): void {
 	const { workspaceFiles, workspaceNames, dashboardFile } = plugin.settings;
 	const active = normalizeWorkspacePath(dashboardFile);
 

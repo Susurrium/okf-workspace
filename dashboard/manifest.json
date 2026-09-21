@@ -1,9 +1,9 @@
 {
   "id": "okf-workspace-dashboard",
-  "name": "Workspace Dashboard",
+  "name": "OKF Apex Workbench",
   "version": "1.15.0",
-  "minAppVersion": "1.6.0",
-  "description": "Human-first personal workspace Dashboard with structured Claudian handoff.",
+  "minAppVersion": "1.8.7",
+  "description": "Apex-based workbench with OKF projects, learning, knowledge, feeds, and structured Claudian handoff.",
   "author": "susurrus",
   "isDesktopOnly": true
 }

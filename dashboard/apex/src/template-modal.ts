@@ -1,5 +1,5 @@
 import { Modal, setIcon } from 'obsidian';
-import type DashboardPlugin from './main';
+import type { ApexHost } from './host';
 import type { TaskTemplate } from './types';
 import { t } from './i18n';
 import { showConfirmDialog } from './confirm-dialog';
@@ -8,14 +8,14 @@ import { applyModalTheme } from './modal-theme';
 type TemplateSelectCallback = (template: TaskTemplate) => void;
 
 export class TemplatePickerModal extends Modal {
-	private plugin: DashboardPlugin;
+	private plugin: ApexHost;
 	private onSelect: TemplateSelectCallback;
 	private mode: 'pick' | 'edit' = 'pick';
 	private editingTemplate: TaskTemplate | null = null;
 
 	constructor(
 		app: import('obsidian').App,
-		plugin: DashboardPlugin,
+		plugin: ApexHost,
 		onSelect: TemplateSelectCallback,
 	) {
 		super(app);

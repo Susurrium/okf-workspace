@@ -1,5 +1,5 @@
 import { Notice } from 'obsidian';
-import type DashboardPlugin from './main';
+import type { ApexHost } from './host';
 import type { BackupPeriod } from './types';
 import { t } from './i18n';
 import { DATA_FILE as HABITS_FILE } from './habit-service';
@@ -35,10 +35,10 @@ const DATA_FILES = [HABITS_FILE, EXPENSE_FILE, POMODORO_FILE, READING_FILE];
  * granularity of the existing day-rollover checker.
  */
 export class BackupService {
-	private readonly plugin: DashboardPlugin;
+	private readonly plugin: ApexHost;
 	private static readonly TICK_MS = 60_000;
 
-	constructor(plugin: DashboardPlugin) {
+	constructor(plugin: ApexHost) {
 		this.plugin = plugin;
 	}
 

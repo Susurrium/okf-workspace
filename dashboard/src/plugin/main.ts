@@ -51,7 +51,9 @@ import type {
   ImportQuality,
 } from "../imports/types.js";
 import { renderFeedDecisionFlow } from "../ui/feed-decision-flow.js";
-import { OkfDashboardView, OKF_DASHBOARD_VIEW } from "./dashboard-view.js";
+import { DashboardSettingTab } from "../../apex/src/settings.js";
+import { DashboardView, DASHBOARD_VIEW_TYPE } from "../../apex/src/view.js";
+import { ApexHostAdapter } from "../adapters/apex-host.js";
 import {
   DASHBOARD_COMMAND_ID,
   registerDashboardRibbon,
@@ -81,6 +83,7 @@ import {
   OkfBrainSettingTab,
   type OkfBrainSettings,
 } from "./settings.js";
+import { normalizeApexSettings } from "./apex-settings.js";
 import {
   ClaudianBridgeAdapter,
   type CodexHandoffRequest,
@@ -101,6 +104,8 @@ import {
 
 export default class OkfBrainPlugin extends Plugin {
   public settings: OkfBrainSettings = DEFAULT_SETTINGS;
+  private persistedSettings: Record<string, unknown> = {};
+  private apexHost: ApexHostAdapter | undefined;
   private feedDigestCache: { value: FeedDashboardDigest; loadedAt: number } | undefined;
   private feedDigestRequest: Promise<FeedDashboardDigest> | undefined;
   private feedProjectionRevision = 0;
@@ -123,11 +128,18 @@ export default class OkfBrainPlugin extends Plugin {
   private dashboardUiStateStore: DashboardUiStateStore | undefined;
 
   public async onload(): Promise<void> {
-    // Keep the primary UI entry available even if settings or service setup fail.
-    this.registerView(OKF_DASHBOARD_VIEW, (leaf) => new OkfDashboardView(leaf, this));
-    registerDashboardRibbon(this, () => void this.openDashboard());
-
     await this.loadSettings();
+    this.apexHost = new ApexHostAdapter({
+      owner: this,
+      settings: this.settings.apex,
+      persist: async (settings) => {
+        this.settings.apex = settings;
+        await this.saveSettings();
+      },
+    });
+    await this.apexHost.initialize();
+    this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new DashboardView(leaf, this.apexHost!));
+    registerDashboardRibbon(this, () => void this.openDashboard());
     this.dashboardUiStateStore = new DashboardUiStateStore(
       this.settings.dashboardUiState,
       async (state) => {
@@ -151,7 +163,9 @@ export default class OkfBrainPlugin extends Plugin {
       await this.api().syncIndex();
     });
     this.addSettingTab(new OkfBrainSettingTab(this.app, this));
+    this.addSettingTab(new DashboardSettingTab(this.app, this.apexHost, this));
     this.registerCommands();
+    this.registerApexCommands();
     this.registerReadingViewControls();
     this.registerIndexSync();
     this.registerEditorExtension(
@@ -172,7 +186,8 @@ export default class OkfBrainPlugin extends Plugin {
     if (this.indexSyncTimer !== undefined) window.clearTimeout(this.indexSyncTimer);
     if (this.dashboardRefreshTimer !== undefined) window.clearTimeout(this.dashboardRefreshTimer);
     this.watchedConversionIds.clear();
-    this.app.workspace.detachLeavesOfType(OKF_DASHBOARD_VIEW);
+    this.app.workspace.detachLeavesOfType(DASHBOARD_VIEW_TYPE);
+    this.apexHost?.destroy();
     void this.dashboardUiStateStore?.dispose().catch((error: unknown) => {
       console.error("[okf-workspace] could not flush Dashboard UI state", error);
     });
@@ -207,6 +222,7 @@ export default class OkfBrainPlugin extends Plugin {
     }
     this.settings.feedReadingPositions = feedReadingPositions;
     await this.saveData({
+      ...this.persistedSettings,
       baseUrl: this.settings.baseUrl,
       tokenFile: this.settings.tokenFile,
       manageLocalService: this.settings.manageLocalService,
@@ -216,6 +232,7 @@ export default class OkfBrainPlugin extends Plugin {
       documentParserPolicy: this.settings.documentParserPolicy,
       dashboardUiState,
       feedReadingPositions,
+      apex: this.settings.apex,
     });
   }
 
@@ -976,8 +993,13 @@ export default class OkfBrainPlugin extends Plugin {
         10_000,
       );
     }
+    const existing = this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE)[0];
+    if (existing) {
+      this.app.workspace.setActiveLeaf(existing, { focus: true });
+      return;
+    }
     const leaf = this.app.workspace.getLeaf("tab");
-    await leaf.setViewState({ type: OKF_DASHBOARD_VIEW, active: true });
+    await leaf.setViewState({ type: DASHBOARD_VIEW_TYPE, active: true });
     this.app.workspace.revealLeaf(leaf);
   }
 
@@ -1232,9 +1254,7 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public refreshDashboardViews(): void {
-    for (const leaf of this.app.workspace.getLeavesOfType(OKF_DASHBOARD_VIEW)) {
-      if (leaf.view instanceof OkfDashboardView) void leaf.view.refresh();
-    }
+    this.apexHost?.refreshAllDashboards();
   }
 
   private async initializeSemanticMonitor(): Promise<void> {
@@ -1483,6 +1503,46 @@ export default class OkfBrainPlugin extends Plugin {
       callback: () => {
         void this.api().rebuildIndex().then(() => new Notice("索引已重建"));
       },
+    });
+  }
+
+  private registerApexCommands(): void {
+    this.addCommand({
+      id: "cycle-theme",
+      name: "切换工作台主题",
+      callback: () => void this.apexHost?.cycleTheme(),
+    });
+    this.addCommand({
+      id: "next-workspace",
+      name: "下一个工作台",
+      callback: () => this.apexHost?.cycleWorkspace(1),
+    });
+    this.addCommand({
+      id: "previous-workspace",
+      name: "上一个工作台",
+      callback: () => this.apexHost?.cycleWorkspace(-1),
+    });
+    this.addCommand({
+      id: "toggle-note-popover",
+      name: "切换笔记浮窗",
+      callback: () => {
+        if (!this.apexHost) return;
+        this.apexHost.settings = {
+          ...this.apexHost.settings,
+          disableNotePopover: !this.apexHost.settings.disableNotePopover,
+        };
+        void this.apexHost.saveSettings();
+      },
+    });
+    this.addCommand({
+      id: "add-section",
+      name: "添加工作台分区",
+      callback: () => void this.apexHost?.addSection(),
+    });
+    this.addCommand({
+      id: "toggle-banner-mode",
+      name: "切换工作台横幅模式",
+      callback: () => void this.apexHost?.toggleBannerMode(),
     });
   }
 
@@ -1872,7 +1932,12 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   private async loadSettings(): Promise<void> {
-    const loaded = (await this.loadData()) as Partial<OkfBrainSettings> | null;
+    const raw = await this.loadData();
+    const loaded = raw && typeof raw === "object"
+      ? raw as Record<string, unknown> & Partial<OkfBrainSettings>
+      : {};
+    this.persistedSettings = { ...loaded };
+    delete this.persistedSettings.token;
     this.settings = {
       ...DEFAULT_SETTINGS,
       ...loaded,
@@ -1881,6 +1946,7 @@ export default class OkfBrainPlugin extends Plugin {
         loaded?.feedReadingPositions,
       ),
       feedReadingPositions: { ...DEFAULT_SETTINGS.feedReadingPositions, ...loaded?.feedReadingPositions },
+      apex: normalizeApexSettings(loaded.apex),
     };
     await this.reloadLocalToken();
   }

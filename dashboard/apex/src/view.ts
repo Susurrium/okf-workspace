@@ -1,6 +1,6 @@
 import { Events, HoverParent, HoverPopover, ItemView, MarkdownView, Notice, Platform, setIcon, WorkspaceLeaf, TFile } from 'obsidian';
 import { nowMoment } from './datetime';
-import type DashboardPlugin from './main';
+import type { ApexHost } from './host';
 import type { AppWithCommands } from './obsidian-internal';
 import type { DashboardData, DashboardCard, QuickAction, BannerData, LibraryConfig, QuickNotePreset, PinnedNote, QuickCommand, DataviewConfig } from './types';
 import { SyncEngine } from './sync';
@@ -90,7 +90,7 @@ function prependAfterFrontmatter(md: string, block: string): string {
 export const DASHBOARD_VIEW_TYPE = 'apex-dashboard-view';
 
 export class DashboardView extends ItemView implements HoverParent {
-	private plugin: DashboardPlugin;
+	private plugin: ApexHost;
 	private sync: SyncEngine;
 	private data: DashboardData | null = null;
 	private cleanupFns: Array<() => void> = [];
@@ -159,7 +159,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	// be torn down (detaching its embedded leaf) when the view closes.
 	private popoverModal: NotePopoverModal | null = null;
 
-	constructor(leaf: WorkspaceLeaf, plugin: DashboardPlugin) {
+	constructor(leaf: WorkspaceLeaf, plugin: ApexHost) {
 		super(leaf);
 		this.plugin = plugin;
 		this.sync = new SyncEngine(this.app, this.plugin.settings);

@@ -1,5 +1,7 @@
 import { App, PluginSettingTab, Setting } from "obsidian";
 
+import type { DashboardSettings as ApexDashboardSettings } from "../../apex/src/types.js";
+import { normalizeApexSettings } from "./apex-settings.js";
 import {
   createDefaultDashboardUiState,
   type DashboardUiState,
@@ -24,6 +26,8 @@ export interface OkfBrainSettings {
   dashboardUiState: DashboardUiState;
   /** Compatibility mirror for settings written before Dashboard UI state v1. */
   feedReadingPositions: Partial<Record<"ai-daily" | "treehole", FeedReadingPosition>>;
+  /** Apex layout, theme, provider, and native-widget settings. */
+  apex: ApexDashboardSettings;
 }
 
 export const DEFAULT_SETTINGS: OkfBrainSettings = {
@@ -37,6 +41,7 @@ export const DEFAULT_SETTINGS: OkfBrainSettings = {
   documentParserPolicy: "markitdown-only",
   dashboardUiState: createDefaultDashboardUiState(),
   feedReadingPositions: {},
+  apex: normalizeApexSettings(undefined),
 };
 
 export class OkfBrainSettingTab extends PluginSettingTab {

@@ -31,8 +31,8 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 
 | Stage | Deliverable | Gate status |
 | --- | --- | --- |
-| M0 | Scope, ownership, baseline, capability and acceptance ledgers | Implemented; verify documentation links/checks |
-| M1 | Apex subtree and one outer plugin build/identity | Pending |
+| M0 | Scope, ownership, baseline, capability and acceptance ledgers | Complete: architecture ownership, this ledger, and `docs/upstream/apex-baseline.md`; local links and `git diff --check` passed |
+| M1 | Apex subtree and one outer plugin build/identity | In progress: subtree imported at locked SHA; 28 upstream scripts, independent build, outer Vitest/typecheck/build, and single `dist/` package pass; disposable-Vault interaction remains |
 | M2 | Existing OKF services, settings, commands, and plugin lifecycle exposed to new host | Pending |
 | M3 | Stable section IDs, lossless board repository, registry, pane-local state | Pending |
 | M4 | Full Project experience and managed-artifact edit policy | Pending |

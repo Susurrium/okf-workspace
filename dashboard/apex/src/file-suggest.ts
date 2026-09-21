@@ -304,15 +304,16 @@ export function attachFileSuggest(
 		}
 	}
 
+	const keydownListener: EventListener = (event) => onKeyDown(event as KeyboardEvent);
 	inputEl.addEventListener('input', onInput);
-	inputEl.addEventListener('keydown', onKeyDown);
+	inputEl.addEventListener('keydown', keydownListener);
 	inputEl.addEventListener('blur', () => window.setTimeout(hide, 150));
 
 	return {
 		isActive: () => active,
 		destroy() {
 			inputEl.removeEventListener('input', onInput);
-			inputEl.removeEventListener('keydown', onKeyDown);
+			inputEl.removeEventListener('keydown', keydownListener);
 			hide();
 		},
 	};

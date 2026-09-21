@@ -1,5 +1,5 @@
 import { App, Modal, setIcon } from 'obsidian';
-import type DashboardPlugin from './main';
+import type { ApexHost } from './host';
 import type { PinnedNote, QuickCommand, QuickNotePreset } from './types';
 import { IconPickerModal } from './icon-picker-modal';
 import type { AppWithCommands } from './obsidian-internal';
@@ -14,7 +14,7 @@ import { attachPathPicker, type PathPickerMode } from './path-picker-modal';
  * global settings, persists, and refreshes open dashboards.
  */
 export class QuickNoteConfigModal extends Modal {
-	private plugin: DashboardPlugin;
+	private plugin: ApexHost;
 	private presets: QuickNotePreset[];
 	private pinned: PinnedNote[];
 	private commands: QuickCommand[];
@@ -28,7 +28,7 @@ export class QuickNoteConfigModal extends Modal {
 	private dragIndex: number | null = null;
 	private dragKind: 'preset' | 'pinned' | 'command' | null = null;
 
-	constructor(app: App, plugin: DashboardPlugin) {
+	constructor(app: App, plugin: ApexHost) {
 		super(app);
 		this.plugin = plugin;
 		const s = plugin.settings;

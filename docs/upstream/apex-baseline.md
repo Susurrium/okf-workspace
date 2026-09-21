@@ -18,10 +18,11 @@ upstream implementations and must not import OKF domain modules directly.
 
 ## Baseline validation
 
-Before integration, the locked checkout passed its TypeScript/esbuild production build and the following
-upstream scripts: calendar task insertion, calendar section, web section, card movement, kanban upgrade,
-WeRead progress, and mobile stability. These checks establish the imported baseline; they do not prove the
-OKF integration or real Obsidian behavior.
+Before integration, the locked checkout passed its TypeScript/esbuild production build. After subtree
+import, all 28 `test:*` scripts in the locked package passed, including layout, calendar, web, media,
+music, expense, WeRead, card movement, kanban, and mobile-stability checks. The outer OKF build also emits
+one `dist/` package containing the OKF manifest, combined Apex/OKF stylesheet, and unified JavaScript entry.
+These checks establish the imported and composed baseline; they do not prove real Obsidian behavior.
 
 ## Update procedure
 

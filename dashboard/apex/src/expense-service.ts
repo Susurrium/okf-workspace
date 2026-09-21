@@ -1,4 +1,4 @@
-import type DashboardPlugin from './main';
+import type { ApexHost } from './host';
 import { t } from './i18n';
 
 /** Direction of a bookkeeping entry. */
@@ -423,7 +423,7 @@ export class ExpenseService {
 		if (this.focusDoc?.visibilityState === 'visible') void this.syncFromDisk();
 	};
 
-	constructor(private plugin: DashboardPlugin) {
+	constructor(private plugin: ApexHost) {
 		// Data files only ever load at startup; without re-reading, a session
 		// open all day never sees another device's records and its next save
 		// clobbers them. On focus (window switch / mobile foreground)

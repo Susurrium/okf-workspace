@@ -1,5 +1,5 @@
-import type { App, TFile } from 'obsidian';
-import type DashboardPlugin from './main';
+import { TFile, type App } from 'obsidian';
+import type { ApexHost } from './host';
 
 /** Max tags per media file — keeps the per-file chip UI readable. */
 export const MEDIA_TAG_MAX_PER_FILE = 10;
@@ -49,14 +49,14 @@ export function getMediaTagService(): MediaTagService | null {
  * data.json write; vault rename/delete events keep the path keys in sync.
  */
 export class MediaTagService {
-	private plugin: DashboardPlugin;
+	private plugin: ApexHost;
 	private data: Record<string, string[]> = {};
 	private saveTimer: number | null = null;
 	private readonly debounceMs = 400;
 	private renameRef: ReturnType<App['vault']['on']> | null = null;
 	private deleteRef: ReturnType<App['vault']['on']> | null = null;
 
-	constructor(plugin: DashboardPlugin) {
+	constructor(plugin: ApexHost) {
 		this.plugin = plugin;
 		this.registerVaultEvents(plugin.app);
 	}
@@ -125,7 +125,8 @@ export class MediaTagService {
 
 	/** Re-key on rename/move, prune on delete, debounced save. */
 	private registerVaultEvents(app: App): void {
-		this.renameRef = app.vault.on('rename', (file: TFile, oldPath: string) => {
+		this.renameRef = app.vault.on('rename', (file, oldPath: string) => {
+			if (!(file instanceof TFile)) return;
 			const tags = this.data[oldPath];
 			if (!tags) return;
 			delete this.data[oldPath];
@@ -133,7 +134,8 @@ export class MediaTagService {
 			this.plugin.settings.mediaTags = this.data;
 			this.scheduleSave();
 		});
-		this.deleteRef = app.vault.on('delete', (file: TFile) => {
+		this.deleteRef = app.vault.on('delete', (file) => {
+			if (!(file instanceof TFile)) return;
 			if (!this.data[file.path]) return;
 			delete this.data[file.path];
 			this.plugin.settings.mediaTags = this.data;
