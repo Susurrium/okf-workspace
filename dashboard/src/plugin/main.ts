@@ -58,6 +58,11 @@ import { ApexHostAdapter } from "../adapters/apex-host.js";
 import { createProjectSectionDefinition } from "../features/projects/project-section.js";
 import { createTodaySectionDefinition } from "../features/today/today-section.js";
 import {
+  createInboxSectionDefinition,
+  createKnowledgeSectionDefinition,
+  createLearningSectionDefinition,
+} from "../features/workspace/workspace-sections.js";
+import {
   DASHBOARD_COMMAND_ID,
   registerDashboardRibbon,
 } from "./dashboard-ribbon.js";
@@ -148,6 +153,9 @@ export default class OkfBrainPlugin extends Plugin {
     this.unregisterApexSections.push(
       registerSectionDefinition(createProjectSectionDefinition(this)),
       registerSectionDefinition(createTodaySectionDefinition(this)),
+      registerSectionDefinition(createLearningSectionDefinition(this)),
+      registerSectionDefinition(createKnowledgeSectionDefinition(this)),
+      registerSectionDefinition(createInboxSectionDefinition(this)),
     );
     this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new DashboardView(leaf, this.apexHost!));
     registerDashboardRibbon(this, () => void this.openDashboard());

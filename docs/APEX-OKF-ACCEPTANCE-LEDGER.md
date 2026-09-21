@@ -37,7 +37,7 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 | M3 | Stable section IDs, lossless board repository, registry, pane-local state | In progress: stable IDs/anchors, duplicate-name routing, unknown YAML/body preservation, section registry, per-board shared state/write queues, three-way pre-write merge, and persisted pane-local workspace/collapse/scroll state implemented; real Obsidian interaction remains |
 | M4 | Full Project experience and managed-artifact edit policy | In progress: registered `workspace-projects` Vault projection, independent persisted status filters, and existing create/open/log/Decision/status actions are connected; detail routing, related-content actions, and managed database/drag policy remain |
 | M5 | Unified task/calendar/Daily/Capture loop | In progress: shared formal-task scanner/fixture, stable block identity, independent reminder/scheduled/due fields, exact-date OKF Daily creation, and Project/Today/Calendar projections and toggles implemented; full edit/move/archive and sticky-to-Capture recovery remain |
-| M6 | Learning/Knowledge/Inbox/Import sections and details | Pending |
+| M6 | Learning/Knowledge/Inbox/Import sections and details | In progress: native registered Learning, Knowledge, and Inbox sections now reuse Vault projections plus existing Course/Lesson, explicit study completion/reversal, Capture routing, Source routing, Wiki, and Import actions; richer in-workbench detail surfaces and disposable-Vault workflow run remain |
 | M7 | Feed/Reading and default workbench presets | Pending |
 | M8 | Native-data takeover, UX, capability, and performance work | Pending |
 | M9 | Full release, rollback, real Obsidian, and upstream-update exercise | Pending |
