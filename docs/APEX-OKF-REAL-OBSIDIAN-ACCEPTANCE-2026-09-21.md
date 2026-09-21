@@ -5,6 +5,10 @@
 > complete old surfaces are no longer reachable from the registered Apex view. See
 > `APEX-OKF-FUNCTIONAL-PARITY-GAP-AUDIT-2026-09-21.md`; the release gate is reopened.
 
+The later functional-parity repair and its separate nonempty real-Obsidian evidence are recorded in
+`APEX-OKF-FUNCTIONAL-PARITY-IMPLEMENTATION-2026-09-21.md`. This original report is retained as evidence for
+the earlier data-safety run rather than rewritten retroactively.
+
 ## Environment
 
 Acceptance ran against an isolated disposable Vault, an isolated Obsidian profile, Obsidian 1.13.7, and

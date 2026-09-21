@@ -1,7 +1,11 @@
 # Apex × OKF 功能完整性差距审计
 
 日期：2026-09-21  
-结论状态：阻断当前发布，重新打开 M4–M9
+审计时结论状态：阻断当时版本发布，重新打开 M4–M9
+
+> **实施进展：** 八个正式 Apex Section 已在后续修复中改为挂载完整共享 Surface，P01–P06
+> 已通过，P07 已通过自动化但仍需有效 Engine token 的真实同步复验，P08 仍待最终全状态走查。
+> 详见 `APEX-OKF-FUNCTIONAL-PARITY-IMPLEMENTATION-2026-09-21.md`。
 
 ## 1. 结论
 

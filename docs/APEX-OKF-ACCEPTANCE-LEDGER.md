@@ -2,8 +2,9 @@
 
 > **2026-09-21 functional-parity correction:** the original completion statement was too broad. The
 > recorded data-safety and lifecycle scenarios remain valid, but the new Apex sections do not yet preserve
-> the full reachable behavior of the former OKF Dashboard. M4–M8 are reopened as partial and M9 is reopened.
-> This build is not release-ready. See `APEX-OKF-FUNCTIONAL-PARITY-GAP-AUDIT-2026-09-21.md`.
+> the full reachable behavior of the former OKF Dashboard. The subsequent shared-Surface implementation
+> restored M4–M6 and the desktop runtime portion of M8. M7 awaits one authenticated real-Feed rerun, and
+> M9/P08 remain open. See `APEX-OKF-FUNCTIONAL-PARITY-IMPLEMENTATION-2026-09-21.md`.
 
 This ledger is the implementation authority for the staged work described in
 `APEX-DASHBOARD-DEVELOPMENT-PLAN-2026-09-21.md`. A row is complete only when its named automated evidence
@@ -40,11 +41,11 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 | M1 | Apex subtree and one outer plugin build/identity | Complete: locked subtree, all 28 baseline scripts, independent/outer builds, one installed identity, and real Obsidian load passed |
 | M2 | Existing OKF services, settings, commands, and plugin lifecycle exposed to new host | Complete: one outer plugin owns native services and OKF workflows; 22 commands, reload, two-pane, pane-close timer, Engine-offline, and Claudian-absent runs passed |
 | M3 | Stable section IDs, lossless board repository, registry, pane-local state | Complete: stable IDs, lossless schema/body round-trip, shared write coordination, and real two-pane save/reload passed |
-| M4 | Full Project experience and managed-artifact edit policy | **Partial:** data policy and the new summary/actions passed, but contextual Capture/import, Claudian, catalog, exact related-item navigation, and state-aware primary actions are missing |
-| M5 | Unified task/calendar/Daily/Capture loop | **Partial:** shared task identity/date writes and sticky conversion passed; the former Today and Life surfaces, continuation lanes, attention queues, and global entry points are incomplete or absent |
-| M6 | Learning/Knowledge/Inbox/Import sections and details | **Partial:** thin projections and some actions exist, but scope/context, operation states, failure recovery, filters, verification, bulk decisions, and Claudian workflows were not migrated |
-| M7 | Feed/Reading and default workbench presets | **Partial:** basic Reading projection and presets exist; full item loading, request lifecycle, cache/scroll continuity, refresh recovery, and truthful contextual preset behavior remain incomplete |
-| M8 | Native-data takeover, UX, capability, and performance work | **Partial:** native JSON takeover and lifecycle safeguards passed; full OKF UX parity and System/background-operation access did not |
+| M4 | Full Project experience and managed-artifact edit policy | **Complete after parity repair:** shared Project Surface restores contextual Capture/import, Claudian, catalog, metrics and state-aware actions, while retaining formal tasks, dates and Decision creation; nonempty real Obsidian run passed |
+| M5 | Unified task/calendar/Daily/Capture loop | **Complete after parity repair:** shared Today and Life Surfaces restore continuation, attention, Feed, reflection/review and global entry points; anchored task/date regression and nonempty real run passed |
+| M6 | Learning/Knowledge/Inbox/Import sections and details | **Complete after parity repair:** registered Apex types mount the complete shared Surfaces; scope/context, operation states, filters, verification, decisions, recovery and Claudian paths are reachable; nonempty real run passed |
+| M7 | Feed/Reading and default workbench presets | **Conditional:** complete Reading controller, presets, cache/scroll/request lifecycle and sync UI are mounted and automated tests pass; authenticated real-Feed rerun remains required |
+| M8 | Native-data takeover, UX, capability, and performance work | **Complete for desktop implementation:** native takeover remains intact; eight shared Surfaces, Life/System access, custom-section cleanup and 9-to-9 rerender stability passed in real Obsidian |
 | M9 | Full release, rollback, real Obsidian, and upstream-update exercise | **Reopened:** the recorded 19 scenarios and upstream exercise are valid but insufficient; release remains blocked until the functional-parity gate passes |
 
 ## Final acceptance matrix
@@ -54,14 +55,14 @@ claim of complete Dashboard replacement. The following additional release gate i
 
 | ID | Scenario | Required evidence | Status |
 | --- | --- | --- | --- |
-| P01 | Learning feature parity | Registered Apex section exposes the former scope, context, workflow states, recovery, Claudian, completion, and Wiki actions | Gap |
-| P02 | Inbox/import feature parity | Registered Apex section exposes decisions, bulk handling, conversion progress, fallback, retry, cancel, and recovery | Gap |
-| P03 | Knowledge feature parity | Registered Apex section exposes catalog, search, filters, verification, lifecycle badges, and operation states | Gap |
-| P04 | Project feature parity | Registered Apex section exposes contextual capture/import, Claudian, catalog, status-aware action, and precise related navigation | Gap |
-| P05 | Today/Life feature parity | Registered Apex sections expose continuation, attention, Feed, reflection/review, calendar, and capture organization | Gap |
-| P06 | System/global controls | Registered surface exposes diagnostics, task center, failed-operation recovery, settings, search, quick create, and Ask Notes | Gap |
-| P07 | Reading controller parity | Registered Apex section passes full-load, pagination, cache, stale-response, scroll, refresh-failure, and sync scenarios | Gap |
-| P08 | Reachable-surface acceptance | Nonempty real Obsidian run verifies every inventory action through the registered Apex surfaces | Gap |
+| P01 | Learning feature parity | Registered Apex section exposes the former scope, context, workflow states, recovery, Claudian, completion, and Wiki actions | **Passed:** 49 shared-Surface behavior tests plus nonempty Course/ready/pending/completed real run |
+| P02 | Inbox/import feature parity | Registered Apex section exposes decisions, bulk handling, conversion progress, fallback, retry, cancel, and recovery | **Passed:** registered shared Surface, workflow tests and real Web Clip two-stage decision run |
+| P03 | Knowledge feature parity | Registered Apex section exposes catalog, search, filters, verification, lifecycle badges, and operation states | **Passed:** registered shared Surface and real AI-unverified Wiki run |
+| P04 | Project feature parity | Registered Apex section exposes contextual capture/import, Claudian, catalog, status-aware action, and precise related navigation | **Passed:** full action panel, formal task/date and nonempty real Project run |
+| P05 | Today/Life feature parity | Registered Apex sections expose continuation, attention, Feed, reflection/review, calendar, and capture organization | **Passed:** nonempty Today task/continuation run and real Life navigation |
+| P06 | System/global controls | Registered surface exposes diagnostics, task center, failed-operation recovery, settings, search, quick create, and Ask Notes | **Passed:** registered System Surface, embedded navigation and existing recovery tests |
+| P07 | Reading controller parity | Registered Apex section passes full-load, pagination, cache, stale-response, scroll, refresh-failure, and sync scenarios | **Conditional:** all automated scenarios pass and real offline/401 behavior is correct; authenticated sync rerun pending |
+| P08 | Reachable-surface acceptance | Nonempty real Obsidian run verifies every inventory action through the registered Apex surfaces | **Partial:** nonempty Learning/Inbox/Knowledge/Project/Today and Life/System navigation passed; live Feed and synthetic active/failed operation states remain |
 
 | ID | Scenario | Required evidence | Status |
 | --- | --- | --- | --- |
