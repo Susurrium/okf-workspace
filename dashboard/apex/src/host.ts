@@ -21,7 +21,7 @@ export interface ApexHost {
 	refreshAllDashboards(): void;
 	reloadAllDashboards(): Promise<void>;
 	switchWorkspace(path: string): Promise<void>;
-	createWorkspace(name: string): Promise<void>;
+	createWorkspace(name: string): Promise<string | void>;
 	renameWorkspace(path: string, name: string): Promise<void>;
 	removeWorkspace(path: string): Promise<void>;
 	reorderWorkspaces(from: number, to: number): Promise<void>;

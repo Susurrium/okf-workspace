@@ -27,6 +27,7 @@ import {
 } from './doc-tree';
 import { moveToOwnRow, moveBeside, unpartnerAt } from './column-pairs';
 import { workspaceBackupName } from './workspace-registry';
+import { normalizeWorkspacePath } from './workspace-registry';
 import { mergeBoardData } from './board-merge';
 
 import type { DashboardUpdateSource } from './render-update';
@@ -41,23 +42,33 @@ interface SharedSyncEntry {
 	initPromise?: Promise<void>;
 }
 
-const SHARED_SYNC_ENGINES = new WeakMap<App, SharedSyncEntry>();
+const SHARED_SYNC_ENGINES = new WeakMap<App, Map<string, SharedSyncEntry>>();
 
 export interface SyncEngineLease {
 	engine: SyncEngine;
 	init(): Promise<void>;
-	release(): void;
+	release(): Promise<void>;
 }
 
-/** All panes in one plugin process share the board state, watcher and write queue. */
-export function acquireSyncEngine(app: App, settings: DashboardSettings): SyncEngineLease {
-	let entry = SHARED_SYNC_ENGINES.get(app);
+/** Panes viewing the same board share state, watcher and write queue. */
+export function acquireSyncEngine(
+	app: App,
+	settings: DashboardSettings,
+	workspacePath = settings.dashboardFile,
+): SyncEngineLease {
+	const key = normalizeWorkspacePath(workspacePath);
+	let entries = SHARED_SYNC_ENGINES.get(app);
+	if (!entries) {
+		entries = new Map();
+		SHARED_SYNC_ENGINES.set(app, entries);
+	}
+	let entry = entries.get(key);
 	if (!entry) {
-		entry = { engine: new SyncEngine(app, settings), refs: 0 };
-		SHARED_SYNC_ENGINES.set(app, entry);
+		entry = { engine: new SyncEngine(app, { ...settings, dashboardFile: key }), refs: 0 };
+		entries.set(key, entry);
 	}
 	entry.refs++;
-	entry.engine.updateSettings(settings);
+	entry.engine.updateSettings({ ...settings, dashboardFile: key });
 	const sharedEntry = entry;
 	let released = false;
 	return {
@@ -66,13 +77,17 @@ export function acquireSyncEngine(app: App, settings: DashboardSettings): SyncEn
 			sharedEntry.initPromise ??= sharedEntry.engine.init();
 			await sharedEntry.initPromise;
 		},
-		release: () => {
+		release: async () => {
 			if (released) return;
 			released = true;
 			sharedEntry.refs--;
 			if (sharedEntry.refs <= 0) {
-				sharedEntry.engine.destroy();
-				SHARED_SYNC_ENGINES.delete(app);
+				await sharedEntry.engine.flush();
+				if (sharedEntry.refs <= 0) {
+					sharedEntry.engine.destroy();
+					entries.delete(key);
+					if (entries.size === 0) SHARED_SYNC_ENGINES.delete(app);
+				}
 			}
 		},
 	};
@@ -122,6 +137,15 @@ export class SyncEngine {
 		if (this.deferredWriteTimer) {
 			window.clearTimeout(this.deferredWriteTimer);
 		}
+	}
+
+	async flush(): Promise<void> {
+		if (this.deferredWriteTimer) {
+			window.clearTimeout(this.deferredWriteTimer);
+			this.deferredWriteTimer = null;
+			if (this.data) await this.writeToDisk(true);
+		}
+		await this.writeQueue;
 	}
 
 	/** Detach the vault modify/rename watchers. Called on destroy and before

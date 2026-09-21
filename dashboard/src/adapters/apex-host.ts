@@ -154,15 +154,18 @@ export class ApexHostAdapter implements ApexHost {
   public async switchWorkspace(path: string): Promise<void> {
     return this.runWorkspaceOp(async () => {
       const target = normalizeWorkspacePath(path);
-      if (!target || target === normalizeWorkspacePath(this.settings.dashboardFile)) return;
+      if (!target) return;
       if (!this.settings.workspaceFiles.includes(target)) return;
-      this.settings = { ...this.settings, dashboardFile: target };
-      await this.saveSettings();
-      await this.repointAllViews();
+      if (target !== normalizeWorkspacePath(this.settings.dashboardFile)) {
+        this.settings = { ...this.settings, dashboardFile: target };
+        await this.saveSettings();
+      }
+      const active = this.app.workspace.getActiveViewOfType(DashboardView);
+      if (active) await active.switchWorkspace(target);
     });
   }
 
-  public async createWorkspace(name: string): Promise<void> {
+  public async createWorkspace(name: string): Promise<string | void> {
     return this.runWorkspaceOp(async () => {
       const trimmed = name.trim();
       const path = nextWorkspacePath(
@@ -175,7 +178,7 @@ export class ApexHostAdapter implements ApexHost {
       } catch (error) {
         console.error("Workspace file creation failed:", error);
         new Notice(t("workspace.createFailed"));
-        return;
+        return undefined;
       }
       const names = alignWorkspaceNames(this.settings.workspaceFiles, this.settings.workspaceNames);
       this.settings = {
@@ -185,8 +188,8 @@ export class ApexHostAdapter implements ApexHost {
         dashboardFile: path,
       };
       await this.saveSettings();
-      await this.repointAllViews();
       new Notice(t("workspace.created", { name: trimmed || path }));
+      return path;
     });
   }
 
@@ -222,7 +225,7 @@ export class ApexHostAdapter implements ApexHost {
         dashboardFile: active === target ? nextFiles[0]! : this.settings.dashboardFile,
       };
       await this.saveSettings();
-      await this.repointAllViews();
+      await this.repointRemovedWorkspace(target, this.settings.dashboardFile);
     });
   }
 
@@ -263,14 +266,14 @@ export class ApexHostAdapter implements ApexHost {
         dashboardFile: activeChanged ? next : this.settings.dashboardFile,
       };
       await this.saveSettings();
-      if (activeChanged) await this.repointAllViews();
-      else this.refreshAllDashboards();
+      await this.repointRenamedWorkspace(target, next);
+      this.refreshAllDashboards();
     });
   }
 
-  private runWorkspaceOp(operation: () => Promise<void>): Promise<void> {
+  private runWorkspaceOp<T>(operation: () => Promise<T>): Promise<T> {
     const run = this.workspaceOps.then(operation);
-    this.workspaceOps = run.catch((error: unknown) => {
+    this.workspaceOps = run.then(() => undefined).catch((error: unknown) => {
       console.error("Workspace operation failed:", error);
     });
     return run;
@@ -280,9 +283,15 @@ export class ApexHostAdapter implements ApexHost {
     return !!this.app.vault.getFileByPath(path.endsWith(".md") ? path : `${path}.md`);
   }
 
-  private async repointAllViews(): Promise<void> {
+  private async repointRemovedWorkspace(path: string, fallback: string): Promise<void> {
     for (const leaf of this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE)) {
-      if (leaf.view instanceof DashboardView) await leaf.view.applyWorkspaceSwitch();
+      if (leaf.view instanceof DashboardView) await leaf.view.handleWorkspaceRemoved(path, fallback);
+    }
+  }
+
+  private async repointRenamedWorkspace(oldPath: string, newPath: string): Promise<void> {
+    for (const leaf of this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE)) {
+      if (leaf.view instanceof DashboardView) await leaf.view.replaceWorkspacePath(oldPath, newPath);
     }
   }
 
@@ -314,7 +323,7 @@ export class ApexHostAdapter implements ApexHost {
         dashboardFile: active === oldEntry ? next : this.settings.dashboardFile,
       };
       await this.saveSettings();
-      await this.repointAllViews();
+      await this.repointRenamedWorkspace(oldEntry, next);
     });
   }
 
@@ -343,7 +352,7 @@ export class ApexHostAdapter implements ApexHost {
         };
       }
       await this.saveSettings();
-      await this.repointAllViews();
+      await this.repointRemovedWorkspace(entry, this.settings.dashboardFile);
     });
   }
 }

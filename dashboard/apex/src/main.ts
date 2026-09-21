@@ -324,12 +324,12 @@ export default class DashboardPlugin extends Plugin {
 	 *  sequences on the same engine (duplicate watchers, duplicate renders). */
 	private workspaceOps: Promise<void> = Promise.resolve();
 
-	private runWorkspaceOp(op: () => Promise<void>): Promise<void> {
+	private runWorkspaceOp<T>(op: () => Promise<T>): Promise<T> {
 		const run = this.workspaceOps.then(op);
-		this.workspaceOps = run.catch((err: unknown) => {
+		this.workspaceOps = run.then(() => undefined).catch((err: unknown) => {
 			console.error('Workspace operation failed:', err);
 		});
-		return this.workspaceOps;
+		return run;
 	}
 
 	/** File-existence check against the vault, extensionless path in. */
@@ -345,35 +345,41 @@ export default class DashboardPlugin extends Plugin {
 
 	private async doSwitchWorkspace(path: string): Promise<void> {
 		const target = normalizeWorkspacePath(path);
-		if (!target || target === normalizeWorkspacePath(this.settings.dashboardFile)) return;
+		if (!target) return;
 		if (!this.settings.workspaceFiles.includes(target)) return;
-		this.settings = { ...this.settings, dashboardFile: target };
-		// Persist BEFORE re-pointing engines: a crash mid-switch then reopens
-		// on the new workspace instead of resurrecting the old one.
-		await this.saveSettings();
-		await this.repointAllViews();
+		if (target !== normalizeWorkspacePath(this.settings.dashboardFile)) {
+			this.settings = { ...this.settings, dashboardFile: target };
+			await this.saveSettings();
+		}
+		const active = this.app.workspace.getActiveViewOfType(DashboardView);
+		if (active) await active.switchWorkspace(target);
 	}
 
-	/** Point every open dashboard view's engine at the (already-updated)
-	 *  active workspace file and reload. Serial on purpose: each engine drains
-	 *  its own queued writes into the OLD file before re-pointing, so two open
-	 *  views never cross-write between workspace files. */
-	private async repointAllViews(): Promise<void> {
+	private async repointRemovedWorkspace(path: string, fallback: string): Promise<void> {
 		const leaves = this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE);
 		for (const leaf of leaves) {
 			if (leaf.view instanceof DashboardView) {
-				await leaf.view.applyWorkspaceSwitch();
+				await leaf.view.handleWorkspaceRemoved(path, fallback);
+			}
+		}
+	}
+
+	private async repointRenamedWorkspace(oldPath: string, newPath: string): Promise<void> {
+		const leaves = this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE);
+		for (const leaf of leaves) {
+			if (leaf.view instanceof DashboardView) {
+				await leaf.view.replaceWorkspacePath(oldPath, newPath);
 			}
 		}
 	}
 
 	/** Create a new workspace file with default board content, register it and
 	 *  switch to it. */
-	async createWorkspace(name: string): Promise<void> {
+	async createWorkspace(name: string): Promise<string | void> {
 		return this.runWorkspaceOp(() => this.doCreateWorkspace(name));
 	}
 
-	private async doCreateWorkspace(name: string): Promise<void> {
+	private async doCreateWorkspace(name: string): Promise<string | undefined> {
 		const trimmed = name.trim();
 		const path = nextWorkspacePath(
 			this.settings.workspaceFiles,
@@ -386,7 +392,7 @@ export default class DashboardPlugin extends Plugin {
 		} catch (err) {
 			console.error('Workspace file creation failed:', err);
 			new Notice(t('workspace.createFailed'));
-			return;
+			return undefined;
 		}
 		const names = alignWorkspaceNames(this.settings.workspaceFiles, this.settings.workspaceNames);
 		this.settings = {
@@ -396,8 +402,8 @@ export default class DashboardPlugin extends Plugin {
 			dashboardFile: path,
 		};
 		await this.saveSettings();
-		await this.repointAllViews();
 		new Notice(t('workspace.created', { name: trimmed || path }));
+		return path;
 	}
 
 	/** Rename a workspace's display name (tooltip/label only, file untouched). */
@@ -441,7 +447,7 @@ export default class DashboardPlugin extends Plugin {
 			dashboardFile: nextActive,
 		};
 		await this.saveSettings();
-		await this.repointAllViews();
+		await this.repointRemovedWorkspace(target, nextActive);
 	}
 
 	/** Reorder the workspace registry (banner pill order). Both indices refer
@@ -495,18 +501,16 @@ export default class DashboardPlugin extends Plugin {
 			dashboardFile: activeChanged ? next : this.settings.dashboardFile,
 		};
 		await this.saveSettings();
-		if (activeChanged) {
-			await this.repointAllViews();
-		} else {
-			this.refreshAllDashboards();
-		}
+		await this.repointRenamedWorkspace(target, next);
+		this.refreshAllDashboards();
 	}
 
 	/** Switch to the adjacent workspace (wraps around; no-op with one). */
 	private cycleWorkspace(delta: 1 | -1): void {
 		const files = this.settings.workspaceFiles;
 		if (files.length < 2) return;
-		const active = normalizeWorkspacePath(this.settings.dashboardFile);
+		const activeView = this.app.workspace.getActiveViewOfType(DashboardView);
+		const active = activeView?.currentWorkspacePath() ?? normalizeWorkspacePath(this.settings.dashboardFile);
 		const idx = Math.max(0, files.indexOf(active));
 		const next = files[(idx + delta + files.length) % files.length]!;
 		void this.switchWorkspace(next);
@@ -555,7 +559,7 @@ export default class DashboardPlugin extends Plugin {
 			dashboardFile: active === oldEntry ? newEntry : this.settings.dashboardFile,
 		};
 		await this.saveSettings();
-		await this.repointAllViews();
+		await this.repointRenamedWorkspace(oldEntry, newEntry);
 	}
 
 	/** A workspace file deleted in the file explorer: drop it from the registry
@@ -591,6 +595,6 @@ export default class DashboardPlugin extends Plugin {
 			};
 		}
 		await this.saveSettings();
-		await this.repointAllViews();
+		await this.repointRemovedWorkspace(entry, this.settings.dashboardFile);
 	}
 }

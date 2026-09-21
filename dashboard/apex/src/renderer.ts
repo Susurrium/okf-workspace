@@ -1899,7 +1899,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	const sectionType = getSectionType(column);
 	el.dataset.sectionType = sectionType;
 
-	const collapsed = getCollapsedSections(app);
+	const collapsed = callbacks.getCollapsedSections?.() ?? getCollapsedSections(app);
 	if (collapsed.has(reference) || collapsed.has(column.name)) {
 		el.addClass('dashboard-section-row--collapsed');
 	}
@@ -1997,7 +1997,8 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 			el.addClass('dashboard-section-row--collapsed');
 			collapsed.add(reference);
 		}
-		saveCollapsedSections(app, collapsed);
+		if (callbacks.onCollapsedSectionsChange) callbacks.onCollapsedSectionsChange(collapsed);
+		else saveCollapsedSections(app, collapsed);
 	});
 
 		const headerActions = header.createDiv({ cls: 'dashboard-section-header-actions' });

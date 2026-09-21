@@ -11,7 +11,7 @@ function workspaceLabel(name: string, path: string): string {
 }
 
 /** Open the "new workspace" dialog and create the workspace on confirm. */
-async function promptNewWorkspace(plugin: ApexHost): Promise<void> {
+async function promptNewWorkspace(plugin: ApexHost, onSwitch: (path: string) => Promise<void>): Promise<void> {
 	const files = plugin.settings.workspaceFiles;
 	const fallback = t('workspace.defaultName', { n: files.length + 1 });
 	const name = await showPromptDialog(plugin.app, {
@@ -20,7 +20,8 @@ async function promptNewWorkspace(plugin: ApexHost): Promise<void> {
 		defaultValue: fallback,
 	});
 	if (name === null) return;
-	await plugin.createWorkspace(name === '' ? fallback : name);
+	const created = await plugin.createWorkspace(name === '' ? fallback : name);
+	if (created) await onSwitch(created);
 }
 
 /** Long-press / right-click management menu for one workspace button. */
@@ -62,9 +63,14 @@ function openWorkspaceMenu(plugin: ApexHost, file: string, name: string, ev: Eve
  * on mobile there is no hover, so the pills stay visible. Rebuilt on every
  * render so the active highlight always matches the current settings.
  */
-export function renderWorkspaceSwitcher(container: HTMLElement, plugin: ApexHost): void {
-	const { workspaceFiles, workspaceNames, dashboardFile } = plugin.settings;
-	const active = normalizeWorkspacePath(dashboardFile);
+export function renderWorkspaceSwitcher(
+	container: HTMLElement,
+	plugin: ApexHost,
+	activeWorkspace: string = plugin.settings.dashboardFile,
+	onSwitch: (path: string) => Promise<void> = (path) => plugin.switchWorkspace(path),
+): void {
+	const { workspaceFiles, workspaceNames } = plugin.settings;
+	const active = normalizeWorkspacePath(activeWorkspace);
 
 	const switcher = container.createDiv({ cls: 'dashboard-workspace-switcher' });
 
@@ -79,7 +85,7 @@ export function renderWorkspaceSwitcher(container: HTMLElement, plugin: ApexHost
 		});
 		btn.addEventListener('click', (e) => {
 			e.stopPropagation();
-			void plugin.switchWorkspace(file);
+			void onSwitch(file);
 		});
 		btn.addEventListener('contextmenu', (ev) => {
 			ev.preventDefault();
@@ -95,6 +101,6 @@ export function renderWorkspaceSwitcher(container: HTMLElement, plugin: ApexHost
 	setIcon(addBtn, 'plus');
 	addBtn.addEventListener('click', (e) => {
 		e.stopPropagation();
-		void promptNewWorkspace(plugin);
+		void promptNewWorkspace(plugin, onSwitch);
 	});
 }

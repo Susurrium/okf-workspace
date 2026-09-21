@@ -1,4 +1,4 @@
-import { Events, HoverParent, HoverPopover, ItemView, MarkdownView, Notice, Platform, setIcon, WorkspaceLeaf, TFile } from 'obsidian';
+import { Events, HoverParent, HoverPopover, ItemView, MarkdownView, Notice, Platform, setIcon, WorkspaceLeaf, TFile, type ViewStateResult } from 'obsidian';
 import { nowMoment } from './datetime';
 import type { ApexHost } from './host';
 import type { AppWithCommands } from './obsidian-internal';
@@ -55,6 +55,7 @@ import { archiveCompleted, serializeTasksForNote } from './task-tree';
 import type { App } from 'obsidian';
 import { dashboardMarkdownPath, planDashboardUpdate, type DashboardUpdateSource } from './render-update';
 import { captureScrollStates, restoreScrollStates } from './scroll-preserve';
+import { normalizeWorkspacePath } from './workspace-registry';
 
 interface DailyNotesOptions {
 	folder?: string;
@@ -64,6 +65,12 @@ interface DailyNotesOptions {
 interface DailyNotesPlugin {
 	enabled?: boolean;
 	instance?: { options?: DailyNotesOptions };
+}
+
+interface PaneScrollState {
+	kanban: number;
+	sidebar: number;
+	sections: Record<string, number>;
 }
 
 /** Read the core "Daily notes" plugin handle (folder/format live on instance.options). */
@@ -96,8 +103,12 @@ function matchesSection(column: DashboardColumn, reference: string): boolean {
 export class DashboardView extends ItemView implements HoverParent {
 	private plugin: ApexHost;
 	private sync: SyncEngine;
-	private readonly syncLease: SyncEngineLease;
-	private readonly unsubscribeSync: () => void;
+	private syncLease: SyncEngineLease;
+	private unsubscribeSync: () => void;
+	private workspacePath: string;
+	private collapsedSections = new Set<string>();
+	private pendingPaneScroll: PaneScrollState | undefined;
+	private workspaceSwitchQueue: Promise<void> = Promise.resolve();
 	private data: DashboardData | null = null;
 	private cleanupFns: Array<() => void> = [];
 	private dndCleanupFns: Array<() => void> = [];
@@ -168,11 +179,59 @@ export class DashboardView extends ItemView implements HoverParent {
 	constructor(leaf: WorkspaceLeaf, plugin: ApexHost) {
 		super(leaf);
 		this.plugin = plugin;
-		this.syncLease = acquireSyncEngine(this.app, this.plugin.settings);
+		this.workspacePath = normalizeWorkspacePath(this.plugin.settings.dashboardFile);
+		this.syncLease = acquireSyncEngine(this.app, this.plugin.settings, this.workspacePath);
 		this.sync = this.syncLease.engine;
 		this.unsubscribeSync = this.sync.onDataUpdate((data, source) => {
 			this.handleDataUpdate(data, source);
 		});
+	}
+
+	getState(): Record<string, unknown> {
+		const root = this.containerEl.children[1] as HTMLElement | undefined;
+		const sections: Record<string, number> = {};
+		root?.querySelectorAll('.dashboard-section-cards').forEach((element) => {
+			const section = (element as HTMLElement).closest('.dashboard-section-row');
+			const key = section?.getAttribute('data-column');
+			if (key) sections[key] = (element as HTMLElement).scrollLeft;
+		});
+		return {
+			workspacePath: this.workspacePath,
+			collapsedSections: [...this.collapsedSections],
+			scroll: {
+				kanban: (root?.querySelector('.dashboard-kanban') as HTMLElement | null)?.scrollTop ?? 0,
+				sidebar: (root?.querySelector('.dashboard-sidebar-scroll') as HTMLElement | null)?.scrollTop ?? 0,
+				sections,
+			},
+		};
+	}
+
+	async setState(state: unknown, _result: ViewStateResult): Promise<void> {
+		if (!state || typeof state !== 'object') return;
+		const candidate = (state as Record<string, unknown>).workspacePath;
+		if (typeof candidate !== 'string') return;
+		const target = normalizeWorkspacePath(candidate);
+		if (!target || !this.plugin.settings.workspaceFiles.includes(target)) return;
+		const workspaceChanged = target !== this.workspacePath;
+		const collapsed = (state as Record<string, unknown>).collapsedSections;
+		if (Array.isArray(collapsed)) {
+			this.collapsedSections = new Set(collapsed.filter((value): value is string => typeof value === 'string'));
+		}
+		const scroll = (state as Record<string, unknown>).scroll;
+		if (scroll && typeof scroll === 'object' && !Array.isArray(scroll)) {
+			const record = scroll as Record<string, unknown>;
+			const sections = record.sections && typeof record.sections === 'object' && !Array.isArray(record.sections)
+				? Object.fromEntries(Object.entries(record.sections as Record<string, unknown>)
+					.filter((entry): entry is [string, number] => typeof entry[1] === 'number'))
+				: {};
+			this.pendingPaneScroll = {
+				kanban: typeof record.kanban === 'number' ? record.kanban : 0,
+				sidebar: typeof record.sidebar === 'number' ? record.sidebar : 0,
+				sections,
+			};
+		}
+		await this.switchWorkspace(target);
+		if (!workspaceChanged && this.isOpen && this.data) this.render(this.data);
 	}
 
 	getViewType(): string {
@@ -191,7 +250,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		if (this.isOpening || this.isOpen) return;
 		this.isOpening = true;
 		const revision = ++this.lifecycleRevision;
-		this.sync.updateSettings(this.plugin.settings);
+		this.sync.updateSettings(this.workspaceSettings());
 		await this.syncLease.init();
 		if (revision !== this.lifecycleRevision) return;
 		const currentData = this.sync.getData();
@@ -287,8 +346,9 @@ export class DashboardView extends ItemView implements HoverParent {
 		this.pomodoroUnsubscribe = null;
 		this.readingUnsubscribe?.();
 		this.readingUnsubscribe = null;
+		await this.workspaceSwitchQueue;
 		this.unsubscribeSync();
-		this.syncLease.release();
+		await this.syncLease.release();
 	}
 
 	private handleDataUpdate(data: DashboardData, source: DashboardUpdateSource): void {
@@ -327,7 +387,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	}
 
 	async refresh(): Promise<void> {
-		this.sync.updateSettings(this.plugin.settings);
+		this.sync.updateSettings(this.workspaceSettings());
 		const data = this.sync.getData();
 		if (data) {
 			this.render(data);
@@ -345,8 +405,49 @@ export class DashboardView extends ItemView implements HoverParent {
 	 *  Settings objects are replaced (not mutated) on every save, so the fresh
 	 *  reference must be pushed into the engine before it re-resolves the file. */
 	async applyWorkspaceSwitch(): Promise<void> {
-		this.sync.updateSettings(this.plugin.settings);
-		await this.sync.switchFile();
+		await this.switchWorkspace(this.plugin.settings.dashboardFile);
+	}
+
+	async switchWorkspace(path: string): Promise<void> {
+		const run = this.workspaceSwitchQueue.then(() => this.performWorkspaceSwitch(path));
+		this.workspaceSwitchQueue = run.catch((error: unknown) => {
+			console.error('Workspace switch failed:', error);
+		});
+		return run;
+	}
+
+	private async performWorkspaceSwitch(path: string): Promise<void> {
+		const target = normalizeWorkspacePath(path);
+		if (!target || target === this.workspacePath || !this.plugin.settings.workspaceFiles.includes(target)) return;
+		this.unsubscribeSync();
+		await this.syncLease.release();
+		this.workspacePath = target;
+		this.data = null;
+		this.pendingInitialData = null;
+		this.syncLease = acquireSyncEngine(this.app, this.plugin.settings, target);
+		this.sync = this.syncLease.engine;
+		this.unsubscribeSync = this.sync.onDataUpdate((data, source) => this.handleDataUpdate(data, source));
+		await this.syncLease.init();
+		const data = this.sync.getData();
+		if (data && this.isOpen) this.render(data);
+	}
+
+	currentWorkspacePath(): string {
+		return this.workspacePath;
+	}
+
+	async replaceWorkspacePath(oldPath: string, newPath: string): Promise<void> {
+		if (this.workspacePath !== normalizeWorkspacePath(oldPath)) return;
+		await this.switchWorkspace(newPath);
+	}
+
+	async handleWorkspaceRemoved(path: string, fallback: string): Promise<void> {
+		if (this.workspacePath !== normalizeWorkspacePath(path)) return;
+		await this.switchWorkspace(fallback);
+	}
+
+	private workspaceSettings() {
+		return { ...this.plugin.settings, dashboardFile: this.workspacePath };
 	}
 
 	async addSection(): Promise<void> {
@@ -396,8 +497,8 @@ export class DashboardView extends ItemView implements HoverParent {
 		const root = this.containerEl.children[1] as HTMLElement;
 		const kanbanEl = root?.querySelector('.dashboard-kanban');
 		const sidebarScrollEl = root?.querySelector('.dashboard-sidebar-scroll');
-		const savedKanbanScroll = kanbanEl ? kanbanEl.scrollTop : 0;
-		const savedSidebarScroll = sidebarScrollEl ? sidebarScrollEl.scrollTop : 0;
+		let savedKanbanScroll = kanbanEl ? kanbanEl.scrollTop : 0;
+		let savedSidebarScroll = sidebarScrollEl ? sidebarScrollEl.scrollTop : 0;
 
 		const savedCardScrolls = new Map<string, number>();
 		root?.querySelectorAll('.dashboard-section-cards').forEach((el) => {
@@ -405,6 +506,12 @@ export class DashboardView extends ItemView implements HoverParent {
 			const key = section?.getAttribute('data-column') ?? '';
 			if (key) savedCardScrolls.set(key, (el as HTMLElement).scrollLeft);
 		});
+		if (this.pendingPaneScroll) {
+			savedKanbanScroll = this.pendingPaneScroll.kanban;
+			savedSidebarScroll = this.pendingPaneScroll.sidebar;
+			for (const [key, value] of Object.entries(this.pendingPaneScroll.sections)) savedCardScrolls.set(key, value);
+			this.pendingPaneScroll = undefined;
+		}
 
 		// Save per-task-list scroll positions so they survive re-render
 		const savedTaskListScrolls = new Map<string, number>();
@@ -444,7 +551,12 @@ export class DashboardView extends ItemView implements HoverParent {
 		// view's CENTER column (the CSS mirrors the stats grid: 20px panel
 		// padding + 1/5 of the content width = the center column's left edge).
 		// Rebuilt every render so the active highlight always matches settings.
-		renderWorkspaceSwitcher(bannerEl, this.plugin);
+		renderWorkspaceSwitcher(
+			bannerEl,
+			this.plugin,
+			this.workspacePath,
+			(path) => this.switchWorkspace(path),
+		);
 
 		// Sidebar pin — desktop-only, bottom-left corner of the banner. Moved
 		// here out of the quick-actions header because quick buttons became a
@@ -1175,6 +1287,10 @@ export class DashboardView extends ItemView implements HoverParent {
 					void this.sync.updateExtensionConfig(columnName, config).then(() => {
 						this.refreshSectionInPlace(columnName);
 					});
+				},
+				getCollapsedSections: () => new Set(this.collapsedSections),
+				onCollapsedSectionsChange: (collapsed: Set<string>) => {
+					this.collapsedSections = new Set(collapsed);
 				},
 		};
 	}

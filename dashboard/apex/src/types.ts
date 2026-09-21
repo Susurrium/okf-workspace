@@ -779,6 +779,8 @@ export interface RenderCallbacks {
 	onLibraryConfigChange(columnName: string, config: LibraryConfig): void;
 	onDataviewConfigChange(columnName: string, config: DataviewConfig): void;
 	onExtensionConfigChange(columnName: string, config: Record<string, unknown>): void;
+	getCollapsedSections?(): Set<string>;
+	onCollapsedSectionsChange?(collapsed: Set<string>): void;
 	onQuickNoteCreate(preset: QuickNotePreset): void;
 	onQuickNoteCapture(text: string): void;
 	onOpenPinnedNote(note: PinnedNote): void;
