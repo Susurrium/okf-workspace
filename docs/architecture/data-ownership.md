@@ -12,6 +12,7 @@
 | Daily, Reflection, Review | Workspace Life | Dashboard, Claudian, retrieval |
 | Semantic and conversion state | Operations | Dashboard, workers |
 | Contracts, templates, views, policies, Skills | Engine Workspace resources | Engine, deployed Vault, Dashboard, Claudian |
+| Apex habits, expenses, reading history, completed focus sessions, and widget state | Apex native services and their existing JSON/plugin data | Unified Dashboard widgets and their existing export/sync adapters |
 
 `Source.resource`, `kind`, and `text` describe a context-neutral input identity. Provenance such as
 `ingested_via` records how the input first entered the Workspace; neither identity nor provenance says
@@ -31,3 +32,9 @@ and failure are Operations runtime data rather than Source state.
 
 The Markdown model does not depend on a Vault Git repository. Local checkpoints are an optional recovery
 feature that becomes active only after the user explicitly opts in.
+
+The unified Apex-based Dashboard does not turn Apex-native life-tool data into Workspace artifacts. The
+native services keep their existing formats, semantics, and export/sync behavior. A plugin-identity change
+may require a repeatable path takeover, but it must not create corresponding Markdown/YAML notes, merge two
+stores by guesswork, or leave two active writers. Physical storage below `.obsidian/plugins/` does not make
+these records part of the Workspace semantic model.
