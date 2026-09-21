@@ -20,16 +20,29 @@ import { SUPPORT_IMAGE_DATA_URL } from './assets/support-image';
 
 export type { DashboardSettings };
 
+export interface DashboardSettingsExtension {
+	heading: string;
+	getSettingDefinitions(): SettingDefinitionItem[];
+	renderFallback(container: HTMLElement): void;
+}
+
 /** The three settings pages, shared by the declarative (1.13+) navigable
  *  definitions and the pre-1.13 fallback tab bar. */
 type SettingsPage = 'general' | 'widgets' | 'coffee';
 
 export class DashboardSettingTab extends PluginSettingTab {
 	plugin: ApexHost;
+	private readonly extension: DashboardSettingsExtension | undefined;
 
-	constructor(app: App, plugin: ApexHost, owner: Plugin = plugin as unknown as Plugin) {
+	constructor(
+		app: App,
+		plugin: ApexHost,
+		owner: Plugin = plugin as unknown as Plugin,
+		extension?: DashboardSettingsExtension,
+	) {
 		super(app, owner);
 		this.plugin = plugin;
+		this.extension = extension;
 	}
 
 	/**
@@ -182,6 +195,7 @@ export class DashboardSettingTab extends PluginSettingTab {
 					},
 				],
 			},
+			...(this.extension?.getSettingDefinitions() ?? []),
 		];
 	}
 
@@ -251,6 +265,10 @@ export class DashboardSettingTab extends PluginSettingTab {
 			this.renderYearProgressSettings(host);
 		} else {
 			this.renderCoffeeSettings(host);
+		}
+		if (this.extension) {
+			new Setting(containerEl).setName(this.extension.heading).setHeading();
+			this.extension.renderFallback(containerEl.createDiv({ cls: 'dashboard-settings-tab-body' }));
 		}
 	}
 

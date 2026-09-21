@@ -82,7 +82,8 @@ import { ORGANIZE_DAILY_PROMPT } from "./workflow-prompts.js";
 import {
   DEFAULT_SETTINGS,
   type FeedReadingPosition,
-  OkfBrainSettingTab,
+  okfServiceSettingDefinitions,
+  renderOkfServiceSettings,
   type OkfBrainSettings,
 } from "./settings.js";
 import { normalizeApexSettings } from "./apex-settings.js";
@@ -168,8 +169,11 @@ export default class OkfBrainPlugin extends Plugin {
     this.indexSync = new IndexSyncCoordinator(async () => {
       await this.api().syncIndex();
     });
-    this.addSettingTab(new OkfBrainSettingTab(this.app, this));
-    this.addSettingTab(new DashboardSettingTab(this.app, this.apexHost, this));
+    this.addSettingTab(new DashboardSettingTab(this.app, this.apexHost, this, {
+      heading: "OKF / Engine",
+      getSettingDefinitions: () => okfServiceSettingDefinitions(this),
+      renderFallback: (container) => renderOkfServiceSettings(container, this),
+    }));
     this.registerCommands();
     this.registerApexCommands();
     this.registerReadingViewControls();

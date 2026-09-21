@@ -33,7 +33,7 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 | --- | --- | --- |
 | M0 | Scope, ownership, baseline, capability and acceptance ledgers | Complete: architecture ownership, this ledger, and `docs/upstream/apex-baseline.md`; local links and `git diff --check` passed |
 | M1 | Apex subtree and one outer plugin build/identity | In progress: subtree imported at locked SHA; 28 upstream scripts, independent build, outer Vitest/typecheck/build, and single `dist/` package pass; disposable-Vault interaction remains |
-| M2 | Existing OKF services, settings, commands, and plugin lifecycle exposed to new host | Pending |
+| M2 | Existing OKF services, settings, commands, and plugin lifecycle exposed to new host | In progress: one outer plugin owns Apex native services plus existing OKF commands, Engine/operation lifecycle, Digest integration, Claudian bridge, and a single combined settings entry; multi-pane/disposable-Vault lifecycle run remains |
 | M3 | Stable section IDs, lossless board repository, registry, pane-local state | In progress: stable IDs/anchors, duplicate-name routing, unknown YAML/body preservation, shared in-process state/write queue, and three-way pre-write merge implemented; pane-local workspace selection and real Obsidian interaction remain |
 | M4 | Full Project experience and managed-artifact edit policy | In progress: registered `workspace-projects` Vault projection, independent persisted status filters, and existing create/open/log/Decision/status actions are connected; detail routing, related-content actions, and managed database/drag policy remain |
 | M5 | Unified task/calendar/Daily/Capture loop | Pending |
