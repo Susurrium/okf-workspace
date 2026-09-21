@@ -2,6 +2,18 @@
    Dashboard Plugin — Multi-Theme Design System
    ================================================================= */
 
+.dashboard-compat-warning {
+	position: relative;
+	z-index: 2;
+	margin: 10px 16px 0;
+	padding: 8px 12px;
+	border: 1px solid var(--text-warning, #d97706);
+	border-radius: var(--db-radius-sm, 8px);
+	background: var(--background-modifier-warning, rgba(217, 119, 6, 0.12));
+	color: var(--text-warning, #d97706);
+	font-size: var(--font-ui-small, 12px);
+}
+
 /* ===== Aurora Gradient Animation ===== */
 @keyframes db-aurora-shift {
 	0% { background-position: 0% 50%; }

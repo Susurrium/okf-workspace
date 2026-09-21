@@ -37,6 +37,7 @@ import { WeatherConfigModal } from './weather-config-modal';
 import { LibraryConfigModal } from './library-config-modal';
 import { FolderConfigModal } from './folder-config-modal';
 import { buildNewNoteProps, createNoteWithProps, pickFolderFromMenu } from './library-new-note';
+import { workbenchCompatibilityMessage } from './parser';
 import { DataviewConfigModal } from './dataview-config-modal';
 import { WebConfigModal } from './web-config-modal';
 import { MediaConfigModal } from './media-config-modal';
@@ -542,6 +543,13 @@ export class DashboardView extends ItemView implements HoverParent {
 		// Must run after data-theme so inline `--db-*` overrides win by specificity,
 		// and before banner/main are created so the bg layer sits behind content.
 		applyAppearance(container, this.app, this.plugin.settings);
+		const compatibilityMessage = workbenchCompatibilityMessage(data.workbenchSchema);
+		if (compatibilityMessage) {
+			container.createDiv({
+				cls: 'dashboard-compat-warning',
+				text: compatibilityMessage,
+			});
+		}
 
 		const bannerEl = renderBanner(
 			container,

@@ -14,7 +14,16 @@ export const OKF_TODAY_SECTION_TYPE = "workspace-today";
 export interface TodaySectionHost {
   openDailyForWriting(): Promise<void>;
   promptDailyCapture(): void;
+  promptTaskDates(task: VaultTask): void;
   openVaultPath(path: string): Promise<void>;
+}
+
+function taskDates(task: VaultTask): string {
+  return [
+    task.reminder ? `提醒 ${task.reminder}` : "",
+    task.scheduled ? `计划 ${task.scheduled}${task.scheduledTime ? ` ${task.scheduledTime}` : ""}` : "",
+    task.due ? `截止 ${task.due}` : "",
+  ].filter(Boolean).join(" · ");
 }
 
 export function localIsoDate(value = new Date()): string {
@@ -58,6 +67,12 @@ function renderTask(container: HTMLElement, task: VaultTask, host: TodaySectionH
     attr: { type: "button", title: task.path },
   });
   title.addEventListener("click", () => void host.openVaultPath(task.path));
+  const dates = row.createEl("button", {
+    cls: "okf-today-task__dates",
+    text: taskDates(task) || "设置日期",
+    attr: { type: "button", title: "分别编辑提醒、计划日和截止日" },
+  });
+  dates.addEventListener("click", () => host.promptTaskDates(task));
   row.createSpan({ cls: "okf-today-task__source", text: task.file.basename });
 }
 

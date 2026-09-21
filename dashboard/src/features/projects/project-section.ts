@@ -23,6 +23,7 @@ export interface ProjectSectionHost {
   promptProjectProgress(projectPath: string): void;
   promptProjectDecision(projectPath: string): void;
   promptProjectStatus(projectPath: string, current: ProjectLifecycleStatus): void;
+  promptTaskDates(task: VaultTask): void;
   openVaultPath(path: string): Promise<void>;
 }
 
@@ -116,6 +117,40 @@ function renderProjectTasks(
     });
     const open = row.createEl("button", { text: task.text, attr: { type: "button", title: task.path } });
     open.addEventListener("click", () => void host.openVaultPath(task.path));
+    const dates = row.createEl("button", {
+      cls: "okf-project-card__task-dates",
+      text: task.scheduled ? `计划 ${task.scheduled}` : task.due ? `截止 ${task.due}` : task.reminder ? `提醒 ${task.reminder}` : "设置日期",
+      attr: { type: "button", title: "分别编辑提醒、计划日和截止日" },
+    });
+    dates.addEventListener("click", () => host.promptTaskDates(task));
+  }
+}
+
+function renderRelatedItems(
+  container: HTMLElement,
+  project: ProjectSummary,
+  host: ProjectSectionHost,
+): void {
+  const details = container.createEl("details", { cls: "okf-project-card__related" });
+  details.createEl("summary", { text: "关联内容" });
+  const groups: Array<{ label: string; items: Array<{ path: string; title: string }> }> = [
+    { label: "决定", items: project.decisions.map((path) => ({ path, title: path.split("/").at(-1)?.replace(/\.md$/u, "") ?? path })) },
+    { label: "产出", items: project.outputs.map((path) => ({ path, title: path.split("/").at(-1)?.replace(/\.md$/u, "") ?? path })) },
+    { label: "学习", items: project.related_learning.map(({ path, title }) => ({ path, title })) },
+    { label: "资料", items: project.related_materials.map(({ path, title }) => ({ path, title })) },
+    { label: "待处理", items: project.pending_captures.map(({ path, title }) => ({ path, title })) },
+  ];
+  for (const group of groups.filter(({ items }) => items.length > 0)) {
+    const row = details.createDiv({ cls: "okf-project-card__related-group" });
+    row.createSpan({ cls: "okf-project-card__related-label", text: group.label });
+    const items = row.createDiv({ cls: "okf-project-card__related-items" });
+    for (const item of group.items) {
+      const button = items.createEl("button", { text: item.title, attr: { type: "button", title: item.path } });
+      button.addEventListener("click", () => void host.openVaultPath(item.path));
+    }
+  }
+  if (groups.every(({ items }) => items.length === 0)) {
+    details.createDiv({ cls: "okf-project-card__related-empty", text: "暂无关联内容" });
   }
 }
 
@@ -143,6 +178,7 @@ function renderProjectCard(
   labeledValue(fields, "最近进展", project.recent_log);
   renderProjectTasks(fields, tasks, host, app);
   card.createDiv({ cls: "okf-project-card__counts", text: countLabel(project) });
+  renderRelatedItems(card, project, host);
 
   const actions = card.createDiv({ cls: "okf-project-card__actions" });
   const progress = actions.createEl("button", { text: "记录进展", attr: { type: "button" } });

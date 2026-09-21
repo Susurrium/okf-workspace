@@ -355,6 +355,73 @@ export async function toggleTaskInFile(app: App, task: VaultTask, nextChecked: b
 	return wrote;
 }
 
+export interface TaskDateFields {
+	reminder?: string;
+	due?: string;
+	scheduled?: string;
+}
+
+const DATE_VALUE_REGEX = /^\d{4}-\d{2}-\d{2}$/u;
+const REMINDER_VALUE_REGEX = /^\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?$/u;
+
+/** Replace only the three independently editable date markers on a task line. */
+export function updateTaskDateFields(line: string, fields: TaskDateFields): string {
+	const reminder = fields.reminder?.trim() ?? '';
+	const due = fields.due?.trim() ?? '';
+	const scheduled = fields.scheduled?.trim() ?? '';
+	if (reminder && !REMINDER_VALUE_REGEX.test(reminder)) throw new Error('提醒必须为 YYYY-MM-DD 或 YYYY-MM-DD HH:MM');
+	if (due && !DATE_VALUE_REGEX.test(due)) throw new Error('截止日必须为 YYYY-MM-DD');
+	if (scheduled && !DATE_VALUE_REGEX.test(scheduled)) throw new Error('计划日必须为 YYYY-MM-DD');
+
+	const suffixMatch = line.match(/(\s+\^[a-zA-Z0-9-]+)?(\s*<!--collapsed-->)?\s*$/u);
+	const suffix = suffixMatch?.[0] ?? '';
+	let body = suffix ? line.slice(0, -suffix.length) : line;
+	body = body
+		.replace(REMINDER_REGEX, '')
+		.replace(DUE_FIELD_REGEX, '')
+		.replace(CALENDAR_REGEX, '')
+		.replace(SCHEDULED_FIELD_REGEX, '')
+		.replace(SCHEDULED_EMOJI_REGEX, '')
+		.trimEnd();
+	const markers = [
+		reminder ? `⏰ ${reminder}` : '',
+		due ? `[due:: ${due}]` : '',
+		scheduled ? `[scheduled:: ${scheduled}]` : '',
+	].filter(Boolean);
+	return `${body}${markers.length > 0 ? ` ${markers.join(' ')}` : ''}${suffix}`;
+}
+
+/** Update task dates after re-locating the task by stable block ID or an unambiguous original line. */
+export async function updateTaskDatesInFile(
+	app: App,
+	task: VaultTask,
+	fields: TaskDateFields,
+): Promise<boolean> {
+	let wrote = false;
+	await app.vault.process(task.file, (data: string) => {
+		const lines = data.split('\n');
+		let idx = lines[task.line] === task.originalLine ? task.line : -1;
+		if (idx === -1 && task.blockId) {
+			const escaped = task.blockId.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+			const block = new RegExp(`\\^${escaped}\\s*(?:<!--collapsed-->\\s*)?$`, 'u');
+			const hits = lines.flatMap((line, index) => block.test(line) ? [index] : []);
+			if (hits.length === 1) idx = hits[0]!;
+		}
+		if (idx === -1) {
+			const hits = lines.flatMap((line, index) => line === task.originalLine ? [index] : []);
+			if (hits.length === 1) idx = hits[0]!;
+		}
+		if (idx === -1) return data;
+		const replacement = updateTaskDateFields(lines[idx]!, fields);
+		if (replacement === lines[idx]) return data;
+		lines[idx] = replacement;
+		wrote = true;
+		return lines.join('\n');
+	});
+	if (wrote) invalidatePath(task.path);
+	return wrote;
+}
+
 /* ----------------------------- bucketing ----------------------------- */
 
 export type DateBucket = 'overdue' | 'today' | 'week' | 'later' | 'nodue';

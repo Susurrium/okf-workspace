@@ -6,6 +6,8 @@ import {
   matchesCalendarFilter,
   scanFileTasks,
   toggleTaskInFile,
+  updateTaskDateFields,
+  updateTaskDatesInFile,
 } from "../apex/src/alltasks-scan.js";
 import { todayFormalTasks } from "../src/features/today/today-section.js";
 
@@ -79,6 +81,40 @@ type: Source
     await expect(toggleTaskInFile(app, task, true)).resolves.toBe(true);
     expect(markdown).toContain("- [x] #task Edited elsewhere");
     expect(markdown).not.toContain("Original");
+  });
+
+  it("edits reminder, due, and scheduled independently without changing text or identity", () => {
+    const line = "- [ ] #task Ship it ⏰ 2026-09-28 08:00 [due:: 2026-09-30] [scheduled:: 2026-09-29] ^task-ship";
+    const updated = updateTaskDateFields(line, {
+      reminder: "2026-10-01 09:15",
+      due: "2026-10-04",
+      scheduled: "2026-10-02",
+    });
+    expect(updated).toBe("- [ ] #task Ship it ⏰ 2026-10-01 09:15 [due:: 2026-10-04] [scheduled:: 2026-10-02] ^task-ship");
+    const parsed = scanFileTasks(file("projects/demo/project.md"), updated)[0]!;
+    expect(parsed).toEqual(expect.objectContaining({
+      reminder: "2026-10-01 09:15",
+      due: "2026-10-04",
+      scheduled: "2026-10-02",
+      blockId: "task-ship",
+      text: "Ship it",
+    }));
+  });
+
+  it("relocates a date edit by block ID and preserves concurrent task text", async () => {
+    const task = scanFileTasks(file("projects/demo/project.md"), "- [ ] #task Original [due:: 2026-09-30] ^task-dates")[0]!;
+    let markdown = "intro\n- [ ] #task Edited elsewhere [due:: 2026-09-30] ^task-dates\n";
+    const app = { vault: { process: async (_file: TFile, transform: (value: string) => string) => {
+      markdown = transform(markdown);
+      return markdown;
+    } } } as unknown as App;
+
+    await expect(updateTaskDatesInFile(app, task, {
+      reminder: "2026-09-28 08:00",
+      due: "2026-10-01",
+      scheduled: "2026-09-29",
+    })).resolves.toBe(true);
+    expect(markdown).toContain("#task Edited elsewhere ⏰ 2026-09-28 08:00 [due:: 2026-10-01] [scheduled:: 2026-09-29] ^task-dates");
   });
 
   it("projects the same formal source task into Today by its calendar date", () => {

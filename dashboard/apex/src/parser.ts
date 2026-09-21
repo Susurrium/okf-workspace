@@ -29,7 +29,12 @@ import { isRegisteredSection } from './section-registry';
 const KNOWN_METADATA_KEYS = new Set(['id', 'link', 'progress', 'due', 'streak', 'type', 'color', 'cover', 'width', 'size', 'lat', 'lon', 'city', 'track', 'days', 'cols', 'rows', 'gcol', 'grow', 'noteStyle']);
 const SECTION_TYPES = new Set(['memo', 'todo', 'projects', 'notes', 'dashboard', 'library', 'folder', 'images', 'videos', 'alltasks', 'calendar', 'dataview', 'weread', 'ticktick', 'sticky', 'web']);
 const SECTION_ANCHOR = /^\s*<!--\s*okf-section:([A-Za-z0-9._-]+)\s*-->\s*$/;
-const WORKBENCH_SCHEMA = 1;
+export const WORKBENCH_SCHEMA = 1;
+
+export function workbenchCompatibilityMessage(schema: number | undefined): string | undefined {
+	if ((schema ?? WORKBENCH_SCHEMA) <= WORKBENCH_SCHEMA) return undefined;
+	return `此工作台使用更高格式版本 ${schema}；当前版本只会修改已识别字段，并保留未知配置与正文。`;
+}
 const ROOT_MANAGED_KEYS = new Set([
 	'dashboard', 'workbench_schema', 'banner', 'quickActions', 'quickActionOrder', 'hiddenPresets', 'columns',
 ]);

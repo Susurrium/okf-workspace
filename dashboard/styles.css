@@ -1433,6 +1433,17 @@
   font-size: var(--font-ui-smaller);
 }
 
+.okf-today-task__dates,
+.okf-project-card__task-dates {
+  flex: none;
+  padding: 2px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-accent);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+}
+
 .okf-native-section__toolbar,
 .okf-native-note,
 .okf-native-note__actions,
@@ -1666,6 +1677,41 @@
 }
 
 .okf-project-card__actions button {
+  font-size: var(--font-ui-smaller);
+}
+
+.okf-project-card__related {
+  margin: 0 0 11px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+
+.okf-project-card__related summary {
+  cursor: pointer;
+  color: var(--text-accent);
+}
+
+.okf-project-card__related-group {
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.okf-project-card__related-label,
+.okf-project-card__related-empty {
+  color: var(--text-faint);
+}
+
+.okf-project-card__related-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.okf-project-card__related-items button {
+  height: auto;
+  padding: 2px 6px;
   font-size: var(--font-ui-smaller);
 }
 

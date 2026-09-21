@@ -1,7 +1,7 @@
 import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
 
-import { parse, serialize } from "../apex/src/parser.js";
+import { parse, serialize, workbenchCompatibilityMessage } from "../apex/src/parser.js";
 import { registerSectionDefinition } from "../apex/src/section-registry.js";
 
 function frontmatter(markdown: string): Record<string, unknown> {
@@ -10,6 +10,11 @@ function frontmatter(markdown: string): Record<string, unknown> {
 }
 
 describe("Apex workbench format", () => {
+  it("warns visibly when a board comes from a newer schema", () => {
+    expect(workbenchCompatibilityMessage(1)).toBeUndefined();
+    expect(workbenchCompatibilityMessage(99)).toContain("更高格式版本 99");
+  });
+
   it("keeps stable IDs, duplicate-name bodies, unknown fields, and free prose", () => {
     const source = `---
 dashboard: true

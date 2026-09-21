@@ -53,6 +53,7 @@ import type {
 import { renderFeedDecisionFlow } from "../ui/feed-decision-flow.js";
 import { DashboardSettingTab } from "../../apex/src/settings.js";
 import { DashboardView, DASHBOARD_VIEW_TYPE } from "../../apex/src/view.js";
+import { updateTaskDatesInFile, type VaultTask } from "../../apex/src/alltasks-scan.js";
 import { registerSectionDefinition } from "../../apex/src/section-registry.js";
 import { ApexHostAdapter } from "../adapters/apex-host.js";
 import { ArtifactEditPolicy } from "../application/artifact-edit-policy.js";
@@ -776,6 +777,29 @@ export default class OkfBrainPlugin extends Plugin {
       await this.setProjectStatus(projectPath, status);
       new Notice(`Project 状态已更新为 ${status}`);
     }).open();
+  }
+
+  public promptTaskDates(task: VaultTask): void {
+    new FieldsPromptModal(
+      this.app,
+      `编辑任务日期：${task.text}`,
+      [
+        { key: "reminder", label: "提醒", placeholder: "YYYY-MM-DD 或 YYYY-MM-DD HH:MM", initialValue: task.reminder ?? "", required: false },
+        { key: "scheduled", label: "计划日", placeholder: "YYYY-MM-DD", initialValue: task.scheduled ?? "", required: false },
+        { key: "due", label: "截止日", placeholder: "YYYY-MM-DD", initialValue: task.due ?? "", required: false },
+      ],
+      "保存日期",
+      async (values) => {
+        const wrote = await updateTaskDatesInFile(this.app, task, {
+          reminder: values.reminder,
+          scheduled: values.scheduled,
+          due: values.due,
+        });
+        if (!wrote) throw new Error("任务已变化或日期没有改变，请刷新后重试。");
+        new Notice("任务日期已更新");
+        this.refreshDashboardViews();
+      },
+    ).open();
   }
 
   public promptWikiFromSources(): void {
