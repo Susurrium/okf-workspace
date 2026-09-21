@@ -1,0 +1,27 @@
+# Dependencies
+node_modules
+
+# Obsidian plugin data
+data.json
+
+# macOS
+.DS_Store
+
+# Source code
+version-bump.mjs
+.npmrc
+.editorconfig
+
+# Build artifacts
+*.map
+
+# IDE
+.vscode
+.idea
+*.iml
+
+# AI / Dev helpers
+AGENTS.md
+300句经典句子.md
+# DQL test fixtures (local only)
+dataview-test/
