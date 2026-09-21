@@ -338,9 +338,12 @@ export class LocalApi {
       });
     } catch (error) {
       if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) {
-        throw new Error("Workspace 本地服务响应超时");
+        throw new Error("Workspace Engine 不可用：本地服务响应超时。Vault 阅读与轻量编辑仍可使用；导入和生成需要 Engine。", { cause: error });
       }
-      throw error;
+      throw new Error(
+        `Workspace Engine 不可用：无法连接 ${this.baseUrl}。Vault 阅读与轻量编辑仍可使用；导入和生成需要 Engine。`,
+        { cause: error instanceof Error ? error : undefined },
+      );
     }
     if (!response.ok) {
       const message = await response.text();

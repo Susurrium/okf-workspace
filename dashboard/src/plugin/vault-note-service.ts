@@ -148,6 +148,28 @@ export class VaultNoteService {
     return { path };
   }
 
+  /**
+   * Convert one workbench card exactly once. The durable source marker lets a
+   * retry after restart find a Capture written before the card was removed.
+   */
+  public async createCaptureFromWorkbench(
+    workspacePath: string,
+    cardId: string,
+    title: string,
+    content: string,
+  ): Promise<{ path: string; created: boolean }> {
+    const source = `${workspacePath.replace(/\.md$/u, "")}#${cardId}`;
+    const marker = `<!-- okf:apex-capture source=${JSON.stringify(source)} -->`;
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      if (!file.path.startsWith("inbox/captures/")) continue;
+      const existing = await this.app.vault.cachedRead(file);
+      if (existing.includes(marker)) return { path: file.path, created: false };
+    }
+    const body = [content.trim(), marker].filter(Boolean).join("\n\n");
+    const result = await this.createCapture(title, body);
+    return { ...result, created: true };
+  }
+
   /** Lightweight local options for Quick Capture; it never calls the backend. */
   public async captureContexts(): Promise<CaptureContextOptions> {
     const courses: { path: string; title: string }[] = [];

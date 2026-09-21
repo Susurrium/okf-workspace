@@ -1220,6 +1220,57 @@ def test_additional_human_feed_decision_is_reflected_in_an_existing_source(
     assert stored is not None and stored["action"] == "learn-later"
 
 
+def test_feed_reuses_one_source_for_idempotent_uses_in_several_projects(
+    vault: Path, tmp_path: Path
+) -> None:
+    for slug, title in (("alpha", "Alpha"), ("beta", "Beta")):
+        path = vault / "projects" / slug / "project.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_document(
+            path,
+            OkfDocument(
+                {
+                    "type": "Project",
+                    "title": title,
+                    "project_status": "active",
+                    "created_at": "2026-09-21T12:00:00+08:00",
+                },
+                f"# {title}\n",
+            ),
+        )
+    service = FeedDecisionService(vault, tmp_path / "state")
+    item = _ai_item("multi-project:1", "同一来源服务多个项目")
+
+    first = service.decide(
+        item,
+        DecisionAction.LEARN_LATER,
+        project="alpha",
+        checkpoint=False,
+    )
+    second = service.decide(
+        item,
+        DecisionAction.WIKI_NOW,
+        project="beta",
+        checkpoint=False,
+    )
+    service.decide(
+        item,
+        DecisionAction.WIKI_NOW,
+        project="beta",
+        checkpoint=False,
+    )
+
+    assert first.source == second.source
+    assert first.source is not None
+    source = read_document(Path(first.source))
+    assert source.frontmatter["uses"] == [
+        {"purpose": "study", "project": "/projects/alpha/project.md"},
+        {"purpose": "wiki", "project": "/projects/beta/project.md"},
+    ]
+    assert "interest" not in source.frontmatter
+    assert "long_term_value" not in source.frontmatter
+
+
 def test_learn_still_materializes_when_git_checkpoint_is_unavailable(
     vault: Path,
     tmp_path: Path,

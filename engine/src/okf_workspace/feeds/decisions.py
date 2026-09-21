@@ -185,14 +185,20 @@ class FeedDecisionService:
         self,
         item: FeedItem,
         action: DecisionAction,
+        *,
+        course: str | None = None,
+        project: str | None = None,
     ) -> tuple[Path, Path]:
         with web_source_write_lock(self.vault):
-            return self._create_source_locked(item, action)
+            return self._create_source_locked(item, action, course=course, project=project)
 
     def _create_source_locked(
         self,
         item: FeedItem,
         action: DecisionAction,
+        *,
+        course: str | None = None,
+        project: str | None = None,
     ) -> tuple[Path, Path]:
         publisher = SourcePublisher(self.vault)
         source_relative, text_relative = self._source_paths(item)
@@ -230,6 +236,8 @@ class FeedDecisionService:
                 publisher.resolve_use(
                     source_document,
                     purpose=_purpose(action),
+                    course=course,
+                    project=project,
                 )
                 publisher.publish_pair(
                     reused_source,
@@ -277,6 +285,8 @@ class FeedDecisionService:
         publisher.resolve_use(
             source_document,
             purpose=_purpose(action),
+            course=course,
+            project=project,
         )
         text_document.frontmatter.update(
             {
@@ -333,6 +343,8 @@ class FeedDecisionService:
         action: DecisionAction,
         *,
         checkpoint: bool = True,
+        course: str | None = None,
+        project: str | None = None,
     ) -> DecisionResult:
         """Apply one user-selected outcome; AI never chooses this action."""
         source: Path | None = None
@@ -357,7 +369,12 @@ class FeedDecisionService:
             except GitCheckpointError as exc:
                 warnings.append(f"写入前 Git 检查点失败：{exc}")
         if creates_artifacts:
-            source, source_text = self._create_source(item, action)
+            source, source_text = self._create_source(
+                item,
+                action,
+                course=course,
+                project=project,
+            )
             if action is DecisionAction.LEARN_NOW:
                 study_guide = self._learning_target(item)
             elif action is DecisionAction.WIKI_NOW:

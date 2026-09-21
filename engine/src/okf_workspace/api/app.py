@@ -198,6 +198,8 @@ class FeedDecisionRequest(BaseModel):
         "source-only",
         "ignore",
     ]
+    course: str | None = Field(default=None, max_length=500)
+    project: str | None = Field(default=None, max_length=500)
 
 
 class DocumentRouteRequest(BaseModel):
@@ -1006,6 +1008,8 @@ def create_app(
             item,
             DecisionAction(request.action),
             checkpoint=False,
+            course=request.course,
+            project=request.project,
         )
         public = asdict(result)
         for key in ("source", "source_text", "study_guide", "wiki"):

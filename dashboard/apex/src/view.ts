@@ -1206,7 +1206,7 @@ export class DashboardView extends ItemView implements HoverParent {
 			onTaskUnnest: (cardId: string, taskPath: number[]) => this.sync.unnestTask(cardId, taskPath),
 			onTaskToggleCollapse: (cardId: string, taskPath: number[]) => this.sync.toggleCollapseTaskQuiet(cardId, taskPath),
 			onMemoUpdate: (card: DashboardCard, updates: Pick<DashboardCard, 'body' | 'blockquote'> & Partial<Pick<DashboardCard, 'tasks' | 'docs' | 'wikiLink' | 'url' | 'type'>>) => this.sync.updateMemoCard(card.id, updates),
-			onMemoSaveAsNote: (card: DashboardCard) => this.saveMemoAsNote(card),
+			onMemoSaveAsNote: (card: DashboardCard) => this.convertMemo(card),
 			onTaskSaveToDaily: (card: DashboardCard) => this.saveTasksToDaily(card),
 			onDocAdd: (cardId: string, path: string) => this.sync.addDocToCard(cardId, path),
 			onDocDelete: (cardId: string, docPath: number[]) => this.sync.deleteDoc(cardId, docPath),
@@ -1300,6 +1300,23 @@ export class DashboardView extends ItemView implements HoverParent {
 					this.collapsedSections = new Set(collapsed);
 				},
 		};
+	}
+
+	private async convertMemo(card: DashboardCard): Promise<void> {
+		if (!this.plugin.convertMemoToCapture) {
+			await this.saveMemoAsNote(card);
+			return;
+		}
+		try {
+			const result = await this.plugin.convertMemoToCapture(this.workspacePath, card);
+			await this.sync.deleteCard(card.id);
+			new Notice(result.created
+				? `已转为 Capture：${result.path}`
+				: `已找到先前创建的 Capture，并完成便签清理：${result.path}`, 7000);
+		} catch (error) {
+			console.error('[Dashboard] memo to Capture failed:', error);
+			new Notice(`转为 Capture 失败，原便签已保留：${error instanceof Error ? error.message : '未知错误'}`, 9000);
+		}
 	}
 
 	private handleFileDrop(cardId: string, filePath: string): void {
@@ -1896,6 +1913,11 @@ export class DashboardView extends ItemView implements HoverParent {
 		try {
 			const column = this.data?.columns.find(c => matchesSection(c, columnName));
 			if (!column || (column.sectionType !== 'folder' && column.sectionType !== 'library')) return;
+			const managedType = column.libraryConfig?.filters.find((filter) =>
+				filter.property === 'type' &&
+				(filter.operator === undefined || filter.operator === 'equals') &&
+				filter.values.length === 1)?.values[0];
+			if (managedType && await this.plugin.createManagedArtifact?.(managedType)) return;
 
 			const folders = (column.libraryConfig?.folders ?? [])
 				.map(f => f.trim().replace(/^\/+|\/+$/g, ''))

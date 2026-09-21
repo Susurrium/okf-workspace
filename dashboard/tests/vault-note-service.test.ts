@@ -74,6 +74,18 @@ describe("VaultNoteService", () => {
       "这条记录先留在 Inbox，但在对应上下文中也能找到。",
       { project: project.path, course: course.path },
     );
+    const convertedCapture = await notes.createCaptureFromWorkbench(
+      "workbenches/daily",
+      "memo-17",
+      "可恢复便签",
+      "转换过程中即使重启也不能产生第二份。",
+    );
+    const repeatedConversion = await notes.createCaptureFromWorkbench(
+      "workbenches/daily",
+      "memo-17",
+      "可恢复便签",
+      "转换过程中即使重启也不能产生第二份。",
+    );
     const guidePath = "learning/guides/local-first.md";
     files.set(guidePath, new (TFile as unknown as new (value: string) => TFile)(guidePath));
     frontmatterByPath.set(guidePath, { type: "Study Guide", custom: "保留" });
@@ -128,6 +140,11 @@ describe("VaultNoteService", () => {
     expect(markdown.get(linkedCapture.path)).toContain(
       'project: "/projects/test-project/project.md"',
     );
+    expect(convertedCapture.created).toBe(true);
+    expect(repeatedConversion).toEqual({ path: convertedCapture.path, created: false });
+    expect(markdown.get(convertedCapture.path)).toContain(
+      '<!-- okf:apex-capture source="workbenches/daily#memo-17" -->',
+    );
     expect(await notes.captureContexts()).toEqual({
       courses: [{ path: course.path, title: "测试课程" }],
       projects: [{ path: project.path, title: "测试项目" }],
@@ -141,7 +158,7 @@ describe("VaultNoteService", () => {
     expect(folders.has("projects/test-project/decisions")).toBe(false);
     expect(folders.has("projects/test-project/outputs")).toBe(false);
     const today = await new VaultDashboardReader(app).today();
-    expect(today.open_inbox_count).toBe(3);
+    expect(today.open_inbox_count).toBe(4);
     expect(today.active_projects).toEqual([
       expect.objectContaining({ title: "测试项目", project_status: "active" }),
     ]);

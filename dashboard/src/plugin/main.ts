@@ -55,6 +55,7 @@ import { DashboardSettingTab } from "../../apex/src/settings.js";
 import { DashboardView, DASHBOARD_VIEW_TYPE } from "../../apex/src/view.js";
 import { registerSectionDefinition } from "../../apex/src/section-registry.js";
 import { ApexHostAdapter } from "../adapters/apex-host.js";
+import { ArtifactEditPolicy } from "../application/artifact-edit-policy.js";
 import {
   readLegacyApexSettings,
   takeoverApexNativeData,
@@ -103,6 +104,7 @@ import {
 } from "./settings.js";
 import { normalizeApexSettings } from "./apex-settings.js";
 import {
+  buildClaudianFallbackText,
   ClaudianBridgeAdapter,
   type CodexHandoffRequest,
 } from "./claudian-bridge.js";
@@ -148,6 +150,7 @@ export default class OkfBrainPlugin extends Plugin {
 
   public async onload(): Promise<void> {
     await this.loadSettings();
+    this.vaultNotes = new VaultNoteService(this.app);
     const takeover = await takeoverApexNativeData(this.app, this.manifest.id);
     const copied = takeover.entries.filter((entry) => entry.status === "copied");
     const conflicts = takeover.entries.filter((entry) => entry.status === "target-kept");
@@ -171,6 +174,26 @@ export default class OkfBrainPlugin extends Plugin {
         this.notes().appendDailyTask(date, taskLine, position),
       workspacePresets: WORKBENCH_PRESETS,
       createWorkspaceMarkdown: generateWorkbenchPresetMarkdown,
+      mutateManagedArtifact: (mutation) =>
+        new ArtifactEditPolicy(this.notes()).mutate(mutation),
+      convertMemoToCapture: (workspacePath, card) => {
+        const title = card.title?.trim() || "工作台便签";
+        const content = [card.blockquote?.trim(), card.body?.trim()]
+          .filter(Boolean)
+          .join("\n\n");
+        return this.notes().createCaptureFromWorkbench(workspacePath, card.id, title, content);
+      },
+      createManagedArtifact: async (artifactType) => {
+        if (artifactType === "Project") {
+          this.promptProject();
+          return true;
+        }
+        if (["Source", "Source Text"].includes(artifactType)) {
+          new Notice("Source 必须通过导入、Feed 或资料保留流程创建，以维持 record/text 配对。", 8000);
+          return true;
+        }
+        return false;
+      },
     });
     await this.apexHost.initialize();
     this.unregisterApexSections.push(
@@ -194,7 +217,6 @@ export default class OkfBrainPlugin extends Plugin {
     );
     this.registerDashboardRecentFiles();
     this.claudianBridge = new ClaudianBridgeAdapter(this.app);
-    this.vaultNotes = new VaultNoteService(this.app);
     this.localService = new LocalServiceManager(() => ({
       baseUrl: this.settings.baseUrl,
       enabled: this.settings.manageLocalService,
@@ -493,13 +515,33 @@ export default class OkfBrainPlugin extends Plugin {
     options: Omit<CodexHandoffRequest, "prompt"> = {},
   ): Promise<void> {
     if (!this.claudianBridge) throw new Error("Claudian Bridge 尚未初始化");
-    const result = await this.claudianBridge.handoff({
+    const request: CodexHandoffRequest = {
       prompt,
       actionMode: "read",
       autoSend: false,
       newSession: true,
       ...options,
-    });
+    };
+    if (!this.claudianBridge.isAvailable()) {
+      const fallback = buildClaudianFallbackText(request);
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(fallback);
+        copied = true;
+      } catch (error) {
+        console.warn("[okf-workspace] could not copy Claudian fallback", error);
+      }
+      const firstContext = request.contextPaths?.[0];
+      if (firstContext) await this.openVaultPath(firstContext);
+      new Notice(
+        copied
+          ? "Claudian 未启用；提示词和上下文路径已复制，并已打开首个上下文文件。"
+          : "Claudian 未启用；已打开首个上下文文件。请启用 okf-claudian 后重试 AI 操作。",
+        10_000,
+      );
+      return;
+    }
+    const result = await this.claudianBridge.handoff(request);
     new Notice(
       result.sent
         ? "任务已在 Claudian 中提交"

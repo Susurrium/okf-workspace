@@ -4,6 +4,17 @@ import type { DashboardSettings } from './types';
 import type { TaskInsertTarget } from './daily-notes';
 import type { PomodoroService } from './pomodoro-service';
 import type { ReadingService } from './reading-service';
+import type { DashboardCard } from './types';
+
+export type ArtifactMutation =
+	| { kind: 'frontmatter'; path: string; artifactType: string; property: string; value: unknown }
+	| { kind: 'move'; path: string; artifactType: string; targetPath: string }
+	| { kind: 'trash'; path: string; artifactType: string };
+
+export type ArtifactMutationResult =
+	| { outcome: 'allow' }
+	| { outcome: 'handled'; message?: string }
+	| { outcome: 'deny'; message: string };
 
 /**
  * Generic host surface used by the Apex workbench UI and native services.
@@ -38,6 +49,12 @@ export interface ApexHost {
 		taskLine: string,
 		position: 'start' | 'end',
 	): Promise<TaskInsertTarget | null>;
+	mutateManagedArtifact?(mutation: ArtifactMutation): Promise<ArtifactMutationResult>;
+	convertMemoToCapture?(
+		workspacePath: string,
+		card: DashboardCard,
+	): Promise<{ path: string; created: boolean }>;
+	createManagedArtifact?(artifactType: string): Promise<boolean>;
 }
 
 export interface WorkspacePresetOption {

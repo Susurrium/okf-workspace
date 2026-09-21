@@ -3,7 +3,13 @@ import { Notice, Platform, TFile, type Plugin } from "obsidian";
 import { BackupService } from "../../apex/src/backup-service.js";
 import { ExpenseService, registerExpenseService } from "../../apex/src/expense-service.js";
 import { HabitService, registerHabitService } from "../../apex/src/habit-service.js";
-import { type ApexHost, registerApexHost } from "../../apex/src/host.js";
+import {
+  type ApexHost,
+  type ArtifactMutation,
+  type ArtifactMutationResult,
+  registerApexHost,
+} from "../../apex/src/host.js";
+import type { DashboardCard } from "../../apex/src/types.js";
 import { setLanguage, t } from "../../apex/src/i18n.js";
 import { MediaTagService, registerMediaTagService } from "../../apex/src/media-tags.js";
 import { MusicService, registerMusicService } from "../../apex/src/music-service.js";
@@ -40,6 +46,12 @@ export interface ApexHostAdapterOptions {
   ) => Promise<TaskInsertTarget | null>;
   workspacePresets?: ApexHost["workspacePresets"];
   createWorkspaceMarkdown?: (presetId?: string) => string;
+  mutateManagedArtifact?: (mutation: ArtifactMutation) => Promise<ArtifactMutationResult>;
+  convertMemoToCapture?: (
+    workspacePath: string,
+    card: DashboardCard,
+  ) => Promise<{ path: string; created: boolean }>;
+  createManagedArtifact?: (artifactType: string) => Promise<boolean>;
 }
 
 /**
@@ -56,6 +68,9 @@ export class ApexHostAdapter implements ApexHost {
   private readonly calendarTaskWriter: ApexHostAdapterOptions["insertCalendarTask"];
   public readonly workspacePresets: ApexHost["workspacePresets"];
   private readonly workspaceMarkdownFactory: ApexHostAdapterOptions["createWorkspaceMarkdown"];
+  private readonly artifactMutation: ApexHostAdapterOptions["mutateManagedArtifact"];
+  private readonly memoConversion: ApexHostAdapterOptions["convertMemoToCapture"];
+  private readonly managedArtifactCreation: ApexHostAdapterOptions["createManagedArtifact"];
   public readonly backupService: BackupService;
   private readonly mediaTagService: MediaTagService;
   private readonly habitService: HabitService;
@@ -77,6 +92,9 @@ export class ApexHostAdapter implements ApexHost {
     this.calendarTaskWriter = options.insertCalendarTask;
     this.workspacePresets = options.workspacePresets;
     this.workspaceMarkdownFactory = options.createWorkspaceMarkdown;
+    this.artifactMutation = options.mutateManagedArtifact;
+    this.memoConversion = options.convertMemoToCapture;
+    this.managedArtifactCreation = options.createManagedArtifact;
     this.backupService = new BackupService(this);
     this.mediaTagService = new MediaTagService(this);
     this.habitService = new HabitService(this);
@@ -151,6 +169,22 @@ export class ApexHostAdapter implements ApexHost {
   ): Promise<TaskInsertTarget | null> {
     if (!this.calendarTaskWriter) return Promise.resolve(null);
     return this.calendarTaskWriter(date, taskLine, position);
+  }
+
+  public mutateManagedArtifact(mutation: ArtifactMutation): Promise<ArtifactMutationResult> {
+    return this.artifactMutation?.(mutation) ?? Promise.resolve({ outcome: "allow" });
+  }
+
+  public convertMemoToCapture(
+    workspacePath: string,
+    card: DashboardCard,
+  ): Promise<{ path: string; created: boolean }> {
+    if (!this.memoConversion) return Promise.reject(new Error("Capture 转换服务未配置"));
+    return this.memoConversion(workspacePath, card);
+  }
+
+  public createManagedArtifact(artifactType: string): Promise<boolean> {
+    return this.managedArtifactCreation?.(artifactType) ?? Promise.resolve(false);
   }
 
   public createDefaultWorkspaceMarkdown(): string {

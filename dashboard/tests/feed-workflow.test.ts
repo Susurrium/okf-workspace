@@ -45,8 +45,12 @@ describe("Dashboard Feed workflow", () => {
     vi.stubGlobal("fetch", fetchMock);
     try {
       const api = new HttpFeedApi("http://127.0.0.1:8765", "token");
-      await api.decide("ai-daily", "news-2", "learn-now");
+      await api.decide("ai-daily", "news-2", "learn-now", { project: "demo" });
       expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+        action: "learn-now",
+        project: "demo",
+      });
       expect(timeout.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([120_000]);
     } finally {
       vi.unstubAllGlobals();

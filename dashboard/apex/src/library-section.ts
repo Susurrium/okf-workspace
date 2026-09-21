@@ -1,4 +1,11 @@
 import { App, Notice, Platform, TFile, setIcon } from 'obsidian';
+import { getRegisteredApexHost, type ArtifactMutation, type ArtifactMutationResult } from './host';
+
+type ArtifactMutationInput = ArtifactMutation extends infer Mutation
+	? Mutation extends ArtifactMutation
+		? Omit<Mutation, 'path' | 'artifactType'>
+		: never
+	: never;
 import type { HoverParent } from 'obsidian';
 import type { LibraryConfig, PropertyFilter, LibraryViewMode } from './types';
 import { t, getLanguage } from './i18n';
@@ -1037,7 +1044,23 @@ function attachItemHover(app: App, el: HTMLElement, file: TFile): void {
 /** Move a note to the trash (recoverable) via the file manager so the user's
  *  "delete to trash vs permanent" preference is respected. */
 async function trashLibraryFile(app: App, file: TFile): Promise<void> {
+	const decision = await managedMutation(app, file, { kind: 'trash' });
+	if (decision.outcome !== 'allow') {
+		if (decision.message) new Notice(decision.message, 7000);
+		return;
+	}
 	await app.fileManager.trashFile(file);
+}
+
+async function managedMutation(
+	app: App,
+	file: TFile,
+	mutation: ArtifactMutationInput,
+): Promise<ArtifactMutationResult> {
+	const host = getRegisteredApexHost();
+	if (!host?.mutateManagedArtifact) return { outcome: 'allow' };
+	const artifactType = String(app.metadataCache.getFileCache(file)?.frontmatter?.type ?? '');
+	return host.mutateManagedArtifact({ ...mutation, path: file.path, artifactType } as ArtifactMutation);
 }
 
 function renderGridView(container: HTMLElement, results: LibraryFileResult[], app: App, showTags: boolean, config: LibraryConfig): void {
@@ -1360,12 +1383,15 @@ function startCellEdit(
 	input.focus();
 	input.select();
 
-	const finish = (save: boolean) => {
+	let finishing = false;
+	const finish = async (save: boolean) => {
 		if (!input.isConnected) return;
+		if (finishing) return;
+		finishing = true;
 		const raw = input.value.trim();
-		input.remove();
 
 		if (!save) {
+			input.remove();
 			td.textContent = displayValue || '—';
 			if (!displayValue) td.addClass('dashboard-library-table-empty');
 			return;
@@ -1382,8 +1408,21 @@ function startCellEdit(
 			newValue = !isNaN(num) && raw !== '' ? num : raw;
 		}
 
-		// Write via processFrontMatter
-		void app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
+		const decision = await managedMutation(app, file, {
+			kind: 'frontmatter',
+			property: prop,
+			value: newValue,
+		});
+		input.remove();
+		if (decision.outcome === 'deny') {
+			new Notice(decision.message, 7000);
+			td.textContent = displayValue || '—';
+			if (!displayValue) td.addClass('dashboard-library-table-empty');
+			return;
+		}
+		if (decision.outcome === 'handled') {
+			if (decision.message) new Notice(decision.message, 5000);
+		} else await app.fileManager.processFrontMatter(file, (fm: Record<string, unknown>) => {
 			if (newValue === null) {
 				delete fm[prop];
 			} else {
@@ -1403,10 +1442,10 @@ function startCellEdit(
 	};
 
 	input.addEventListener('keydown', (e: KeyboardEvent) => {
-		if (e.key === 'Enter') { e.preventDefault(); finish(true); }
-		else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+		if (e.key === 'Enter') { e.preventDefault(); void finish(true); }
+		else if (e.key === 'Escape') { e.preventDefault(); void finish(false); }
 	});
-	input.addEventListener('blur', () => finish(true));
+	input.addEventListener('blur', () => void finish(true));
 }
 
 function renderTableView(container: HTMLElement, results: LibraryFileResult[], app: App, config: LibraryConfig, onDelete: (file: TFile) => void): void {
@@ -1697,6 +1736,11 @@ async function moveKanbanCard(
 		new Notice(t('library.moveNameConflict', { name: file.basename, folder: targetFolder }));
 		return;
 	}
+	const policy = await managedMutation(app, file, { kind: 'move', targetPath: newPath });
+	if (policy.outcome !== 'allow') {
+		if (policy.message) new Notice(policy.message, 7000);
+		return;
+	}
 	const originParent = cardEl.parentNode;
 	const originNext = cardEl.nextSibling;
 	kanbanMovesInFlight.add(file);
@@ -1759,7 +1803,21 @@ async function setKanbanGroupProperty(
 ): Promise<void> {
 	// Same-value drop (including a drop back on the card's own column): no-op.
 	const cached: unknown = app.metadataCache.getFileCache(file)?.frontmatter?.[propKey];
-	if (nextGroupPropertyValue(cached, targetValue, fromKey) === undefined) return;
+	const proposed = nextGroupPropertyValue(cached, targetValue, fromKey);
+	if (proposed === undefined) return;
+	const policy = await managedMutation(app, file, {
+		kind: 'frontmatter',
+		property: propKey,
+		value: proposed,
+	});
+	if (policy.outcome === 'deny') {
+		new Notice(policy.message, 7000);
+		return;
+	}
+	if (policy.outcome === 'handled') {
+		if (policy.message) new Notice(policy.message, 5000);
+		return;
+	}
 	// A previous drop of this file is still writing — let it finish.
 	if (kanbanMovesInFlight.has(file)) return;
 	const originParent = cardEl.parentNode;

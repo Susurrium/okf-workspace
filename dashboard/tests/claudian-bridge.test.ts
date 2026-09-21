@@ -1,7 +1,10 @@
 import type { App } from "obsidian";
 import { describe, expect, it, vi } from "vitest";
 
-import { ClaudianBridgeAdapter } from "../src/plugin/claudian-bridge.js";
+import {
+  buildClaudianFallbackText,
+  ClaudianBridgeAdapter,
+} from "../src/plugin/claudian-bridge.js";
 
 describe("ClaudianBridgeAdapter", () => {
   it("passes structured context and authority through the public OKF bridge", async () => {
@@ -47,5 +50,18 @@ describe("ClaudianBridgeAdapter", () => {
 
     expect(adapter.isAvailable()).toBe(false);
     await expect(adapter.handoff({ prompt: "test" })).rejects.toThrow("Claudian 面板");
+  });
+
+  it("builds a complete manual fallback with the original prompt and context paths", () => {
+    expect(buildClaudianFallbackText({
+      prompt: "整理这份资料",
+      contextPaths: ["sources/records/web/example.md", "sources/text/web/example.md"],
+      actionMode: "write",
+      skill: "distill-wiki",
+    })).toBe([
+      "整理这份资料",
+      "模式：write\n技能：distill-wiki",
+      "上下文文件：\n- sources/records/web/example.md\n- sources/text/web/example.md",
+    ].join("\n\n"));
   });
 });

@@ -1,5 +1,6 @@
 import type {
   FeedDecisionAction,
+  FeedDecisionContext,
   FeedDecisionResult,
   FeedDashboardDigest,
   FeedDigest,
@@ -60,6 +61,7 @@ export interface FeedApi {
     kind: FeedKind,
     itemId: string,
     action: FeedDecisionAction,
+    context?: FeedDecisionContext,
   ): Promise<FeedDecisionResult>;
   getDecision(kind: FeedKind, itemId: string): Promise<FeedDecisionResult | undefined>;
 }
@@ -183,13 +185,14 @@ export class HttpFeedApi implements FeedApi {
     kind: FeedKind,
     itemId: string,
     action: FeedDecisionAction,
+    context: FeedDecisionContext = {},
   ): Promise<FeedDecisionResult> {
     return this.request(
       `/feeds/${kind}/items/${encodeURIComponent(itemId)}/decision`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action }),
+        body: JSON.stringify({ action, ...context }),
       },
       120_000,
     );
