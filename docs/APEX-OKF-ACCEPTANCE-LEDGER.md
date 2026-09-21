@@ -34,7 +34,7 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 | M0 | Scope, ownership, baseline, capability and acceptance ledgers | Complete: architecture ownership, this ledger, and `docs/upstream/apex-baseline.md`; local links and `git diff --check` passed |
 | M1 | Apex subtree and one outer plugin build/identity | In progress: subtree imported at locked SHA; 28 upstream scripts, independent build, outer Vitest/typecheck/build, and single `dist/` package pass; disposable-Vault interaction remains |
 | M2 | Existing OKF services, settings, commands, and plugin lifecycle exposed to new host | Pending |
-| M3 | Stable section IDs, lossless board repository, registry, pane-local state | Pending |
+| M3 | Stable section IDs, lossless board repository, registry, pane-local state | In progress: stable IDs/anchors, duplicate-name routing, unknown YAML/body preservation, shared in-process state/write queue, and three-way pre-write merge implemented; pane-local workspace selection and real Obsidian interaction remain |
 | M4 | Full Project experience and managed-artifact edit policy | Pending |
 | M5 | Unified task/calendar/Daily/Capture loop | Pending |
 | M6 | Learning/Knowledge/Inbox/Import sections and details | Pending |
@@ -48,8 +48,8 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 | --- | --- | --- | --- |
 | A01 | Create a dated Project action | One task body appears through Project, Today, and Calendar; completion from any view updates all | Pending |
 | A02 | Put one Project in two workbenches | Status synchronizes; removing one reference keeps the Project; filters remain independent | Pending |
-| A03 | Rename/reorder same-named sections | Stable IDs retain config, collapse, scroll, and body association | Pending |
-| A04 | Complete a board checklist from Calendar, then save layout | Completion remains after layout save/reload | Pending |
+| A03 | Rename/reorder same-named sections | Stable IDs retain config, collapse, scroll, and body association | Automated format/identity coverage: `dashboard/tests/apex-board-format.test.ts`; DOM scroll and disposable-Vault run pending |
+| A04 | Complete a board checklist from Calendar, then save layout | Completion remains after layout save/reload | Automated three-way merge coverage: `dashboard/tests/apex-board-merge.test.ts`; calendar UI run pending |
 | A05 | Checkboxes in fences/YAML/Source Text/Digest | Formal-task query excludes them; explicit ordinary-checklist filter can still expose ordinary lists | Pending |
 | A06 | Reminder before due and scheduled distinct from due | All values render and edit independently; reminder never overwrites due | Pending |
 | A07 | Duplicate text, file rename, and line movement | Mutation finds the same anchored task or requests reread; never changes its twin | Pending |
@@ -62,7 +62,7 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 | A14 | Engine unavailable | Vault read/light edits work; import/generation reports the exact unavailable capability | Pending |
 | A15 | Claudian unavailable | Other workbench features work; AI action offers clear context/prompt fallback | Pending |
 | A16 | Feed return, note update, or theme switch | Unrelated web/music/timer state survives; reading page and position survive | Pending |
-| A17 | Unknown field/section/free prose/newer board version | Data is retained and compatibility limit is visible; save never silently drops it | Pending |
+| A17 | Unknown field/section/free prose/newer board version | Data is retained and compatibility limit is visible; save never silently drops it | Automated preservation coverage and unknown-section compatibility UI implemented; disposable-Vault run pending |
 | A18 | Re-run interrupted legacy Apex-data takeover | Original format remains, manual changes are not overwritten, no Vault notes are created, one writer remains | Pending |
 | A19 | Apply an upstream update | Native Apex and integrated OKF scenarios pass after a real subtree update exercise | Pending |
 

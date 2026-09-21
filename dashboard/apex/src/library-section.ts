@@ -491,7 +491,7 @@ function showCalendarPopup(
 
 export function renderLibrarySection(
 	el: HTMLElement,
-	column: { name: string; color: string; sectionType?: string; libraryConfig?: LibraryConfig },
+	column: { id?: string; name: string; color: string; sectionType?: string; libraryConfig?: LibraryConfig },
 	app: App,
 	onConfigChange: (config: LibraryConfig) => void,
 	hoverParent: HoverParent | null = null,
@@ -941,7 +941,7 @@ export function renderLibrarySection(
 
 	// Config button handler - will be wired in view.ts via custom event
 	configBtn.addEventListener('click', () => {
-		const event = new CustomEvent('dashboard-library-config', { detail: { columnName: column.name }, bubbles: true });
+		const event = new CustomEvent('dashboard-library-config', { detail: { columnName: column.id ?? column.name }, bubbles: true });
 		el.dispatchEvent(event);
 	});
 
@@ -949,7 +949,7 @@ export function renderLibrarySection(
 	// (x/y anchor the folder-picker menu for sections with several folders)
 	newNoteBtn.addEventListener('click', (ev) => {
 		const event = new CustomEvent('dashboard-library-new-note', {
-			detail: { columnName: column.name, x: ev.clientX, y: ev.clientY },
+			detail: { columnName: column.id ?? column.name, x: ev.clientX, y: ev.clientY },
 			bubbles: true,
 		});
 		el.dispatchEvent(event);

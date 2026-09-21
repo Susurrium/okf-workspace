@@ -2,7 +2,7 @@ import { memoCardText } from './card-move';
 import { extractCardParts } from './parser';
 import { App, Platform, TFile, setIcon } from 'obsidian';
 import type { HoverParent, EventRef } from 'obsidian';
-import type { DashboardData, DashboardColumn, DashboardCard, RenderCallbacks, TaskItem, DocNode, DashboardSettings, CardSize, TrackerStyle } from './types';
+import { sectionRef, type DashboardData, type DashboardColumn, type DashboardCard, type RenderCallbacks, type TaskItem, type DocNode, type DashboardSettings, type CardSize, type TrackerStyle } from './types';
 import { t, getLanguage } from './i18n';
 import { renderLibrarySection } from './library-section';
 import { renderMediaSection, destroyMediaSection } from './media-section';
@@ -1697,7 +1697,7 @@ export function refreshScanningSections(
 	activeHoverParent = hoverParent;
 	for (const column of data.columns) {
 		if (!SCANNING_SECTION_TYPES.has(getSectionType(column))) continue;
-		const oldEl = kanban.querySelector(`:scope > [data-column="${CSS.escape(column.name)}"]`);
+		const oldEl = kanban.querySelector(`:scope > [data-column="${CSS.escape(sectionRef(column))}"]`);
 		if (!oldEl) continue;
 		const newEl = renderSection(column, callbacks, app, data, settings);
 		// Carry the old row's scroll positions over the swap (file lists,
@@ -1725,7 +1725,7 @@ export function refreshMediaSections(
 	activeHoverParent = hoverParent;
 	for (const column of data.columns) {
 		if (!MEDIA_SECTION_TYPES.has(getSectionType(column))) continue;
-		const matched = kanban.querySelector(`:scope > [data-column="${CSS.escape(column.name)}"]`);
+		const matched = kanban.querySelector(`:scope > [data-column="${CSS.escape(sectionRef(column))}"]`);
 		if (!(matched instanceof HTMLElement)) continue;
 		const scrollStates = captureScrollStates(matched);
 		destroyMediaSection(matched);
@@ -1736,6 +1736,10 @@ export function refreshMediaSections(
 }
 
 const COLLAPSED_KEY = 'apex-dashboard-collapsed';
+const SUPPORTED_SECTION_TYPES = new Set([
+	'memo', 'todo', 'projects', 'notes', 'dashboard', 'library', 'folder', 'images', 'videos',
+	'alltasks', 'calendar', 'dataview', 'weread', 'ticktick', 'sticky', 'web',
+]);
 
 function getCollapsedSections(app: App): Set<string> {
 	try {
@@ -1789,7 +1793,7 @@ function attachSectionResizeHandle(el: HTMLElement, column: DashboardColumn, cal
 			stopDrag();
 			const finalHeight = Math.max(160, Math.min(2000, startHeight + (ev.clientY - startY)));
 			if (finalHeight !== column.height) {
-				callbacks.onColumnHeightChange(column.name, finalHeight);
+				callbacks.onColumnHeightChange(sectionRef(column), finalHeight);
 			}
 		};
 		function stopDrag(): void {
@@ -1872,7 +1876,7 @@ function attachPairWidthHandle(el: HTMLElement, column: DashboardColumn, callbac
 			stopDrag();
 			const rounded = Math.round(lastPct);
 			if (rounded !== Math.round(startPct)) {
-				callbacks.onColumnWidthChange(column.name, rounded);
+				callbacks.onColumnWidthChange(sectionRef(column), rounded);
 			}
 		};
 		function stopDrag(): void {
@@ -1889,12 +1893,13 @@ function attachPairWidthHandle(el: HTMLElement, column: DashboardColumn, callbac
 export function renderSection(column: DashboardColumn, callbacks: RenderCallbacks, app: App, data?: DashboardData, settings?: DashboardSettings): HTMLElement {
 	const el = createDiv();
 	el.addClass('dashboard-section-row');
-	el.dataset.column = column.name;
+	const reference = sectionRef(column);
+	el.dataset.column = reference;
 	const sectionType = getSectionType(column);
 	el.dataset.sectionType = sectionType;
 
 	const collapsed = getCollapsedSections(app);
-	if (collapsed.has(column.name)) {
+	if (collapsed.has(reference) || collapsed.has(column.name)) {
 		el.addClass('dashboard-section-row--collapsed');
 	}
 
@@ -1952,7 +1957,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		const finish = (save: boolean) => {
 			const newName = input.value.trim();
 			if (save && newName && newName !== currentName) {
-				callbacks.onColumnRename(currentName, newName, data ? data.columns.indexOf(column) : -1);
+				callbacks.onColumnRename(reference, newName, data ? data.columns.indexOf(column) : -1);
 			} else {
 				titleEl.empty();
 				titleEl.setText(currentName);
@@ -1985,15 +1990,33 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		const isNowCollapsed = el.hasClass('dashboard-section-row--collapsed');
 		if (isNowCollapsed) {
 			el.removeClass('dashboard-section-row--collapsed');
+			collapsed.delete(reference);
 			collapsed.delete(column.name);
 		} else {
 			el.addClass('dashboard-section-row--collapsed');
-			collapsed.add(column.name);
+			collapsed.add(reference);
 		}
 		saveCollapsedSections(app, collapsed);
 	});
 
 		const headerActions = header.createDiv({ cls: 'dashboard-section-header-actions' });
+
+	if (!SUPPORTED_SECTION_TYPES.has(sectionType)) {
+		const deleteSectionBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
+			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
+		});
+		setIcon(deleteSectionBtn, 'trash-2');
+		deleteSectionBtn.addEventListener('click', (event) => {
+			event.stopPropagation();
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
+		});
+		el.createDiv({
+			cls: 'dashboard-library-empty dashboard-section-compatibility',
+			text: `此分区类型（${sectionType}）需要更新版本才能编辑；原始配置和正文会被保留。`,
+		});
+		return el;
+	}
 
 	// Sticky ("便利贴") sections mix memo and todo cards: they get the one-click
 	// archive button like todo sections, but NOT the task-template button — cards
@@ -2004,7 +2027,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 			attr: { 'aria-label': t('renderer.archiveTasks') },
 		});
 		setIcon(archiveBtn, 'archive');
-		archiveBtn.addEventListener('click', () => callbacks.onArchiveTasks(column.name));
+		archiveBtn.addEventListener('click', () => callbacks.onArchiveTasks(reference));
 	}
 
 	if (sectionType === 'todo') {
@@ -2013,7 +2036,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 			attr: { 'aria-label': t('template.addFromTemplate') },
 		});
 		setIcon(templateBtn, 'layout-template');
-		templateBtn.addEventListener('click', () => callbacks.onAddFromTemplate(column.name));
+		templateBtn.addEventListener('click', () => callbacks.onAddFromTemplate(reference));
 	}
 
 	// Library section: render differently
@@ -2034,7 +2057,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 			});
 			setIcon(configBtn, 'settings');
 			configBtn.addEventListener('click', () => {
-				const event = new CustomEvent('dashboard-library-config', { detail: { columnName: column.name }, bubbles: true });
+				const event = new CustomEvent('dashboard-library-config', { detail: { columnName: reference }, bubbles: true });
 				el.dispatchEvent(event);
 			});
 		}
@@ -2046,7 +2069,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		setIcon(deleteSectionBtn, 'trash-2');
 		deleteSectionBtn.addEventListener('click', (e) => {
 			e.stopPropagation();
-			callbacks.onColumnDelete(column.name, data ? data.columns.indexOf(column) : -1);
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
 		});
 
 		if (folderUnconfigured) {
@@ -2055,7 +2078,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		}
 
 		renderLibrarySection(el, column, app, (config) => {
-			callbacks.onLibraryConfigChange(column.name, config);
+			callbacks.onLibraryConfigChange(reference, config);
 		}, activeHoverParent, activeNoteOpener);
 		return el;
 	}
@@ -2069,7 +2092,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		});
 		setIcon(configBtn, 'settings');
 		configBtn.addEventListener('click', () => {
-			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: column.name }, bubbles: true });
+			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: reference }, bubbles: true });
 			el.dispatchEvent(event);
 		});
 
@@ -2080,7 +2103,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		setIcon(deleteSectionBtn, 'trash-2');
 		deleteSectionBtn.addEventListener('click', (e) => {
 			e.stopPropagation();
-			callbacks.onColumnDelete(column.name, data ? data.columns.indexOf(column) : -1);
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
 		});
 
 		renderMediaSection(el, column, app, activeHoverParent, callbacks.onOpenNoteInPopover, getMediaTagService() ?? undefined);
@@ -2099,7 +2122,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		setIcon(deleteSectionBtn, 'trash-2');
 		deleteSectionBtn.addEventListener('click', (e) => {
 			e.stopPropagation();
-			callbacks.onColumnDelete(column.name, data ? data.columns.indexOf(column) : -1);
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
 		});
 
 		if (settings) {
@@ -2118,7 +2141,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		});
 		setIcon(configBtn, 'settings');
 		configBtn.addEventListener('click', () => {
-			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: column.name }, bubbles: true });
+			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: reference }, bubbles: true });
 			el.dispatchEvent(event);
 		});
 
@@ -2139,7 +2162,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		setIcon(deleteSectionBtn, 'trash-2');
 		deleteSectionBtn.addEventListener('click', (e) => {
 			e.stopPropagation();
-			callbacks.onColumnDelete(column.name, data ? data.columns.indexOf(column) : -1);
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
 		});
 
 		const apiKey = (settings?.wereadApiKey ?? '').trim();
@@ -2159,7 +2182,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		});
 		setIcon(todayBtn, 'calendar-check');
 		todayBtn.addEventListener('click', () => {
-			el.dispatchEvent(new CustomEvent('dashboard-ticktick-view', { detail: { columnName: column.name, view: 'today' }, bubbles: true }));
+			el.dispatchEvent(new CustomEvent('dashboard-ticktick-view', { detail: { columnName: reference, view: 'today' }, bubbles: true }));
 		});
 
 		// View toggle: Lists
@@ -2169,7 +2192,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		});
 		setIcon(listsBtn, 'list');
 		listsBtn.addEventListener('click', () => {
-			el.dispatchEvent(new CustomEvent('dashboard-ticktick-view', { detail: { columnName: column.name, view: 'lists' }, bubbles: true }));
+			el.dispatchEvent(new CustomEvent('dashboard-ticktick-view', { detail: { columnName: reference, view: 'lists' }, bubbles: true }));
 		});
 
 		// Project filter (only in lists view)
@@ -2180,7 +2203,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 			});
 			setIcon(filterBtn, 'filter');
 			filterBtn.addEventListener('click', () => {
-				el.dispatchEvent(new CustomEvent('dashboard-ticktick-filter', { detail: { columnName: column.name }, bubbles: true }));
+				el.dispatchEvent(new CustomEvent('dashboard-ticktick-filter', { detail: { columnName: reference }, bubbles: true }));
 			});
 		}
 
@@ -2199,7 +2222,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		setIcon(deleteSectionBtn, 'trash-2');
 		deleteSectionBtn.addEventListener('click', (e) => {
 			e.stopPropagation();
-			callbacks.onColumnDelete(column.name, data ? data.columns.indexOf(column) : -1);
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
 		});
 
 		const region = settings?.ticktickRegion === 'ticktick' ? 'ticktick' : 'dida365';
@@ -2212,7 +2235,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 				const cfg = column.ticktickConfig;
 				if (cfg) {
 					const newWidths = { ...(cfg.projectWidths ?? {}), [projectId]: width };
-					el.dispatchEvent(new CustomEvent('dashboard-ticktick-resize', { detail: { columnName: column.name, projectWidths: newWidths }, bubbles: true }));
+					el.dispatchEvent(new CustomEvent('dashboard-ticktick-resize', { detail: { columnName: reference, projectWidths: newWidths }, bubbles: true }));
 				}
 			});
 		return el;
@@ -2237,7 +2260,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		});
 		setIcon(configBtn, 'settings');
 		configBtn.addEventListener('click', () => {
-			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: column.name }, bubbles: true });
+			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: reference }, bubbles: true });
 			el.dispatchEvent(event);
 		});
 
@@ -2248,11 +2271,11 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		setIcon(deleteSectionBtn, 'trash-2');
 		deleteSectionBtn.addEventListener('click', (e) => {
 			e.stopPropagation();
-			callbacks.onColumnDelete(column.name, data ? data.columns.indexOf(column) : -1);
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
 		});
 
 		renderDataviewSection(el, column, app, activeHoverParent, callbacks.onOpenNoteInPopover ?? null, (fn) => { reload = fn; },
-			(cfg) => callbacks.onDataviewConfigChange(column.name, cfg));
+			(cfg) => callbacks.onDataviewConfigChange(reference, cfg));
 		return el;
 	}
 
@@ -2273,7 +2296,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		});
 		setIcon(configBtn, 'settings');
 		configBtn.addEventListener('click', () => {
-			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: column.name }, bubbles: true });
+			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: reference }, bubbles: true });
 			el.dispatchEvent(event);
 		});
 
@@ -2284,7 +2307,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		setIcon(deleteSectionBtn, 'trash-2');
 		deleteSectionBtn.addEventListener('click', (e) => {
 			e.stopPropagation();
-			callbacks.onColumnDelete(column.name, data ? data.columns.indexOf(column) : -1);
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
 		});
 
 		renderWebSection(el, column, (fn) => { reload = fn; });
@@ -2296,7 +2319,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		attr: { 'aria-label': t('renderer.addCardTo', { column: column.name }) },
 	});
 	setIcon(addCardBtn, 'plus');
-	addCardBtn.addEventListener('click', () => callbacks.onCardAdd(column.name));
+	addCardBtn.addEventListener('click', () => callbacks.onCardAdd(reference));
 
 	const deleteSectionBtn = headerActions.createEl('button', {
 		cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
@@ -2305,7 +2328,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	setIcon(deleteSectionBtn, 'trash-2');
 	deleteSectionBtn.addEventListener('click', (e) => {
 		e.stopPropagation();
-		callbacks.onColumnDelete(column.name, data ? data.columns.indexOf(column) : -1);
+		callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
 	});
 
 	const cardsContainer = el.createDiv({ cls: 'dashboard-section-cards' });

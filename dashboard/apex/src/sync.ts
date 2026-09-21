@@ -1,6 +1,6 @@
 import { moveDashboardCard } from './card-move';
 import { App, TFile } from 'obsidian';
-import type { DashboardSettings, DashboardCard, DashboardData, TaskItem, DocNode, QuickAction, BannerData, CardType } from './types';
+import type { DashboardSettings, DashboardCard, DashboardColumn, DashboardData, TaskItem, DocNode, QuickAction, BannerData, CardType } from './types';
 import { parse, serialize, generateDefaultMarkdown } from './parser';
 import { t } from './i18n';
 import {
@@ -27,6 +27,7 @@ import {
 } from './doc-tree';
 import { moveToOwnRow, moveBeside, unpartnerAt } from './column-pairs';
 import { workspaceBackupName } from './workspace-registry';
+import { mergeBoardData } from './board-merge';
 
 import type { DashboardUpdateSource } from './render-update';
 
@@ -34,11 +35,55 @@ type DataCallback = (data: DashboardData, source: DashboardUpdateSource) => void
 
 type TaskDropMode = 'before' | 'after' | 'nest';
 
+interface SharedSyncEntry {
+	engine: SyncEngine;
+	refs: number;
+	initPromise?: Promise<void>;
+}
+
+const SHARED_SYNC_ENGINES = new WeakMap<App, SharedSyncEntry>();
+
+export interface SyncEngineLease {
+	engine: SyncEngine;
+	init(): Promise<void>;
+	release(): void;
+}
+
+/** All panes in one plugin process share the board state, watcher and write queue. */
+export function acquireSyncEngine(app: App, settings: DashboardSettings): SyncEngineLease {
+	let entry = SHARED_SYNC_ENGINES.get(app);
+	if (!entry) {
+		entry = { engine: new SyncEngine(app, settings), refs: 0 };
+		SHARED_SYNC_ENGINES.set(app, entry);
+	}
+	entry.refs++;
+	entry.engine.updateSettings(settings);
+	const sharedEntry = entry;
+	let released = false;
+	return {
+		engine: sharedEntry.engine,
+		init: async () => {
+			sharedEntry.initPromise ??= sharedEntry.engine.init();
+			await sharedEntry.initPromise;
+		},
+		release: () => {
+			if (released) return;
+			released = true;
+			sharedEntry.refs--;
+			if (sharedEntry.refs <= 0) {
+				sharedEntry.engine.destroy();
+				SHARED_SYNC_ENGINES.delete(app);
+			}
+		},
+	};
+}
+
 export class SyncEngine {
 	private app: App;
 	private settings: DashboardSettings;
 	private file: TFile | null = null;
 	private data: DashboardData | null = null;
+	private baseData: DashboardData | null = null;
 	private debounceTimer: number | null = null;
 	private readonly debounceMs = 300;
 	private writeQueue: Promise<void> = Promise.resolve();
@@ -138,6 +183,7 @@ export class SyncEngine {
 		await this.writeQueue;
 		this.unregisterFileWatchers();
 		this.data = null;
+		this.baseData = null;
 		await this.findOrCreateFile();
 		this.registerFileWatcher();
 		await this.load();
@@ -384,16 +430,17 @@ export class SyncEngine {
 
 	async addCard(columnName: string, overrides?: Partial<DashboardCard>): Promise<void> {
 		if (!this.data) return;
-		const column = this.data.columns.find(col => col.name === columnName);
+		const column = this.data.columns.find(col => this.columnMatches(col, columnName));
 		const sectionType = column?.sectionType;
-		const cardTitle = overrides?.title ?? this.getDefaultCardTitle(columnName, sectionType);
-		const cardType = overrides?.type ?? this.getDefaultCardType(columnName, sectionType);
+		const displayName = column?.name ?? columnName;
+		const cardTitle = overrides?.title ?? this.getDefaultCardTitle(displayName, sectionType);
+		const cardType = overrides?.type ?? this.getDefaultCardType(displayName, sectionType);
 
 		const newCard: DashboardCard = {
 			id: `card-${Date.now().toString(36)}`,
 			title: cardTitle,
 			type: cardType,
-			column: columnName,
+			column: displayName,
 			body: '',
 			tasks: cardType === 'task' ? [{ text: t('sync.todoDefaultTask'), checked: false }] : [],
 			docs: [],
@@ -417,7 +464,7 @@ export class SyncEngine {
 		this.data = {
 			...this.data,
 			columns: this.data.columns.map(col =>
-				col.name === columnName
+				this.columnMatches(col, columnName)
 					? { ...col, cards: [...col.cards, newCard] }
 					: col
 			),
@@ -444,7 +491,7 @@ export class SyncEngine {
 
 		this.data = {
 			...this.data,
-			columns: [...this.data.columns, { name: uniqueName, color: '#6366f1', sectionType, cards: [], libraryConfig }],
+			columns: [...this.data.columns, { id: `section-${Date.now().toString(36)}`, name: uniqueName, color: '#6366f1', sectionType, cards: [], libraryConfig }],
 		};
 		await this.writeToDisk();
 	}
@@ -455,7 +502,7 @@ export class SyncEngine {
 		this.data = {
 			...this.data,
 			columns: this.data.columns.map(col =>
-				col.name === columnName ? { ...col, libraryConfig: config } : col
+				this.columnMatches(col, columnName) ? { ...col, libraryConfig: config } : col
 			),
 		};
 		await this.writeToDisk();
@@ -467,7 +514,7 @@ export class SyncEngine {
 		this.data = {
 			...this.data,
 			columns: this.data.columns.map(col =>
-				col.name === columnName ? { ...col, wereadConfig: config } : col
+				this.columnMatches(col, columnName) ? { ...col, wereadConfig: config } : col
 			),
 		};
 		await this.writeToDisk();
@@ -479,7 +526,7 @@ export class SyncEngine {
 		this.data = {
 			...this.data,
 			columns: this.data.columns.map(col =>
-				col.name === columnName ? { ...col, ticktickConfig: config } : col
+				this.columnMatches(col, columnName) ? { ...col, ticktickConfig: config } : col
 			),
 		};
 		await this.writeToDisk();
@@ -491,7 +538,7 @@ export class SyncEngine {
 		this.data = {
 			...this.data,
 			columns: this.data.columns.map(col =>
-				col.name === columnName ? { ...col, dataviewConfig: config } : col
+				this.columnMatches(col, columnName) ? { ...col, dataviewConfig: config } : col
 			),
 		};
 		await this.writeToDisk();
@@ -503,7 +550,7 @@ export class SyncEngine {
 		this.data = {
 			...this.data,
 			columns: this.data.columns.map(col =>
-				col.name === columnName ? { ...col, webConfig: config } : col
+				this.columnMatches(col, columnName) ? { ...col, webConfig: config } : col
 			),
 		};
 		await this.writeToDisk();
@@ -541,7 +588,7 @@ export class SyncEngine {
 		this.data = {
 			...this.data,
 			columns: this.data.columns.map(col =>
-				col.name === columnName ? { ...col, height } : col
+				this.columnMatches(col, columnName) ? { ...col, height } : col
 			),
 		};
 		await this.writeToDisk();
@@ -555,7 +602,7 @@ export class SyncEngine {
 		this.data = {
 			...this.data,
 			columns: this.data.columns.map(col =>
-				col.name === columnName ? { ...col, width: pct } : col
+				this.columnMatches(col, columnName) ? { ...col, width: pct } : col
 			),
 		};
 		await this.writeToDisk();
@@ -571,10 +618,14 @@ export class SyncEngine {
 		if (!this.data) return -1;
 		const idx = typeof columnIndex === 'number' ? columnIndex : -1;
 		if (idx >= 0 && idx < this.data.columns.length
-			&& this.data.columns[idx]!.name === columnName) {
+			&& this.columnMatches(this.data.columns[idx]!, columnName)) {
 			return idx;
 		}
-		return this.data.columns.findIndex(col => col.name === columnName);
+		return this.data.columns.findIndex(col => this.columnMatches(col, columnName));
+	}
+
+	private columnMatches(column: DashboardColumn, reference: string): boolean {
+		return column.id === reference || column.name === reference;
 	}
 
 	/** Names are the column key in the markdown format (## heading), so
@@ -1009,6 +1060,7 @@ export class SyncEngine {
 		if (this.data && serialize(newData) === serialize(this.data)) return;
 
 		this.data = newData;
+		this.baseData = newData;
 		this.notifyCallbacks('external');
 	}
 
@@ -1030,9 +1082,20 @@ export class SyncEngine {
 				// earlier can be stale by the time earlier queued writes drain,
 				// and writing it would silently revert everything that changed in
 				// between (external inserts included).
-				const content = serialize(this.data!);
-
 				const current = await this.app.vault.read(fileRef);
+				const remote = parse(current);
+				if (this.baseData && serialize(remote) !== serialize(this.baseData)) {
+					const merged = mergeBoardData(this.baseData, this.data!, remote);
+					if (merged.conflicts.length > 0) {
+						console.error('Dashboard write requires reread due to conflicts:', merged.conflicts);
+						this.data = remote;
+						this.baseData = remote;
+						this.notifyCallbacks('external');
+						return;
+					}
+					this.data = merged.data;
+				}
+				const content = serialize(this.data!);
 
 				// Safety: skip write if new content is drastically smaller
 				if (current.length > 0 && content.length < current.length * 0.3) {
@@ -1044,6 +1107,7 @@ export class SyncEngine {
 				await this.createBackup(current);
 
 				await this.app.vault.modify(fileRef, content);
+				this.baseData = parse(content);
 			} catch (err) {
 				console.error('Dashboard sync write failed:', err);
 			} finally {

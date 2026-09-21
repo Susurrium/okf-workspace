@@ -2,8 +2,8 @@ import { Events, HoverParent, HoverPopover, ItemView, MarkdownView, Notice, Plat
 import { nowMoment } from './datetime';
 import type { ApexHost } from './host';
 import type { AppWithCommands } from './obsidian-internal';
-import type { DashboardData, DashboardCard, QuickAction, BannerData, LibraryConfig, QuickNotePreset, PinnedNote, QuickCommand, DataviewConfig } from './types';
-import { SyncEngine } from './sync';
+import { sectionRef, type DashboardData, type DashboardColumn, type DashboardCard, type QuickAction, type BannerData, type LibraryConfig, type QuickNotePreset, type PinnedNote, type QuickCommand, type DataviewConfig } from './types';
+import { acquireSyncEngine, SyncEngine, type SyncEngineLease } from './sync';
 import { renderDashboard, destroyAllCharts, renderSidebarWidgets, sidebarWidgetSignature, refreshSidebarWeatherWidget, renderSidebarWeekCalendar, renderSidebarPomodoro, renderSidebarReading, refreshScanningSections, refreshMediaSections, renderSection, refreshWeatherCards } from './renderer';
 import { refreshSidebarTaskCalendar, renderSidebarCalendar } from './calendar-widget';
 import { refreshCalendarSections } from './calendar-section';
@@ -89,9 +89,15 @@ function prependAfterFrontmatter(md: string, block: string): string {
 
 export const DASHBOARD_VIEW_TYPE = 'apex-dashboard-view';
 
+function matchesSection(column: DashboardColumn, reference: string): boolean {
+	return sectionRef(column) === reference || column.name === reference;
+}
+
 export class DashboardView extends ItemView implements HoverParent {
 	private plugin: ApexHost;
 	private sync: SyncEngine;
+	private readonly syncLease: SyncEngineLease;
+	private readonly unsubscribeSync: () => void;
 	private data: DashboardData | null = null;
 	private cleanupFns: Array<() => void> = [];
 	private dndCleanupFns: Array<() => void> = [];
@@ -162,8 +168,9 @@ export class DashboardView extends ItemView implements HoverParent {
 	constructor(leaf: WorkspaceLeaf, plugin: ApexHost) {
 		super(leaf);
 		this.plugin = plugin;
-		this.sync = new SyncEngine(this.app, this.plugin.settings);
-		this.sync.onDataUpdate((data, source) => {
+		this.syncLease = acquireSyncEngine(this.app, this.plugin.settings);
+		this.sync = this.syncLease.engine;
+		this.unsubscribeSync = this.sync.onDataUpdate((data, source) => {
 			this.handleDataUpdate(data, source);
 		});
 	}
@@ -185,8 +192,10 @@ export class DashboardView extends ItemView implements HoverParent {
 		this.isOpening = true;
 		const revision = ++this.lifecycleRevision;
 		this.sync.updateSettings(this.plugin.settings);
-		await this.sync.init();
+		await this.syncLease.init();
 		if (revision !== this.lifecycleRevision) return;
+		const currentData = this.sync.getData();
+		if (currentData) this.handleDataUpdate(currentData, 'external');
 		// The banner "streak" auto-detects the Daily Notes core plugin, whose
 		// internal-plugins state may report as not-yet-enabled during the very
 		// first render. Re-compute once the metadata cache has fully resolved so
@@ -278,7 +287,8 @@ export class DashboardView extends ItemView implements HoverParent {
 		this.pomodoroUnsubscribe = null;
 		this.readingUnsubscribe?.();
 		this.readingUnsubscribe = null;
-		this.sync.destroy();
+		this.unsubscribeSync();
+		this.syncLease.release();
 	}
 
 	private handleDataUpdate(data: DashboardData, source: DashboardUpdateSource): void {
@@ -303,7 +313,7 @@ export class DashboardView extends ItemView implements HoverParent {
 			// Skip those; every other change re-renders as usual.
 			const buildable = plan.names.filter((name) => {
 				if (!previous) return true;
-				const idx = data.columns.findIndex(c => c.name === name);
+				const idx = data.columns.findIndex(c => matchesSection(c, name));
 				const before = previous.columns[idx];
 				const after = data.columns[idx];
 				if (!before || !after || (after.sectionType !== 'calendar' && after.sectionType !== 'web')) return true;
@@ -474,7 +484,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		// Library config event delegation
 		kanban.addEventListener('dashboard-library-config', ((e: CustomEvent) => {
 			const { columnName } = e.detail as { columnName: string };
-			const col = this.data?.columns.find(c => c.name === columnName);
+			const col = this.data?.columns.find(c => matchesSection(c, columnName));
 			if (col?.sectionType === 'folder') {
 				this.openFolderConfigModal(columnName);
 			} else if (col?.sectionType === 'weread') {
@@ -500,7 +510,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		// TickTick view toggle (today/lists) — dispatched from header buttons.
 		kanban.addEventListener('dashboard-ticktick-view', ((e: CustomEvent) => {
 			const { columnName, view } = e.detail as { columnName: string; view: 'today' | 'lists' };
-			const col = this.data?.columns.find(c => c.name === columnName);
+			const col = this.data?.columns.find(c => matchesSection(c, columnName));
 			if (col) {
 				const config = col.ticktickConfig ?? { view: 'today' as const };
 				this.suppressNextRender = true;
@@ -519,7 +529,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		// TickTick project card resize (lists view).
 		kanban.addEventListener('dashboard-ticktick-resize', ((e: CustomEvent) => {
 			const { columnName, projectWidths } = e.detail as { columnName: string; projectWidths: Record<string, number> };
-			const col = this.data?.columns.find(c => c.name === columnName);
+			const col = this.data?.columns.find(c => matchesSection(c, columnName));
 			if (col?.ticktickConfig) {
 				this.suppressNextRender = true;
 				void this.sync.updateTickTickConfig(columnName, { ...col.ticktickConfig, projectWidths }).then(() => {
@@ -1086,7 +1096,7 @@ export class DashboardView extends ItemView implements HoverParent {
 			onDocNest: (cardId: string, docPath: number[]) => this.sync.nestDoc(cardId, docPath),
 			onDocToggleCollapse: (cardId: string, docPath: number[]) => this.sync.toggleCollapseDocQuiet(cardId, docPath),
 			onCardAdd: (colName: string) => {
-				const column = this.data?.columns.find(col => col.name === colName);
+				const column = this.data?.columns.find(col => matchesSection(col, colName));
 				const effectiveType = column?.sectionType ?? colName.toLowerCase();
 				if (effectiveType === 'dashboard') {
 					this.openWidgetTypeModal(colName);
@@ -1484,7 +1494,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	}
 
 	private openLibraryConfigModal(colName: string): void {
-		const column = this.data?.columns.find(col => col.name === colName);
+		const column = this.data?.columns.find(col => matchesSection(col, colName));
 		const existingConfig = column?.libraryConfig ?? {
 			filters: [],
 			viewMode: 'grid' as const,
@@ -1502,7 +1512,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	}
 
 	private openDataviewConfigModal(colName: string): void {
-		const column = this.data?.columns.find(col => col.name === colName);
+		const column = this.data?.columns.find(col => matchesSection(col, colName));
 		const existing = column?.dataviewConfig ?? { query: '' };
 		const modal = new DataviewConfigModal(
 			this.app,
@@ -1516,7 +1526,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	 *  sync path — handleDataUpdate('local') rebuilds the section in place,
 	 *  reloading the frame with the new URL. */
 	private openWebConfigModal(colName: string): void {
-		const column = this.data?.columns.find(col => col.name === colName);
+		const column = this.data?.columns.find(col => matchesSection(col, colName));
 		const existing = column?.webConfig ?? { url: '' };
 		const modal = new WebConfigModal(
 			this.app,
@@ -1529,7 +1539,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	/** Images/videos sections: the config currently manages the excluded-folder
 	 *  set, persisted via the column's libraryConfig. */
 	private openMediaConfigModal(colName: string): void {
-		const column = this.data?.columns.find(col => col.name === colName);
+		const column = this.data?.columns.find(col => matchesSection(col, colName));
 		const modal = new MediaConfigModal(
 			this.app,
 			column?.libraryConfig,
@@ -1539,7 +1549,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	}
 
 	private openWereadConfigModal(colName: string): void {
-		const column = this.data?.columns.find(col => col.name === colName);
+		const column = this.data?.columns.find(col => matchesSection(col, colName));
 		const existing = column?.wereadConfig ?? { widgets: [{ id: 'w1', view: 'shelf' as const, groupBy: 'readingState' as const }] };
 		const modal = new WereadConfigModal(
 			this.app,
@@ -1574,7 +1584,8 @@ export class DashboardView extends ItemView implements HoverParent {
 	private async handleMoveCard(cardId: string, targetCol: string, targetIdx: number): Promise<void> {
 		const kanban = (this.containerEl.children[1] as HTMLElement)?.querySelector<HTMLElement>('.dashboard-kanban');
 		const draggedEl = kanban?.querySelector<HTMLElement>(`.dashboard-card[data-card-id="${CSS.escape(cardId)}"]`) ?? null;
-		const sourceCol = this.data?.columns.find(c => c.cards.some(card => card.id === cardId))?.name;
+		const sourceColumn = this.data?.columns.find(c => c.cards.some(card => card.id === cardId));
+		const sourceCol = sourceColumn ? sectionRef(sourceColumn) : undefined;
 
 		this.suppressNextRender = true;
 		try {
@@ -1631,7 +1642,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		const section = kanban?.querySelector<HTMLElement>(`:scope > [data-column="${CSS.escape(columnName)}"]`);
 		const cardsContainer = section?.querySelector<HTMLElement>('.dashboard-section-cards');
 		if (!cardsContainer) return false;
-		const column = this.data.columns.find(c => c.name === columnName);
+		const column = this.data.columns.find(c => matchesSection(c, columnName));
 		if (!column) return false;
 
 		const existing = new Map<string, HTMLElement>();
@@ -1662,7 +1673,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		if (!kanban) return false;
 		const oldEl = kanban.querySelector(`:scope > [data-column="${CSS.escape(columnName)}"]`);
 		if (!oldEl) return false;
-		const column = this.data.columns.find(c => c.name === columnName);
+		const column = this.data.columns.find(c => matchesSection(c, columnName));
 		if (!column) return false;
 		const callbacks = this.createCallbacks();
 		const newEl = renderSection(column, callbacks, this.app, this.data, this.plugin.settings);
@@ -1680,7 +1691,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	}
 
 	private async openTickTickFilterModal(colName: string): Promise<void> {
-		const column = this.data?.columns.find(col => col.name === colName);
+		const column = this.data?.columns.find(col => matchesSection(col, colName));
 		const config = column?.ticktickConfig ?? { view: 'lists' as const };
 		const region = this.plugin.settings.ticktickRegion === 'ticktick' ? 'ticktick' : 'dida365';
 		const projects = await fetchTickTickProjects(region, this.plugin.settings.ticktickCookie, this.plugin.settings.ticktickDeviceVersion);
@@ -1693,7 +1704,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	}
 
 	private openFolderConfigModal(colName: string): void {
-		const column = this.data?.columns.find(col => col.name === colName);
+		const column = this.data?.columns.find(col => matchesSection(col, colName));
 		const libraryConfig = column?.libraryConfig;
 		const currentFolders = libraryConfig?.folders ?? [];
 		const currentTags = libraryConfig?.filters.find(f => f.property === 'tags')?.values ?? [];
@@ -1754,7 +1765,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		if (this.libraryNewNoteInFlight) return;
 		this.libraryNewNoteInFlight = true;
 		try {
-			const column = this.data?.columns.find(c => c.name === columnName);
+			const column = this.data?.columns.find(c => matchesSection(c, columnName));
 			if (!column || (column.sectionType !== 'folder' && column.sectionType !== 'library')) return;
 
 			const folders = (column.libraryConfig?.folders ?? [])

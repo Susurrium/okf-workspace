@@ -21,12 +21,54 @@ import type {
 	DataviewConfig,
 	WebEmbedConfig,
 } from './types';
-import { parse as parseYaml } from 'yaml';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { t } from './i18n';
 import { normalizeColumnPairs } from './column-pairs';
 
 const KNOWN_METADATA_KEYS = new Set(['id', 'link', 'progress', 'due', 'streak', 'type', 'color', 'cover', 'width', 'size', 'lat', 'lon', 'city', 'track', 'days', 'cols', 'rows', 'gcol', 'grow', 'noteStyle']);
 const SECTION_TYPES = new Set(['memo', 'todo', 'projects', 'notes', 'dashboard', 'library', 'folder', 'images', 'videos', 'alltasks', 'calendar', 'dataview', 'weread', 'ticktick', 'sticky', 'web']);
+const SECTION_ANCHOR = /^\s*<!--\s*okf-section:([A-Za-z0-9._-]+)\s*-->\s*$/;
+const WORKBENCH_SCHEMA = 1;
+const ROOT_MANAGED_KEYS = new Set([
+	'dashboard', 'workbench_schema', 'banner', 'quickActions', 'quickActionOrder', 'hiddenPresets', 'columns',
+]);
+const COLUMN_MANAGED_KEYS = new Set([
+	'id', 'name', 'color', 'type', 'library', 'weread', 'ticktick', 'dataview', 'web', 'height', 'half', 'width',
+]);
+const BANNER_MANAGED_KEYS = new Set([
+	'quote', 'author', 'image', 'quoteColor', 'quoteFont', 'quotes', 'images', 'mode', 'statsConfig',
+]);
+const BANNER_STATS_MANAGED_KEYS = new Set([
+	'dailyFolder', 'dailyFormat', 'streakFromDaily', 'excludeFolders', 'accent', 'blur', 'darkness',
+	'showDetails', 'showLeft', 'showCenter', 'showRight', 'leftStat', 'centerStat', 'rightStats',
+	'heatmapSource', 'heatmapHabitId',
+]);
+const CONFIG_MANAGED_KEYS: Record<string, Set<string>> = {
+	library: new Set([
+		'viewMode', 'sortBy', 'sortDesc', 'folders', 'folderFilter', 'excludeFolders', 'taskGroupBy',
+		'kanbanGroupBy', 'groupMode', 'kanbanShowCovers', 'pageSize', 'showProperties', 'propertyLimit',
+		'visibleProperties', 'cardSize', 'quickDateFilter', 'filters',
+	]),
+	weread: new Set(['widgets']),
+	ticktick: new Set(['view', 'hiddenProjects', 'projectWidths']),
+	dataview: new Set(['query', 'title', 'excludeFolders', 'pageSize', 'viewMode', 'showSource', 'density', 'striped', 'rowNumbers']),
+	web: new Set(['url', 'zoom']),
+};
+
+interface ColumnDef {
+	id?: string;
+	name: string;
+	color: string;
+	sectionType?: string;
+	libraryConfig?: LibraryConfig;
+	wereadConfig?: WereadConfig;
+	ticktickConfig?: TickTickConfig;
+	dataviewConfig?: DataviewConfig;
+	webConfig?: WebEmbedConfig;
+	height?: number;
+	half?: boolean;
+	width?: number;
+}
 
 // Card colors are persisted without the leading '#' (see serialize) so Obsidian
 // does not register them as tags. Restore the '#' here; legacy '#xxxxxx' values
@@ -69,9 +111,17 @@ export function parse(markdown: string): DashboardData {
 	const quickActions = parseQuickActions(frontmatter);
 	const quickActionOrder = parseQuickActionOrder(frontmatter);
 	const columnDefs = parseColumnDefs(frontmatter);
-	const columns = parseColumns(body, columnDefs);
+	const parsedBody = splitByH2(body);
+	const columns = parseColumns(parsedBody.sections, columnDefs);
 
-	const data: DashboardData = { banner, quickActions, columns };
+	const data: DashboardData = {
+		workbenchSchema: typeof frontmatter.workbench_schema === 'number' ? frontmatter.workbench_schema : WORKBENCH_SCHEMA,
+		banner,
+		quickActions,
+		columns,
+		bodyPreamble: parsedBody.preamble || undefined,
+		sourceFrontmatter: frontmatter,
+	};
 	if (quickActionOrder) data.quickActionOrder = quickActionOrder;
 	const hiddenPresets = parseHiddenPresets(frontmatter);
 	if (hiddenPresets) data.hiddenPresets = hiddenPresets;
@@ -79,10 +129,16 @@ export function parse(markdown: string): DashboardData {
 }
 
 export function serialize(data: DashboardData): string {
+	const usedSectionIds = new Set<string>();
+	for (let index = 0; index < data.columns.length; index++) {
+		const column = data.columns[index]!;
+		column.id = uniqueSectionId(column.id, column.name, index, usedSectionIds);
+	}
 	const lines: string[] = [];
 
 	lines.push('---');
 	lines.push('dashboard: true');
+	lines.push(`workbench_schema: ${data.workbenchSchema ?? WORKBENCH_SCHEMA}`);
 
 	lines.push('banner:');
 	lines.push(`  quote: "${escapeYamlString(data.banner.quote)}"`);
@@ -165,7 +221,8 @@ export function serialize(data: DashboardData): string {
 
 	lines.push('columns:');
 	for (const col of data.columns) {
-		lines.push(`  - name: ${col.name}`);
+		lines.push(`  - id: "${escapeYamlString(col.id ?? '')}"`);
+		lines.push(`    name: ${JSON.stringify(col.name)}`);
 		lines.push(`    color: "${col.color}"`);
 		if (col.sectionType) {
 			lines.push(`    type: ${col.sectionType}`);
@@ -337,10 +394,24 @@ export function serialize(data: DashboardData): string {
 
 	lines.push('---');
 	lines.push('');
+	if (data.bodyPreamble?.trim()) {
+		lines.push(data.bodyPreamble.trim());
+		lines.push('');
+	}
 
 	for (const column of data.columns) {
 		lines.push(`## ${column.name}`);
+		lines.push(`<!-- okf-section:${column.id ?? ''} -->`);
 		lines.push('');
+		if (column.rawContent !== undefined && column.sectionType && !SECTION_TYPES.has(column.sectionType)) {
+			if (column.rawContent) lines.push(column.rawContent);
+			lines.push('');
+			continue;
+		}
+		if (column.leadingContent?.trim()) {
+			lines.push(column.leadingContent.trim());
+			lines.push('');
+		}
 
 		if (column.sectionType === 'library' || column.sectionType === 'folder' || column.sectionType === 'images' || column.sectionType === 'videos' || column.sectionType === 'alltasks' || column.sectionType === 'calendar' || column.sectionType === 'dataview' || column.sectionType === 'web') continue;
 
@@ -454,7 +525,83 @@ export function serialize(data: DashboardData): string {
 		}
 	}
 
-	return lines.join('\n');
+	return mergeUnknownFrontmatter(lines.join('\n'), data.sourceFrontmatter);
+}
+
+function mergeUnknownFrontmatter(
+	generatedMarkdown: string,
+	sourceFrontmatter: Record<string, unknown> | undefined,
+): string {
+	if (!sourceFrontmatter || Object.keys(sourceFrontmatter).length === 0) return generatedMarkdown;
+	if (!hasUnknownFrontmatter(sourceFrontmatter)) return generatedMarkdown;
+	const generated = splitFrontmatter(generatedMarkdown);
+	const merged = mergeManagedObject(sourceFrontmatter, generated.frontmatter, ROOT_MANAGED_KEYS);
+
+	const rawBanner = sourceFrontmatter.banner;
+	const nextBanner = generated.frontmatter.banner;
+	if (isRecord(rawBanner) && isRecord(nextBanner)) {
+		merged.banner = mergeManagedObject(rawBanner, nextBanner, BANNER_MANAGED_KEYS);
+		const mergedBanner = merged.banner as Record<string, unknown>;
+		if (isRecord(rawBanner.statsConfig) && isRecord(nextBanner.statsConfig)) {
+			mergedBanner.statsConfig = mergeManagedObject(
+				rawBanner.statsConfig,
+				nextBanner.statsConfig,
+				BANNER_STATS_MANAGED_KEYS,
+			);
+		}
+	}
+
+	const rawColumns: unknown[] = Array.isArray(sourceFrontmatter.columns) ? sourceFrontmatter.columns : [];
+	const nextColumns: unknown[] = Array.isArray(generated.frontmatter.columns) ? generated.frontmatter.columns : [];
+	merged.columns = nextColumns.map((value, index) => {
+		if (!isRecord(value)) return value;
+		const id = typeof value.id === 'string' ? value.id : '';
+		const raw = rawColumns.find((candidate) => isRecord(candidate) && id && candidate.id === id)
+			?? rawColumns[index];
+		if (!isRecord(raw)) return value;
+		const column = mergeManagedObject(raw, value, COLUMN_MANAGED_KEYS);
+		for (const [key, managed] of Object.entries(CONFIG_MANAGED_KEYS)) {
+			if (isRecord(raw[key]) && isRecord(value[key])) {
+				column[key] = mergeManagedObject(raw[key], value[key], managed);
+			}
+		}
+		return column;
+	});
+
+	const yaml = stringifyYaml(merged, { lineWidth: 0 }).trimEnd();
+	return `---\n${yaml}\n---\n${generated.body ? `\n${generated.body}` : ''}`;
+}
+
+function mergeManagedObject(
+	raw: Record<string, unknown>,
+	next: Record<string, unknown>,
+	managedKeys: Set<string>,
+): Record<string, unknown> {
+	const merged: Record<string, unknown> = { ...raw };
+	for (const key of managedKeys) delete merged[key];
+	return { ...merged, ...next };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasUnknownKeys(value: unknown, managed: Set<string>): boolean {
+	return isRecord(value) && Object.keys(value).some((key) => !managed.has(key));
+}
+
+function hasUnknownFrontmatter(frontmatter: Record<string, unknown>): boolean {
+	if (hasUnknownKeys(frontmatter, ROOT_MANAGED_KEYS)) return true;
+	if (hasUnknownKeys(frontmatter.banner, BANNER_MANAGED_KEYS)) return true;
+	if (isRecord(frontmatter.banner)
+		&& hasUnknownKeys(frontmatter.banner.statsConfig, BANNER_STATS_MANAGED_KEYS)) return true;
+	if (!Array.isArray(frontmatter.columns)) return false;
+	return frontmatter.columns.some((column) => {
+		if (hasUnknownKeys(column, COLUMN_MANAGED_KEYS)) return true;
+		if (!isRecord(column)) return false;
+		return Object.entries(CONFIG_MANAGED_KEYS).some(([key, managed]) =>
+			hasUnknownKeys(column[key], managed));
+	});
 }
 
 export function generateDefaultMarkdown(): string {
@@ -835,11 +982,12 @@ function parseHiddenPresets(fm: Record<string, unknown>): string[] | undefined {
 	return undefined;
 }
 
-function parseColumnDefs(fm: Record<string, unknown>): Array<{ name: string; color: string; sectionType?: string; libraryConfig?: LibraryConfig; wereadConfig?: WereadConfig; ticktickConfig?: TickTickConfig; dataviewConfig?: DataviewConfig; webConfig?: WebEmbedConfig; height?: number; half?: boolean; width?: number }> {
+function parseColumnDefs(fm: Record<string, unknown>): ColumnDef[] {
 	const raw = fm.columns;
 	if (!Array.isArray(raw)) return DEFAULT_COLUMNS;
 
 	return (raw as Array<Record<string, unknown>>).map(item => ({
+		id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : undefined,
 			name: String((item.name ?? 'Unnamed') as string | number | boolean),
 			color: String((item.color ?? '#6366f1') as string | number | boolean),
 		sectionType: item.type ? String(item.type as string | number | boolean) : undefined,
@@ -854,23 +1002,30 @@ function parseColumnDefs(fm: Record<string, unknown>): Array<{ name: string; col
 	}));
 }
 
-function parseColumns(body: string, defs: Array<{ name: string; color: string; sectionType?: string; libraryConfig?: LibraryConfig; wereadConfig?: WereadConfig; ticktickConfig?: TickTickConfig; dataviewConfig?: DataviewConfig; webConfig?: WebEmbedConfig; height?: number; half?: boolean; width?: number }>): DashboardColumn[] {
-	const sections = splitByH2(body);
-	const defMap = new Map(defs.map(d => [d.name, d]));
+function parseColumns(
+	sections: Array<{ heading: string; content: string; id?: string }>,
+	defs: ColumnDef[],
+): DashboardColumn[] {
 	const usedDefIndices = new Set<number>();
+	const usedIds = new Set<string>();
 
 	const mapped = sections.map((section, sectionIdx) => {
-		let def = defMap.get(section.heading);
-		if (!def && sectionIdx < defs.length && !usedDefIndices.has(sectionIdx)) {
-			def = defs[sectionIdx];
+		let defIdx = section.id ? defs.findIndex((candidate) => candidate.id === section.id) : -1;
+		if (defIdx < 0) {
+			defIdx = defs.findIndex((candidate, index) =>
+				!usedDefIndices.has(index) && candidate.name === section.heading);
 		}
+		if (defIdx < 0 && sectionIdx < defs.length && !usedDefIndices.has(sectionIdx)) defIdx = sectionIdx;
+		const def = defIdx >= 0 ? defs[defIdx] : undefined;
 		if (def) {
-			const defIdx = defs.indexOf(def);
 			usedDefIndices.add(defIdx);
 		}
+		const id = uniqueSectionId(section.id || def?.id, section.heading, sectionIdx, usedIds);
+		const leadingContent = contentBeforeFirstCard(section.content);
 		const cards = parseCards(section.content, section.heading);
 		const resolvedType = resolveSectionType(section.heading, cards, def?.sectionType);
 		return {
+			id,
 			name: section.heading,
 			color: def?.color ?? '#6366f1',
 			sectionType: resolvedType,
@@ -884,6 +1039,8 @@ function parseColumns(body: string, defs: Array<{ name: string; color: string; s
 			height: def?.height,
 			half: def?.half,
 			width: def?.half ? def?.width : undefined,
+			leadingContent: leadingContent || undefined,
+			rawContent: resolvedType && !SECTION_TYPES.has(resolvedType) ? section.content : undefined,
 		};
 	});
 	// Self-heal hand-edited frontmatter: a lone `half: true` (or an odd run)
@@ -896,7 +1053,7 @@ function resolveSectionType(
 	cards: DashboardCard[],
 	fallback?: string,
 ): string {
-	if (fallback && SECTION_TYPES.has(fallback)) return fallback;
+	if (fallback) return fallback;
 
 	const lower = name.toLowerCase();
 	if (SECTION_TYPES.has(lower)) return lower;
@@ -1051,27 +1208,62 @@ function parseWebConfig(raw: Record<string, unknown>): WebEmbedConfig {
 	return { url, zoom };
 }
 
-function splitByH2(body: string): Array<{ heading: string; content: string }> {
+function splitByH2(body: string): {
+	preamble: string;
+	sections: Array<{ heading: string; content: string; id?: string }>;
+} {
 	const lines = body.split('\n');
-	const sections: Array<{ heading: string; content: string }> = [];
-	let current: { heading: string; lines: string[] } | null = null;
+	const preamble: string[] = [];
+	const sections: Array<{ heading: string; content: string; id?: string }> = [];
+	let current: { heading: string; lines: string[]; id?: string } | null = null;
 
 	for (const line of lines) {
 		if (line.startsWith('## ')) {
 			if (current) {
-				sections.push({ heading: current.heading, content: current.lines.join('\n').trim() });
+				sections.push({ heading: current.heading, content: current.lines.join('\n').trim(), id: current.id });
 			}
 			current = { heading: line.slice(3).trim(), lines: [] };
 		} else if (current) {
+			const anchor = line.match(SECTION_ANCHOR);
+			if (anchor?.[1] && current.lines.every((candidate) => candidate.trim() === '')) {
+				current.id = anchor[1];
+				continue;
+			}
 			current.lines.push(line);
+		} else {
+			preamble.push(line);
 		}
 	}
 
 	if (current) {
-		sections.push({ heading: current.heading, content: current.lines.join('\n').trim() });
+		sections.push({ heading: current.heading, content: current.lines.join('\n').trim(), id: current.id });
 	}
 
-	return sections;
+	return { preamble: preamble.join('\n').trim(), sections };
+}
+
+function contentBeforeFirstCard(content: string): string {
+	const index = content.split('\n').findIndex((line) => line.startsWith('### '));
+	if (index < 0) return content.trim();
+	return content.split('\n').slice(0, index).join('\n').trim();
+}
+
+function uniqueSectionId(
+	requested: string | undefined,
+	name: string,
+	index: number,
+	used: Set<string>,
+): string {
+	const slug = name.toLowerCase()
+		.normalize('NFKD')
+		.replace(/[^a-z0-9_-]+/g, '-')
+		.replace(/^-+|-+$/g, '') || 'section';
+	const base = requested?.trim() || `${slug}-${index + 1}`;
+	let candidate = base;
+	let suffix = 2;
+	while (used.has(candidate)) candidate = `${base}-${suffix++}`;
+	used.add(candidate);
+	return candidate;
 }
 
 function parseCards(content: string, columnName: string): DashboardCard[] {

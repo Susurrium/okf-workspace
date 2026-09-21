@@ -669,6 +669,8 @@ export interface WebEmbedConfig {
 }
 
 export interface DashboardColumn {
+	/** Stable section identity. Legacy boards receive one on first parse/save. */
+	id?: string;
 	name: string;
 	color: string;
 	sectionType?: string;
@@ -693,14 +695,28 @@ export interface DashboardColumn {
 	 *  a left half member; cleared together with `half` by the pair
 	 *  transforms. Desktop only. */
 	width?: number;
+	/** Free prose before the first card heading, retained across layout edits. */
+	leadingContent?: string;
+	/** Opaque body for a section type newer than this build. */
+	rawContent?: string;
 }
 
 export interface DashboardData {
+	/** Board format version, independent from the Workspace artifact schema. */
+	workbenchSchema?: number;
 	banner: BannerData;
 	quickActions: QuickAction[];
 	quickActionOrder?: string[];
 	hiddenPresets?: string[];
 	columns: DashboardColumn[];
+	/** Markdown before the first H2 section. */
+	bodyPreamble?: string;
+	/** Parsed source frontmatter used only to preserve unknown extension fields. */
+	sourceFrontmatter?: Record<string, unknown>;
+}
+
+export function sectionRef(column: DashboardColumn): string {
+	return column.id || column.name;
 }
 
 export interface RenderCallbacks {

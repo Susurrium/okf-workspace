@@ -1,5 +1,5 @@
 import { Notice, Platform, setIcon } from 'obsidian';
-import type { DashboardColumn } from './types';
+import { sectionRef, type DashboardColumn } from './types';
 import { t } from './i18n';
 import {
 	clearPrecheckCache,
@@ -132,7 +132,7 @@ export function renderWebSection(
 		configure.addEventListener('click', () => {
 			// Same routing event as the header gear — view.ts's delegation opens
 			// the config modal, so no callback threading is needed here.
-			el.dispatchEvent(new CustomEvent('dashboard-library-config', { detail: { columnName: column.name }, bubbles: true }));
+			el.dispatchEvent(new CustomEvent('dashboard-library-config', { detail: { columnName: sectionRef(column) }, bubbles: true }));
 		});
 	}
 

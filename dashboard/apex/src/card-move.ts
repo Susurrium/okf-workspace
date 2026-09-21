@@ -1,4 +1,4 @@
-import type { DashboardCard, DashboardColumn, DashboardData, DocNode, TaskItem } from './types';
+import { sectionRef, type DashboardCard, type DashboardColumn, type DashboardData, type DocNode, type TaskItem } from './types';
 
 /** Memo editing and rendering use the same complete text, including task trees. */
 export function memoCardText(card: DashboardCard): string {
@@ -37,7 +37,7 @@ export function convertMovedCard(card: DashboardCard, source: DashboardColumn, t
 	const sourceType = sectionType(source);
 	const targetType = sectionType(target);
 	const moved = { ...card, column: target.name };
-	if (source.name === target.name) return moved;
+	if (source === target) return moved;
 	if (targetType === 'sticky' && (sourceType === 'projects' || sourceType === 'notes')) {
 		return { ...moved, noteStyle: sourceType === 'notes' ? 'plain' : 'cover' };
 	}
@@ -56,7 +56,7 @@ export function convertMovedCard(card: DashboardCard, source: DashboardColumn, t
 export function moveDashboardCard(data: DashboardData, cardId: string, targetName: string, targetIndex: number): DashboardData {
 	if (!Number.isInteger(targetIndex)) return data;
 	const source = data.columns.find(column => column.cards.some(card => card.id === cardId));
-	const target = data.columns.find(column => column.name === targetName);
+	const target = data.columns.find(column => sectionRef(column) === targetName || column.name === targetName);
 	if (!source || !target || !['memo', 'todo', 'sticky', 'projects', 'notes', 'dashboard'].includes(sectionType(target))) return data;
 	const card = source.cards.find(item => item.id === cardId);
 	if (!card) return data;

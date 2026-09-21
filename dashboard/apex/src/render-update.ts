@@ -1,4 +1,4 @@
-import type { DashboardData } from './types';
+import { sectionRef, type DashboardData } from './types';
 
 export type DashboardUpdateSource = 'local' | 'external';
 
@@ -36,13 +36,14 @@ export function planDashboardUpdate(
 		if (!before || !after) return { kind: 'full' };
 		// These fields determine the outer row layout/identity, so replacing only
 		// the section node would leave the parent layout stale.
-		if (before.name !== after.name
+		if (sectionRef(before) !== sectionRef(after)
+			|| before.name !== after.name
 			|| before.sectionType !== after.sectionType
 			|| before.half !== after.half
 			|| before.cards.length !== after.cards.length) {
 			return { kind: 'full' };
 		}
-		if (!sameValue(before, after)) changed.push(after.name);
+		if (!sameValue(before, after)) changed.push(sectionRef(after));
 	}
 
 	return changed.length > 0
