@@ -93,3 +93,14 @@ Apex 自定义 Section 的 `render` 现在可以返回清理函数。`DashboardV
 2. 使用包含生成中、发布中、失败、取消和转换回退的合成 operation 数据执行一次完整 P08 走查。
 
 这两个门槛不需要再改变页面架构；它们用于证明在线服务状态和失败恢复在最终发布包中的真实表现。
+
+## 2026-09-22 嵌入布局修复
+
+首次共享 Surface 实现仍让每个嵌入实例继承并构造 Obsidian `ItemView`。`ItemView` 构造器会向当前
+leaf 插入新的 `.workspace-leaf-content`；八个 Surface 因而把同一 pane 分成九段，完整 DOM 虽已生成，
+但宿主内容被裁剪成空白条带。修复后，嵌入 Surface 是普通控制器，只复用 Apex 提供的容器，不再创建
+嵌套 Obsidian View；独立容器仅保留给非嵌入兼容路径。
+
+真实 Electron DOM 复验确认：活动 pane 只有一个宿主内容容器、没有嵌套 OKF View，10 个 Apex 行和
+8 个 OKF Surface 均存在，宿主内容高度恢复为完整 pane 高度。新增单元测试同时禁止嵌入模式调用
+`ItemView` 构造器。

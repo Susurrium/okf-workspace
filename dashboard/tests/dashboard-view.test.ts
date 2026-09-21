@@ -1,4 +1,4 @@
-import { TFile, WorkspaceLeaf, type App } from "obsidian";
+import { ItemView, TFile, WorkspaceLeaf, type App } from "obsidian";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -189,6 +189,25 @@ function enableLatestItemsPagination(view: OkfDashboardView): void {
 }
 
 describe("real Dashboard View source handoff", () => {
+  it("mounts an embedded Surface without constructing a nested Obsidian ItemView", () => {
+    const runtimeItemView = ItemView as unknown as { constructorCount: number };
+    runtimeItemView.constructorCount = 0;
+    const app = {} as App;
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)(app);
+    const container = new TestElement();
+    const view = new OkfDashboardView(leaf, {
+      app,
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+    } as never, {
+      container: container as unknown as HTMLElement,
+      initialSection: "learning",
+      embedded: true,
+    });
+
+    expect(runtimeItemView.constructorCount).toBe(0);
+    expect(view.contentEl).toBe(container);
+  });
+
   it("constructs the registered runtime View rather than a legacy page model", () => {
     const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
     const view = new OkfDashboardView(leaf, {

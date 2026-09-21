@@ -82,6 +82,12 @@ import {
 } from "../ui/anchored-action-panel.js";
 
 export const OKF_DASHBOARD_VIEW = "okf-workspace-dashboard";
+
+class StandaloneOkfDashboardContainer extends ItemView {
+  public getViewType(): string { return OKF_DASHBOARD_VIEW; }
+  public getDisplayText(): string { return "Dashboard"; }
+}
+
 export type DashboardSection =
   | "today"
   | "inbox"
@@ -219,7 +225,9 @@ export async function resolveDashboardLearningSources(
   return [...candidates];
 }
 
-export class OkfDashboardView extends ItemView {
+export class OkfDashboardView {
+  public readonly app: App;
+  public readonly contentEl: HTMLElement;
   private readonly embedded: boolean;
   private readonly initialSection: Section;
   private section: Section = "today";
@@ -307,8 +315,15 @@ export class OkfDashboardView extends ItemView {
     private readonly plugin: OkfBrainPlugin,
     options: EmbeddedDashboardSurfaceOptions = {},
   ) {
-    super(leaf);
-    if (options.container) this.contentEl = options.container;
+    // ItemView's constructor appends a new .workspace-leaf-content to `leaf`.
+    // An embedded Surface already lives inside Apex's active ItemView, so
+    // constructing another ItemView here would split the pane into one hidden
+    // Obsidian view per Surface and clip the real dashboard to a thin strip.
+    const fallbackView = options.container ? undefined : new StandaloneOkfDashboardContainer(leaf);
+    this.app = (plugin as unknown as { app?: App }).app
+      ?? fallbackView?.app
+      ?? (leaf as unknown as { app: App }).app;
+    this.contentEl = options.container ?? fallbackView!.contentEl;
     this.embedded = options.embedded ?? false;
     this.vaultReader = new VaultDashboardReader(this.app);
     const state = this.plugin.getDashboardUiState();
