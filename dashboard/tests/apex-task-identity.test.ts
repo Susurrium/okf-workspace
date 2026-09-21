@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  collectVaultTasks,
   matchesCalendarFilter,
   scanFileTasks,
   toggleTaskInFile,
@@ -65,6 +66,18 @@ type: Source
     expect(matchesCalendarFilter(source[1]!, "all", "2026-09-29")).toBe(true);
   });
 
+  it("parses a formal task on the final CRLF line", () => {
+    const tasks = scanFileTasks(
+      file("projects/crlf/project.md"),
+      "---\r\ntype: Project\r\n---\r\n- [ ] #task Windows line ^task-crlf\r\n",
+    );
+
+    expect(tasks).toEqual([
+      expect.objectContaining({ text: "Windows line", formal: true, blockId: "task-crlf" }),
+    ]);
+    expect(tasks[0]?.originalLine.endsWith("\r")).toBe(true);
+  });
+
   it("uses a unique block ID after line movement and preserves concurrent text edits", async () => {
     const source = "- [ ] #task Original [scheduled:: 2026-09-29] ^task-stable";
     const task = scanFileTasks(file("projects/demo/project.md"), source)[0]!;
@@ -125,5 +138,31 @@ type: Source
     ].join("\n"));
 
     expect(todayFormalTasks(tasks, "2026-09-29").map((task) => task.text)).toEqual(["Today"]);
+  });
+
+  it("invalidates task scans when external writes change size before the cached read catches up", async () => {
+    const target = file("projects/cache-race/project.md");
+    const original = "- [ ] #task Original ^task-original\n";
+    const changed = `${original}- [ ] #task Added externally ^task-added\n`;
+    target.stat.size = original.length;
+    let current = original;
+    const app = {
+      vault: {
+        getMarkdownFiles: () => [target],
+        cachedRead: async () => original,
+        read: async () => current,
+      },
+      metadataCache: {
+        getFileCache: () => ({ listItems: [{ task: " " }] }),
+      },
+    } as unknown as App;
+
+    await expect(collectVaultTasks(app)).resolves.toHaveLength(1);
+    current = changed;
+    target.stat.size = changed.length;
+    await expect(collectVaultTasks(app)).resolves.toEqual([
+      expect.objectContaining({ blockId: "task-original" }),
+      expect.objectContaining({ blockId: "task-added" }),
+    ]);
   });
 });

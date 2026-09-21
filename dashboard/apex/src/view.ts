@@ -112,6 +112,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	private workspaceSwitchQueue: Promise<void> = Promise.resolve();
 	private data: DashboardData | null = null;
 	private cleanupFns: Array<() => void> = [];
+	private readonly customSectionCleanupFns = new Map<string, () => void>();
 	private dndCleanupFns: Array<() => void> = [];
 	private suppressNextRender = false;
 	private vaultEventRefs: Array<{ evt: Events; ref: unknown }> = [];
@@ -1184,6 +1185,10 @@ export class DashboardView extends ItemView implements HoverParent {
 
 	private createCallbacks() {
 		return {
+			onCustomSectionCleanup: (sectionReference: string, cleanup: () => void) => {
+				this.runCustomSectionCleanup(sectionReference);
+				this.customSectionCleanupFns.set(sectionReference, cleanup);
+			},
 			onCardEdit: (card: DashboardCard) => this.openCardEditModal(card),
 			onOpenNoteInPopover: (file: TFile, subpath?: string) => this.openNote(file, subpath),
 			onOpenNoteAtLine: (file: TFile, line?: number) => this.openNote(file, undefined, line),
@@ -1836,6 +1841,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		// the "page jumps away after finishing an edit" symptom. Carry the old
 		// row's scroll positions over the node swap.
 		const scrollStates = captureScrollStates(oldEl);
+		this.runCustomSectionCleanup(sectionRef(column));
 		oldEl.replaceWith(newEl);
 		restoreScrollStates(newEl, scrollStates);
 		for (const fn of this.dndCleanupFns) fn();
@@ -2345,8 +2351,17 @@ export class DashboardView extends ItemView implements HoverParent {
 		}
 		for (const fn of this.cleanupFns) fn();
 		this.cleanupFns = [];
+		for (const cleanup of this.customSectionCleanupFns.values()) cleanup();
+		this.customSectionCleanupFns.clear();
 		for (const fn of this.dndCleanupFns) fn();
 		this.dndCleanupFns = [];
+	}
+
+	private runCustomSectionCleanup(sectionReference: string): void {
+		const cleanup = this.customSectionCleanupFns.get(sectionReference);
+		if (!cleanup) return;
+		this.customSectionCleanupFns.delete(sectionReference);
+		cleanup();
 	}
 
 	/**

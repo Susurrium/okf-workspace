@@ -1,4 +1,53 @@
 .okf-dashboard { position: relative; max-width: 1180px; margin: 0 auto; padding: 16px 18px 48px; }
+.okf-workbench-surface.okf-dashboard--embedded {
+  max-width: none;
+  margin: 0;
+  padding: 4px 0 20px;
+}
+
+.okf-dashboard--embedded .okf-dashboard__topbar {
+  justify-content: space-between;
+}
+
+.okf-dashboard__surface-navigation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.okf-dashboard__surface-navigation > span {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-weight: 700;
+}
+
+.okf-formal-task-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.okf-formal-task-row__title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-normal);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.okf-formal-task-row__dates {
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+}
+
+.okf-project-row__tasks {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--background-modifier-border);
+}
 .okf-dashboard__nav { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 4px; margin: -4px 0 18px; padding: 6px; border: 1px solid var(--background-modifier-border); border-radius: 12px; background: color-mix(in srgb, var(--background-primary) 92%, transparent); backdrop-filter: blur(10px); }
 .okf-dashboard__nav button { flex: 1 1 auto; min-width: 76px; border: 0; background: transparent; }
 .okf-dashboard__nav button.is-active { background: var(--interactive-accent); color: var(--text-on-accent); }

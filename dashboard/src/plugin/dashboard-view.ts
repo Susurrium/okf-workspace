@@ -1,4 +1,10 @@
 import { ItemView, Notice, TFile, WorkspaceLeaf, type App } from "obsidian";
+import {
+  collectVaultTasks,
+  invalidatePath,
+  toggleTaskInFile,
+  type VaultTask,
+} from "../../apex/src/alltasks-scan.js";
 
 import { LocalApi } from "../api/client.js";
 import type {
@@ -86,6 +92,15 @@ export type DashboardSection =
   | "life"
   | "system";
 type Section = DashboardSection;
+
+export interface EmbeddedDashboardSurfaceOptions {
+  /** Mount the complete OKF surface inside an Apex custom section. */
+  container?: HTMLElement;
+  /** The page represented by the containing Apex section. */
+  initialSection?: DashboardSection;
+  /** Apex already owns the outer section navigation and chrome. */
+  embedded?: boolean;
+}
 type TodayPane = "actions" | "reading";
 type LearningContextFilter = "all" | DashboardLearningContext;
 const SUBSCRIPTION_FIRST_PAGE_TTL_MS = 120_000;
@@ -159,6 +174,7 @@ export const PROJECT_ACTION_PANEL_LABELS = [
   "记录待整理想法",
   "添加资料",
   "打开项目日志",
+  "新建正式决定",
   "在 Claudian 中整理项目",
 ] as const;
 
@@ -204,6 +220,8 @@ export async function resolveDashboardLearningSources(
 }
 
 export class OkfDashboardView extends ItemView {
+  private readonly embedded: boolean;
+  private readonly initialSection: Section;
   private section: Section = "today";
   private taskCenterOpen = false;
   private todayPane: TodayPane = "actions";
@@ -287,11 +305,15 @@ export class OkfDashboardView extends ItemView {
   public constructor(
     leaf: WorkspaceLeaf,
     private readonly plugin: OkfBrainPlugin,
+    options: EmbeddedDashboardSurfaceOptions = {},
   ) {
     super(leaf);
+    if (options.container) this.contentEl = options.container;
+    this.embedded = options.embedded ?? false;
     this.vaultReader = new VaultDashboardReader(this.app);
     const state = this.plugin.getDashboardUiState();
-    this.section = state.activeSection;
+    this.initialSection = options.initialSection ?? state.activeSection;
+    this.section = this.initialSection;
     for (const [section, page] of Object.entries(state.pages)) {
       this.pageScroll.set(section as Section, page.scrollTop);
     }
@@ -448,26 +470,48 @@ export class OkfDashboardView extends ItemView {
     this.destroyActionPanels();
     root.empty();
     root.addClass("okf-dashboard");
+    root.toggleClass("okf-dashboard--embedded", this.embedded);
     const topbar = root.createDiv({ cls: "okf-dashboard__topbar" });
-    const nav = topbar.createDiv({ cls: "okf-dashboard__nav", attr: { role: "tablist" } });
-    NAVIGATION.forEach((item, index) => {
-      const active = item.id === this.section;
-      const button = nav.createEl("button", {
-        text: item.label,
-        cls: active ? "is-active" : "",
-        attr: { type: "button", role: "tab", "aria-selected": String(active) },
+    if (!this.embedded) {
+      const nav = topbar.createDiv({ cls: "okf-dashboard__nav", attr: { role: "tablist" } });
+      NAVIGATION.forEach((item, index) => {
+        const active = item.id === this.section;
+        const button = nav.createEl("button", {
+          text: item.label,
+          cls: active ? "is-active" : "",
+          attr: { type: "button", role: "tab", "aria-selected": String(active) },
+        });
+        button.addEventListener("click", () => {
+          this.openSection(item.id);
+        });
+        button.addEventListener("keydown", (event) => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+          event.preventDefault();
+          const direction = event.key === "ArrowRight" ? 1 : -1;
+          const target = NAVIGATION[(index + direction + NAVIGATION.length) % NAVIGATION.length];
+          if (target) this.openSection(target.id);
+        });
       });
-      button.addEventListener("click", () => {
-        this.openSection(item.id);
+    } else {
+      const navigation = topbar.createDiv({ cls: "okf-dashboard__surface-navigation" });
+      navigation.createSpan({ text: "OKF" });
+      const select = navigation.createEl("select", {
+        attr: { "aria-label": "切换 OKF 功能" },
       });
-      button.addEventListener("keydown", (event) => {
-        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-        event.preventDefault();
-        const direction = event.key === "ArrowRight" ? 1 : -1;
-        const target = NAVIGATION[(index + direction + NAVIGATION.length) % NAVIGATION.length];
-        if (target) this.openSection(target.id);
-      });
-    });
+      for (const item of [...NAVIGATION, { id: "system" as const, label: "System" }]) {
+        const option = select.createEl("option", { text: item.label, value: item.id });
+        option.selected = item.id === this.section;
+      }
+      select.addEventListener("change", () => this.openSection(select.value as Section));
+      if (this.section !== this.initialSection) {
+        const back = navigation.createEl("button", {
+          text: `返回${PAGE_COPY[this.initialSection].title}`,
+          cls: "okf-dashboard__ghost-action okf-dashboard__surface-back",
+          attr: { type: "button" },
+        });
+        back.addEventListener("click", () => this.openSection(this.initialSection));
+      }
+    }
     const utilities = topbar.createDiv({ cls: "okf-dashboard__utilities" });
     const search = utilities.createEl("button", {
       text: "搜索",
@@ -701,8 +745,11 @@ export class OkfDashboardView extends ItemView {
   }
 
   private async renderToday(container: HTMLElement): Promise<void> {
-    const data = await this.vaultReader.today();
-    const inbox = await this.vaultReader.inbox();
+    const [data, inbox, vaultTasks] = await Promise.all([
+      this.vaultReader.today(),
+      this.vaultReader.inbox(),
+      this.collectFormalTasks(),
+    ]);
     const actions = container.createDiv({ cls: "okf-dashboard__hero-actions okf-dashboard__today-actions" });
     const daily = actions.createEl("button", {
       text: data.daily.exists ? "继续写今日日记" : "创建今日日记",
@@ -857,15 +904,20 @@ export class OkfDashboardView extends ItemView {
         `${data.tasks.length} 项未完成；这里显示前 4 项。`,
         "okf-today-tasks",
       );
-      const list = tasks.createDiv({ cls: "okf-dashboard__compact-list" });
+      const list = tasks.createDiv({ cls: "okf-dashboard__compact-list okf-formal-task-list" });
+      const taskIndex = new Map(vaultTasks.map((task) => [`${task.path}:${task.line + 1}`, task]));
       for (const item of data.tasks.slice(0, 4)) {
-        this.compactRow(
-          list,
-          compactText(item.text, 100),
-          relationName(item.path),
-          "打开",
-          () => void this.openPath(item.path),
-        );
+        const task = taskIndex.get(`${item.path}:${item.line}`);
+        if (task) this.renderFormalTaskRow(list, task);
+        else {
+          this.compactRow(
+            list,
+            compactText(item.text, 100),
+            relationName(item.path),
+            "打开",
+            () => void this.openPath(item.path),
+          );
+        }
       }
       if (data.tasks.length > 4) {
         const more = tasks.createEl("button", { text: "查看全部待办", cls: "okf-dashboard__ghost-action" });
@@ -960,6 +1012,56 @@ export class OkfDashboardView extends ItemView {
     });
     open.addEventListener("click", action);
     return row;
+  }
+
+  private renderFormalTaskRow(parent: HTMLElement, task: VaultTask): void {
+    const row = parent.createDiv({ cls: "okf-formal-task-row" });
+    const checkbox = row.createEl("input", {
+      attr: { type: "checkbox", "aria-label": `完成 ${task.text}` },
+    });
+    checkbox.checked = task.checked;
+    checkbox.addEventListener("change", () => {
+      checkbox.disabled = true;
+      void toggleTaskInFile(this.app, task, checkbox.checked)
+        .then((wrote) => {
+          if (!wrote) {
+            checkbox.checked = task.checked;
+            new Notice("任务已变化，请刷新后重试。", 5_000);
+            return;
+          }
+          invalidatePath(task.path);
+          row.remove();
+          this.plugin.refreshDashboardViews();
+        })
+        .catch((error: unknown) => {
+          checkbox.checked = task.checked;
+          new Notice(error instanceof Error ? error.message : "任务更新失败", 5_000);
+        })
+        .finally(() => { checkbox.disabled = false; });
+    });
+    const title = row.createEl("button", {
+      cls: "okf-formal-task-row__title",
+      text: task.text,
+      attr: { type: "button", title: task.path },
+    });
+    title.addEventListener("click", () => void this.openPath(task.path));
+    const dates = [
+      task.reminder ? `提醒 ${task.reminder}` : "",
+      task.scheduled ? `计划 ${task.scheduled}${task.scheduledTime ? ` ${task.scheduledTime}` : ""}` : "",
+      task.due ? `截止 ${task.due}` : "",
+    ].filter(Boolean).join(" · ");
+    const editDates = row.createEl("button", {
+      cls: "okf-dashboard__ghost-action okf-formal-task-row__dates",
+      text: dates || "设置日期",
+      attr: { type: "button", title: "分别编辑提醒、计划日和截止日" },
+    });
+    editDates.addEventListener("click", () => this.plugin.promptTaskDates(task));
+  }
+
+  private collectFormalTasks(): Promise<VaultTask[]> {
+    const vault = (this.app as App & { vault?: { getMarkdownFiles?: unknown } }).vault;
+    if (!vault || typeof vault.getMarkdownFiles !== "function") return Promise.resolve([]);
+    return collectVaultTasks(this.app);
   }
 
   private openSection(section: Section): void {
@@ -3496,6 +3598,7 @@ export class OkfDashboardView extends ItemView {
     parent: HTMLElement,
     project: ProjectSummary,
     context = false,
+    tasks: readonly VaultTask[] = [],
   ): void {
     const status = projectLifecycleStatus(project);
     const row = parent.createEl("article", {
@@ -3526,6 +3629,11 @@ export class OkfDashboardView extends ItemView {
       "study-guides": project.related_learning,
       sources: project.related_materials,
     });
+    if (tasks.length) {
+      const taskList = main.createDiv({ cls: "okf-project-row__tasks" });
+      taskList.createDiv({ cls: "okf-dashboard__muted", text: `待办 · ${tasks.length}` });
+      for (const task of tasks.slice(0, 3)) this.renderFormalTaskRow(taskList, task);
+    }
 
     const actions = row.createDiv({ cls: "okf-work-item__actions" });
     const primary = actions.createEl("button", {
@@ -3579,8 +3687,14 @@ export class OkfDashboardView extends ItemView {
         onSelect: () => this.openPath(logPath),
       },
       {
-        id: "claudian",
+        id: "decision",
         title: PROJECT_ACTION_PANEL_LABELS[3],
+        description: "为这个 Project 创建一条可追踪的 Decision",
+        onSelect: () => this.plugin.promptProjectDecision(project.path),
+      },
+      {
+        id: "claudian",
+        title: PROJECT_ACTION_PANEL_LABELS[4],
         description: "读取项目主页和日志，梳理状态、阻塞与下一步",
         onSelect: () => this.copyPrompt(
           "根据已有项目主页和日志，梳理当前状态、关键点与重要选择、阻塞和下一步。",
@@ -3845,7 +3959,10 @@ export class OkfDashboardView extends ItemView {
   }
 
   private async renderProjects(container: HTMLElement): Promise<void> {
-    const data = await this.vaultReader.projects();
+    const [data, tasks] = await Promise.all([
+      this.vaultReader.projects(),
+      this.collectFormalTasks(),
+    ]);
     const actions = container.createDiv({ cls: "okf-dashboard__page-actions" });
     const create = actions.createEl("button", {
       text: "新建 Project",
@@ -3895,7 +4012,11 @@ export class OkfDashboardView extends ItemView {
     }
     const list = container.createDiv({ cls: "okf-dashboard__compact-list okf-project-list" });
     for (const project of selected) {
-      this.renderProjectWorkItem(list, project);
+      const root = project.path.split("/").slice(0, -1).join("/") + "/";
+      const projectTasks = tasks.filter((task) =>
+        task.formal && !task.checked && task.path.startsWith(root),
+      );
+      this.renderProjectWorkItem(list, project, false, projectTasks);
     }
   }
 

@@ -2052,6 +2052,7 @@ describe("real Dashboard View source handoff", () => {
       "记录待整理想法",
       "添加资料",
       "打开项目日志",
+      "新建正式决定",
       "在 Claudian 中整理项目",
     ]);
     expect(PROJECT_ACTION_PANEL_LABELS).not.toContain("记录关键点");

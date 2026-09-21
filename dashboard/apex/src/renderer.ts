@@ -2041,7 +2041,14 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 			app,
 			callbacks,
 			setConfig: (config) => callbacks.onExtensionConfigChange(reference, config),
-		})).catch((error: unknown) => {
+		})).then((cleanup) => {
+			if (typeof cleanup !== 'function') return;
+			if (!body.isConnected) {
+				cleanup();
+				return;
+			}
+			callbacks.onCustomSectionCleanup?.(reference, cleanup);
+		}).catch((error: unknown) => {
 			console.error(`[apex-dashboard] custom section ${sectionType} failed`, error);
 			body.empty();
 			body.createDiv({

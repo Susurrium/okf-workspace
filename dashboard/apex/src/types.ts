@@ -722,6 +722,8 @@ export function sectionRef(column: DashboardColumn): string {
 }
 
 export interface RenderCallbacks {
+	/** Register resources owned by a custom section for the current render. */
+	onCustomSectionCleanup?(sectionReference: string, cleanup: () => void): void;
 	onCardEdit(card: DashboardCard): void;
 	/** subpath is the raw `#heading` / `#^block` fragment of a wikilink, when present. */
 	onOpenNoteInPopover(this: void, file: TFile, subpath?: string): void;

@@ -15,7 +15,7 @@ export interface CustomSectionDefinition {
 	icon: string;
 	label: string;
 	defaultName: string;
-	render(context: CustomSectionRenderContext): void | Promise<void>;
+	render(context: CustomSectionRenderContext): void | (() => void) | Promise<void | (() => void)>;
 }
 
 const DEFINITIONS = new Map<string, CustomSectionDefinition>();

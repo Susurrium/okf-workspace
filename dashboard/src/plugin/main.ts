@@ -61,18 +61,11 @@ import {
   readLegacyApexSettings,
   takeoverApexNativeData,
 } from "../adapters/apex-native-data.js";
-import { createProjectSectionDefinition } from "../features/projects/project-section.js";
-import { createTodaySectionDefinition } from "../features/today/today-section.js";
-import { createReadingSectionDefinition } from "../features/reading/reading-section.js";
 import {
   generateWorkbenchPresetMarkdown,
   WORKBENCH_PRESETS,
 } from "../features/workbench-presets.js";
-import {
-  createInboxSectionDefinition,
-  createKnowledgeSectionDefinition,
-  createLearningSectionDefinition,
-} from "../features/workspace/workspace-sections.js";
+import { createOkfSurfaceSectionDefinitions } from "../features/workbench/okf-surface-sections.js";
 import {
   DASHBOARD_COMMAND_ID,
   registerDashboardRibbon,
@@ -122,6 +115,7 @@ import {
   type DashboardUiStatePatch,
   type RecentDashboardFile,
 } from "./dashboard-ui-state.js";
+import { OkfDashboardView, type DashboardSection as EmbeddedDashboardSection } from "./dashboard-view.js";
 
 export default class OkfBrainPlugin extends Plugin {
   public settings: OkfBrainSettings = DEFAULT_SETTINGS;
@@ -148,6 +142,7 @@ export default class OkfBrainPlugin extends Plugin {
   private readonly watchedConversionIds = new Set<string>();
   private dashboardUiStateStore: DashboardUiStateStore | undefined;
   private readonly unregisterApexSections: Array<() => void> = [];
+  private readonly embeddedDashboardSurfaces = new Set<OkfDashboardView>();
 
   public async onload(): Promise<void> {
     await this.loadSettings();
@@ -198,12 +193,7 @@ export default class OkfBrainPlugin extends Plugin {
     });
     await this.apexHost.initialize();
     this.unregisterApexSections.push(
-      registerSectionDefinition(createProjectSectionDefinition(this)),
-      registerSectionDefinition(createTodaySectionDefinition(this)),
-      registerSectionDefinition(createLearningSectionDefinition(this)),
-      registerSectionDefinition(createKnowledgeSectionDefinition(this)),
-      registerSectionDefinition(createInboxSectionDefinition(this)),
-      registerSectionDefinition(createReadingSectionDefinition(this)),
+      ...createOkfSurfaceSectionDefinitions(this).map(registerSectionDefinition),
     );
     this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new DashboardView(leaf, this.apexHost!));
     registerDashboardRibbon(this, () => void this.openDashboard());
@@ -256,6 +246,8 @@ export default class OkfBrainPlugin extends Plugin {
     if (this.dashboardRefreshTimer !== undefined) window.clearTimeout(this.dashboardRefreshTimer);
     this.watchedConversionIds.clear();
     this.app.workspace.detachLeavesOfType(DASHBOARD_VIEW_TYPE);
+    for (const surface of [...this.embeddedDashboardSurfaces]) void surface.onClose();
+    this.embeddedDashboardSurfaces.clear();
     for (const unregister of this.unregisterApexSections.splice(0)) unregister();
     this.apexHost?.destroy();
     void this.dashboardUiStateStore?.dispose().catch((error: unknown) => {
@@ -1368,6 +1360,35 @@ export default class OkfBrainPlugin extends Plugin {
 
   public refreshDashboardViews(): void {
     this.apexHost?.refreshAllDashboards();
+  }
+
+  public async mountOkfDashboardSurface(
+    container: HTMLElement,
+    section: EmbeddedDashboardSection,
+  ): Promise<() => void> {
+    const leaf = this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE)[0];
+    if (!leaf) throw new Error("当前没有可挂载 OKF 工作区的 Dashboard pane");
+    const surface = new OkfDashboardView(leaf, this, {
+      container,
+      initialSection: section,
+      embedded: true,
+    });
+    this.embeddedDashboardSurfaces.add(surface);
+    try {
+      await surface.onOpen();
+    } catch (error) {
+      this.embeddedDashboardSurfaces.delete(surface);
+      await surface.onClose();
+      throw error;
+    }
+
+    let disposed = false;
+    return (): void => {
+      if (disposed) return;
+      disposed = true;
+      this.embeddedDashboardSurfaces.delete(surface);
+      void surface.onClose();
+    };
   }
 
   private async initializeSemanticMonitor(): Promise<void> {

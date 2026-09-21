@@ -51,6 +51,7 @@ export interface VaultTask {
 
 interface CacheEntry {
 	mtime: number;
+	size: number;
 	tasks: VaultTask[];
 }
 
@@ -82,7 +83,7 @@ const COMPLETION_EMOJI_REGEX = /\s*✅\s*(\d{4}-\d{2}-\d{2})/;
 /** Dataview-style priority inline field, anywhere in the text. */
 const PRIORITY_FIELD_REGEX = /\s*\[priority::\s*([^\]]+?)\s*\]/i;
 /** Any checkbox line, allowing leading indentation so subtasks are aggregated too. */
-const TASK_LINE_REGEX = /^(\s*)- \[([ xX])\]\s*(.+)$/;
+const TASK_LINE_REGEX = /^(\s*)- \[([ xX])\]\s*(.+?)\r?$/;
 const FORMAL_TASK_REGEX = /(?:^|\s)#task(?=\s|$)/i;
 const BLOCK_ID_REGEX = /\s+\^([a-zA-Z0-9-]+)\s*$/;
 
@@ -274,7 +275,7 @@ export async function collectVaultTasks(
 		stale.delete(file.path);
 
 		const cached = moduleCache.get(file.path);
-		if (cached && cached.mtime === file.stat.mtime) {
+		if (cached && cached.mtime === file.stat.mtime && cached.size === file.stat.size) {
 			all.push(...cached.tasks);
 			continue;
 		}
@@ -291,12 +292,18 @@ export async function collectVaultTasks(
 
 		let content: string;
 		try {
-			content = await app.vault.cachedRead(file);
+			// When a known file changes, bypass Obsidian's read cache. External
+			// editors can update stat/metadata before cachedRead observes the new
+			// bytes, which would otherwise pin stale tasks under the new fingerprint.
+			const directRead = (app.vault as typeof app.vault & { read?: (target: TFile) => Promise<string> }).read;
+			content = cached && typeof directRead === 'function'
+				? await directRead.call(app.vault, file)
+				: await app.vault.cachedRead(file);
 		} catch {
 			continue;
 		}
 		const tasks = scanFileTasks(file, content);
-		moduleCache.set(file.path, { mtime: file.stat.mtime, tasks });
+		moduleCache.set(file.path, { mtime: file.stat.mtime, size: file.stat.size, tasks });
 		all.push(...tasks);
 	}
 	for (const path of stale) moduleCache.delete(path);

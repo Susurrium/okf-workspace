@@ -9,9 +9,9 @@ import {
 } from "../src/features/workbench-presets.js";
 
 describe("OKF workbench presets", () => {
-  it("provides the four declared workflows and defaults to the unified daily board", () => {
+  it("provides every declared workflow and defaults to the unified daily board", () => {
     expect(WORKBENCH_PRESETS.map((preset) => preset.id)).toEqual([
-      "daily", "learning", "project", "reading",
+      "daily", "learning", "project", "reading", "life", "system",
     ]);
     expect(workbenchPresetData().columns.map((column) => column.sectionType)).toEqual([
       "memo",
@@ -20,6 +20,8 @@ describe("OKF workbench presets", () => {
       "workspace-projects",
       "calendar",
       "workspace-reading",
+      "workspace-life",
+      "workspace-system",
     ]);
     expect(workbenchPresetData().quickActions).toContainEqual({
       name: "全局搜索",
@@ -27,10 +29,16 @@ describe("OKF workbench presets", () => {
       type: "command",
       target: "global-search:open",
     });
+    expect(workbenchPresetData().quickActions.map((action) => action.name)).toEqual([
+      "全局搜索", "快速创建", "问我的笔记", "导入资料",
+    ]);
   });
 
   it("serializes stable section IDs and declarative filters without object snapshots", () => {
-    const unregister = ["workspace-today", "workspace-inbox", "workspace-projects", "workspace-reading"]
+    const unregister = [
+      "workspace-today", "workspace-inbox", "workspace-projects", "workspace-reading",
+      "workspace-life", "workspace-system",
+    ]
       .map((type) => registerSectionDefinition({
         type,
         icon: "box",
@@ -54,6 +62,15 @@ describe("OKF workbench presets", () => {
       "workspace-reading",
       "weread",
       "workspace-knowledge",
+      "workspace-inbox",
     ]);
+  });
+
+  it("does not claim project or reading context that the preset does not bind", () => {
+    const project = workbenchPresetData("project");
+    expect(project.columns.find((column) => column.id === "project-today")?.name).toBe("今日行动");
+    expect(project.columns.find((column) => column.id === "project-learning")?.name).toBe("学习工作区");
+    expect(workbenchPresetData("reading").columns.find((column) => column.id === "reading-knowledge")?.name)
+      .toBe("知识工作区");
   });
 });
