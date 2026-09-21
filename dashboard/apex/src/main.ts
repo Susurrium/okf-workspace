@@ -375,7 +375,7 @@ export default class DashboardPlugin extends Plugin {
 
 	/** Create a new workspace file with default board content, register it and
 	 *  switch to it. */
-	async createWorkspace(name: string): Promise<string | void> {
+	async createWorkspace(name: string, _presetId?: string): Promise<string | void> {
 		return this.runWorkspaceOp(() => this.doCreateWorkspace(name));
 	}
 

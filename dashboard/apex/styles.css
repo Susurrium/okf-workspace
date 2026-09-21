@@ -16789,6 +16789,39 @@ body.is-mobile .dashboard-media-item .dashboard-media-tagbtn { opacity: 1; }
 	outline: none;
 	border-color: var(--interactive-accent);
 }
+
+.dashboard-choice-card {
+	width: min(460px, calc(100vw - 32px));
+}
+
+.dashboard-choice-list {
+	display: grid;
+	gap: 8px;
+	margin: 12px 0;
+}
+
+.dashboard-choice-option {
+	display: grid;
+	gap: 3px;
+	width: 100%;
+	padding: 10px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	text-align: left;
+}
+
+.dashboard-choice-option:hover,
+.dashboard-choice-option:focus-visible {
+	border-color: var(--interactive-accent);
+	background: var(--background-modifier-hover);
+}
+
+.dashboard-choice-option span {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
 .dashboard-confirm-confirm {
 	padding: 7px 20px;
 	border-radius: 8px;

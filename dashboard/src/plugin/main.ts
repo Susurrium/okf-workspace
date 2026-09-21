@@ -57,6 +57,11 @@ import { registerSectionDefinition } from "../../apex/src/section-registry.js";
 import { ApexHostAdapter } from "../adapters/apex-host.js";
 import { createProjectSectionDefinition } from "../features/projects/project-section.js";
 import { createTodaySectionDefinition } from "../features/today/today-section.js";
+import { createReadingSectionDefinition } from "../features/reading/reading-section.js";
+import {
+  generateWorkbenchPresetMarkdown,
+  WORKBENCH_PRESETS,
+} from "../features/workbench-presets.js";
 import {
   createInboxSectionDefinition,
   createKnowledgeSectionDefinition,
@@ -148,6 +153,8 @@ export default class OkfBrainPlugin extends Plugin {
       },
       insertCalendarTask: (date, taskLine, position) =>
         this.notes().appendDailyTask(date, taskLine, position),
+      workspacePresets: WORKBENCH_PRESETS,
+      createWorkspaceMarkdown: generateWorkbenchPresetMarkdown,
     });
     await this.apexHost.initialize();
     this.unregisterApexSections.push(
@@ -156,6 +163,7 @@ export default class OkfBrainPlugin extends Plugin {
       registerSectionDefinition(createLearningSectionDefinition(this)),
       registerSectionDefinition(createKnowledgeSectionDefinition(this)),
       registerSectionDefinition(createInboxSectionDefinition(this)),
+      registerSectionDefinition(createReadingSectionDefinition(this)),
     );
     this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new DashboardView(leaf, this.apexHost!));
     registerDashboardRibbon(this, () => void this.openDashboard());

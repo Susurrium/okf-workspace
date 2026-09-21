@@ -3,6 +3,7 @@ import type { ApexHost } from './host';
 import { t } from './i18n';
 import { showPromptDialog } from './prompt-dialog';
 import { showConfirmDialog } from './confirm-dialog';
+import { showChoiceDialog } from './choice-dialog';
 import { normalizeWorkspacePath } from './workspace-registry';
 
 /** Display label for a workspace: its name, else the file path. */
@@ -20,7 +21,12 @@ async function promptNewWorkspace(plugin: ApexHost, onSwitch: (path: string) => 
 		defaultValue: fallback,
 	});
 	if (name === null) return;
-	const created = await plugin.createWorkspace(name === '' ? fallback : name);
+	const presets = plugin.workspacePresets ?? [];
+	const presetId = presets.length > 0
+		? await showChoiceDialog(presets, '选择工作台预设')
+		: undefined;
+	if (presetId === null) return;
+	const created = await plugin.createWorkspace(name === '' ? fallback : name, presetId);
 	if (created) await onSwitch(created);
 }
 

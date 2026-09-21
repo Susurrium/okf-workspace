@@ -2,6 +2,7 @@ import { moveDashboardCard } from './card-move';
 import { App, TFile } from 'obsidian';
 import type { DashboardSettings, DashboardCard, DashboardColumn, DashboardData, TaskItem, DocNode, QuickAction, BannerData, CardType } from './types';
 import { parse, serialize, generateDefaultMarkdown } from './parser';
+import { getRegisteredApexHost } from './host';
 import { t } from './i18n';
 import {
 	type TaskPath,
@@ -972,7 +973,8 @@ export class SyncEngine {
 			return;
 		}
 
-		const content = generateDefaultMarkdown();
+		const content = getRegisteredApexHost()?.createDefaultWorkspaceMarkdown?.()
+			?? generateDefaultMarkdown();
 		this.file = await this.app.vault.create(path, content);
 	}
 

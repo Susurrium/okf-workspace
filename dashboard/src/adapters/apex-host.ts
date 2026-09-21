@@ -28,6 +28,8 @@ export interface ApexHostAdapterOptions {
     taskLine: string,
     position: "start" | "end",
   ) => Promise<TaskInsertTarget | null>;
+  workspacePresets?: ApexHost["workspacePresets"];
+  createWorkspaceMarkdown?: (presetId?: string) => string;
 }
 
 /**
@@ -42,6 +44,8 @@ export class ApexHostAdapter implements ApexHost {
   private readonly owner: Plugin;
   private readonly persist: (settings: DashboardSettings) => Promise<void>;
   private readonly calendarTaskWriter: ApexHostAdapterOptions["insertCalendarTask"];
+  public readonly workspacePresets: ApexHost["workspacePresets"];
+  private readonly workspaceMarkdownFactory: ApexHostAdapterOptions["createWorkspaceMarkdown"];
   public readonly backupService: BackupService;
   private readonly mediaTagService: MediaTagService;
   private readonly habitService: HabitService;
@@ -57,6 +61,8 @@ export class ApexHostAdapter implements ApexHost {
     this.settings = options.settings;
     this.persist = options.persist;
     this.calendarTaskWriter = options.insertCalendarTask;
+    this.workspacePresets = options.workspacePresets;
+    this.workspaceMarkdownFactory = options.createWorkspaceMarkdown;
     this.backupService = new BackupService(this);
     this.mediaTagService = new MediaTagService(this);
     this.habitService = new HabitService(this);
@@ -116,6 +122,10 @@ export class ApexHostAdapter implements ApexHost {
   ): Promise<TaskInsertTarget | null> {
     if (!this.calendarTaskWriter) return Promise.resolve(null);
     return this.calendarTaskWriter(date, taskLine, position);
+  }
+
+  public createDefaultWorkspaceMarkdown(): string {
+    return this.workspaceMarkdownFactory?.() ?? generateDefaultMarkdown();
   }
 
   public refreshAllDashboards(): void {
@@ -182,7 +192,7 @@ export class ApexHostAdapter implements ApexHost {
     });
   }
 
-  public async createWorkspace(name: string): Promise<string | void> {
+  public async createWorkspace(name: string, presetId?: string): Promise<string | void> {
     return this.runWorkspaceOp(async () => {
       const trimmed = name.trim();
       const path = nextWorkspacePath(
@@ -191,7 +201,8 @@ export class ApexHostAdapter implements ApexHost {
         (candidate) => this.workspaceFileExists(candidate),
       );
       try {
-        await this.app.vault.create(path.endsWith(".md") ? path : `${path}.md`, generateDefaultMarkdown());
+        const markdown = this.workspaceMarkdownFactory?.(presetId) ?? generateDefaultMarkdown();
+        await this.app.vault.create(path.endsWith(".md") ? path : `${path}.md`, markdown);
       } catch (error) {
         console.error("Workspace file creation failed:", error);
         new Notice(t("workspace.createFailed"));

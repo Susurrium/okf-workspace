@@ -22,7 +22,9 @@ export interface ApexHost {
 	refreshAllDashboards(): void;
 	reloadAllDashboards(): Promise<void>;
 	switchWorkspace(path: string): Promise<void>;
-	createWorkspace(name: string): Promise<string | void>;
+	workspacePresets?: readonly WorkspacePresetOption[];
+	createWorkspace(name: string, presetId?: string): Promise<string | void>;
+	createDefaultWorkspaceMarkdown?(): string;
 	renameWorkspace(path: string, name: string): Promise<void>;
 	removeWorkspace(path: string): Promise<void>;
 	reorderWorkspaces(from: number, to: number): Promise<void>;
@@ -32,6 +34,12 @@ export interface ApexHost {
 		taskLine: string,
 		position: 'start' | 'end',
 	): Promise<TaskInsertTarget | null>;
+}
+
+export interface WorkspacePresetOption {
+	id: string;
+	label: string;
+	description?: string;
 }
 
 let registeredHost: ApexHost | null = null;

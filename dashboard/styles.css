@@ -1355,6 +1355,41 @@
   color: var(--text-faint);
 }
 
+.okf-reading-native__content {
+  display: grid;
+  gap: 18px;
+  padding: 0 16px 16px;
+}
+
+.okf-reading-native .okf-feed-shelf,
+.okf-reading-native .okf-reading-source-grid {
+  margin: 0;
+}
+
+.okf-reading-native__sources {
+  display: grid;
+  gap: 10px;
+}
+
+.okf-reading-native .okf-reading-source-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.okf-reading-native .okf-reading-source-search input {
+  min-width: 0;
+  flex: 1;
+}
+
+.okf-reading-native .okf-reading-source-detail__header {
+  flex-wrap: wrap;
+}
+
+.okf-reading-native .okf-dashboard__error button {
+  margin-left: 8px;
+}
+
 .okf-today-section__actions,
 .okf-today-task {
   display: flex;
