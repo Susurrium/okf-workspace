@@ -1,16 +1,17 @@
 ---
 name: organize-daily
-description: Append, organize, or lightly polish one Workspace Daily while preserving the user's raw words. Use when the user says to record something today, organize today, optimize a diary entry, or extract explicit tasks. Do not infer personality or create a Wiki.
+description: 在一篇 Workspace Daily 中追加原话、整理当天记录或局部润色，并保留用户原始表达。用于记今天的事、整理日记或提取明确承诺的任务；普通问答不写入 Daily。
 ---
 
-# Organize Daily
+# 整理每日记录
 
-Work on the canonical note at `life/daily/YYYY/MM/YYYY-MM-DD.md`.
+让 Daily 更容易回看和继续行动，同时保留它作为用户原始记录的价值。按请求决定是追加、整理还是局部润色；不要把每一天都加工成固定的主题分析或复盘表。
 
-- **Append:** add the user's words to the raw capture area without paraphrasing them.
-- **Organize:** summarize themes, events, and open loops inside the managed organized-daily region. Separately add deduplicated formal tasks under `## 任务` when the raw text contains the user's explicit actionable commitment.
-- **Polish:** rewrite only the section the user names; keep the original meaning and retain raw text unless replacement is explicit.
+1. 根据用户指定的日期或当前 Vault 本地日期定位 `life/daily/YYYY/MM/YYYY-MM-DD.md`，读取完整目标及已有任务。日期不明且会改变写入目标时才询问。
+2. **追加**时把用户文字放入原始记录区，保留措辞和事实，不悄悄改写。**整理**时在 `organized-daily` 区域提炼值得回看的事件、联系、变化和未完成事项；没有实质内容就保持简短，不强行归纳情绪或人生主题。**润色**时只调整用户指明的范围，保持原意；除非明确要求替换，否则保留原话。
+3. 仅从用户明确承诺的行动创建正式任务。与现有任务去重，使用 Vault 的 `- [ ] #task` 格式及唯一 block ID，保留用户给定的计划时间、截止时间和提醒时间各自的含义；想法、希望、AI 建议和待确认事项不自动变成任务。
+4. 需要链接 Project、Course 或 Wiki 时，先定位并读取真实目标，再写有用的关联；不为了制造关系而扩大检索。用户提及他人、情绪或推测时，忠实保留表述，不将其升级为已核实事实或长期个人偏好。
 
-Read the full target note plus `system/contracts/base.yaml` and `system/contracts/daily.yaml` before a structural change. These YAML Contracts are the only format authority. Preserve raw entries, existing tasks, unknown frontmatter, and user-authored sections. The managed summary belongs only in `organized-daily`; formal tasks are the one deliberate exception and belong under `## 任务`. Create one only when the user stated an actionable commitment, deduplicate it against existing tasks, and preserve any due date or recurrence supplied. Link a Project, Course, or Wiki only after resolving and reading the real target note. This ordinary user-directed organization does not receive a `generated` marker.
+创建或结构性修改前读取 `system/contracts/base.yaml` 和 `system/contracts/daily.yaml`。整理正文只写 `organized-daily`；正式任务是有明确承诺时写入 `## 任务` 的例外。保留原始记录、既有任务、未知 frontmatter 和用户其他章节。普通交互式整理不加 `generated`；不另建 Reflection 或 Wiki，除非用户要求。
 
-Do not invent mood, preference, personal facts, or completed actions. Do not create a Reflection or Wiki unless separately requested. Report the written Daily path.
+交付前检查原话是否完整、总结是否确有信息增量、任务是否有用户承诺和正确时间、有没有误写用户心理或完成情况。报告写入的 Daily 路径和实际新增的任务。

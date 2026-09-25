@@ -41,6 +41,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Dashboard typecheck failed' }
     & npm.cmd test
     if ($LASTEXITCODE -ne 0) { throw 'Dashboard tests failed' }
+    & npm.cmd run build
+    if ($LASTEXITCODE -ne 0) { throw 'Dashboard build failed' }
 }
 finally { Pop-Location }
 
@@ -50,8 +52,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Claudian typecheck failed' }
     & npm.cmd run lint
     if ($LASTEXITCODE -ne 0) { throw 'Claudian lint failed' }
-    & npm.cmd run test:workspace
-    if ($LASTEXITCODE -ne 0) { throw 'Claudian Workspace tests failed' }
+    & npm.cmd test
+    if ($LASTEXITCODE -ne 0) { throw 'Claudian tests failed' }
+    & npm.cmd run build
+    if ($LASTEXITCODE -ne 0) { throw 'Claudian build failed' }
 }
 finally { Pop-Location }
 

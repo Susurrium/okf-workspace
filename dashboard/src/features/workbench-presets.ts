@@ -83,6 +83,7 @@ export function workbenchPresetData(preset: WorkbenchPresetId = "daily"): Dashbo
       { name: "快速创建", icon: "plus", type: "command", target: "okf-workspace-dashboard:open-action-menu" },
       { name: "问我的笔记", icon: "message-circle", type: "command", target: "okf-workspace-dashboard:ask-notes" },
       { name: "导入资料", icon: "file-up", type: "command", target: "okf-workspace-dashboard:import-document" },
+      { name: "系统状态", icon: "settings-2", type: "command", target: "okf-workspace-dashboard:open-system" },
     ],
     columns: columns[preset].map((item) => ({ ...item })),
     bodyPreamble: "此文件保存工作台布局与原生便签；OKF 对象仍以各自 Vault 文件为准。",

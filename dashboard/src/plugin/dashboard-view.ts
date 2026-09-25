@@ -1,4 +1,4 @@
-import { ItemView, Notice, TFile, WorkspaceLeaf, type App } from "obsidian";
+import { ItemView, Notice, TFile, WorkspaceLeaf, type App, type ViewStateResult } from "obsidian";
 import {
   collectVaultTasks,
   invalidatePath,
@@ -106,6 +106,10 @@ export interface EmbeddedDashboardSurfaceOptions {
   initialSection?: DashboardSection;
   /** Apex already owns the outer section navigation and chrome. */
   embedded?: boolean;
+  /** A separate page for sections absent from the current Apex workbench. */
+  focused?: boolean;
+  /** Apex board to return to when a focused page was opened from a card. */
+  workbenchPath?: string;
 }
 type TodayPane = "actions" | "reading";
 type LearningContextFilter = "all" | DashboardLearningContext;
@@ -229,6 +233,8 @@ export class OkfDashboardView {
   public readonly app: App;
   public readonly contentEl: HTMLElement;
   private readonly embedded: boolean;
+  private readonly focused: boolean;
+  private readonly workbenchPath: string | undefined;
   private readonly initialSection: Section;
   private section: Section = "today";
   private taskCenterOpen = false;
@@ -325,6 +331,8 @@ export class OkfDashboardView {
       ?? (leaf as unknown as { app: App }).app;
     this.contentEl = options.container ?? fallbackView!.contentEl;
     this.embedded = options.embedded ?? false;
+    this.focused = options.focused ?? false;
+    this.workbenchPath = options.workbenchPath;
     this.vaultReader = new VaultDashboardReader(this.app);
     const state = this.plugin.getDashboardUiState();
     this.initialSection = options.initialSection ?? state.activeSection;
@@ -486,81 +494,83 @@ export class OkfDashboardView {
     root.empty();
     root.addClass("okf-dashboard");
     root.toggleClass("okf-dashboard--embedded", this.embedded);
-    const topbar = root.createDiv({ cls: "okf-dashboard__topbar" });
+    root.toggleClass("okf-dashboard--focused", this.focused);
     if (!this.embedded) {
-      const nav = topbar.createDiv({ cls: "okf-dashboard__nav", attr: { role: "tablist" } });
-      NAVIGATION.forEach((item, index) => {
-        const active = item.id === this.section;
-        const button = nav.createEl("button", {
-          text: item.label,
-          cls: active ? "is-active" : "",
-          attr: { type: "button", role: "tab", "aria-selected": String(active) },
-        });
-        button.addEventListener("click", () => {
-          this.openSection(item.id);
-        });
-        button.addEventListener("keydown", (event) => {
-          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-          event.preventDefault();
-          const direction = event.key === "ArrowRight" ? 1 : -1;
-          const target = NAVIGATION[(index + direction + NAVIGATION.length) % NAVIGATION.length];
-          if (target) this.openSection(target.id);
-        });
-      });
-    } else {
-      const navigation = topbar.createDiv({ cls: "okf-dashboard__surface-navigation" });
-      navigation.createSpan({ text: "OKF" });
-      const select = navigation.createEl("select", {
-        attr: { "aria-label": "切换 OKF 功能" },
-      });
-      for (const item of [...NAVIGATION, { id: "system" as const, label: "System" }]) {
-        const option = select.createEl("option", { text: item.label, value: item.id });
-        option.selected = item.id === this.section;
-      }
-      select.addEventListener("change", () => this.openSection(select.value as Section));
-      if (this.section !== this.initialSection) {
-        const back = navigation.createEl("button", {
-          text: `返回${PAGE_COPY[this.initialSection].title}`,
-          cls: "okf-dashboard__ghost-action okf-dashboard__surface-back",
+      const topbar = root.createDiv({ cls: "okf-dashboard__topbar" });
+      if (this.focused) {
+        const back = topbar.createEl("button", {
+          text: "返回工作台",
+          cls: "okf-dashboard__ghost-action",
           attr: { type: "button" },
         });
-        back.addEventListener("click", () => this.openSection(this.initialSection));
+        back.addEventListener("click", () => void this.plugin.returnToOkfWorkbench(this.workbenchPath));
+      } else {
+        const nav = topbar.createDiv({ cls: "okf-dashboard__nav", attr: { role: "tablist" } });
+        NAVIGATION.forEach((item, index) => {
+          const active = item.id === this.section;
+          const button = nav.createEl("button", {
+            text: item.label,
+            cls: active ? "is-active" : "",
+            attr: { type: "button", role: "tab", "aria-selected": String(active) },
+          });
+          button.addEventListener("click", () => {
+            this.openSection(item.id);
+          });
+          button.addEventListener("keydown", (event) => {
+            if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+            event.preventDefault();
+            const direction = event.key === "ArrowRight" ? 1 : -1;
+            const target = NAVIGATION[(index + direction + NAVIGATION.length) % NAVIGATION.length];
+            if (target) this.openSection(target.id);
+          });
+        });
+      }
+      const utilities = topbar.createDiv({ cls: "okf-dashboard__utilities" });
+      const search = utilities.createEl("button", {
+        text: "搜索",
+        cls: "okf-dashboard__ghost-action okf-dashboard__search-action",
+        attr: { type: "button", "aria-label": "搜索 Vault" },
+      });
+      search.addEventListener("click", () => this.openGlobalSearch());
+      const create = utilities.createEl("button", {
+        text: "＋",
+        cls: "okf-dashboard__icon-action",
+        attr: { type: "button", "aria-label": "快速创建" },
+      });
+      create.addEventListener("click", () => this.plugin.promptActionMenu());
+      const codex = utilities.createEl("button", {
+        text: "问我的笔记",
+        cls: "okf-dashboard__ghost-action okf-dashboard__codex-action",
+        attr: { type: "button", "aria-label": "问我的笔记" },
+      });
+      codex.addEventListener("click", () => this.plugin.promptAsk());
+      this.renderBackgroundTasks(utilities);
+      const settings = utilities.createEl("button", {
+        text: "System",
+        cls: this.section === "system" ? "is-active okf-dashboard__ghost-action" : "okf-dashboard__ghost-action",
+        attr: { type: "button", "aria-label": "系统状态与设置" },
+      });
+      settings.addEventListener("click", () => this.openSection("system"));
+    }
+    const body = root.createDiv({ cls: "okf-dashboard__body" });
+    if (!this.embedded) {
+      const pageHeader = body.createDiv({ cls: "okf-dashboard__page-header" });
+      const pageCopy = PAGE_COPY[this.section];
+      const heading = pageHeader.createDiv();
+      heading.createEl("h2", { text: pageCopy.title });
+      heading.createDiv({ cls: "okf-dashboard__muted", text: pageCopy.description });
+      if (this.focused && !this.plugin.hasOkfSectionInActiveWorkbench(this.section, this.workbenchPath)) {
+        const add = pageHeader.createEl("button", {
+          text: "添加到当前工作台",
+          cls: "okf-dashboard__secondary-action",
+          attr: { type: "button" },
+        });
+        add.addEventListener("click", () => {
+          void this.plugin.addOkfSectionToActiveWorkbench(this.section, this.workbenchPath)
+            .catch((error: unknown) => new Notice(error instanceof Error ? error.message : "添加卡片失败"));
+        });
       }
     }
-    const utilities = topbar.createDiv({ cls: "okf-dashboard__utilities" });
-    const search = utilities.createEl("button", {
-      text: "搜索",
-      cls: "okf-dashboard__ghost-action okf-dashboard__search-action",
-      attr: { type: "button", "aria-label": "搜索 Vault" },
-    });
-    search.addEventListener("click", () => this.openGlobalSearch());
-    const create = utilities.createEl("button", {
-      text: "＋",
-      cls: "okf-dashboard__icon-action",
-      attr: { type: "button", "aria-label": "快速创建" },
-    });
-    create.addEventListener("click", () => this.plugin.promptActionMenu());
-    const codex = utilities.createEl("button", {
-      text: "问我的笔记",
-      cls: "okf-dashboard__ghost-action okf-dashboard__codex-action",
-      attr: { type: "button", "aria-label": "问我的笔记" },
-    });
-    codex.addEventListener("click", () => this.plugin.promptAsk());
-    this.renderBackgroundTasks(utilities);
-    const settings = utilities.createEl("button", {
-      text: "System",
-      cls: this.section === "system" ? "is-active okf-dashboard__ghost-action" : "okf-dashboard__ghost-action",
-      attr: { type: "button", "aria-label": "系统状态与设置" },
-    });
-    settings.addEventListener("click", () => {
-      this.openSection("system");
-    });
-    const body = root.createDiv({ cls: "okf-dashboard__body" });
-    const pageHeader = body.createDiv({ cls: "okf-dashboard__page-header" });
-    const pageCopy = PAGE_COPY[this.section];
-    const heading = pageHeader.createDiv();
-    heading.createEl("h2", { text: pageCopy.title });
-    heading.createDiv({ cls: "okf-dashboard__muted", text: pageCopy.description });
     const loading = body.createDiv({ cls: "okf-dashboard__loading", text: "正在读取本地笔记…" });
     try {
       if (this.section === "today") await this.renderToday(body);
@@ -589,6 +599,7 @@ export class OkfDashboardView {
       });
       const retry = failure.createEl("button", { text: "重新加载" });
       retry.addEventListener("click", () => void this.render());
+      this.renderServiceSettingsAction(failure, error);
     } finally {
       loading.remove();
       if (renderVersion === this.renderVersion) {
@@ -907,6 +918,10 @@ export class OkfDashboardView {
       this.openSection("knowledge");
     });
     this.attentionItem(attention, "后台运行", attentionCounts.background_running, () => {
+      if (this.embedded) {
+        this.openSection("system");
+        return;
+      }
       this.taskCenterOpen = true;
       void this.render(true);
     });
@@ -1080,6 +1095,11 @@ export class OkfDashboardView {
   }
 
   private openSection(section: Section): void {
+    if (this.embedded || this.focused) {
+      void this.plugin.navigateToOkfSection(section, this.contentEl, this.workbenchPath)
+        .catch((error: unknown) => new Notice(error instanceof Error ? error.message : "无法打开 OKF 页面"));
+      return;
+    }
     if (this.refreshTimer !== undefined) {
       window.clearTimeout(this.refreshTimer);
       this.refreshTimer = undefined;
@@ -1251,6 +1271,15 @@ export class OkfDashboardView {
     return { card, meta, context, body, footer };
   }
 
+  private renderServiceSettingsAction(container: HTMLElement, error: unknown): void {
+    if (!(error instanceof Error) || !error.message.includes("工作区本地服务缺少 Python 或部署配置路径")) return;
+    const settings = container.createEl("button", {
+      text: "配置本地服务",
+      attr: { type: "button" },
+    });
+    settings.addEventListener("click", () => this.plugin.openPluginSettings());
+  }
+
   private renderDailyFeeds(parent: HTMLElement): void {
     const reading = this.dashboardSection(
       parent,
@@ -1258,6 +1287,7 @@ export class OkfDashboardView {
       "滚动浏览中国热点、AI 资讯和树洞热榜的本期全部条目；完整内容与判断仍在原生 Digest。",
       "okf-dashboard__reading",
     );
+    const alert = reading.createDiv({ cls: "okf-dashboard__inline-alert is-hidden" });
     const shelf = reading.createDiv({ cls: "okf-feed-shelf okf-feed-shelf--daily" });
     const definitions: readonly {
       id: DashboardFeed;
@@ -1348,21 +1378,25 @@ export class OkfDashboardView {
       .catch((error: unknown) => {
         if (!shelf.isConnected) return;
         const message = error instanceof Error ? error.message : "Feed 摘要暂时无法读取";
+        alert.removeClass("is-hidden");
+        alert.addClass("okf-dashboard__error");
+        alert.setText(`${rendered ? "刷新失败，保留上次内容" : "暂时无法读取"}：${message}`);
+        const retry = alert.createEl("button", {
+          text: "重新读取",
+          cls: "okf-dashboard__secondary-action",
+          attr: { type: "button" },
+        });
+        retry.addEventListener("click", () => {
+          reading.remove();
+          this.renderDailyFeeds(parent);
+        });
+        this.renderServiceSettingsAction(alert, error);
         for (const surface of surfaces) {
           surface.context.empty();
-          surface.context.createDiv({ cls: "okf-dashboard__error", text: `${rendered ? "刷新失败，保留上次内容" : "暂时无法读取"}：${message}` });
           if (!rendered) {
             surface.meta.setText("暂时无法读取");
             surface.body.empty();
           }
-          const retry = surface.context.createEl("button", {
-            text: "重新读取",
-            cls: "okf-dashboard__secondary-action",
-          });
-          retry.addEventListener("click", () => {
-            reading.remove();
-            this.renderDailyFeeds(parent);
-          });
         }
       });
   }
@@ -1438,6 +1472,7 @@ export class OkfDashboardView {
         });
         const retry = surface.context.createEl("button", { text: "重新读取", attr: { type: "button" } });
         retry.addEventListener("click", () => { shelf.remove(); this.renderReadingPapers(parent); });
+        this.renderServiceSettingsAction(surface.context, error);
       });
   }
 
@@ -3159,7 +3194,9 @@ export class OkfDashboardView {
         onSelect: async () => {
           const sources = await this.learningSources(note.path);
           await this.copyPrompt(
-            "读取明确来源，生成第一版辅助学习材料；先让我补充具体要求。",
+            "请读取附带的目标 Study Guide 和明确来源，按资料生成第一版可连续阅读的学习材料，并写入目标笔记。" +
+              "我在本消息中补充的要求一并执行；没有补充要求时直接按资料处理。" +
+              "完成后说明写入路径、实际读取的来源和重要缺口。",
             {
               contextPaths: [...new Set([note.path, ...sources])],
               actionMode: "write",
@@ -3712,7 +3749,9 @@ export class OkfDashboardView {
         title: PROJECT_ACTION_PANEL_LABELS[4],
         description: "读取项目主页和日志，梳理状态、阻塞与下一步",
         onSelect: () => this.copyPrompt(
-          "根据已有项目主页和日志，梳理当前状态、关键点与重要选择、阻塞和下一步。",
+          "请读取附带的项目主页和日志。若我在本消息中提供了新的已发生进展，" +
+            "请按项目记录 Skill 将其写入日志，并仅在当前状态确实变化时更新项目主页；" +
+            "区分已确认事实、决定和建议。若没有提供新进展，先概括现状并询问要记录什么，不要追加重复日志。",
           {
             contextPaths: [project.path, logPath],
             actionMode: "write",
@@ -3911,8 +3950,11 @@ export class OkfDashboardView {
           const sources = await this.learningSources(note.path);
           await this.copyPrompt(
           note.material_ready
-            ? "读取现有辅助学习材料和来源，根据我接下来补充的要求继续完善这篇学习材料。"
-            : "读取目标笔记和明确来源，生成第一版辅助学习材料；先让我补充具体要求。",
+            ? "请完整读取附带的 Study Guide，把我在本消息中补充的结论、纠错、例子或具体修改要求融入相关章节，" +
+              "保留原有人工内容。若本消息没有提供需要融入的内容，先询问我希望完善什么，不要改写笔记。"
+            : "请读取附带的目标 Study Guide 和明确来源，按资料生成第一版可连续阅读的学习材料，并写入目标笔记。" +
+              "我在本消息中补充的要求一并执行；没有补充要求时直接按资料处理。" +
+              "完成后说明写入路径、实际读取的来源和重要缺口。",
           {
             contextPaths: [...new Set([note.path, ...sources])],
             actionMode: "write",
@@ -3926,10 +3968,14 @@ export class OkfDashboardView {
           id: "claudian-read",
           title: "用 Claudian 讨论",
           description: "结合这篇 Study Guide 继续提问和学习",
-          onSelect: () => this.copyPrompt("结合这篇 Study Guide 和相关 Wiki 帮助我继续学习和解答问题。", {
-            contextPaths: [note.path],
-            actionMode: "read",
-          }),
+          onSelect: () => this.copyPrompt(
+            "请先读取附带的 Study Guide，再根据我在本消息中提出的问题，按需读取相关 Wiki 并帮助我理解。" +
+              "区分笔记记载、补充解释和未核实的内容。若我尚未提出具体问题，先问我想讨论哪部分。",
+            {
+              contextPaths: [note.path],
+              actionMode: "read",
+            },
+          ),
         });
       }
       if (canCompleteDashboardStudy(note, operation)) {
@@ -3948,11 +3994,16 @@ export class OkfDashboardView {
           id: "wiki",
           title: "沉淀 Wiki",
           description: "把已完成的学习成果整理为长期知识",
-          onSelect: () => this.copyPrompt("从已经完成的学习成果中生成或更新长期 Wiki，并维护必要的关联。", {
-            contextPaths: [note.path],
-            actionMode: "write",
-            skill: "distill-wiki",
-          }),
+          onSelect: () => this.copyPrompt(
+            "请读取附带的 Study Guide，提炼其中可独立使用的概念、机制或判断；" +
+              "核对相关的既有 Wiki 后，创建或更新合适的笔记，并维护必要的来源与链接。" +
+              "不要把“已标记学完”推断为我认同或掌握了其中每个结论。",
+            {
+              contextPaths: [note.path],
+              actionMode: "write",
+              skill: "distill-wiki",
+            },
+          ),
         });
       }
     }
@@ -4799,6 +4850,72 @@ export class OkfDashboardView {
 
   private async openPath(path: string): Promise<void> {
     await this.plugin.openVaultPath(path);
+  }
+}
+
+/** A real Obsidian pane for a requested page absent from the Apex layout. */
+export class OkfDashboardItemView extends ItemView {
+  private section: Section;
+  private workbenchPath: string | undefined;
+  private surface: OkfDashboardView | undefined;
+
+  public constructor(
+    private readonly hostLeaf: WorkspaceLeaf,
+    private readonly plugin: OkfBrainPlugin,
+  ) {
+    super(hostLeaf);
+    this.section = plugin.getDashboardUiState().activeSection;
+  }
+
+  public getViewType(): string { return OKF_DASHBOARD_VIEW; }
+  public getDisplayText(): string { return `OKF · ${PAGE_COPY[this.section].title}`; }
+  public getIcon(): string { return "brain-circuit"; }
+  public getState(): Record<string, string> {
+    return this.workbenchPath
+      ? { section: this.section, workbenchPath: this.workbenchPath }
+      : { section: this.section };
+  }
+
+  public async setState(state: unknown, _result: ViewStateResult): Promise<void> {
+    const candidate = state && typeof state === "object"
+      ? (state as Record<string, unknown>).section
+      : undefined;
+    if (typeof candidate !== "string" || !Object.hasOwn(PAGE_COPY, candidate)) return;
+    const section = candidate as Section;
+    const workbenchPath = typeof (state as Record<string, unknown>).workbenchPath === "string"
+      ? (state as Record<string, string>).workbenchPath
+      : undefined;
+    if (section === this.section && workbenchPath === this.workbenchPath) return;
+    this.section = section;
+    this.workbenchPath = workbenchPath;
+    if (this.surface) {
+      await this.surface.onClose();
+      this.surface = undefined;
+      await this.mountSurface();
+    }
+  }
+
+  public async onOpen(): Promise<void> {
+    await this.mountSurface();
+  }
+
+  public async onClose(): Promise<void> {
+    const surface = this.surface;
+    this.surface = undefined;
+    await surface?.onClose();
+  }
+
+  private async mountSurface(): Promise<void> {
+    this.contentEl.empty();
+    const container = this.contentEl.createDiv();
+    const surface = new OkfDashboardView(this.hostLeaf, this.plugin, {
+      container,
+      initialSection: this.section,
+      focused: true,
+      workbenchPath: this.workbenchPath,
+    });
+    this.surface = surface;
+    await surface.onOpen();
   }
 }
 

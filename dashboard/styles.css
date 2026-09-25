@@ -2,23 +2,29 @@
 .okf-workbench-surface.okf-dashboard--embedded {
   max-width: none;
   margin: 0;
-  padding: 4px 0 20px;
+  padding: 0 0 12px;
 }
 
-.okf-dashboard--embedded .okf-dashboard__topbar {
-  justify-content: space-between;
+.okf-dashboard--focused {
+  height: 100%;
+  overflow-y: auto;
 }
 
-.okf-dashboard__surface-navigation {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* Apex's 500px section cap is for its small widgets. An OKF section mounts a
+   complete page, so that cap lets the page paint over the following rows. */
+.apex-dashboard-root .dashboard-section-row[data-section-type^="workspace-"] {
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible;
 }
 
-.okf-dashboard__surface-navigation > span {
-  color: var(--text-muted);
-  font-size: var(--font-ui-smaller);
-  font-weight: 700;
+.apex-dashboard-root .dashboard-section-row[data-section-type^="workspace-"] > .dashboard-custom-section {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.apex-dashboard-root .dashboard-section-row[data-section-type^="workspace-"] > .dashboard-section-resize-handle {
+  display: none;
 }
 
 .okf-formal-task-row {

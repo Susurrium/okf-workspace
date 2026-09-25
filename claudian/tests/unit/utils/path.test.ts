@@ -151,10 +151,9 @@ describe('parsePathEntries', () => {
 
   it('splits on platform separator', () => {
     const sep = isWindows ? ';' : ':';
-    const result = parsePathEntries(`/a${sep}/b${sep}/c`);
-    expect(result).toContain('/a');
-    expect(result).toContain('/b');
-    expect(result).toContain('/c');
+    const entries = ['/alpha', '/beta', '/gamma'];
+    const result = parsePathEntries(entries.join(sep));
+    expect(result).toEqual(entries);
   });
 
   it('filters out empty segments', () => {
@@ -237,22 +236,22 @@ describe('normalizePathForFilesystem', () => {
 
   it('normalizes a regular path', () => {
     const result = normalizePathForFilesystem('/usr/local/bin');
-    expect(result).toBe('/usr/local/bin');
+    expect(result).toBe(path.normalize('/usr/local/bin'));
   });
 
   it('normalizes path with redundant separators', () => {
     const result = normalizePathForFilesystem('/usr//local///bin');
-    expect(result).toBe('/usr/local/bin');
+    expect(result).toBe(path.normalize('/usr/local/bin'));
   });
 
   it('normalizes path with . segments', () => {
     const result = normalizePathForFilesystem('/usr/./local/./bin');
-    expect(result).toBe('/usr/local/bin');
+    expect(result).toBe(path.normalize('/usr/local/bin'));
   });
 
   it('normalizes path with .. segments', () => {
     const result = normalizePathForFilesystem('/usr/local/../bin');
-    expect(result).toBe('/usr/bin');
+    expect(result).toBe(path.normalize('/usr/bin'));
   });
 
   it('expands ~ in path', () => {
@@ -452,7 +451,7 @@ describe('findClaudeCLIPath', () => {
 
   it('falls back to npm cli-wrapper.cjs paths when binary not found', () => {
     const cliWrapperPath = path.join(
-      os.homedir(), '.npm-global', 'lib', 'node_modules',
+      os.homedir(), ...(isWindows ? ['AppData', 'Roaming', 'npm'] : ['.npm-global', 'lib']), 'node_modules',
       '@anthropic-ai', 'claude-code', 'cli-wrapper.cjs'
     );
 
@@ -469,7 +468,7 @@ describe('findClaudeCLIPath', () => {
 
   it('keeps legacy npm cli.js fallback when cli-wrapper.cjs is absent', () => {
     const legacyCliPath = path.join(
-      os.homedir(), '.npm-global', 'lib', 'node_modules',
+      os.homedir(), ...(isWindows ? ['AppData', 'Roaming', 'npm'] : ['.npm-global', 'lib']), 'node_modules',
       '@anthropic-ai', 'claude-code', 'cli.js'
     );
 
@@ -485,9 +484,10 @@ describe('findClaudeCLIPath', () => {
   });
 
   it('falls back to PATH environment when common and npm paths fail', () => {
-    const envClaudePath = '/env/specific/bin/claude';
+    const envDir = isWindows ? 'C:\\env\\specific\\bin' : '/env/specific/bin';
+    const envClaudePath = path.join(envDir, isWindows ? 'claude.exe' : 'claude');
     const originalPath = process.env.PATH;
-    process.env.PATH = `/env/specific/bin:${originalPath}`;
+    process.env.PATH = `${envDir}${path.delimiter}${originalPath ?? ''}`;
 
     jest.spyOn(fs, 'existsSync').mockImplementation(
       p => String(p) === envClaudePath

@@ -8,6 +8,8 @@ import {
   resolveCodexWorkspaceDependencies,
 } from '@/providers/codex/runtime/CodexWorkspaceDependencyResolver';
 
+const toUnixTargetPath = (value: string): string => value.replace(/\\/g, '/');
+
 function createRuntimeBundle(home: string): string {
   const runtimeRoot = path.join(
     home,
@@ -104,17 +106,17 @@ describe('CodexWorkspaceDependencyResolver', () => {
     expect(result).toEqual(expect.objectContaining({
       bundleVersion: '26.715.12143',
       artifactToolVersion: '2.8.24',
-      runtimeRoot,
-      nodeExecutable: path.join(runtimeRoot, 'dependencies', 'node', 'bin', 'node'),
-      nodePackages: path.join(runtimeRoot, 'dependencies', 'node', 'node_modules'),
-      pythonExecutable: path.join(runtimeRoot, 'dependencies', 'python', 'bin', 'python3'),
-      pythonPackages: path.join(runtimeRoot, 'dependencies', 'python'),
-      gitExecutable: path.join(runtimeRoot, 'dependencies', 'bin', 'fallback', 'git'),
-      pnpmExecutable: path.join(runtimeRoot, 'dependencies', 'bin', 'fallback', 'pnpm'),
+      runtimeRoot: toUnixTargetPath(runtimeRoot),
+      nodeExecutable: toUnixTargetPath(path.join(runtimeRoot, 'dependencies', 'node', 'bin', 'node')),
+      nodePackages: toUnixTargetPath(path.join(runtimeRoot, 'dependencies', 'node', 'node_modules')),
+      pythonExecutable: toUnixTargetPath(path.join(runtimeRoot, 'dependencies', 'python', 'bin', 'python3')),
+      pythonPackages: toUnixTargetPath(path.join(runtimeRoot, 'dependencies', 'python')),
+      gitExecutable: toUnixTargetPath(path.join(runtimeRoot, 'dependencies', 'bin', 'fallback', 'git')),
+      pnpmExecutable: toUnixTargetPath(path.join(runtimeRoot, 'dependencies', 'bin', 'fallback', 'pnpm')),
     }));
 
     expect(formatCodexWorkspaceDependencies(result!)).toContain(
-      `- Node.js packages: \`${path.join(runtimeRoot, 'dependencies', 'node', 'node_modules')}\``,
+      `- Node.js packages: \`${toUnixTargetPath(path.join(runtimeRoot, 'dependencies', 'node', 'node_modules'))}\``,
     );
   });
 
@@ -133,7 +135,7 @@ describe('CodexWorkspaceDependencyResolver', () => {
       },
     ));
 
-    expect(result?.runtimeRoot).toBe(explicitRuntimeRoot);
+    expect(result?.runtimeRoot).toBe(toUnixTargetPath(explicitRuntimeRoot));
   });
 
   it('does not expose a partial bundle without artifact-tool', async () => {

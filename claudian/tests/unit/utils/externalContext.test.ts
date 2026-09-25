@@ -152,9 +152,9 @@ describe('externalContext utilities', () => {
       });
 
       it('should return first conflict when multiple exist', () => {
-        const result = findConflictingPath('/a/b', ['/a', '/a/b/c']);
-        // Should return /a as it appears first and is a parent
-        expect(result).toEqual({ path: '/a', type: 'parent' });
+        const result = findConflictingPath('/parent/child', ['/parent', '/parent/child/grandchild']);
+        // Should return the first matching parent.
+        expect(result).toEqual({ path: '/parent', type: 'parent' });
       });
     });
   });

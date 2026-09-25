@@ -1,17 +1,16 @@
 ---
 name: retrieve-vault-context
-description: Find and read the minimum real Workspace Vault notes needed to answer a question or continue a Course, Project, or knowledge task. Use when the answer depends on existing notes and the relevant file is not already unambiguous. Do not use for ordinary chat, a fully specified single-file edit, or whole-Vault loading.
+description: 在答案依赖既有 Workspace 笔记且目标不唯一时，定位并读取足够的真实 Markdown 证据。用于继续课程、项目或知识任务及个人化问答；已明确且足够的单篇笔记直接读取。
 ---
 
-# Retrieve Vault Context
+# 检索 Vault 上下文
 
-Return a small set of actual Markdown evidence, not search snippets or index metadata.
+用最小充分的真实笔记回答当前问题。检索结果负责找文件，不能代替正文；也不因“可能有用”而加载整个 Vault。
 
-1. Start with files explicitly named by the user, attached by the UI, or already established as the active course/project/note. If one file is clearly sufficient, read it directly and stop.
-2. Otherwise run `okf context "<question and useful alternate terms>" --scope auto --json`. Choose a narrower scope when the task is clearly learning, projects, knowledge, life, or self.
-3. Treat retrieval results only as candidate paths. Open and read the Markdown files that support the answer. Never treat a title, embedding match, cache row, Dashboard preview, or root `index.md` as the note contents.
-4. Use `type`, `title`, `description`, `aliases`, `tags`, `course`, `project`, and source links only to rank or expand candidates. `status` describes document maturity; `studied_at` is only a user-confirmed completion time. Neither field proves correctness or relevance.
-5. Expand through links or a second retrieval only when the first evidence set leaves a concrete gap. Do not scan the entire Vault for reassurance.
-6. For technical tasks, do not read `life/` or `self/` unless the request actually depends on personal context. For personal questions, use only the relevant self or life notes rather than loading the whole profile.
+1. 先检查用户指定、UI 附加或当前课程/项目已确定的文件。一篇已明确的笔记若足够，直接读取并停止；路径、标题或预览不能代替正文。
+2. 需要查找时运行 `okf context "<问题及必要的同义词>" --scope auto --json`。主题明确时可选择 CLI 实际支持的 `technical`、`learning`、`projects` 或 `life`；`all` 只在确有跨域必要时使用。`knowledge` 和 `self` 不是可用的 scope。若 `okf` 命令不可用，改用当前环境可用的文件搜索与读取，不把安装排障变成用户的工作。
+3. 将命中结果视为候选路径，打开最相关的 Markdown，读取支持结论的实际段落及必要上下文。需要知道来源内容时沿 Source 的 `text` 读取 Source Text；需要判断用户立场时优先核对用户亲自写入或确认的内容，不把剪藏、测试笔记或 AI 草稿当作个人偏好。
+4. 用 `type`、标题、描述、别名、标签、课程/项目归属和真实链接缩小候选。`status` 是文档成熟度，`studied_at` 只记录用户确认的完成时间，二者都不证明观点正确或相关。第一批材料留下具体缺口时再沿链接或做第二次检索。
+5. 技术问题不无故读取 `life/` 或 `self/`。个人问题只读取相关个人笔记；`auto` 检索默认排除 `self/`，已知相关路径时应直接读取，不要误以为搜索无命中就不存在。
 
-Do not write while using this Skill. In the answer, name the key Vault-relative paths actually used when local notes materially influenced the result. If evidence is missing or conflicting, say so without inventing a personal fact or prior decision.
+本 Skill 只读取，不写入。回答中区分笔记中的记载、一般知识和待核实推断；本地笔记实质影响答案时列出实际读取的关键 Vault 相对路径。证据缺失或冲突时直接说明，不补造用户事实或既往决定。

@@ -1183,11 +1183,15 @@ describe('Obsidian CLI path integration', () => {
     Object.defineProperty(process, 'execPath', { value: originalExecPath });
     Object.keys(process.env).forEach(key => delete process.env[key]);
     Object.assign(process.env, originalEnv);
+    jest.dontMock('path');
     jest.resetModules();
   });
 
   function loadWithPlatform(platform: NodeJS.Platform, execPath: string): typeof env {
     jest.resetModules();
+    jest.doMock('path', () => platform === 'win32'
+      ? jest.requireActual<typeof pathType>('path').win32
+      : jest.requireActual<typeof pathType>('path').posix);
     Object.defineProperty(process, 'platform', { value: platform, writable: true });
     Object.defineProperty(process, 'execPath', { value: execPath, configurable: true });
     // Dynamic require needed to re-evaluate module with mocked platform/execPath

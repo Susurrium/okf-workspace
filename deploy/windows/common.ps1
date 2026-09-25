@@ -467,7 +467,7 @@ function Install-OkfDashboardPluginAtomic {
         -Artifacts ([ordered]@{
             'main.js' = Join-Path $sourcePath 'dist\main.js'
             'manifest.json' = Join-Path $sourcePath 'manifest.json'
-            'styles.css' = Join-Path $sourcePath 'styles.css'
+            'styles.css' = Join-Path $sourcePath 'dist\styles.css'
         }) `
         -Target $Target `
         -ExpectedId 'okf-workspace-dashboard'

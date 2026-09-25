@@ -1345,3 +1345,25 @@ def test_document_import_endpoint_accepts_upload_and_returns_vault_relative_resu
     source = read_document(vault / payload["source"])
     assert source.frontmatter["title"] == "API 导入文档"
     assert source.frontmatter["resource"].endswith("/manual.pdf")
+
+
+def test_document_import_rejects_oversized_upload_and_removes_spool(
+    vault: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("okf_workspace.api.app.MAX_DOCUMENT_UPLOAD_BYTES", 10)
+    paths = BrainPaths(vault=vault, originals=tmp_path / "originals", state=tmp_path / "state")
+    token = LocalTokenStore(paths.state).ensure()
+    client = TestClient(create_app(paths))
+
+    response = client.post(
+        "/documents/import",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"intent": "source"},
+        files={"file": ("large.pdf", b"%PDF-123456789", "application/pdf")},
+    )
+
+    assert response.status_code == 413
+    assert not list((paths.state / "uploads").glob("*"))
+    assert not list(paths.originals.rglob("original.pdf"))

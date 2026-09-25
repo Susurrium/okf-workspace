@@ -42,6 +42,10 @@ const SECTION_METADATA: Readonly<Record<DashboardSection, {
   system: { icon: "settings-2", label: "系统（OKF）", defaultName: "系统" },
 };
 
+export function okfSectionDefaultName(section: DashboardSection): string {
+  return SECTION_METADATA[section].defaultName;
+}
+
 export interface OkfSurfaceSectionHost {
   mountOkfDashboardSurface(container: HTMLElement, section: DashboardSection): Promise<() => void>;
 }

@@ -15,6 +15,7 @@ from okf_workspace.notes.web_captures import (
     canonical_web_url,
     web_source_write_lock,
 )
+from okf_workspace.okf.file_io import atomic_write_bytes, document_lock
 from okf_workspace.okf.frontmatter import OkfDocument
 from okf_workspace.okf.paths import slugify
 from okf_workspace.sources import SourcePublisher
@@ -123,6 +124,13 @@ class FeedDecisionStore:
     def path_for(self, item: FeedItem) -> Path:
         return self.root / item.feed.value / f"{_identity(item)}.json"
 
+    @staticmethod
+    def _write(path: Path, payload: dict[str, object]) -> None:
+        atomic_write_bytes(
+            path,
+            (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+        )
+
     def save(
         self,
         item: FeedItem,
@@ -141,11 +149,8 @@ class FeedDecisionStore:
             "decided_at": _now(),
             "outputs": asdict(result),
         }
-        target.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-            newline="\n",
-        )
+        with document_lock(target):
+            self._write(target, payload)
         return target
 
     def load(self, item: FeedItem) -> dict[str, object] | None:
@@ -156,15 +161,13 @@ class FeedDecisionStore:
         return cast(dict[str, object], loaded) if isinstance(loaded, dict) else None
 
     def attach_semantic_operation(self, item: FeedItem, operation_id: str) -> None:
-        payload = self.load(item)
-        if payload is None:
-            raise FileNotFoundError(self.path_for(item))
-        payload["semantic_operation_id"] = operation_id
-        self.path_for(item).write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-            newline="\n",
-        )
+        target = self.path_for(item)
+        with document_lock(target):
+            payload = self.load(item)
+            if payload is None:
+                raise FileNotFoundError(target)
+            payload["semantic_operation_id"] = operation_id
+            self._write(target, payload)
 
 
 class FeedDecisionService:

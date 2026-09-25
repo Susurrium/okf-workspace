@@ -52,20 +52,24 @@ class OfficeComConverter:
         environment = os.environ.copy()
         environment["OKF_OFFICE_COM_SOURCE"] = str(source.resolve())
         environment["OKF_OFFICE_COM_TARGET"] = str(destination.resolve())
-        result = subprocess.run(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                script,
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env=environment,
-        )
+        try:
+            result = subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-Command",
+                    script,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=environment,
+                timeout=180,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"{extension.upper().lstrip('.')} conversion timed out") from exc
         if result.returncode != 0 or not destination.is_file():
             detail = result.stderr.strip() or result.stdout.strip() or "unknown Word COM error"
             target_kind = "DOCX" if extension == ".doc" else "PPTX"

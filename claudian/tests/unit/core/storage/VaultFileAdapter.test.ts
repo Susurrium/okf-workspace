@@ -614,14 +614,14 @@ describe('VaultFileAdapter', () => {
         if (relative !== '.agents') {
           await fs.mkdir(path.join(vaultPath, '.agents/skills/portable-skill'), { recursive: true });
         }
-        const target = type === 'folder'
+        const target = type === 'folder' || process.platform === 'win32'
           ? externalPath
           : path.join(externalPath, 'SKILL.md');
-        if (type === 'file') await fs.writeFile(target, 'external');
+        if (type === 'file' && process.platform !== 'win32') await fs.writeFile(target, 'external');
         if (type === 'folder' && relative !== '.agents') {
           await fs.rm(path.join(vaultPath, relative), { recursive: true });
         }
-        await fs.symlink(target, path.join(vaultPath, relative));
+        await fs.symlink(target, path.join(vaultPath, relative), process.platform === 'win32' ? 'junction' : type === 'folder' ? 'dir' : 'file');
         const desktopApp = {
           vault: { adapter: { getBasePath: () => vaultPath } },
         } as unknown as App;

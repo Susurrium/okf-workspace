@@ -2,6 +2,7 @@ import { ItemView, TFile, WorkspaceLeaf, type App } from "obsidian";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  OkfDashboardItemView,
   OkfDashboardView,
   OKF_DASHBOARD_VIEW,
   PROJECT_ACTION_PANEL_LABELS,
@@ -208,6 +209,65 @@ describe("real Dashboard View source handoff", () => {
     expect(view.contentEl).toBe(container);
   });
 
+  it("keeps an Apex card on its own page without a second switcher or title", async () => {
+    const navigateToOkfSection = vi.fn(async () => undefined);
+    const app = {} as App;
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)(app);
+    const container = new TestElement();
+    const view = new OkfDashboardView(leaf, {
+      app,
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      updateDashboardPageUiState: vi.fn(),
+      updateDashboardFeedUiState: vi.fn(),
+      navigateToOkfSection,
+    } as never, {
+      container: container as unknown as HTMLElement,
+      initialSection: "system",
+      embedded: true,
+    });
+    vi.spyOn(view as never, "renderSystem").mockResolvedValue(undefined);
+
+    await view.onOpen();
+
+    expect(container.descendants("okf-dashboard__topbar")).toHaveLength(0);
+    expect(container.descendants("okf-dashboard__page-header")).toHaveLength(0);
+    expect(container.descendants("okf-dashboard__surface-navigation")).toHaveLength(0);
+    (view as unknown as { openSection: (section: string) => void }).openSection("learning");
+    expect(navigateToOkfSection).toHaveBeenCalledWith("learning", container, undefined);
+    expect(container.descendants("okf-dashboard__page-header")).toHaveLength(0);
+    await view.onClose();
+  });
+
+  it("offers to add a missing focused page to the originating workbench", async () => {
+    const addOkfSectionToActiveWorkbench = vi.fn(async () => undefined);
+    const app = {} as App;
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)(app);
+    const container = new TestElement();
+    const view = new OkfDashboardView(leaf, {
+      app,
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      updateDashboardPageUiState: vi.fn(),
+      updateDashboardFeedUiState: vi.fn(),
+      semanticOperationsSnapshot: () => [],
+      conversionSnapshot: () => [],
+      hasOkfSectionInActiveWorkbench: () => false,
+      addOkfSectionToActiveWorkbench,
+    } as never, {
+      container: container as unknown as HTMLElement,
+      initialSection: "system",
+      focused: true,
+      workbenchPath: "workbenches/daily",
+    });
+    vi.spyOn(view as never, "renderSystem").mockResolvedValue(undefined);
+
+    await view.onOpen();
+    expect(container.descendants().some((item) => item.textContent === "返回工作台")).toBe(true);
+    expect(container.descendants("okf-dashboard__nav")).toHaveLength(0);
+    container.descendants().find((item) => item.textContent === "添加到当前工作台")!.click();
+    expect(addOkfSectionToActiveWorkbench).toHaveBeenCalledWith("system", "workbenches/daily");
+    await view.onClose();
+  });
+
   it("constructs the registered runtime View rather than a legacy page model", () => {
     const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
     const view = new OkfDashboardView(leaf, {
@@ -216,6 +276,19 @@ describe("real Dashboard View source handoff", () => {
 
     expect(view.getViewType()).toBe(OKF_DASHBOARD_VIEW);
     expect(view.getDisplayText()).toBe("Dashboard");
+  });
+
+  it("keeps the focused pane title and saved state aligned with its page", async () => {
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const pane = new OkfDashboardItemView(leaf, {
+      getDashboardUiState: () => normalizeDashboardUiState(undefined),
+    } as never);
+
+    await pane.setState({ section: "knowledge", workbenchPath: "workbenches/daily" }, {} as never);
+
+    expect(pane.getViewType()).toBe(OKF_DASHBOARD_VIEW);
+    expect(pane.getDisplayText()).toBe("OKF · Knowledge");
+    expect(pane.getState()).toEqual({ section: "knowledge", workbenchPath: "workbenches/daily" });
   });
 
   it("renders a newly confirmed source as a waiting card without requesting missing items", () => {
@@ -2248,17 +2321,21 @@ describe("real Dashboard View source handoff", () => {
 
   it("keeps cached Daily and Papers items visible while making a refresh failure actionable", async () => {
     const digest = { ai_daily: [feedEdition("news", "news", "2026-09-08")], ai_papers: feedEdition("papers", "papers", "2026-09-08"), treehole: null };
-    const load = vi.fn(async () => { throw new Error("service offline"); });
+    const load = vi.fn(async () => { throw new Error("工作区本地服务缺少 Python 或部署配置路径"); });
+    const openPluginSettings = vi.fn();
     const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
     const view = new OkfDashboardView(leaf, { getDashboardUiState: () => normalizeDashboardUiState(undefined),
       feedDashboardDigestSnapshot: () => digest, loadFeedDashboardDigest: load,
       feedDecisionSnapshot: () => undefined, feedReadingPosition: () => undefined,
-      updateDashboardFeedUiState: () => undefined } as never);
+      updateDashboardFeedUiState: () => undefined, openPluginSettings } as never);
     const runtime = view as unknown as { renderDailyFeeds: (el: HTMLElement) => void; renderReadingPapers: (el: HTMLElement) => void };
     const root = new TestElement(); runtime.renderDailyFeeds(root as unknown as HTMLElement); runtime.renderReadingPapers(root as unknown as HTMLElement);
-    await vi.waitFor(() => expect(root.descendants("okf-dashboard__error")).toHaveLength(4));
+    await vi.waitFor(() => expect(root.descendants("okf-dashboard__error")).toHaveLength(2));
     expect(root.descendants("okf-feed-digest__item")).toHaveLength(2);
     expect(root.descendants("okf-dashboard__error").every((entry) => entry.textContent.includes("保留上次内容"))).toBe(true);
+    expect(root.descendants().filter((entry) => entry.textContent === "配置本地服务")).toHaveLength(2);
+    root.descendants().find((entry) => entry.textContent === "配置本地服务")!.click();
+    expect(openPluginSettings).toHaveBeenCalledTimes(1);
     root.descendants().find((entry) => entry.textContent === "重新读取")!.click();
     await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(3));
   });

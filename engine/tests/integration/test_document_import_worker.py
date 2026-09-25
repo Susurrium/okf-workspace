@@ -85,6 +85,30 @@ def test_required_mineru_waits_after_a_transient_failure(tmp_path: Path) -> None
     assert waiting["next_retry_at"]
 
 
+def test_legacy_office_normalization_failure_stops_worker_retry_loop(tmp_path: Path) -> None:
+    class BrokenOfficeConverter:
+        def convert(self, source: Path, destination: Path) -> Path:
+            del source, destination
+            raise RuntimeError("Office COM unavailable")
+
+    source = tmp_path / "legacy.doc"
+    source.write_bytes(b"legacy document")
+    importer = DocumentImporter(
+        vault=initialize_vault(tmp_path / "vault"),
+        originals=tmp_path / "originals",
+        state=tmp_path / "state",
+        doc_converter=BrokenOfficeConverter(),
+    )
+    queued = importer.enqueue(ImportRequest(source=source, intent=ImportIntent.SOURCE))
+    worker = DocumentImportWorker(importer)
+
+    assert worker.run_once() is True
+    record = importer.store.load(str(queued["conversion_id"]))
+    assert record["status"] == ConversionStatus.FAILED.value
+    assert record["error"] == "Office COM unavailable"
+    assert worker.run_once() is False
+
+
 def test_switching_parser_retries_the_same_job_without_leaving_old_queue(
     tmp_path: Path,
 ) -> None:

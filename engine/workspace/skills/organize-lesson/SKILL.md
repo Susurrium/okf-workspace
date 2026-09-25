@@ -1,16 +1,17 @@
 ---
 name: organize-lesson
-description: Organize one existing Workspace Lesson while preserving the student's raw classroom notes. Use when the user asks to整理、总结或结构化当前课堂笔记. Do not create a separate Study Guide unless separately requested.
+description: 整理一篇已有的 Workspace Lesson，在保留学生原始课堂记录的同时，写出有助于理解课程内容的讲解。用于整理、总结或结构化课堂笔记；另建 Study Guide 时使用 prepare-study-guide。
 ---
 
-# Organize Lesson
+# 整理课堂笔记
 
-Improve the current Lesson without replacing the student's original record.
+把一节课中零散的记录整理成能继续阅读和复习的 Lesson。以课堂实际内容为中心，不为了填满模板而生成目标、术语表、重点清单或课后建议。
 
-1. Identify and read exactly one Lesson, then read `system/contracts/base.yaml` and `system/contracts/lesson.yaml`. These YAML Contracts are the only format authority.
-2. Preserve the complete `human:notes` region, questions, tasks, unknown frontmatter, and unrelated user sections.
-3. Write a structured account of the class only inside `organized-lesson`: topic flow, central explanations, examples, unresolved points, and useful follow-up. Distinguish the student's wording from AI clarification in the prose when that distinction matters; do not add authorship taxonomy to YAML.
-4. Add a formal task outside the managed region only when the user explicitly committed to it; deduplicate existing tasks.
-5. Do not create a Study Guide, Wiki, Course, or Project unless separately requested.
+1. 确定并完整读取一篇 Lesson，辨认 `human:notes`、已有 `organized-lesson`、问题、任务及明确关联的资料。目标不唯一时先用课程和日期定位；仍无法判断再询问。
+2. 以学生原始记录为主要依据。仅在解释关键概念、核对公式或处理记录中的空缺与矛盾时读取相关课件、Source Text 或原件的必要部分。原始记录中的疑问不能直接当作教师结论；资料不够时指出待确认处。
+3. 梳理本节课的实质内容、概念之间的关系、教师明确提出的要求，以及能够说明机制的例子或证据。按理解上的依赖关系写成连贯讲解；必要推导和重要条件不能只留下标题或结论。连续内容用段落讲清，不默认拆成大量表格和条目。
+4. 区分课堂可确认的内容、为帮助理解添加的解释和仍未解决的问题。不要推断考试重点、用户已经理解或赞同的程度；重要图像、曲线或数据无法从转换文字恢复时，说明具体缺口，不猜测补全。
 
-Report the updated Lesson path. If the user also wants auxiliary learning material, finish this task first and use `prepare-study-guide` as a separate operation.
+结构性修改前读取 `system/contracts/base.yaml` 和 `system/contracts/lesson.yaml`。整理正文只写 `organized-lesson`，完整保留 `human:notes`、人工问题、未知 frontmatter 和无关章节。只有从用户明确承诺中提取正式任务时，才在原有课后任务区按 Vault 任务格式去重添加；普通建议仍留在讲解中。若用户同时要求独立的学习材料，再按 `prepare-study-guide` 另行处理。
+
+完成前检查课堂主线是否读得通、关键机制和例子是否得到解释、原记录是否完整，以及不确定处是否被误写成事实。报告更新的 Lesson 路径、实际核查的资料和重要未解缺口。

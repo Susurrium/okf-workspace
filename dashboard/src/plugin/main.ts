@@ -1,4 +1,4 @@
-import { Notice, Plugin, TFile } from "obsidian";
+import { Notice, Plugin, TFile, type WorkspaceLeaf } from "obsidian";
 import { readFileSync } from "node:fs";
 
 import { LocalApi } from "../api/client.js";
@@ -65,7 +65,11 @@ import {
   generateWorkbenchPresetMarkdown,
   WORKBENCH_PRESETS,
 } from "../features/workbench-presets.js";
-import { createOkfSurfaceSectionDefinitions } from "../features/workbench/okf-surface-sections.js";
+import {
+  createOkfSurfaceSectionDefinitions,
+  OKF_SECTION_TYPES,
+  okfSectionDefaultName,
+} from "../features/workbench/okf-surface-sections.js";
 import {
   DASHBOARD_COMMAND_ID,
   registerDashboardRibbon,
@@ -115,7 +119,12 @@ import {
   type DashboardUiStatePatch,
   type RecentDashboardFile,
 } from "./dashboard-ui-state.js";
-import { OkfDashboardView, type DashboardSection as EmbeddedDashboardSection } from "./dashboard-view.js";
+import {
+  OkfDashboardItemView,
+  OkfDashboardView,
+  OKF_DASHBOARD_VIEW,
+  type DashboardSection as EmbeddedDashboardSection,
+} from "./dashboard-view.js";
 
 export default class OkfBrainPlugin extends Plugin {
   public settings: OkfBrainSettings = DEFAULT_SETTINGS;
@@ -196,6 +205,7 @@ export default class OkfBrainPlugin extends Plugin {
       ...createOkfSurfaceSectionDefinitions(this).map(registerSectionDefinition),
     );
     this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new DashboardView(leaf, this.apexHost!));
+    this.registerView(OKF_DASHBOARD_VIEW, (leaf) => new OkfDashboardItemView(leaf, this));
     registerDashboardRibbon(this, () => void this.openDashboard());
     this.dashboardUiStateStore = new DashboardUiStateStore(
       this.settings.dashboardUiState,
@@ -246,6 +256,7 @@ export default class OkfBrainPlugin extends Plugin {
     if (this.dashboardRefreshTimer !== undefined) window.clearTimeout(this.dashboardRefreshTimer);
     this.watchedConversionIds.clear();
     this.app.workspace.detachLeavesOfType(DASHBOARD_VIEW_TYPE);
+    this.app.workspace.detachLeavesOfType(OKF_DASHBOARD_VIEW);
     for (const surface of [...this.embeddedDashboardSurfaces]) void surface.onClose();
     this.embeddedDashboardSurfaces.clear();
     for (const unregister of this.unregisterApexSections.splice(0)) unregister();
@@ -823,8 +834,9 @@ export default class OkfBrainPlugin extends Plugin {
           .map((value) => value.trim())
           .filter(Boolean);
         await this.openCodexPrompt(
-          `目标标题：${values.title ?? "Wiki 草稿"}\n` +
-            `补充要求：${values.instruction ?? "无"}`,
+          `请读取附带的来源，围绕“${values.title ?? "Wiki 草稿"}”沉淀一篇可长期复用的 Wiki。` +
+            "先核对相关的既有 Wiki，选择创建或更新，保留来源依据与尚未解决的不确定性。" +
+            `\n\n补充要求：${values.instruction || "无"}`,
           {
             contextPaths: paths,
             actionMode: "write",
@@ -856,8 +868,9 @@ export default class OkfBrainPlugin extends Plugin {
       "只修改这一节",
       async (values) => {
         await this.openCodexPrompt(
-          `请读取并只修改 ${active.path} 的“${values.heading ?? ""}”章节。` +
-            `保留其它内容和未知 frontmatter。要求：${values.instruction ?? ""}`,
+          `请读取 ${active.path}，定位标题为“${values.heading ?? ""}”的章节，` +
+            "只按以下要求修改该章节正文，保留标题、其他章节、未知 frontmatter 和已有链接。" +
+            `若有多个同名章节，先询问目标位置。\n\n修改要求：${values.instruction ?? ""}`,
           { contextPaths: [active.path], actionMode: "write" },
         );
       },
@@ -1108,6 +1121,77 @@ export default class OkfBrainPlugin extends Plugin {
     this.app.workspace.revealLeaf(leaf);
   }
 
+  private activeApexView(origin?: HTMLElement, workbenchPath?: string): { leaf: WorkspaceLeaf; view: DashboardView } | undefined {
+    const leaves = this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE);
+    const leaf = (origin
+      ? leaves.find((candidate) => candidate.view instanceof DashboardView && candidate.view.containerEl.contains(origin))
+      : undefined)
+      ?? (workbenchPath
+        ? leaves.find((candidate) => candidate.view instanceof DashboardView && candidate.view.currentWorkspacePath() === workbenchPath)
+        : undefined)
+      ?? leaves.find((candidate) => candidate.view === this.app.workspace.getActiveViewOfType(DashboardView))
+      ?? leaves[0];
+    return leaf?.view instanceof DashboardView ? { leaf, view: leaf.view } : undefined;
+  }
+
+  public async returnToOkfWorkbench(workbenchPath?: string): Promise<void> {
+    let target = this.activeApexView(undefined, workbenchPath);
+    if (!target) {
+      await this.openDashboard();
+      target = this.activeApexView();
+    }
+    if (!target) return;
+    if (workbenchPath && target.view.currentWorkspacePath() !== workbenchPath &&
+      this.settings.apex.workspaceFiles.includes(workbenchPath)) {
+      await target.view.switchWorkspace(workbenchPath);
+    }
+    await this.app.workspace.revealLeaf(target.leaf);
+  }
+
+  public hasOkfSectionInActiveWorkbench(section: EmbeddedDashboardSection, workbenchPath?: string): boolean {
+    const target = this.activeApexView(undefined, workbenchPath);
+    return !!target && (!workbenchPath || target.view.currentWorkspacePath() === workbenchPath) &&
+      target.view.hasSectionType(OKF_SECTION_TYPES[section]);
+  }
+
+  public async navigateToOkfSection(section: EmbeddedDashboardSection, origin?: HTMLElement, workbenchPath?: string): Promise<void> {
+    const target = this.activeApexView(origin, workbenchPath);
+    if (target && (!workbenchPath || target.view.currentWorkspacePath() === workbenchPath) &&
+      target.view.hasSectionType(OKF_SECTION_TYPES[section])) {
+      await this.app.workspace.revealLeaf(target.leaf);
+      target.view.refreshSectionType(OKF_SECTION_TYPES[section]);
+      if (target.view.revealSectionType(OKF_SECTION_TYPES[section])) return;
+    }
+    this.updateDashboardUiState({ activeSection: section });
+    const existing = this.app.workspace.getLeavesOfType(OKF_DASHBOARD_VIEW)[0];
+    const leaf = existing ?? this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({
+      type: OKF_DASHBOARD_VIEW,
+      state: { section, workbenchPath: target?.view.currentWorkspacePath() ?? workbenchPath },
+      active: true,
+    });
+    await this.app.workspace.revealLeaf(leaf);
+  }
+
+  public async addOkfSectionToActiveWorkbench(section: EmbeddedDashboardSection, workbenchPath?: string): Promise<void> {
+    if (workbenchPath && !this.settings.apex.workspaceFiles.includes(workbenchPath)) {
+      new Notice("原工作台已不存在，请返回工作台后再添加卡片。");
+      return;
+    }
+    if (!this.activeApexView()) await this.openDashboard();
+    const target = this.activeApexView(undefined, workbenchPath);
+    if (!target) {
+      new Notice("无法打开当前工作台，请重试。");
+      return;
+    }
+    if (workbenchPath && target.view.currentWorkspacePath() !== workbenchPath &&
+      this.settings.apex.workspaceFiles.includes(workbenchPath)) {
+      await target.view.switchWorkspace(workbenchPath);
+    }
+    await target.view.addSectionType(OKF_SECTION_TYPES[section], okfSectionDefaultName(section));
+    await this.app.workspace.revealLeaf(target.leaf);
+  }
+
   public async openFeedDigest(feed: FeedKind, digestId: string): Promise<void> {
     await this.ensureLocalServiceAvailable();
     const opened = await new HttpFeedApi(
@@ -1131,7 +1215,11 @@ export default class OkfBrainPlugin extends Plugin {
           this.feedDigestCache = { value, loadedAt: Date.now() };
         }
         return value;
-      } catch {
+      } catch (error) {
+        // A rejected HTTP response (for example an expired token) is an API
+        // error. Starting another service cannot repair it and hides the
+        // useful response behind a misleading launch-configuration error.
+        if (!(error instanceof FeedTransportError)) throw error;
         await this.ensureLocalServiceAvailable();
         const value = await api.dashboardDigest();
         if (revision === this.feedProjectionRevision) {
@@ -1556,6 +1644,11 @@ export default class OkfBrainPlugin extends Plugin {
       id: DASHBOARD_COMMAND_ID,
       name: "打开 Dashboard",
       callback: () => void this.openDashboard(),
+    });
+    this.addCommand({
+      id: "open-system",
+      name: "打开 System",
+      callback: () => void this.navigateToOkfSection("system"),
     });
     this.addCommand({
       id: "open-today-daily",

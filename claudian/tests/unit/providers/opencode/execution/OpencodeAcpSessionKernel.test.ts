@@ -40,7 +40,7 @@ function permissionRequest(
 describe('OpencodeAcpSessionKernel read policy', () => {
   it('bounds read-only callbacks to the active workspace', () => {
     expect(resolveOpencodeReadPath('/vault', 'notes/file.md')).toBe(
-      '/vault/notes/file.md',
+      path.resolve('/vault', 'notes/file.md'),
     );
     expect(() => resolveOpencodeReadPath('/vault', '../secret')).toThrow(
       'OpenCode read access is limited to the current workspace',
@@ -58,12 +58,14 @@ describe('OpencodeAcpSessionKernel read policy', () => {
     mkdirSync(outsideRoot);
     const outsideFile = path.join(outsideRoot, 'secret.md');
     writeFileSync(outsideFile, 'secret', 'utf8');
-    symlinkSync(outsideFile, path.join(workspaceRoot, 'linked-secret.md'));
+    const linkedPath = process.platform === 'win32' ? path.join(workspaceRoot, 'linked-outside') : path.join(workspaceRoot, 'linked-secret.md');
+    symlinkSync(process.platform === 'win32' ? outsideRoot : outsideFile, linkedPath,
+      process.platform === 'win32' ? 'junction' : 'file');
 
     try {
       expect(() => resolveOpencodeReadPath(
         workspaceRoot,
-        'linked-secret.md',
+        process.platform === 'win32' ? 'linked-outside/secret.md' : 'linked-secret.md',
       )).toThrow('OpenCode read access is limited to the current workspace');
     } finally {
       rmSync(testRoot, { force: true, recursive: true });
@@ -75,12 +77,14 @@ describe('OpencodeAcpSessionKernel read policy', () => {
     const workspaceRoot = path.join(testRoot, 'vault');
     const outsideTarget = path.join(testRoot, 'outside', 'missing.md');
     mkdirSync(workspaceRoot);
-    symlinkSync(outsideTarget, path.join(workspaceRoot, 'linked-missing.md'));
+    const linkedPath = process.platform === 'win32' ? path.join(workspaceRoot, 'linked-missing-dir') : path.join(workspaceRoot, 'linked-missing.md');
+    symlinkSync(process.platform === 'win32' ? path.dirname(outsideTarget) : outsideTarget,
+      linkedPath, process.platform === 'win32' ? 'junction' : 'file');
 
     try {
       expect(() => resolveOpencodeReadPath(
         workspaceRoot,
-        'linked-missing.md',
+        process.platform === 'win32' ? 'linked-missing-dir/missing.md' : 'linked-missing.md',
       )).toThrow('OpenCode read access is limited to the current workspace');
     } finally {
       rmSync(testRoot, { force: true, recursive: true });
@@ -94,7 +98,8 @@ describe('OpencodeAcpSessionKernel read policy', () => {
     mkdirSync(notesRoot, { recursive: true });
     const notePath = path.join(notesRoot, 'note.md');
     writeFileSync(notePath, 'note', 'utf8');
-    symlinkSync(notesRoot, path.join(workspaceRoot, 'linked-notes'));
+    symlinkSync(notesRoot, path.join(workspaceRoot, 'linked-notes'),
+      process.platform === 'win32' ? 'junction' : 'dir');
 
     try {
       expect(resolveOpencodeReadPath(

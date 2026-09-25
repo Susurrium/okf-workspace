@@ -402,20 +402,26 @@ describe('GrokSettingsTab', () => {
   });
 
   it('validates an executable CLI file before persisting it', async () => {
-    const plugin = createPlugin();
-    grokSettingsTabRenderer.render(createContainer(), createContext(plugin));
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    try {
+      const plugin = createPlugin();
+      grokSettingsTabRenderer.render(createContainer(), createContext(plugin));
 
-    mockedAccessSync.mockImplementation(() => {
-      throw new Error('not executable');
-    });
-    await findSetting('CLI path').textComponents[0].onChangeCallback?.('/opt/grok');
-    expect(plugin.mutateSettings).not.toHaveBeenCalled();
+      mockedAccessSync.mockImplementation(() => {
+        throw new Error('not executable');
+      });
+      await findSetting('CLI path').textComponents[0].onChangeCallback?.('/opt/grok');
+      expect(plugin.mutateSettings).not.toHaveBeenCalled();
 
-    mockedAccessSync.mockImplementation(() => undefined);
-    await findSetting('CLI path').textComponents[0].onChangeCallback?.('/opt/grok');
-    expect(getGrokProviderSettings(plugin.settings).cliPathsByHost).toEqual({
-      'device:current': '/opt/grok',
-    });
+      mockedAccessSync.mockImplementation(() => undefined);
+      await findSetting('CLI path').textComponents[0].onChangeCallback?.('/opt/grok');
+      expect(getGrokProviderSettings(plugin.settings).cliPathsByHost).toEqual({
+        'device:current': '/opt/grok',
+      });
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    }
   });
 
   it('restores CLI path closure and input state after a pre-commit write failure', async () => {

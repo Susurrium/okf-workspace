@@ -1,17 +1,16 @@
 ---
 name: manage-vault-media
-description: Import, save, rename, move, or embed images and other attachments in the Workspace Vault while preserving Obsidian links. Use when the user explicitly asks to keep media in the Vault or reorganize attachments. Do not trigger merely because an image is visible or needs analysis.
+description: 在用户要求保存、移动、重命名或嵌入附件时，维护 Workspace Vault 中的媒体文件及其 Obsidian 引用。仅分析可见图片或资料时不触发持久化。
 ---
 
-# Manage Vault Media
+# 管理 Vault 附件
 
-Manage durable files and their references; image understanding itself does not require this Skill.
+把用户要保留的附件放到可找到的位置，并确保引用仍能打开。图片理解本身不需要保存；来源中出现远程图片也不自动意味着应下载。
 
-1. Resolve the attachment folder from Obsidian settings or the current OKF media convention. Use a user-specified target when provided.
-2. Create a descriptive, filesystem-safe filename, keep the real extension, and avoid overwriting an existing file.
-3. Save or move the asset, then insert or update the note using the Vault's existing link style. Prefer Obsidian embeds such as `![[path/image.png]]` when the surrounding note uses wiki links.
-4. When moving an existing asset, find and update the affected Markdown references. Do not mass-move a folder without an explicit request.
-5. Keep binary data out of Markdown; never insert base64 payloads.
-6. When a durable note needs provenance for the asset, use an OKF `resource` or `sources[].resource` link as allowed by its Contract; do not invent attachment-status fields.
+1. 确认本次实际要保存或移动哪些文件、哪些笔记需要引用。用户指定目标时遵循指定位置；否则从 Obsidian 设置或当前 OKF 附件习惯确定位置。目标不唯一且会影响既有引用时才询问。
+2. 保存前确认真实格式和来源，使用描述性、文件系统安全的名称，保留正确扩展名；检查同名文件，避免覆盖或制造无意义副本。远程媒体只有在用户要求持久保存或现有授权明确涵盖时才下载。
+3. 更新涉及的笔记时沿用其现有 Markdown 或 Wiki 链接风格；周围使用 Wiki 链接时优先用 `![[路径/文件名]]` 嵌入。只有确实有助于理解正文的图片才嵌入，不为满足格式而重复放图。
+4. 移动或重命名现有附件前定位受影响的 Markdown 引用，完成后检查这些引用仍可解析。批量迁移仅在用户明确要求该范围时执行；链接无法可靠定位时停止受影响的部分并报告，不凭相似文件名猜测替换。
+5. 若持久笔记需要记录附件来源，先读取其 Contract，再使用允许的 `resource` 或 `sources[].resource`；不发明附件状态字段。二进制内容留在文件中，不把 base64 写进 Markdown。
 
-Do not download an external image solely because it appears in a note or chat. Ask for or use explicit authorization to persist external media. Report the asset path and any notes whose links changed.
+交付前核对文件存在、格式和目标路径正确，以及所有实际修改的引用可打开。报告附件路径、引用被修改的笔记及无法解决的链接问题。

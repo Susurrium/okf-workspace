@@ -30,7 +30,7 @@ describe("OKF workbench presets", () => {
       target: "global-search:open",
     });
     expect(workbenchPresetData().quickActions.map((action) => action.name)).toEqual([
-      "全局搜索", "快速创建", "问我的笔记", "导入资料",
+      "全局搜索", "快速创建", "问我的笔记", "导入资料", "系统状态",
     ]);
   });
 

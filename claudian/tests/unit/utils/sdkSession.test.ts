@@ -1,6 +1,7 @@
 import { existsSync } from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as os from 'os';
+import type * as pathType from 'path';
 
 import {
   collectAsyncSubagentResults,
@@ -28,6 +29,7 @@ jest.mock('fs', () => ({
 }));
 jest.mock('fs/promises');
 jest.mock('os');
+jest.mock('path', () => jest.requireActual<typeof pathType>('path').posix);
 
 const mockExistsSync = existsSync as jest.MockedFunction<typeof existsSync>;
 const mockFsPromises = fsPromises as jest.Mocked<typeof fsPromises>;

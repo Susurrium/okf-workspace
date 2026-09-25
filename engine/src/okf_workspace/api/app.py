@@ -37,6 +37,7 @@ from okf_workspace.ai import (
     ExplicitAIWorkflows,
     provider_from_env,
 )
+from okf_workspace.ai.workflows import AIInputTooLarge, AIOutputError
 from okf_workspace.config import BrainPaths
 from okf_workspace.dashboard.catalog import scan_notes
 from okf_workspace.dashboard.feeds import (
@@ -85,6 +86,7 @@ from okf_workspace.notes.captures import (
 )
 from okf_workspace.notes.web_captures import publish_web_capture
 from okf_workspace.notes.web_media import mirror_web_source_images
+from okf_workspace.okf.file_io import FileWriteConflict
 from okf_workspace.okf.frontmatter import read_document, write_document
 from okf_workspace.okf.paths import resolve_bundle_path
 from okf_workspace.projections.navigation import rebuild_root_index
@@ -102,6 +104,8 @@ from okf_workspace.semantic import (
 from okf_workspace.semantic.worker import SemanticWorker, SemanticWorkerProcess
 
 from .auth import LocalTokenStore
+
+MAX_DOCUMENT_UPLOAD_BYTES = 64 * 1024 * 1024
 
 
 class CaptureRequest(BaseModel):
@@ -461,6 +465,24 @@ def create_app(
     @app.exception_handler(FileNotFoundError)
     def missing_resource(_request: Request, _error: FileNotFoundError) -> JSONResponse:
         return JSONResponse(status_code=404, content={"detail": "resource not found"})
+
+    @app.exception_handler(FileExistsError)
+    def existing_resource(_request: Request, _error: FileExistsError) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": "target already exists"})
+
+    @app.exception_handler(FileWriteConflict)
+    def stale_ai_write(_request: Request, _error: FileWriteConflict) -> JSONResponse:
+        return JSONResponse(
+            status_code=409, content={"detail": "target changed during AI generation"}
+        )
+
+    @app.exception_handler(AIInputTooLarge)
+    def ai_input_too_large(_request: Request, error: AIInputTooLarge) -> JSONResponse:
+        return JSONResponse(status_code=413, content={"detail": str(error)})
+
+    @app.exception_handler(AIOutputError)
+    def invalid_ai_output(_request: Request, error: AIOutputError) -> JSONResponse:
+        return JSONResponse(status_code=502, content={"detail": str(error)})
 
     @app.exception_handler(ValueError)
     def invalid_request(_request: Request, error: ValueError) -> JSONResponse:
@@ -828,9 +850,23 @@ def create_app(
     ) -> dict[str, object]:
         filename = Path(file.filename or "upload.bin").name
         upload = configured.state / "uploads" / f"{uuid.uuid4()}-{filename}"
-        upload.parent.mkdir(parents=True, exist_ok=True)
-        upload.write_bytes(await file.read())
         try:
+            if file.size is not None and file.size > MAX_DOCUMENT_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"document upload exceeds {MAX_DOCUMENT_UPLOAD_BYTES} bytes",
+                )
+            upload.parent.mkdir(parents=True, exist_ok=True)
+            total_bytes = 0
+            with upload.open("wb") as target:
+                while chunk := await file.read(1024 * 1024):
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_DOCUMENT_UPLOAD_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"document upload exceeds {MAX_DOCUMENT_UPLOAD_BYTES} bytes",
+                        )
+                    target.write(chunk)
             import_request = ImportRequest(
                 source=upload,
                 intent=ImportIntent(intent),

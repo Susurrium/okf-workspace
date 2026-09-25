@@ -57,6 +57,7 @@ import type { App } from 'obsidian';
 import { dashboardMarkdownPath, planDashboardUpdate, type DashboardUpdateSource } from './render-update';
 import { captureScrollStates, restoreScrollStates } from './scroll-preserve';
 import { normalizeWorkspacePath } from './workspace-registry';
+import { revealSectionType as revealApexSectionType } from './section-navigation';
 
 interface DailyNotesOptions {
 	folder?: string;
@@ -443,6 +444,27 @@ export class DashboardView extends ItemView implements HoverParent {
 
 	currentWorkspacePath(): string {
 		return this.workspacePath;
+	}
+
+	/** Reveal the real Apex section instead of replacing another section's content. */
+	hasSectionType(sectionType: string): boolean {
+		return this.data?.columns.some((column) => column.sectionType === sectionType) ?? false;
+	}
+
+	revealSectionType(sectionType: string): boolean {
+		return revealApexSectionType(this.data, this.containerEl, this.collapsedSections, sectionType);
+	}
+
+	/** Recreate one OKF page so a navigation-specific tab/filter patch is read. */
+	refreshSectionType(sectionType: string): boolean {
+		const column = this.data?.columns.find((item) => item.sectionType === sectionType);
+		return column ? this.refreshSectionInPlace(sectionRef(column)) : false;
+	}
+
+	async addSectionType(sectionType: string, name: string): Promise<void> {
+		if (!this.hasSectionType(sectionType)) await this.addColumnWithType(name, sectionType);
+		await this.refresh();
+		this.revealSectionType(sectionType);
 	}
 
 	async replaceWorkspacePath(oldPath: string, newPath: string): Promise<void> {

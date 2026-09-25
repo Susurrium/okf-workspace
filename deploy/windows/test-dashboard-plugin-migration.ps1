@@ -72,7 +72,8 @@ try {
         (Join-Path $packageRoot 'manifest.json'),
         '{"id":"okf-workspace-dashboard","version":"2"}'
     )
-    [System.IO.File]::WriteAllText((Join-Path $packageRoot 'styles.css'), 'new-styles')
+    [System.IO.File]::WriteAllText((Join-Path $packageRoot 'styles.css'), 'unbundled-styles')
+    [System.IO.File]::WriteAllText((Join-Path $packageRoot 'dist\styles.css'), 'new-styles')
 
     $installVault = Join-Path $testRoot 'install-vault'
     $installPlugins = Join-Path $installVault '.obsidian\plugins'
@@ -85,7 +86,7 @@ try {
     Assert-Test -Condition ((Get-Content -LiteralPath (Join-Path $installTarget 'main.js') -Raw) -ceq 'new-main') `
         -Message 'Dashboard main.js was not upgraded'
     Assert-Test -Condition ((Get-Content -LiteralPath (Join-Path $installTarget 'styles.css') -Raw) -ceq 'new-styles') `
-        -Message 'Dashboard styles.css was not upgraded'
+        -Message 'Dashboard bundled styles.css was not upgraded'
     Assert-Test -Condition ((Get-Content -LiteralPath (Join-Path $installTarget 'data.json') -Raw) -ceq '{"userSetting":true}') `
         -Message 'Atomic Dashboard upgrade did not preserve data.json'
 

@@ -70,6 +70,12 @@ class DocumentImportWorker:
                     error=message[:2000],
                     retry_after_seconds=self.retry_seconds,
                 )
+            elif current.get("status") in _ACTIVE:
+                self.store.transition(
+                    conversion_id,
+                    ConversionStatus.FAILED,
+                    error=message[:2000],
+                )
         return True
 
     def run_forever(self, stop: threading.Event, *, poll_seconds: float = 0.5) -> None:

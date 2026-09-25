@@ -206,7 +206,7 @@ describe('utils.ts', () => {
       process.env[envKey] = '/tmp/claudian-test';
 
       try {
-        expect(normalizePathForFilesystem(`$${envKey}/notes/file.md`)).toBe('/tmp/claudian-test/notes/file.md');
+        expect(normalizePathForFilesystem(`$${envKey}/notes/file.md`)).toBe(path.normalize('/tmp/claudian-test/notes/file.md'));
       } finally {
         if (originalValue === undefined) {
           delete process.env[envKey];
@@ -233,8 +233,8 @@ describe('utils.ts', () => {
 
     it('handles non-existent environment variables', () => {
       // Non-existent env vars should be left as-is
-      expect(normalizePathForFilesystem('$NONEXISTENT/path')).toBe('$NONEXISTENT/path');
-      expect(normalizePathForFilesystem('%NONEXISTENT%/path')).toBe('%NONEXISTENT%/path');
+      expect(normalizePathForFilesystem('$NONEXISTENT/path')).toBe(path.normalize('$NONEXISTENT/path'));
+      expect(normalizePathForFilesystem('%NONEXISTENT%/path')).toBe(path.normalize('%NONEXISTENT%/path'));
     });
 
     it('handles mixed path separators', () => {
@@ -487,9 +487,9 @@ describe('utils.ts', () => {
 
       it('should return first matching Claude CLI path', () => {
         jest.spyOn(os, 'homedir').mockReturnValue('/home/test');
-        mockExistingFile('/home/test/.local/bin/claude');
+        mockExistingFile(path.join('/home/test', '.local', 'bin', 'claude'));
 
-        expect(findClaudeCLIPath()).toBe('/home/test/.local/bin/claude');
+        expect(findClaudeCLIPath()).toBe(path.join('/home/test', '.local', 'bin', 'claude'));
       });
 
       it('should return null when Claude CLI is not found', () => {
@@ -501,24 +501,24 @@ describe('utils.ts', () => {
 
       it('should check cli-wrapper.cjs paths as fallback on Unix', () => {
         jest.spyOn(os, 'homedir').mockReturnValue('/home/test');
-        mockExistingFile('/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs');
+        mockExistingFile(path.join('/usr/local/lib', 'node_modules', '@anthropic-ai', 'claude-code', 'cli-wrapper.cjs'));
 
-        expect(findClaudeCLIPath()).toBe('/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs');
+        expect(findClaudeCLIPath()).toBe(path.join('/usr/local/lib', 'node_modules', '@anthropic-ai', 'claude-code', 'cli-wrapper.cjs'));
       });
 
       it('should resolve Claude CLI from custom PATH', () => {
-        mockExistingFile('/custom/bin/claude');
+        mockExistingFile(path.join('/custom/bin', 'claude'));
 
         const customPath = '/custom/bin:/usr/bin';
-        expect(findClaudeCLIPath(customPath)).toBe('/custom/bin/claude');
+        expect(findClaudeCLIPath(customPath)).toBe(path.join('/custom/bin', 'claude'));
       });
 
       it('should expand home directory in custom PATH', () => {
         jest.spyOn(os, 'homedir').mockReturnValue('/home/test');
-        mockExistingFile('/home/test/bin/claude');
+        mockExistingFile(path.join('/home/test', 'bin', 'claude'));
 
         const customPath = '~/bin:/usr/bin';
-        expect(findClaudeCLIPath(customPath)).toBe('/home/test/bin/claude');
+        expect(findClaudeCLIPath(customPath)).toBe(path.join('/home/test', 'bin', 'claude'));
       });
 
       it('should not return a directory path even if it exists', () => {

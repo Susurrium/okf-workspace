@@ -236,27 +236,27 @@ class DocumentImporter:
             parser=selected_parser,
             stages={"upload": "completed", "conversion": "queued"},
         )
-        prepared = original.stored_path
-        if original.extension == ".doc":
-            prepared = self.doc_converter.convert(
-                original.stored_path,
-                working / "normalized.docx",
-            )
-        elif original.extension == ".ppt":
-            prepared = self.doc_converter.convert(
-                original.stored_path,
-                working / "normalized.pptx",
-            )
-        self.store.update(
-            identifier,
-            status=ConversionStatus.CONVERTING,
-            request=request,
-            original=original,
-            parser=selected_parser,
-            stages={"conversion": "running"},
-        )
         export: ParserExport | None = None
         try:
+            prepared = original.stored_path
+            if original.extension == ".doc":
+                prepared = self.doc_converter.convert(
+                    original.stored_path,
+                    working / "normalized.docx",
+                )
+            elif original.extension == ".ppt":
+                prepared = self.doc_converter.convert(
+                    original.stored_path,
+                    working / "normalized.pptx",
+                )
+            self.store.update(
+                identifier,
+                status=ConversionStatus.CONVERTING,
+                request=request,
+                original=original,
+                parser=selected_parser,
+                stages={"conversion": "running"},
+            )
             try:
                 export = self._convert_recorded(identifier, selected_parser, prepared, working)
             except Exception:
