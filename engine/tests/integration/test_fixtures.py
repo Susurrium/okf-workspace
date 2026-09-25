@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from okf_workspace.deployment import verify_restored_data
 from okf_workspace.fixtures import generate_fixture_vault
 from okf_workspace.okf.frontmatter import read_document
 from okf_workspace.okf.validator import validate_bundle
@@ -11,6 +12,7 @@ def test_fixture_generator_covers_acceptance_states(tmp_path: Path) -> None:
     vault = generate_fixture_vault(tmp_path / "fixture-vault")
 
     assert validate_bundle(vault).valid
+    assert verify_restored_data(vault, tmp_path / "originals").valid
     assert (vault / "knowledge/wiki/nonce-note.md").read_text(encoding="utf-8").find(
         "FIXTURE-NONCE-20260817"
     ) >= 0
