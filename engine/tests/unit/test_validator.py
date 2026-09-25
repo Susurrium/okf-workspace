@@ -125,6 +125,20 @@ def test_runtime_instruction_and_format_files_are_not_concepts(vault: Path) -> N
     assert "system/contracts/wiki.md" not in checked_paths
 
 
+def test_apex_dashboard_layout_and_rollback_markdown_are_not_artifacts(vault: Path) -> None:
+    (vault / "dashboard.md").write_text(
+        "---\ntype: ''\ndashboard: true\n---\n# Workbench\n",
+        encoding="utf-8",
+    )
+    backup = vault / ".dashboard-backup" / "previous-dashboard.md"
+    backup.parent.mkdir(parents=True)
+    backup.write_text("---\ntype: ''\ndashboard: true\n---\n# Previous\n", encoding="utf-8")
+
+    report = validate_bundle(vault)
+
+    assert report.valid, report.issues
+
+
 def test_nested_index_is_not_allowed(vault: Path) -> None:
     index = vault / "knowledge" / "index.md"
     index.parent.mkdir(parents=True, exist_ok=True)

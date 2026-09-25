@@ -72,6 +72,22 @@ def test_migration_replaces_root_navigation_and_removes_nested_indexes(tmp_path:
     assert migrate_current_layout(vault, default_template_root()) == ()
 
 
+def test_migration_preserves_apex_dashboard_layout_and_rollback_files(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    board = vault / "dashboard.md"
+    board_bytes = b"---\ntype: ''\ndashboard: true\n---\n# Workbench\n"
+    board.write_bytes(board_bytes)
+    backup = vault / ".dashboard-backup" / "previous-dashboard.md"
+    backup.parent.mkdir(parents=True)
+    backup_bytes = b"---\ntype: ''\ndashboard: true\n---\n# Previous\n"
+    backup.write_bytes(backup_bytes)
+
+    migrate_current_layout(vault, default_template_root())
+
+    assert board.read_bytes() == board_bytes
+    assert backup.read_bytes() == backup_bytes
+
+
 def test_migration_repairs_missing_standard_directories_without_restoring_content(
     tmp_path: Path,
 ) -> None:
