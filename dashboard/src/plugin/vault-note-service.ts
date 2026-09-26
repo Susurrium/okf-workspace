@@ -70,7 +70,7 @@ function reviewDescriptor(period: ReviewPeriod, value: Date): ReviewDescriptor {
     const key = `${isoYear}-W${String(week).padStart(2, "0")}`;
     return {
       key,
-      title: `${key} Weekly Review`,
+      title: `${key} 每周复盘`,
       range: `${utcDateText(start)} — ${utcDateText(end)}`,
     };
   }
@@ -80,14 +80,14 @@ function reviewDescriptor(period: ReviewPeriod, value: Date): ReviewDescriptor {
     const end = new Date(Date.UTC(year, month + 1, 0));
     return {
       key,
-      title: `${key} Monthly Review`,
+      title: `${key} 每月复盘`,
       range: `${utcDateText(start)} — ${utcDateText(end)}`,
     };
   }
   const key = String(year);
   return {
     key,
-    title: `${key} Yearly Review`,
+    title: `${key} 每年复盘`,
     range: `${key}-01-01 — ${key}-12-31`,
   };
 }
@@ -189,7 +189,7 @@ export class VaultNoteService {
   }
 
   public async createDaily(date = localDate()): Promise<{ path: string }> {
-    if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) throw new Error(`Daily 日期无效：${date}`);
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) throw new Error(`日记日期无效：${date}`);
     const pending = this.dailyCreates.get(date);
     if (pending) return pending;
     const request = this.publishDaily(date);
@@ -252,7 +252,7 @@ export class VaultNoteService {
     const existed = this.app.vault.getAbstractFileByPath(path) instanceof TFile;
     await this.createDaily(date);
     const file = this.app.vault.getAbstractFileByPath(path);
-    if (!(file instanceof TFile)) throw new Error(`Daily 不存在：${path}`);
+    if (!(file instanceof TFile)) throw new Error(`日记不存在：${path}`);
 
     let insertedLine = -1;
     await this.app.vault.process(file, (current) => {
@@ -263,7 +263,7 @@ export class VaultNoteService {
         return current;
       }
       const heading = lines.findIndex((line) => /^##\s+任务\s*$/u.test(line));
-      if (heading < 0) throw new Error(`Daily 缺少“任务”区域：${path}`);
+      if (heading < 0) throw new Error(`日记缺少“任务”区域：${path}`);
       const sectionEnd = lines.findIndex((line, index) => index > heading && /^##\s+/u.test(line));
       let at = sectionEnd >= 0 ? sectionEnd : lines.length;
       if (position === "start") {
@@ -307,7 +307,7 @@ export class VaultNoteService {
     const normalized = path.replace(/^\/+|\/+$/gu, "");
     const file = this.app.vault.getAbstractFileByPath(normalized);
     if (!(file instanceof TFile) || !/^projects\/[^/]+\/project\.md$/u.test(normalized)) {
-      throw new Error(`Project 不存在：${normalized}`);
+      throw new Error(`项目不存在：${normalized}`);
     }
     await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
       frontmatter.project_status = status;
@@ -352,7 +352,7 @@ export class VaultNoteService {
     const body = await this.renderBody(
       "course",
       { title },
-      `# ${title}\n\n## 学习目标\n\n## 当前进度\n\n## Lessons\n\n## Study Guides`,
+      `# ${title}\n\n## 学习目标\n\n## 当前进度\n\n## 课堂笔记\n\n## 学习笔记`,
     );
     await this.create(path, document("Course", title, body, { course_status: "active" }));
     return { path };

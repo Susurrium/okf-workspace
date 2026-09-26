@@ -3,6 +3,7 @@ import { setIcon } from 'obsidian';
 import { getToolIcon } from '../../../core/tools/toolIcons';
 import type { ToolCallInfo, ToolDiffData } from '../../../core/types';
 import type { DiffLine } from '../../../core/types/diff';
+import { t } from '../../../i18n/i18n';
 import { setupCollapsible } from './collapsible';
 import { renderDiffContent, renderDiffStats } from './DiffRenderer';
 import { fileNameOnly } from './ToolCallRenderer';
@@ -78,7 +79,7 @@ export function createWriteEditBlock(
   const statsEl = headerEl.createDiv({ cls: 'claudian-write-edit-stats' });
 
   const statusEl = headerEl.createDiv({ cls: 'claudian-write-edit-status status-running' });
-  statusEl.setAttribute('aria-label', 'Status: running');
+  statusEl.setAttribute('aria-label', t('chatUi.statusRunning'));
 
   // Content area (collapsed by default)
   const contentEl = wrapperEl.createDiv({ cls: 'claudian-write-edit-content' });
@@ -86,7 +87,7 @@ export function createWriteEditBlock(
   // Initial loading state
   const loadingRow = contentEl.createDiv({ cls: 'claudian-write-edit-diff-row' });
   const loadingEl = loadingRow.createDiv({ cls: 'claudian-write-edit-loading' });
-  loadingEl.setText('Writing...');
+  loadingEl.setText(t('chatUi.writing'));
 
   // Create state object
   const state: WriteEditState = {
@@ -134,7 +135,7 @@ export function finalizeWriteEditBlock(state: WriteEditState, isError: boolean):
   if (isError) {
     state.statusEl.addClass('status-error');
     setIcon(state.statusEl, 'x');
-    state.statusEl.setAttribute('aria-label', 'Status: error');
+    state.statusEl.setAttribute('aria-label', t('chatUi.statusError'));
 
     // Show error in content if no diff was shown
     if (!state.diffLines) {
@@ -148,7 +149,7 @@ export function finalizeWriteEditBlock(state: WriteEditState, isError: boolean):
     state.contentEl.empty();
     const row = state.contentEl.createDiv({ cls: 'claudian-write-edit-diff-row' });
     const doneEl = row.createDiv({ cls: 'claudian-write-edit-done-text' });
-    doneEl.setText('DONE');
+    doneEl.setText(t('chatUi.done'));
   }
 
   // Update wrapper class
@@ -218,7 +219,7 @@ export function renderStoredWriteEdit(
     errorEl.setText(toolCall.result);
   } else {
     const doneEl = row.createDiv({ cls: 'claudian-write-edit-done-text' });
-    doneEl.setText(isError ? 'ERROR' : 'DONE');
+    doneEl.setText(isError ? 'ERROR' : t('chatUi.done'));
   }
 
   // Setup collapsible behavior (handles click, keyboard, ARIA, CSS)

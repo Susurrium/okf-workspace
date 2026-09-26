@@ -119,7 +119,7 @@ export type DashboardObjectMetricKey =
 /** A stable, display-ready count. Zeroes are intentionally retained for comparable rows. */
 export interface DashboardObjectMetric {
   key: DashboardObjectMetricKey;
-  label: "待整理" | "Study Guide" | "来源" | "Lesson" | "学习入口";
+  label: "待整理" | "学习笔记" | "资料" | "课堂笔记" | "待学习";
   count: number;
 }
 
@@ -129,8 +129,8 @@ export function dashboardProjectMetrics(
 ): DashboardObjectMetric[] {
   return [
     metric("pending-captures", "待整理", project.pending_captures.length),
-    metric("study-guides", "Study Guide", project.related_learning.length),
-    metric("sources", "来源", project.related_materials.length),
+    metric("study-guides", "学习笔记", project.related_learning.length),
+    metric("sources", "资料", project.related_materials.length),
   ];
 }
 
@@ -140,9 +140,9 @@ export function dashboardCourseMetrics(
 ): DashboardObjectMetric[] {
   return [
     metric("pending-captures", "待整理", course.pending_captures.length),
-    metric("study-guides", "Study Guide", course.guide_count),
-    metric("sources", "来源", course.related_sources.length),
-    metric("lessons", "Lesson", course.lesson_count),
+    metric("study-guides", "学习笔记", course.guide_count),
+    metric("sources", "资料", course.related_sources.length),
+    metric("lessons", "课堂笔记", course.lesson_count),
   ];
 }
 
@@ -240,7 +240,7 @@ export function dashboardLearningScopeMetric(
 ): DashboardObjectMetric {
   return metric(
     "learning-entries",
-    "学习入口",
+    "待学习",
     countDashboardLearningScopeEntries(notes, scope, relationPath),
   );
 }

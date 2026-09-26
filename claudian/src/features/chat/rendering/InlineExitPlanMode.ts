@@ -5,9 +5,10 @@ import type {
   ExitPlanModeDecision,
   ExitPlanModePresentationOptions,
 } from '../../../core/types/tools';
+import { t } from '../../../i18n/i18n';
 import type { RenderContentFn } from './MessageRenderer';
 
-const HINTS_TEXT = 'Arrow keys to navigate \u00B7 Enter to select \u00B7 Esc to cancel';
+const getHintsText = () => t('interface.keyHints');
 type ExitPlanModeAction = 'abandon' | 'approve' | 'approve-new-session' | 'feedback';
 
 export class InlineExitPlanMode {
@@ -54,7 +55,7 @@ export class InlineExitPlanMode {
     this.rootEl = this.containerEl.createDiv({ cls: 'claudian-plan-approval-inline' });
 
     const titleEl = this.rootEl.createDiv({ cls: 'claudian-plan-inline-title' });
-    titleEl.setText('Plan complete');
+    titleEl.setText(t('interface.planReady'));
 
     this.planContent = this.readPlanContent();
     if (this.planContent) {
@@ -67,14 +68,14 @@ export class InlineExitPlanMode {
     } else if (this.planReadError) {
       this.rootEl.createDiv({
         cls: 'claudian-plan-content-preview claudian-plan-read-error',
-        text: `Could not read plan file: ${this.planReadError}. "Approve (new session)" will not include plan details.`,
+        text: t('interface.planReadError', { error: this.planReadError }),
       });
     }
 
     const allowedPrompts = this.input.allowedPrompts as Array<{ tool: string; prompt: string }> | undefined;
     if (allowedPrompts && Array.isArray(allowedPrompts) && allowedPrompts.length > 0) {
       const permEl = this.rootEl.createDiv({ cls: 'claudian-plan-permissions' });
-      permEl.createDiv({ text: 'Requested permissions:', cls: 'claudian-plan-permissions-label' });
+      permEl.createDiv({ text: t('interface.planPermissions'), cls: 'claudian-plan-permissions-label' });
       const listEl = permEl.createEl('ul', { cls: 'claudian-plan-permissions-list' });
       for (const perm of allowedPrompts) {
         listEl.createEl('li', { text: perm.prompt });
@@ -87,7 +88,7 @@ export class InlineExitPlanMode {
       const newSessionRow = actionsEl.createDiv({ cls: 'claudian-ask-item' });
       newSessionRow.createSpan({ text: '\u00A0', cls: 'claudian-ask-cursor' });
       newSessionRow.createSpan({ text: `${this.items.length + 1}. `, cls: 'claudian-ask-item-num' });
-      newSessionRow.createSpan({ text: 'Approve (new session)', cls: 'claudian-ask-item-label' });
+      newSessionRow.createSpan({ text: t('interface.approveNew'), cls: 'claudian-ask-item-label' });
       const itemIndex = this.items.length;
       newSessionRow.addEventListener('click', () => {
         this.focusedIndex = itemIndex;
@@ -105,7 +106,7 @@ export class InlineExitPlanMode {
     approveRow.createSpan({ text: '\u00A0', cls: 'claudian-ask-cursor' });
     approveRow.createSpan({ text: `${this.items.length + 1}. `, cls: 'claudian-ask-item-num' });
     approveRow.createSpan({
-      text: this.presentation.approveLabel ?? 'Approve (current session)',
+      text: this.presentation.approveLabel ?? t('interface.approveCurrent'),
       cls: 'claudian-ask-item-label',
     });
     const approveIndex = this.items.length;
@@ -129,7 +130,7 @@ export class InlineExitPlanMode {
     this.feedbackInput = feedbackRow.createEl('input', {
       type: 'text',
       cls: 'claudian-ask-custom-text',
-      placeholder: 'Enter feedback to continue planning...',
+      placeholder: t('interface.continuePlan'),
     });
     this.feedbackInput.addEventListener('focus', () => { this.isInputFocused = true; });
     this.feedbackInput.addEventListener('blur', () => { this.isInputFocused = false; });
@@ -145,7 +146,7 @@ export class InlineExitPlanMode {
       const abandonRow = actionsEl.createDiv({ cls: 'claudian-ask-item' });
       abandonRow.createSpan({ text: '\u00A0', cls: 'claudian-ask-cursor' });
       abandonRow.createSpan({ text: `${this.items.length + 1}. `, cls: 'claudian-ask-item-num' });
-      abandonRow.createSpan({ text: 'Abandon', cls: 'claudian-ask-item-label' });
+      abandonRow.createSpan({ text: t('interface.abandon'), cls: 'claudian-ask-item-label' });
       const abandonIndex = this.items.length;
       abandonRow.addEventListener('click', () => {
         this.focusedIndex = abandonIndex;
@@ -160,8 +161,8 @@ export class InlineExitPlanMode {
 
     this.rootEl.createDiv({
       text: this.presentation.dismissOnEscape === false
-        ? 'Arrow keys to navigate \u00B7 Enter to select \u00B7 Shift+Tab to abandon'
-        : HINTS_TEXT,
+        ? t('interface.abandonHints')
+        : getHintsText(),
       cls: 'claudian-ask-hints',
     });
 

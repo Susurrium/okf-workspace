@@ -36,6 +36,7 @@ import type {
   ToolCallInfo,
 } from '../../../core/types';
 import type { SDKToolUseResult } from '../../../core/types/diff';
+import { t } from '../../../i18n/i18n';
 import {
   cancelScheduledAnimationFrame,
   scheduleAnimationFrame,
@@ -702,7 +703,7 @@ export class StreamController {
     if (subagentInfo.status === 'completed' || subagentInfo.status === 'error') {
       this.finalizeProviderSubagentState(
         spawnId,
-        subagentInfo.result || (subagentInfo.status === 'error' ? 'Error' : 'DONE'),
+        subagentInfo.result || (subagentInfo.status === 'error' ? 'Error' : t('chatUi.done')),
         subagentInfo.status === 'error',
       );
     }
@@ -817,7 +818,7 @@ export class StreamController {
       if (subagentInfo.status === 'completed' || subagentInfo.status === 'error') {
         this.finalizeProviderSubagentState(
           chunk.id,
-          subagentInfo.result || (subagentInfo.status === 'error' ? 'Error' : 'DONE'),
+          subagentInfo.result || (subagentInfo.status === 'error' ? 'Error' : t('chatUi.done')),
           subagentInfo.status === 'error',
         );
       }
@@ -840,7 +841,7 @@ export class StreamController {
         if (subagentInfo.status === 'completed' || subagentInfo.status === 'error') {
           this.finalizeProviderSubagentState(
             spawnId,
-            subagentInfo.result || (subagentInfo.status === 'error' ? 'Error' : 'DONE'),
+            subagentInfo.result || (subagentInfo.status === 'error' ? 'Error' : t('chatUi.done')),
             subagentInfo.status === 'error',
           );
         }
@@ -1817,7 +1818,7 @@ export class StreamController {
     if (!state.currentContentEl) return;
     this.hideThinkingIndicator();
     const el = state.currentContentEl.createDiv({ cls: 'claudian-compact-boundary' });
-    el.createSpan({ cls: 'claudian-compact-boundary-label', text: 'Conversation compacted' });
+    el.createSpan({ cls: 'claudian-compact-boundary-label', text: t('chatUi.conversationCompacted') });
   }
 
   // ============================================

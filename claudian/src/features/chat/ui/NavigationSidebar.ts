@@ -1,5 +1,6 @@
 import { setIcon } from 'obsidian';
 
+import { t } from '../../../i18n/i18n';
 import {
   cancelScheduledAnimationFrame,
   scheduleAnimationFrame,
@@ -38,7 +39,7 @@ export class NavigationSidebar {
       // Create buttons
       this.topBtn = this.createButton('claudian-nav-btn-top', 'chevrons-up', 'Scroll to top');
       this.prevBtn = this.createButton('claudian-nav-btn-prev', 'chevron-up', 'Previous message');
-      this.tocBtn = this.createButton('claudian-nav-btn-toc', 'list-tree', 'Conversation directory');
+      this.tocBtn = this.createButton('claudian-nav-btn-toc', 'list-tree', t('chatUi.conversationDirectory'));
       this.nextBtn = this.createButton('claudian-nav-btn-next', 'chevron-down', 'Next message');
       this.bottomBtn = this.createButton('claudian-nav-btn-bottom', 'chevrons-down', 'Scroll to bottom');
 
@@ -198,13 +199,13 @@ export class NavigationSidebar {
     const entries = this.getDirectoryEntries();
     this.closeDirectory();
     this.tocPopover = this.parentEl.createDiv({ cls: 'claudian-nav-toc-popover' });
-    this.tocPopover.createDiv({ cls: 'claudian-nav-toc-title', text: 'Conversation directory' });
+    this.tocPopover.createDiv({ cls: 'claudian-nav-toc-title', text: t('chatUi.conversationDirectory') });
     const listEl = this.tocPopover.createDiv({ cls: 'claudian-nav-toc-list' });
 
     if (entries.length === 0) {
       listEl.createDiv({
         cls: 'claudian-nav-toc-empty',
-        text: 'No user prompts in this conversation',
+        text: t('chatUi.noUserPromptsInThisConversation'),
       });
       return;
     }

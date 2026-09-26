@@ -47,12 +47,12 @@ describe("registered OKF workbench surface parity", () => {
     }
     expect(OKF_SURFACE_CAPABILITIES.learning).toEqual(expect.arrayContaining([
       "学习范围",
-      "Course 上下文",
-      "Project 上下文",
+      "课程上下文",
+      "项目上下文",
       "生成与重试",
       "Claudian",
       "完成与撤销",
-      "沉淀 Wiki",
+      "整理为知识笔记",
     ]));
   });
 });

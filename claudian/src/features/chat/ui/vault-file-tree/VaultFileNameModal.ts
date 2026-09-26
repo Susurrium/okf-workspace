@@ -1,6 +1,8 @@
 import type { App, ButtonComponent, TAbstractFile, TextComponent } from 'obsidian';
 import { Modal, Notice, Setting } from 'obsidian';
 
+import { t } from '../../../../i18n/i18n';
+
 export type VaultFileNameSubmitResult = string | null;
 
 export type VaultFileNameModalOptions = {
@@ -59,10 +61,10 @@ class VaultFileNameModal extends Modal {
     this.modalEl.addClass('claudian-vault-file-name-modal');
 
     new Setting(this.contentEl)
-      .setName('Name')
+      .setName(t('chatUi.name'))
       .addText((input) => {
         this.nameInput = input.setValue(this.options.initialName);
-        input.inputEl.setAttribute('aria-label', 'Name');
+        input.inputEl.setAttribute('aria-label', t('chatUi.name'));
         input.inputEl.addEventListener('keydown', (event) => {
           if (event.key !== 'Enter' || event.isComposing) return;
           event.preventDefault();
@@ -77,7 +79,7 @@ class VaultFileNameModal extends Modal {
 
     new Setting(this.contentEl)
       .addButton(button => button
-        .setButtonText('Cancel')
+        .setButtonText(t('chatUi.cancel'))
         .onClick(() => this.close()))
       .addButton((button) => {
         this.submitButton = button

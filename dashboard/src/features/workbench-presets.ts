@@ -7,15 +7,15 @@ export type WorkbenchPresetId = "daily" | "learning" | "project" | "reading" | "
 export const WORKBENCH_PRESETS: readonly WorkspacePresetOption[] = [
   { id: "daily", label: "日常", description: "今日行动、待处理、项目、日历与每日阅读" },
   { id: "learning", label: "学习", description: "课程、学习材料、知识与资料入口" },
-  { id: "project", label: "项目", description: "正式项目、今日行动、学习工作区与资料入口" },
-  { id: "reading", label: "阅读", description: "Feed 订阅、历史、微信读书与阅读工具" },
-  { id: "life", label: "生活", description: "Daily、Reflection、Review 与记录整理" },
+  { id: "project", label: "项目", description: "项目、今日行动、学习与资料入口" },
+  { id: "reading", label: "阅读", description: "订阅订阅、历史、微信读书与阅读工具" },
+  { id: "life", label: "生活", description: "日记、反思、复盘与记录整理" },
   { id: "system", label: "系统", description: "后台任务、失败恢复、诊断与维护" },
 ] as const;
 
 const BANNER = {
-  quote: "把真实工作放在一个工作台里。",
-  author: "OKF Workspace",
+  quote: "记录今天，继续重要的事。",
+  author: "",
   image: "https://images.pexels.com/photos/2307638/pexels-photo-2307638.jpeg",
 };
 
@@ -54,14 +54,14 @@ export function workbenchPresetData(preset: WorkbenchPresetId = "daily"): Dashbo
     project: [
       column("project-main", "项目", "workspace-projects", "#10b981"),
       column("project-today", "今日行动", "workspace-today", "#6366f1", { half: true }),
-      column("project-learning", "学习工作区", "workspace-learning", "#8b5cf6", { half: true }),
+      column("project-learning", "学习", "workspace-learning", "#8b5cf6", { half: true }),
       column("project-notes", "项目便签", "notes", "#f59e0b"),
       column("project-inbox", "项目资料入口", "workspace-inbox", "#ef8b45"),
     ],
     reading: [
-      column("reading-feed", "订阅与 Feed", "workspace-reading", "#8b5cf6"),
+      column("reading-feed", "阅读与订阅", "workspace-reading", "#8b5cf6"),
       column("reading-weread", "微信读书", "weread", "#10b981"),
-      column("reading-knowledge", "知识工作区", "workspace-knowledge", "#3b82f6"),
+      column("reading-knowledge", "知识库", "workspace-knowledge", "#3b82f6"),
       column("reading-inbox", "阅读资料入口", "workspace-inbox", "#ef8b45"),
     ],
     life: [
@@ -86,7 +86,7 @@ export function workbenchPresetData(preset: WorkbenchPresetId = "daily"): Dashbo
       { name: "系统状态", icon: "settings-2", type: "command", target: "okf-workspace-dashboard:open-system" },
     ],
     columns: columns[preset].map((item) => ({ ...item })),
-    bodyPreamble: "此文件保存工作台布局与原生便签；OKF 对象仍以各自 Vault 文件为准。",
+    bodyPreamble: "这里保存工作台布局和便签；课程、项目及其他笔记保存在各自文件中。",
   };
 }
 

@@ -4,6 +4,7 @@ import {
   InlinePlanApproval,
   type PlanApprovalDecision,
 } from '@/features/chat/rendering/InlinePlanApproval';
+import { setLocale } from '@/i18n/i18n';
 
 beforeAll(() => {
   globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => {
@@ -40,6 +41,19 @@ function createApproval(): {
 }
 
 describe('InlinePlanApproval', () => {
+  it('renders Chinese actions and keeps the execution decision unchanged', () => {
+    setLocale('zh-CN');
+    try {
+      const { container, fireKey, resolve } = createApproval();
+      expect(container.querySelector('.claudian-plan-inline-title')?.textContent).toBe('计划已准备好');
+      expect(container.querySelector('.claudian-ask-item-label')?.textContent).toBe('开始执行');
+      fireKey('Enter');
+      expect(resolve).toHaveBeenCalledWith({ type: 'implement' });
+    } finally {
+      setLocale('en');
+    }
+  });
+
   describe('decisions', () => {
     it('resolves with implement when Enter on first item (default focus)', () => {
       const { resolve, fireKey } = createApproval();

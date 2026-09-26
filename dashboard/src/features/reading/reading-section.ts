@@ -55,7 +55,7 @@ export interface ReadingSectionHost {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Engine 暂时不可用";
+  return error instanceof Error ? error.message : "本地服务暂时不可用";
 }
 
 function button(
@@ -201,7 +201,7 @@ function renderDigestOverview(
     if (stream.edition) renderEdition(body, host, stream.feed, stream.edition, false);
     else body.createDiv({ cls: "okf-dashboard__empty", text: `暂时没有${stream.title}内容。` });
     const footer = card.createEl("footer", { cls: "okf-feed-card__footer" });
-    if (stream.edition) button(footer, "打开本期原生笔记", (element) => {
+    if (stream.edition) button(footer, "打开本期汇总", (element) => {
       runButton(element, () => host.openFeedDigest(stream.feed, stream.edition!.digest_id));
     });
   }
@@ -211,7 +211,7 @@ export function createReadingSectionDefinition(host: ReadingSectionHost): Custom
   return {
     type: OKF_READING_SECTION_TYPE,
     icon: "rss",
-    label: "阅读与订阅（OKF）",
+    label: "阅读与订阅",
     defaultName: "阅读与订阅",
     render({ container }): void {
       container.addClass("okf-reading-native");
@@ -229,7 +229,7 @@ export function createReadingSectionDefinition(host: ReadingSectionHost): Custom
       let editionHasMore = false;
 
       const renderError = (parent: HTMLElement, message: string, retry: () => void): void => {
-        const error = parent.createDiv({ cls: "okf-dashboard__error", text: `Engine 不可用：${message}` });
+        const error = parent.createDiv({ cls: "okf-dashboard__error", text: `本地服务不可用：${message}` });
         button(error, "重新读取", () => retry());
       };
 
@@ -338,7 +338,7 @@ export function createReadingSectionDefinition(host: ReadingSectionHost): Custom
         const latest = content.createDiv({ cls: "okf-reading-native__latest" });
         const snapshot = host.feedDashboardDigestSnapshot();
         if (snapshot) renderDigestOverview(latest, host, snapshot);
-        else latest.createDiv({ cls: "okf-dashboard__muted", text: "正在读取每日 Feed…" });
+        else latest.createDiv({ cls: "okf-dashboard__muted", text: "正在读取每日订阅…" });
 
         const sourceSection = content.createEl("section", { cls: "okf-reading-native__sources" });
         const search = sourceSection.createDiv({ cls: "okf-reading-source-search" });

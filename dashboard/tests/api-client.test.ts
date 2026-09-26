@@ -7,6 +7,14 @@ afterEach(() => {
 });
 
 describe("LocalApi", () => {
+  it("presents a recoverable failure without exposing raw backend JSON", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ detail: "internal_state_invalid" }), { status: 500 },
+    )));
+    const api = new LocalApi("http://127.0.0.1:8765", "token");
+    await expect(api.systemStatus()).rejects.toThrow("本地服务处理失败");
+    await expect(api.systemStatus()).rejects.not.toThrow("internal_state_invalid");
+  });
   it("uses cached system status normally and requests a live probe explicitly", async () => {
     const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
       generated_at: "2026-08-22T00:00:00+08:00",

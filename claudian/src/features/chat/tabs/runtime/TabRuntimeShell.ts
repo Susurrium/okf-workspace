@@ -5,6 +5,7 @@ import { resolveNewConversationModel } from '../../../../core/providers/conversa
 import { getEnabledProviderForModel } from '../../../../core/providers/modelRouting';
 import { ProviderRegistry } from '../../../../core/providers/ProviderRegistry';
 import { DEFAULT_CHAT_PROVIDER_ID } from '../../../../core/providers/types';
+import { t } from '../../../../i18n/i18n';
 import { getVaultPath } from '../../../../utils/path';
 import { ChatExecutionCoordinator } from '../../execution/ChatExecutionCoordinator';
 import { cleanupThinkingBlock } from '../../rendering/ThinkingBlockRenderer';
@@ -43,11 +44,11 @@ export function buildTabRuntimeShell(
       runtime.ui.stopButtonEl.setAttribute('aria-hidden', String(!isStreaming));
       runtime.ui.sendButtonEl.setAttribute(
         'aria-label',
-        isStreaming ? 'Queue message' : 'Send message',
+        isStreaming ? 'Queue message' : t('chatUi.sendMessage'),
       );
       runtime.ui.sendButtonEl.setAttribute(
         'title',
-        isStreaming ? 'Queue message' : 'Send message',
+        isStreaming ? 'Queue message' : t('chatUi.sendMessage'),
       );
       options.onStreamingChanged?.(runtime, isStreaming);
     },
@@ -176,7 +177,7 @@ function buildTabDOM(contentEl: HTMLElement): TabDOMElements {
   const inputEl = inputWrapper.createEl('textarea', {
     cls: 'claudian-input',
     attr: {
-      placeholder: 'Ask to make changes, @mention files, run /commands',
+      placeholder: t('chatUi.askToMakeChangesMentionFilesRunCommands'),
       rows: '3',
       dir: 'auto',
     },

@@ -12,6 +12,7 @@ import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '../../core/providers/ProviderSettingsCoordinator';
 import { type AppTabManagerState, DEFAULT_CHAT_PROVIDER_ID, type ProviderId } from '../../core/providers/types';
 import { type ConversationMeta, VIEW_TYPE_CLAUDIAN } from '../../core/types';
+import { t } from '../../i18n/i18n';
 import {
   cancelScheduledAnimationFrame,
   scheduleAnimationFrame,
@@ -493,7 +494,7 @@ export class ClaudianView extends ItemView {
       cls: 'claudian-session-resizer',
     });
     this.sessionSidebarResizerEl.setAttribute('role', 'separator');
-    this.sessionSidebarResizerEl.setAttribute('aria-label', 'Resize conversation sessions');
+    this.sessionSidebarResizerEl.setAttribute('aria-label', t('chatUi.resizeConversationSessions'));
     this.sessionSidebarResizerEl.setAttribute('aria-orientation', 'vertical');
     this.sessionSidebarResizerEl.setAttribute('tabindex', '0');
     this.sessionSidebarResizerEl.addEventListener('pointerdown', (event) => {
@@ -513,15 +514,15 @@ export class ClaudianView extends ItemView {
       cls: 'claudian-sidebar-surface-switcher',
     });
     this.sidebarSurfaceSwitcherEl.setAttribute('role', 'group');
-    this.sidebarSurfaceSwitcherEl.setAttribute('aria-label', 'Sidebar view');
+    this.sidebarSurfaceSwitcherEl.setAttribute('aria-label', t('chatUi.sidebarView'));
     this.sessionsSurfaceButtonEl = this.sidebarSurfaceSwitcherEl.createEl('button', {
       cls: 'claudian-sidebar-surface-button claudian-sidebar-surface-button--sessions',
-      attr: { 'aria-label': 'Sessions', type: 'button' },
+      attr: { 'aria-label': t('chatUi.sessions'), type: 'button' },
     });
     this.sessionsSurfaceButtonEl.addEventListener('click', () => this.showSessions());
     this.filesSurfaceButtonEl = this.sidebarSurfaceSwitcherEl.createEl('button', {
       cls: 'claudian-sidebar-surface-button claudian-sidebar-surface-button--files',
-      attr: { 'aria-label': 'Files', type: 'button' },
+      attr: { 'aria-label': t('chatUi.files'), type: 'button' },
     });
     this.filesSurfaceButtonEl.addEventListener('click', () => this.showVaultFiles());
     if (this.activeSidebarSurface !== 'files') {
@@ -550,21 +551,21 @@ export class ClaudianView extends ItemView {
 
     this.newTabButtonEl = navActionsEl.createDiv({ cls: 'claudian-input-nav-btn claudian-new-tab-btn' });
     setIcon(this.newTabButtonEl, 'square-plus');
-    this.newTabButtonEl.setAttribute('aria-label', 'New tab');
+    this.newTabButtonEl.setAttribute('aria-label', t('chatUi.newTab'));
     this.newTabButtonEl.addEventListener('click', () => this.requestNewTab());
 
     const newBtn = navActionsEl.createDiv({
       cls: 'claudian-input-nav-btn claudian-new-conversation-btn',
     });
     setIcon(newBtn, 'square-pen');
-    newBtn.setAttribute('aria-label', 'New conversation');
+    newBtn.setAttribute('aria-label', t('chatUi.newConversation'));
     newBtn.addEventListener('click', () => this.requestNewConversation());
 
     // History dropdown
     const historyContainer = navActionsEl.createDiv({ cls: 'claudian-history-container' });
     const historyBtn = historyContainer.createDiv({ cls: 'claudian-input-nav-btn' });
     setIcon(historyBtn, 'history');
-    historyBtn.setAttribute('aria-label', 'Chat history');
+    historyBtn.setAttribute('aria-label', t('chatUi.chatHistory'));
 
     this.historyDropdown = historyContainer.createDiv({ cls: 'claudian-history-menu' });
 
@@ -577,19 +578,19 @@ export class ClaudianView extends ItemView {
   }
 
   private requestNewTab(): void {
-    void this.createNewTab().catch(() => new Notice('Failed to create tab'));
+    void this.createNewTab().catch(() => new Notice(t('chatUi.failedToCreateTab')));
   }
 
   private requestNewConversation(): void {
     void (async () => {
       await this.tabManager?.createNewConversation();
       this.updateHistoryDropdown();
-    })().catch(() => new Notice('Failed to create conversation'));
+    })().catch(() => new Notice(t('chatUi.failedToCreateConversation')));
   }
 
   private requestDualNew(): void {
     void this.activateOrCreateDraftTab()
-      .catch(() => new Notice('Failed to start a new conversation'));
+      .catch(() => new Notice(t('chatUi.failedToStartANewConversation')));
   }
 
   private async activateOrCreateDraftTab(): Promise<void> {
@@ -640,7 +641,7 @@ export class ClaudianView extends ItemView {
       throw new Error('New conversation input is unavailable');
     }
     void inputController.sendMessage({ content: planContent }).catch(() => {
-      new Notice('Failed to start the approved plan in a new conversation');
+      new Notice(t('chatUi.failedToStartTheApprovedPlanInANewConversation'));
     });
     return true;
   }
@@ -735,7 +736,7 @@ export class ClaudianView extends ItemView {
   private handleTabClick(tabId: TabId): void {
     const switched = this.tabManager?.switchToTab(tabId);
     if (switched) {
-      void switched.catch(() => new Notice('Failed to switch tab'));
+      void switched.catch(() => new Notice(t('chatUi.failedToSwitchTab')));
     }
   }
 
@@ -747,7 +748,7 @@ export class ClaudianView extends ItemView {
       await this.tabManager?.closeTab(tabId, force);
       this.updateTabBarVisibility();
     } catch {
-      new Notice('Failed to close tab');
+      new Notice(t('chatUi.failedToCloseTab'));
     }
   }
 
@@ -971,7 +972,7 @@ export class ClaudianView extends ItemView {
       },
       sessionScope: isArchiveView ? 'archived' : 'active',
       sessionActionMode: isArchiveView ? 'archived' : 'active',
-      historyHeaderLabel: isArchiveView ? 'Archived' : 'Sessions',
+      historyHeaderLabel: isArchiveView ? 'Archived' : t('chatUi.sessions'),
       allowConversationSelection: !isArchiveView,
       onSetConversationPinned: (id: string, isPinned: boolean) => (
         this.setConversationPinned(id, isPinned)
@@ -1049,10 +1050,10 @@ export class ClaudianView extends ItemView {
     const newControl = container.createDiv({ cls: 'claudian-session-new-control' });
     newControl.setAttribute('role', 'button');
     newControl.setAttribute('tabindex', '0');
-    newControl.setAttribute('aria-label', 'New');
+    newControl.setAttribute('aria-label', t('chatUi.new'));
     const newIcon = newControl.createSpan({ cls: 'claudian-session-new-icon' });
     setIcon(newIcon, 'square-pen');
-    newControl.createSpan({ cls: 'claudian-session-new-label', text: 'New' });
+    newControl.createSpan({ cls: 'claudian-session-new-label', text: t('chatUi.new') });
     newControl.addEventListener('click', () => this.requestSessionNew());
     newControl.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -1121,10 +1122,10 @@ export class ClaudianView extends ItemView {
       const searchControl = container.createDiv({ cls: 'claudian-session-search-control' });
       searchControl.setAttribute('role', 'button');
       searchControl.setAttribute('tabindex', '0');
-      searchControl.setAttribute('aria-label', 'Search');
+      searchControl.setAttribute('aria-label', t('chatUi.search'));
       const searchIcon = searchControl.createSpan({ cls: 'claudian-session-nav-icon' });
       setIcon(searchIcon, 'search');
-      searchControl.createSpan({ cls: 'claudian-session-nav-label', text: 'Search' });
+      searchControl.createSpan({ cls: 'claudian-session-nav-label', text: t('chatUi.search') });
       const activateSearch = (): void => this.activateSessionSearch();
       searchControl.addEventListener('click', activateSearch);
       searchControl.addEventListener('keydown', (event) => {
@@ -1138,7 +1139,7 @@ export class ClaudianView extends ItemView {
     const archiveControl = container.createDiv({ cls: 'claudian-session-archive-control' });
     archiveControl.setAttribute('role', 'button');
     archiveControl.setAttribute('tabindex', '0');
-    const archiveLabel = this.isArchiveSessionView ? 'Sessions' : 'Archive';
+    const archiveLabel = this.isArchiveSessionView ? t('chatUi.sessions') : t('chatUi.archive');
     archiveControl.setAttribute('aria-label', archiveLabel);
     const archiveIcon = archiveControl.createSpan({ cls: 'claudian-session-nav-icon' });
     setIcon(archiveIcon, this.isArchiveSessionView ? 'arrow-left' : 'archive');
@@ -1501,7 +1502,7 @@ export class ClaudianView extends ItemView {
     const list = container.querySelector<HTMLElement>('.claudian-history-list');
     if (!list) return;
 
-    const label = this.isArchiveSessionView ? 'Sessions' : 'Archive';
+    const label = this.isArchiveSessionView ? t('chatUi.sessions') : t('chatUi.archive');
     const control = list.createDiv({ cls: 'claudian-history-archive-control' });
     control.setAttribute('role', 'button');
     control.setAttribute('tabindex', '0');
@@ -1574,7 +1575,7 @@ export class ClaudianView extends ItemView {
 
     const openTabs = this.getOpenConversationTabs(conversationId);
     if (openTabs.some(({ tab }) => tab.state.isStreaming)) {
-      new Notice('Running sessions cannot be archived');
+      new Notice(t('chatUi.runningSessionsCannotBeArchived'));
       return;
     }
 
@@ -1732,26 +1733,26 @@ export class ClaudianView extends ItemView {
     const sort = this.getSessionManagerSort();
 
     menu.addItem(item => item
-      .setTitle('Organize sessions')
+      .setTitle(t('chatUi.organizeSessions'))
       .setIsLabel(true));
     menu.addItem(item => item
-      .setTitle('In one list')
+      .setTitle(t('chatUi.inOneList'))
       .setChecked(organization === 'list')
       .onClick(() => this.setSessionManagerOrganization('list')));
     menu.addItem(item => item
-      .setTitle('By linked note')
+      .setTitle(t('chatUi.byLinkedNote'))
       .setChecked(organization === 'linked-note')
       .onClick(() => this.setSessionManagerOrganization('linked-note')));
     menu.addSeparator();
     menu.addItem(item => item
-      .setTitle('Sort sessions by')
+      .setTitle(t('chatUi.sortSessionsBy'))
       .setIsLabel(true));
     menu.addItem(item => item
-      .setTitle('Last activity')
+      .setTitle(t('chatUi.lastActivity'))
       .setChecked(sort === 'last-updated')
       .onClick(() => this.setSessionManagerSort('last-updated')));
     menu.addItem(item => item
-      .setTitle('Created')
+      .setTitle(t('chatUi.created'))
       .setChecked(sort === 'created')
       .onClick(() => this.setSessionManagerSort('created')));
 
@@ -1769,14 +1770,14 @@ export class ClaudianView extends ItemView {
     void this.plugin.mutateSettings((settings) => {
       settings.sessionManagerOrganization = organization;
     }).then(() => this.refreshSessionManagerPresentation())
-      .catch(() => new Notice('Failed to update session organization'));
+      .catch(() => new Notice(t('chatUi.failedToUpdateSessionOrganization')));
   }
 
   private setSessionManagerSort(sort: 'last-updated' | 'created'): void {
     void this.plugin.mutateSettings((settings) => {
       settings.sessionManagerSort = sort;
     }).then(() => this.refreshSessionManagerPresentation())
-      .catch(() => new Notice('Failed to update session sorting'));
+      .catch(() => new Notice(t('chatUi.failedToUpdateSessionSorting')));
   }
 
   private refreshSessionManagerPresentation(): void {
@@ -1949,7 +1950,7 @@ export class ClaudianView extends ItemView {
 
     const cleanup = (this.tabManager?.discardProvisionalTabs() ?? Promise.resolve())
       .catch(() => {
-        new Notice('Failed to close the provisional session preview');
+        new Notice(t('chatUi.failedToCloseTheProvisionalSessionPreview'));
       });
     this.pendingProvisionalTabCleanup = cleanup;
     void cleanup.finally(() => {

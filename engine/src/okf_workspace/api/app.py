@@ -305,7 +305,7 @@ def _conversion_public(record: dict[str, object], vault: Path) -> dict[str, obje
             }.get(name, name)
             if public_name in {"source", "source_text", "routed_target"}:
                 outputs[public_name] = _relative(Path(value), vault)
-            elif name != "export":
+            elif name not in {"export", "source_text_sha256"}:
                 outputs[name] = value
     result["outputs"] = outputs
     return result
@@ -883,28 +883,13 @@ def create_app(
             result = configured_importer.import_document(import_request)
         finally:
             upload.unlink(missing_ok=True)
-        semantic_operation: dict[str, object] | None = None
-        wants_study = result.routed_target is not None and (
-            result.status is ConversionStatus.IMPORTED
-            and ImportIntent(intent) in {ImportIntent.LEARN, ImportIntent.COURSE}
-            and generate
-        )
-        wants_wiki = result.routed_target is not None and ImportIntent(intent) is ImportIntent.WIKI
-        if (wants_study or wants_wiki) and semantic_service is not None:
-            target = _relative(cast(Path, result.routed_target), configured.vault)
-            sources = tuple(
-                _relative(Path(path), configured.vault)
-                for path in (result.source, result.source_text)
-                if path is not None
-            )
-            semantic_operation = semantic_service.enqueue(
-                SemanticKind.GENERATE_STUDY_GUIDE if wants_study else SemanticKind.GENERATE_WIKI,
-                target,
-                sources=sources,
-                course=course,
-                project=project,
-            )
+        semantic_operation = DocumentImportWorker(
+            configured_importer, semantic_service=semantic_service,
+        ).enqueue_semantic(result.conversion_id)
         return {
+            **_conversion_public(
+                configured_importer.store.load(result.conversion_id), configured.vault,
+            ),
             "conversion_id": result.conversion_id,
             "status": result.status.value,
             "parser": result.parser.value,
@@ -1069,6 +1054,8 @@ def create_app(
                 else SemanticKind.GENERATE_WIKI,
                 _relative(Path(target_path), configured.vault),
                 sources=sources,
+                course=request.course,
+                project=request.project,
             )
             FeedDecisionService(configured.vault, configured.state).store.attach_semantic_operation(
                 item,

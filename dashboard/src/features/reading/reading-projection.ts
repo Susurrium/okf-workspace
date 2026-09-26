@@ -28,7 +28,7 @@ export function readingStreams(digest: FeedDashboardDigest): ReadingStreamProjec
   return [
     { id: "hotspot", feed: "ai-daily", title: "中国热点", edition: latestAiDailyEdition(digest, "hotspot") },
     { id: "news", feed: "ai-daily", title: "AI 资讯", edition: latestAiDailyEdition(digest, "news") },
-    { id: "papers", feed: "ai-daily", title: "AI Papers", edition: digest.ai_papers ?? undefined },
+    { id: "papers", feed: "ai-daily", title: "AI 论文周刊", edition: digest.ai_papers ?? undefined },
     { id: "treehole", feed: "treehole", title: "树洞热榜", edition: digest.treehole ?? undefined },
   ];
 }
@@ -54,9 +54,9 @@ export function mergeUniqueSources(
 export function feedDecisionLabel(decision: FeedDigestItem["decision"]): string {
   if (!decision) return "";
   return {
-    "learn-now": "已开始学习",
+    "learn-now": "已选择学习",
     "learn-later": "待生成学习材料",
-    "wiki-now": "已整理 Wiki",
+    "wiki-now": "已选择整理为知识笔记",
     "source-only": "已保存来源",
     ignore: "已忽略",
     later: "旧版稍后处理",

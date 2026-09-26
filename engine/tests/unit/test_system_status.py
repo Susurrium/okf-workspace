@@ -144,7 +144,7 @@ def test_system_status_defers_mineru_without_probing_it(
     assert len(calls) == 1 and calls[0].endswith("/v1/health")
     assert items["markitdown"]["status"] == "available"
     assert items["mineru"]["status"] == "deferred"
-    assert "当前暂不使用" in str(items["mineru"]["detail"])
+    assert "当前使用快速转换" in str(items["mineru"]["detail"])
     assert items["mineru"]["action"] is None
 
 

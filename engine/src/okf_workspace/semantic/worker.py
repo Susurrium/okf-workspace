@@ -288,10 +288,7 @@ class SemanticWorker:
         now = datetime.now().astimezone().isoformat(timespec="seconds")
         document.frontmatter.setdefault("title", path.stem)
         document.frontmatter.setdefault("created_at", now)
-        old_learning = document.frontmatter.pop("learning_status", None)
-        old_learned = document.frontmatter.pop("learned", None)
-        if old_learning in {"learned", "completed"} or old_learned is True:
-            document.frontmatter.setdefault("studied_at", now)
+        # Learning completion is a human decision, never a generation side effect.
         if document.frontmatter.get("status") == "stable":
             document.frontmatter.pop("status", None)
         document.frontmatter.pop("study_material_status", None)

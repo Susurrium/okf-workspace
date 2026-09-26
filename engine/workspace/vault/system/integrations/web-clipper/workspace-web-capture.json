@@ -1,6 +1,6 @@
 {
   "schemaVersion": "0.1.0",
-  "name": "Workspace · Web Capture",
+  "name": "网页剪藏",
   "behavior": "create",
   "noteContentFormat": "# {{title}}\n\n> [!info] 网页来源\n> [{{site ?? domain}}]({{url}}){% if author %} · {{author}}{% endif %}{% if published %} · 发布于 {{published}}{% endif %}\n{% if description %}\n## 页面说明\n\n{{description}}\n{% endif %}\n{% if highlights %}\n## 高亮\n{% elseif selection %}\n## 选中内容\n{% else %}\n## 网页正文\n{% endif %}\n{{content}}\n",
   "properties": [

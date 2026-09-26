@@ -1,7 +1,9 @@
 import { Setting } from 'obsidian';
 
+import { t } from '../../i18n/i18n';
+
 const ALL_PROVIDERS_KEY = 'all';
-const VISIBLE_MODELS_DESCRIPTION = 'Choose which models are available in the chat selector. Drag to reorder them; the provider uses the first currently usable model as its default. Select at least one model to use this provider.';
+const getVisibleModelsDescription = () => t('interface.modelHelp');
 
 export function reorderProviderModelIds(
   selectedIds: readonly string[],
@@ -67,8 +69,8 @@ export function renderProviderModelPicker(
   options: ProviderModelPickerOptions,
 ): ProviderModelPickerController {
   const visibleModelsSetting = new Setting(options.container)
-    .setName('Visible models')
-    .setDesc(VISIBLE_MODELS_DESCRIPTION);
+    .setName(t('interface.visibleModels'))
+    .setDesc(getVisibleModelsDescription());
   visibleModelsSetting.settingEl.addClass('claudian-provider-model-picker-setting');
 
   const pickerEl = options.container.createDiv({
@@ -94,7 +96,7 @@ export function renderProviderModelPicker(
   });
   catalogSummaryEl.createSpan({
     cls: 'claudian-provider-model-picker-catalog-title',
-    text: 'Browse models',
+    text: t('interface.browseModels'),
   });
   const catalogSummaryCountEl = catalogSummaryEl.createSpan({
     cls: 'claudian-provider-model-picker-catalog-count',
@@ -105,7 +107,7 @@ export function renderProviderModelPicker(
     cls: 'claudian-provider-model-picker-search',
     type: 'search',
   });
-  searchInput.placeholder = options.searchPlaceholder ?? 'Filter by model, provider, or ID...';
+  searchInput.placeholder = options.searchPlaceholder ?? t('interface.modelFilter');
   searchInput.addEventListener('input', () => {
     searchQuery = searchInput.value.trim().toLowerCase();
     renderList();
@@ -121,7 +123,7 @@ export function renderProviderModelPicker(
 
   const catalogActionEl = controlsEl.createEl('button', {
     cls: 'claudian-provider-model-picker-action',
-    text: 'Discover',
+    text: t('interface.discover'),
   });
   catalogActionEl.setAttribute('type', 'button');
   catalogActionEl.addEventListener('click', () => {
@@ -137,31 +139,31 @@ export function renderProviderModelPicker(
       state.models.map(model => model.providerKey).filter((key): key is string => Boolean(key)),
     ).size;
 
-    summaryEl.createSpan({ text: 'Visible: ' });
+    summaryEl.createSpan({ text: t('interface.visible') });
     summaryEl.createSpan({
       cls: 'claudian-provider-model-picker-summary-value',
       text: String(state.selectedIds.length),
     });
     summaryEl.createSpan({
       text: providerCount > 0
-        ? ` of ${state.discoveredCount} discovered | ${providerCount} ${providerCount === 1 ? 'provider' : 'providers'}`
-        : ` of ${state.discoveredCount} discovered`,
+        ? t('interface.modelCount', { count: state.discoveredCount }) + t('interface.providerCount', { count: providerCount })
+        : t('interface.modelCount', { count: state.discoveredCount }),
     });
 
     catalogSummaryCountEl.setText(
       loadingCatalog
-        ? 'Loading models...'
+        ? t('interface.loadingModels')
         : state.discoveredCount > 0
-        ? `${state.discoveredCount} available`
-        : 'No models discovered yet',
+        ? t('interface.availableCount', { count: state.discoveredCount })
+        : t('interface.noModels'),
     );
     catalogActionEl.disabled = loadingCatalog;
     catalogActionEl.setText(
       loadingCatalog
-        ? 'Loading...'
+        ? t('interface.loading')
         : state.discoveredCount > 0
-        ? 'Refresh'
-        : 'Discover',
+        ? t('interface.refresh')
+        : t('interface.discover'),
     );
   };
 
@@ -199,14 +201,14 @@ export function renderProviderModelPicker(
     const headerEl = selectedEl.createDiv({ cls: 'claudian-provider-model-picker-selected-header' });
     headerEl.createSpan({
       cls: 'claudian-provider-model-picker-selected-label',
-      text: `Selected (${state.selectedIds.length})`,
+      text: t('interface.selectedCount', { count: state.selectedIds.length }),
     });
     const clearAllButton = headerEl.createEl('button', {
       cls: 'claudian-provider-model-picker-selected-clear',
-      text: 'Clear all',
+      text: t('interface.clearAll'),
     });
     clearAllButton.setAttribute('type', 'button');
-    clearAllButton.setAttribute('aria-label', `Clear all selected ${options.providerName} models`);
+    clearAllButton.setAttribute('aria-label', t('interface.clearModels', { provider: options.providerName }));
     clearAllButton.addEventListener('click', () => {
       void persistSelectedIds([]);
     });
@@ -261,7 +263,7 @@ export function renderProviderModelPicker(
         'aria-label',
         `Reorder ${defaultLabel}; drag or use the Up and Down Arrow keys`,
       );
-      dragHandle.setAttribute('title', 'Drag or use arrow keys to reorder');
+      dragHandle.setAttribute('title', t('interface.reorderModels'));
       dragHandle.draggable = state.selectedIds.length > 1;
       dragHandle.addEventListener('dragstart', (event) => {
         draggedModelId = modelId;
@@ -314,7 +316,7 @@ export function renderProviderModelPicker(
       if (modelId === defaultModelId) {
         titleEl.createSpan({
           cls: 'claudian-provider-model-picker-selected-default',
-          text: 'Default',
+          text: t('interface.default'),
         });
       }
       if (model.isAvailable === false && model.unavailableMessage) {
@@ -334,7 +336,7 @@ export function renderProviderModelPicker(
       });
       aliasFieldEl.createSpan({
         cls: 'claudian-provider-model-picker-selected-alias-label',
-        text: 'Alias (optional)',
+        text: t('interface.alias'),
       });
       const aliasInput = aliasFieldEl.createEl('input', {
         cls: 'claudian-provider-model-picker-selected-alias',
@@ -343,7 +345,7 @@ export function renderProviderModelPicker(
       aliasInput.placeholder = defaultLabel;
       aliasInput.value = state.aliases[model.id] ?? '';
       aliasInput.setAttribute('aria-label', `Alias for ${defaultLabel}`);
-      aliasInput.title = 'Custom label shown in the model selector. Leave empty to use the default.';
+      aliasInput.title = t('interface.aliasHelp');
       aliasInput.addEventListener('blur', () => {
         void persistAlias(model.id, aliasInput.value);
       });
@@ -388,7 +390,7 @@ export function renderProviderModelPicker(
     providerSelectEl.toggleClass('claudian-hidden', providers.size === 0);
     providerSelectEl.empty();
     providerSelectEl.createEl('option', {
-      text: `All providers (${models.length})`,
+      text: t('interface.allProviders', { count: models.length }),
       value: ALL_PROVIDERS_KEY,
     });
     for (const [key, { count, label }] of Array.from(providers.entries())
@@ -437,7 +439,7 @@ export function renderProviderModelPicker(
           ? options.failedCatalogText
           : state.models.length === 0
           ? options.emptyCatalogText
-          : 'No models match your filter.',
+          : t('interface.noMatchingModels'),
       });
       return;
     }

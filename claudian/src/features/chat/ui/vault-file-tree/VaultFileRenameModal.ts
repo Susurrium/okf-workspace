@@ -1,6 +1,7 @@
 import type { App, TAbstractFile } from 'obsidian';
 import { TFile, TFolder } from 'obsidian';
 
+import { t } from '../../../../i18n/i18n';
 import {
   hasVaultPathConflict,
   joinVaultPath,
@@ -14,7 +15,7 @@ export function showVaultFileRenameModal(app: App, file: TAbstractFile): void {
   showVaultFileNameModal(app, {
     failureMessage: `Failed to rename "${file.name}"`,
     initialName: initiallyMarkdown ? file.basename : file.name,
-    submitLabel: 'Rename',
+    submitLabel: t('chatUi.rename'),
     title: file instanceof TFolder ? 'Rename folder' : 'Rename file',
     onSubmit: async (name) => {
       if (app.vault.getAbstractFileByPath(file.path) !== file) {

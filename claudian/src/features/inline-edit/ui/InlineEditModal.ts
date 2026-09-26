@@ -11,6 +11,7 @@ import { resolveConversationModel } from '../../../core/providers/conversationMo
 import { ProviderRegistry } from '../../../core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '../../../core/providers/ProviderWorkspaceRegistry';
 import { type InlineEditMode, type InlineEditService, type ProviderId } from '../../../core/providers/types';
+import { t } from '../../../i18n/i18n';
 import { hideSelectionHighlight, showSelectionHighlight } from '../../../shared/components/SelectionHighlight';
 import { SlashCommandDropdown } from '../../../shared/components/SlashCommandDropdown';
 import { MentionDropdownController } from '../../../shared/mention/MentionDropdownController';
@@ -533,7 +534,7 @@ export class InlineEditSession {
       cls: 'claudian-inline-input',
       attr: {
         type: 'text',
-        placeholder: this.mode === 'cursor' ? 'Insert instructions...' : 'Edit instructions...',
+        placeholder: this.mode === 'cursor' ? t('interface.insertInstructions') : t('interface.editInstructions'),
         spellcheck: 'false',
       },
     });
@@ -596,9 +597,9 @@ export class InlineEditSession {
 
     const actionsEl = previewEl.createDiv({ cls: 'claudian-inline-preview-actions' });
     actionsEl.setAttribute('role', 'toolbar');
-    actionsEl.setAttribute('aria-label', 'Inline edit actions');
-    actionsEl.appendChild(this.createPreviewActionButton('Reject', 'reject', () => this.reject()));
-    actionsEl.appendChild(this.createPreviewActionButton('Accept', 'accept', () => this.accept()));
+    actionsEl.setAttribute('aria-label', t('interface.editActions'));
+    actionsEl.appendChild(this.createPreviewActionButton(t('interface.reject'), 'reject', () => this.reject()));
+    actionsEl.appendChild(this.createPreviewActionButton(t('interface.accept'), 'accept', () => this.accept()));
 
     void this.renderMarkdownDiffPreview(bodyEl, diffOps);
     return previewEl;
@@ -614,8 +615,8 @@ export class InlineEditSession {
       text: label,
       attr: {
         type: 'button',
-        'aria-label': `${label} inline edit`,
-        title: variant === 'accept' ? 'Accept (enter)' : 'Reject (esc)',
+        'aria-label': label,
+        title: variant === 'accept' ? t('interface.acceptKey') : t('interface.rejectKey'),
       },
     });
     button.addEventListener('click', (event: MouseEvent) => {

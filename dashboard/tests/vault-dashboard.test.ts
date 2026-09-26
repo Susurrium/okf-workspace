@@ -18,7 +18,7 @@ describe("VaultDashboardReader", () => {
         "projects/okf/project.md",
         note(
           "Project",
-          "个人知识工作区",
+          "个人知识库",
           "project_status: active",
           "## 当前状态\nDashboard local-first。\n\n## 下一步\n完成生产部署。\n\n## 任务\n- [ ] #task 发布工作台 [scheduled:: 2026-09-29] ^task-release",
         ),
@@ -111,7 +111,7 @@ describe("VaultDashboardReader", () => {
           "Source",
           "等待 Wiki",
           "purpose: wiki\ningested_via: feed\nkind: ai-daily",
-          "等待生成 Wiki。",
+          "等待生成知识笔记。",
         ),
       ],
     ]);
@@ -175,7 +175,7 @@ describe("VaultDashboardReader", () => {
       ],
     }));
     expect(learning.projects[0]).toEqual(expect.objectContaining({
-      title: "个人知识工作区",
+      title: "个人知识库",
       related_learning: [
         expect.objectContaining({
           path: "learning/guides/recursion.md",

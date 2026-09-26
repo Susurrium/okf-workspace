@@ -36,7 +36,7 @@ export class QuickCaptureModal extends Modal {
     let textarea: HTMLTextAreaElement | undefined;
     new Setting(this.contentEl)
       .setName("内容")
-      .setDesc("先记下来；没有明确归属就直接进入 Inbox。")
+      .setDesc("先记下来；没有明确归属就直接进入待处理。")
       .addTextArea((area) => {
         textarea = area.inputEl;
         area.setPlaceholder("一个想法、问题，或暂时不想打断当前工作的内容……");
@@ -54,7 +54,7 @@ export class QuickCaptureModal extends Modal {
       if (event.key !== "Enter" || !event.ctrlKey) return;
       event.preventDefault();
       if (this.contextKind) {
-        new Notice(`请先选择具体 ${this.contextKind === "course" ? "Course" : "Project"}`);
+        new Notice(`请先选择具体的${this.contextKind === "course" ? "课程" : "项目"}`);
         return;
       }
       void this.submit(this.initial);
@@ -76,9 +76,9 @@ export class QuickCaptureModal extends Modal {
     context.createEl("strong", { text: "保存时将自动关联" });
     context.createDiv({ text: this.fixedRelationLabel() });
     const label = this.initial.course && !this.initial.project
-      ? "关联 Course 后保存"
+      ? "关联课程后保存"
       : this.initial.project && !this.initial.course
-        ? "关联 Project 后保存"
+        ? "关联项目后保存"
         : "按当前关联保存";
     const actions = parent.createDiv({ cls: "okf-quick-capture-modal__actions" });
     this.actionButton(actions, label, "mod-cta", () => this.submit(this.initial));
@@ -88,10 +88,10 @@ export class QuickCaptureModal extends Modal {
   private fixedRelationLabel(): string {
     const labels: string[] = [];
     if (this.initial.course) {
-      labels.push(`Course · ${this.contextTitle("course", this.initial.course)}`);
+      labels.push(`课程 · ${this.contextTitle("course", this.initial.course)}`);
     }
     if (this.initial.project) {
-      labels.push(`Project · ${this.contextTitle("project", this.initial.project)}`);
+      labels.push(`项目 · ${this.contextTitle("project", this.initial.project)}`);
     }
     return labels.join(" · ");
   }
@@ -118,13 +118,13 @@ export class QuickCaptureModal extends Modal {
     this.actionButton(actions, CAPTURE_ENTRY_ACTION_LABELS[2], "okf-workflow-modal__secondary", () => {
       this.renderContextPicker(parent, "project");
     });
-    parent.createDiv({ cls: "okf-quick-capture-modal__hint", text: "Ctrl + Enter 直接保存到 Inbox" });
+    parent.createDiv({ cls: "okf-quick-capture-modal__hint", text: "Ctrl + Enter 直接保存到待处理" });
   }
 
   private renderContextPicker(parent: HTMLElement, kind: ContextKind): void {
     this.contextKind = kind;
     parent.empty();
-    const noun = kind === "course" ? "Course" : "Project";
+    const noun = kind === "course" ? "课程" : "项目";
     const heading = parent.createDiv({ cls: "okf-quick-capture-modal__picker-heading" });
     heading.createEl("strong", { text: `选择 ${noun}` });
     const back = heading.createEl("button", {

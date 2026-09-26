@@ -9,6 +9,7 @@ import type {
   ProviderServiceTierToggleConfig,
   ProviderUIOption,
 } from '../../../core/providers/types';
+import { t } from '../../../i18n/i18n';
 import { OPENAI_PROVIDER_ICON } from '../../../shared/icons';
 import { getCodexModelOptions } from '../modelOptions';
 import {
@@ -37,16 +38,19 @@ const EFFORT_LEVELS: ProviderReasoningOption[] = [
   ...CODEX_FALLBACK_REASONING_EFFORT_VALUES,
 ].map(value => ({ value, label: formatReasoningValueLabel(value) }));
 
-const CODEX_PERMISSION_MODE_TOGGLE: ProviderPermissionModeToggleConfig = {
+const getPermissionModeToggle = (): ProviderPermissionModeToggleConfig => ({
   inactiveValue: 'normal',
-  inactiveLabel: 'Safe',
+  inactiveLabel: t('interface.restricted'),
   activeValue: 'yolo',
-  activeLabel: 'YOLO',
+  activeLabel: t('interface.fullAccess'),
   planValue: 'plan',
-  planLabel: 'Plan',
-};
+  planLabel: t('interface.plan'),
+  inactiveDescription: t('interface.restrictedHelp'),
+  activeDescription: t('interface.fullAccessHelp'),
+  planDescription: t('interface.planHelp'),
+});
 
-const DEFAULT_SERVICE_TIER_LABEL = 'Standard';
+
 
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 
@@ -167,7 +171,7 @@ export const codexChatUIConfig: ProviderChatUIConfig = {
   },
 
   getPermissionModeToggle(): ProviderPermissionModeToggleConfig {
-    return CODEX_PERMISSION_MODE_TOGGLE;
+    return getPermissionModeToggle();
   },
 
   getServiceTierToggle(settings): ProviderServiceTierToggleConfig | null {
@@ -186,7 +190,7 @@ export const codexChatUIConfig: ProviderChatUIConfig = {
 
     return {
       inactiveValue: CODEX_DEFAULT_SERVICE_TIER,
-      inactiveLabel: DEFAULT_SERVICE_TIER_LABEL,
+      inactiveLabel: t('interface.standard'),
       activeValue: tier.id,
       activeLabel: tier.name,
       isActive: resolveCodexModelServiceTier(model, settings.serviceTier) === tier.id,

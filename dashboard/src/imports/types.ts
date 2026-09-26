@@ -29,7 +29,7 @@ export interface DocumentImportResult {
 
 export const intentLabels: Record<ImportIntent, string> = {
   learn: "学习",
-  wiki: "直接生成 Wiki",
+  wiki: "直接生成知识笔记",
   source: "只存来源",
   later: "暂不确定",
 };

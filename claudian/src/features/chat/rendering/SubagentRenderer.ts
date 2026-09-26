@@ -3,6 +3,7 @@ import { setIcon } from 'obsidian';
 import { getToolIcon } from '../../../core/tools/toolIcons';
 import { TOOL_SUBAGENT } from '../../../core/tools/toolNames';
 import type { SubagentInfo, ToolCallInfo } from '../../../core/types';
+import { t } from '../../../i18n/i18n';
 import { setupCollapsible } from './collapsible';
 import {
   getToolLabel,
@@ -99,7 +100,7 @@ function renderSubagentToolContent(contentEl: HTMLElement, toolCall: ToolCallInf
 
   if (!toolCall.result && toolCall.status === 'running') {
     const emptyEl = contentEl.createDiv({ cls: 'claudian-subagent-tool-empty' });
-    emptyEl.setText('Running...');
+    emptyEl.setText(t('chatUi.running'));
     return;
   }
 
@@ -208,7 +209,7 @@ function hydrateSyncSubagentStateFromStored(state: SubagentState, subagent: Suba
   }
 
   if (subagent.status === 'completed' || subagent.status === 'error') {
-    const fallback = subagent.status === 'error' ? 'ERROR' : 'DONE';
+    const fallback = subagent.status === 'error' ? 'ERROR' : t('chatUi.done');
     finalizeSubagentBlock(state, subagent.result || fallback, subagent.status === 'error');
   } else {
     state.statusEl.className = 'claudian-subagent-status status-running';
@@ -249,7 +250,7 @@ export function createSubagentBlock(
   labelEl.setText(truncateDescription(description));
 
   const statusEl = headerEl.createDiv({ cls: 'claudian-subagent-status status-running' });
-  statusEl.setAttribute('aria-label', 'Status: running');
+  statusEl.setAttribute('aria-label', t('chatUi.statusRunning'));
 
   const contentEl = wrapperEl.createDiv({ cls: 'claudian-subagent-content' });
 
@@ -358,7 +359,7 @@ export function finalizeSubagentBlock(
     state.wrapperEl.addClass('error');
   }
 
-  const finalText = result?.trim() ? result : (isError ? 'ERROR' : 'DONE');
+  const finalText = result?.trim() ? result : (isError ? 'ERROR' : t('chatUi.done'));
   setResultText(state, finalText);
 
   updateSyncHeaderAria(state);
@@ -405,21 +406,21 @@ function getAsyncDisplayStatus(asyncStatus: string | undefined): 'running' | 'co
 
 function getAsyncStatusText(asyncStatus: string | undefined): string {
   switch (asyncStatus) {
-    case 'pending': return 'Initializing';
+    case 'pending': return t('chatUi.initializing');
     case 'completed': return ''; // Just show tick icon, no text
     case 'error': return 'Error';
-    case 'orphaned': return 'Orphaned';
-    default: return 'Running in background';
+    case 'orphaned': return t('chatUi.orphaned');
+    default: return t('chatUi.runningInBackground');
   }
 }
 
 function getAsyncStatusAriaLabel(asyncStatus: string | undefined): string {
   switch (asyncStatus) {
-    case 'pending': return 'Initializing';
+    case 'pending': return t('chatUi.initializing');
     case 'completed': return 'Completed';
     case 'error': return 'Error';
-    case 'orphaned': return 'Orphaned';
-    default: return 'Running in background';
+    case 'orphaned': return t('chatUi.orphaned');
+    default: return t('chatUi.runningInBackground');
   }
 }
 
@@ -466,7 +467,7 @@ function renderAsyncContentLikeSync(
     return;
   }
 
-  const fallback = displayStatus === 'error' ? 'ERROR' : 'DONE';
+  const fallback = displayStatus === 'error' ? 'ERROR' : t('chatUi.done');
   const finalText = subagent.result?.trim() ? subagent.result : fallback;
   resultEl.setText(finalText);
 }
@@ -512,10 +513,10 @@ export function createAsyncSubagentBlock(
   labelEl.setText(truncateDescription(description));
 
   const statusTextEl = headerEl.createDiv({ cls: 'claudian-subagent-status-text' });
-  statusTextEl.setText('Initializing');
+  statusTextEl.setText(t('chatUi.initializing'));
 
   const statusEl = headerEl.createDiv({ cls: 'claudian-subagent-status status-running' });
-  statusEl.setAttribute('aria-label', 'Status: running');
+  statusEl.setAttribute('aria-label', t('chatUi.statusRunning'));
 
   const contentEl = wrapperEl.createDiv({ cls: 'claudian-subagent-content' });
   renderAsyncContentLikeSync(contentEl, info, 'running');
@@ -543,7 +544,7 @@ export function updateAsyncSubagentRunning(
   setAsyncWrapperStatus(state.wrapperEl, 'running');
   updateAsyncLabel(state);
 
-  state.statusTextEl.setText('Running in background');
+  state.statusTextEl.setText(t('chatUi.runningInBackground'));
 
   renderAsyncContentLikeSync(state.contentEl, state.info, 'running');
 }
@@ -588,7 +589,7 @@ export function markAsyncSubagentOrphaned(state: AsyncSubagentState): void {
   setAsyncWrapperStatus(state.wrapperEl, 'orphaned');
   updateAsyncLabel(state);
 
-  state.statusTextEl.setText('Orphaned');
+  state.statusTextEl.setText(t('chatUi.orphaned'));
 
   state.statusEl.className = 'claudian-subagent-status status-error';
   state.statusEl.empty();

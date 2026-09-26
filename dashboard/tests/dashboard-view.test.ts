@@ -16,7 +16,7 @@ import {
   systemStatusLabel,
   treeholeMetadata,
 } from "../src/plugin/dashboard-view.js";
-import type { NoteSummary, ProjectSummary, SemanticOperationRecord } from "../src/api/types.js";
+import type { ConversionRecord, NoteSummary, ProjectSummary, SemanticOperationRecord } from "../src/api/types.js";
 import type {
   AiDailyStream,
   FeedDigestEdition,
@@ -42,11 +42,39 @@ function note(overrides: Partial<NoteSummary>): NoteSummary {
   };
 }
 
+it("keeps a failed generation handoff actionable in the real Inbox card", async () => {
+  const record: ConversionRecord = {
+    conversion_id: "conv-handoff", status: "imported", parser: "markitdown",
+    source_filename: "fixture.pdf", intent: "learn", quality: "quick",
+    stages: { conversion: "completed", routing: "completed", semantic: "failed" },
+    error: "queue busy", outputs: { source_text: "sources/text/fixture.md", routed_target: "learning/guides/future.md" },
+  };
+  const watchDocumentConversion = vi.fn();
+  const openVaultPath = vi.fn();
+  const view = new OkfDashboardView(
+    new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App),
+    { getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      ensureLocalServiceAvailable: async () => undefined, watchDocumentConversion, openVaultPath } as never,
+  );
+  const retryConversion = vi.fn(async () => record);
+  vi.spyOn(view as never, "api").mockReturnValue({ retryConversion });
+  vi.spyOn(view as never, "render").mockResolvedValue(undefined);
+  const container = new TestElement();
+  (view as unknown as { renderInboxConversionCard(parent: HTMLElement, record: ConversionRecord): void })
+    .renderInboxConversionCard(container as unknown as HTMLElement, record);
+  expect(container.descendants().some((item) => item.textContent.includes("生成入队失败"))).toBe(true);
+  container.descendants().find((item) => item.textContent === "打开结果")!.click();
+  expect(openVaultPath).toHaveBeenCalledWith("sources/text/fixture.md");
+  container.descendants().find((item) => item.textContent === "重试生成入队")!.click();
+  await vi.waitFor(() => expect(retryConversion).toHaveBeenCalledWith("conv-handoff"));
+  expect(watchDocumentConversion).toHaveBeenCalledWith("conv-handoff");
+});
+
 function project(status: "active" | "paused" | "completed" = "active"): ProjectSummary {
   return {
     ...note({
       path: "projects/workspace/project.md",
-      title: "个人知识工作区",
+      title: "个人知识库",
       note_type: "Project",
       status: "stable",
       project_status: status,
@@ -275,7 +303,7 @@ describe("real Dashboard View source handoff", () => {
     } as never);
 
     expect(view.getViewType()).toBe(OKF_DASHBOARD_VIEW);
-    expect(view.getDisplayText()).toBe("Dashboard");
+    expect(view.getDisplayText()).toBe("工作台");
   });
 
   it("keeps the focused pane title and saved state aligned with its page", async () => {
@@ -287,7 +315,7 @@ describe("real Dashboard View source handoff", () => {
     await pane.setState({ section: "knowledge", workbenchPath: "workbenches/daily" }, {} as never);
 
     expect(pane.getViewType()).toBe(OKF_DASHBOARD_VIEW);
-    expect(pane.getDisplayText()).toBe("OKF · Knowledge");
+    expect(pane.getDisplayText()).toBe("工作台 · 知识库");
     expect(pane.getState()).toEqual({ section: "knowledge", workbenchPath: "workbenches/daily" });
   });
 
@@ -1022,7 +1050,7 @@ describe("real Dashboard View source handoff", () => {
     const papersBase = feedEdition("papers", "papers-2026-08-24", "2026-08-24");
     const papers = {
       ...papersBase,
-      title: "AI Papers of the Week",
+      title: "AI 论文周刊",
       item_count: 2,
       items: [
         papersBase.items[0]!,
@@ -1069,13 +1097,13 @@ describe("real Dashboard View source handoff", () => {
 
     const nav = root.descendants("okf-dashboard__nav")[0];
     expect(nav?.children.map((child) => child.textContent)).toEqual([
-      "Today",
-      "Inbox",
-      "Reading",
-      "Learning",
-      "Projects",
-      "Knowledge",
-      "Life",
+      "今天",
+      "待处理",
+      "订阅阅读",
+      "学习",
+      "项目",
+      "知识库",
+      "生活",
     ]);
     expect(loadFeedSubscriptionSources).toHaveBeenNthCalledWith(1, { limit: 8 });
     expect(root.descendants("okf-reading-source-card")).toHaveLength(1);
@@ -1165,7 +1193,7 @@ describe("real Dashboard View source handoff", () => {
       "1. 条目 learning-1",
     ]);
     expect(root.descendants("okf-feed-digest__decision").map((item) => item.textContent))
-      .toContain("已整理 Wiki");
+      .toContain("已选择整理为知识笔记");
     expect(root.descendants().some((item) => item.textContent === "已显示全部 4 条")).toBe(true);
 
     // External refreshes eventually revalidate the first page while preserving
@@ -1905,7 +1933,7 @@ describe("real Dashboard View source handoff", () => {
       .toBe(true);
     expect(container.descendants("okf-feed-project__preview")).toHaveLength(3);
     expect(container.descendants().some((item) => item.textContent === "7. 热点 7")).toBe(true);
-    expect(container.descendants().some((item) => item.textContent === "打开本期原生笔记")).toBe(true);
+    expect(container.descendants().some((item) => item.textContent === "打开本期汇总")).toBe(true);
 
     const bodies = container.descendants("okf-feed-card__body");
     expect(bodies.map((body) => body.dataset.feed)).toEqual([
@@ -1992,9 +2020,9 @@ describe("real Dashboard View source handoff", () => {
       .map((item) => item.children[1]?.textContent);
     expect(labels).toEqual([
       "异常",
-      "Inbox",
-      "待生成 Study Guide",
-      "待生成 Wiki",
+      "待处理",
+      "待生成学习笔记",
+      "待生成知识笔记",
       "知识待复核",
       "后台运行",
     ]);
@@ -2101,8 +2129,8 @@ describe("real Dashboard View source handoff", () => {
   });
 
   it("uses the same explicit Feed result labels on Today and Reading items", () => {
-    expect(feedDecisionLabel("learn-now")).toBe("已开始学习");
-    expect(feedDecisionLabel("wiki-now")).toBe("已整理 Wiki");
+    expect(feedDecisionLabel("learn-now")).toBe("已选择学习");
+    expect(feedDecisionLabel("wiki-now")).toBe("已选择整理为知识笔记");
     expect(feedDecisionLabel("ignore")).toBe("已忽略");
     expect(feedDecisionLabel(null)).toBe("");
   });
@@ -2144,8 +2172,8 @@ describe("real Dashboard View source handoff", () => {
       "记录待整理想法",
       "添加资料",
       "打开项目日志",
-      "新建正式决定",
-      "在 Claudian 中整理项目",
+      "记录项目决策",
+      "用 AI 整理项目",
     ]);
     expect(PROJECT_ACTION_PANEL_LABELS).not.toContain("记录关键点");
   });
@@ -2154,12 +2182,12 @@ describe("real Dashboard View source handoff", () => {
     const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
     const promptProjectProgress = vi.fn();
     const promptCapture = vi.fn();
-    const promptDocumentImport = vi.fn();
+    const openDocumentImport = vi.fn();
     const openVaultPath = vi.fn(async () => undefined);
     const plugin = {
       getDashboardUiState: () => normalizeDashboardUiState(undefined),
       promptProject: () => undefined,
-      promptDocumentImport,
+      openDocumentImport,
       promptProjectProgress,
       promptCapture,
       setProjectStatus: vi.fn(async () => ({ path: "projects/workspace/project.md" })),
@@ -2179,7 +2207,7 @@ describe("real Dashboard View source handoff", () => {
         projects: async () => ({
           projects: [{
             path: "projects/workspace/project.md",
-            title: "个人知识工作区",
+            title: "个人知识库",
             note_type: "Project",
             status: "stable",
             stale: false,
@@ -2205,23 +2233,23 @@ describe("real Dashboard View source handoff", () => {
 
     const row = container.descendants("okf-project-row")[0];
     const actions = row?.descendants("okf-work-item__actions")[0];
-    expect(actions?.children.map((child) => child.textContent)).toEqual(["记录进展", "其他操作 ▾"]);
+    expect(actions?.children.map((child) => child.textContent)).toEqual(["记录进展", "添加资料 · 可拖入文件夹", "其他操作 ▾"]);
     actions?.children[0]?.click();
     expect(promptProjectProgress).toHaveBeenCalledWith("projects/workspace/project.md");
     expect(panels).toHaveLength(1);
-    expect(panels[0]?.label).toBe("其他操作 · 个人知识工作区");
+    expect(panels[0]?.label).toBe("其他操作 · 个人知识库");
     expect(panels[0]?.actions.map((action) => action.title)).toEqual(PROJECT_ACTION_PANEL_LABELS);
     expect(row?.descendants("okf-work-item__metric").map((item) => item.textContent)).toEqual([
       "待整理 0",
-      "Study Guide 0",
-      "来源 0",
+      "学习笔记 0",
+      "资料 0",
     ]);
 
     await panels[0]?.actions[0]?.onSelect();
     await panels[0]?.actions[1]?.onSelect();
     await panels[0]?.actions[2]?.onSelect();
     expect(promptCapture).toHaveBeenCalledWith({ project: "projects/workspace/project.md" });
-    expect(promptDocumentImport).toHaveBeenCalledWith({ project: "workspace" });
+    expect(openDocumentImport).toHaveBeenCalledWith([], { project: "workspace" }, "context");
     expect(openVaultPath).toHaveBeenCalledWith("projects/workspace/log.md");
   });
 
@@ -2296,27 +2324,27 @@ describe("real Dashboard View source handoff", () => {
     const list = root.descendants("okf-work-item__related")[0]!;
     expect(list.children.map((entry) => entry.textContent)).toEqual(["资料 A", "资料 B"]);
     list.children[1]!.click(); expect(openVaultPath).toHaveBeenCalledWith("sources/b.md");
-    expect(root.descendants("okf-work-item__actions")[0]!.children.map((entry) => entry.textContent)).toEqual(["记录进展", "其他操作 ▾"]);
+    expect(root.descendants("okf-work-item__actions")[0]!.children.map((entry) => entry.textContent)).toEqual(["记录进展", "添加资料 · 可拖入文件夹", "其他操作 ▾"]);
   });
 
   it("inherits the selected Course when importing and creating a Lesson from Learning", async () => {
     const coursePath = "learning/courses/algebra/course.md";
     const selectedCourse = { ...note({ path: coursePath, title: "Algebra", note_type: "Course" }),
       course_status: "active", current_progress: "", guide_count: 0, lesson_count: 0, related_sources: [], pending_captures: [] };
-    const promptDocumentImport = vi.fn(); const promptLessonForCourse = vi.fn();
+    const openDocumentImport = vi.fn(); const promptLessonForCourse = vi.fn();
     const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
     const view = new OkfDashboardView(leaf, { getDashboardUiState: () => normalizeDashboardUiState({
       pages: { learning: { filters: { context: "course", relation: coursePath } } } }),
-      semanticOperationsSnapshot: () => [], promptDocumentImport, promptLessonForCourse } as never);
+      semanticOperationsSnapshot: () => [], openDocumentImport, promptLessonForCourse } as never);
     const runtime = view as unknown as { renderLearning: (el: HTMLElement) => Promise<void>; attachActionPanel: () => void; vaultReader: unknown };
     runtime.attachActionPanel = () => undefined;
     runtime.vaultReader = { learning: async () => ({ pending_guides: [], ready_guides: [], completed_guides: [], courses: [selectedCourse], projects: [] }) };
     const root = new TestElement(); await runtime.renderLearning(root as unknown as HTMLElement);
     root.descendants().find((entry) => entry.textContent === "导入学习资料")!.click();
-    root.descendants().find((entry) => entry.textContent === "新建 Lesson")!.click();
-    expect(promptDocumentImport).toHaveBeenCalledWith({ course: "algebra" });
+    root.descendants().find((entry) => entry.textContent === "新建课堂笔记")!.click();
+    expect(openDocumentImport).toHaveBeenCalledWith([], { course: "algebra" }, "learning");
     expect(promptLessonForCourse).toHaveBeenCalledWith(coursePath);
-    expect(root.descendants("okf-course-work-item")[0]?.descendants("okf-work-item__actions")[0]?.children.map((entry) => entry.textContent)).toEqual(["新建 Lesson", "其他操作 ▾"]);
+    expect(root.descendants("okf-course-work-item")[0]?.descendants("okf-work-item__actions")[0]?.children.map((entry) => entry.textContent)).toEqual(["新建课堂笔记", "添加资料 · 可拖入文件夹", "其他操作 ▾"]);
   });
 
   it("keeps cached Daily and Papers items visible while making a refresh failure actionable", async () => {
@@ -2408,10 +2436,10 @@ describe("real Dashboard View source handoff", () => {
     ]);
     expect(container.descendants("okf-dashboard__row-details")).toHaveLength(0);
     expect(panels.map((panel) => panel.actions.map((action) => action.title))).toEqual([
-      ["与 Claudian 一起生成"],
-      ["与 Claudian 一起生成"],
-      ["用 Claudian 完善", "用 Claudian 讨论", "标记完成"],
-      ["用 Claudian 完善", "用 Claudian 讨论", "取消完成", "沉淀 Wiki"],
+      ["补充要求后生成"],
+      ["补充要求后生成"],
+      ["用 AI 完善", "与 AI 讨论", "标记完成"],
+      ["用 AI 完善", "与 AI 讨论", "取消完成", "整理为知识笔记"],
     ]);
   });
 
@@ -2437,7 +2465,7 @@ describe("real Dashboard View source handoff", () => {
       operation("generating"),
     );
     expect(generating.descendants("okf-work-item__actions")[0]?.children.map((child) => child.textContent))
-      .toEqual(["Codex 正在生成内容", "其他操作 ▾"]);
+      .toEqual(["正在生成内容", "其他操作 ▾"]);
     expect(panels[0]?.actions.map((action) => action.title)).toEqual(["取消后台生成"]);
 
     const publishing = new TestElement();

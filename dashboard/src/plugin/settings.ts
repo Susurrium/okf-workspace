@@ -56,12 +56,12 @@ export function renderOkfServiceSettings(container: HTMLElement, plugin: OkfBrai
       );
     new Setting(container)
       .setName("文档转换策略")
-      .setDesc("默认使用 MarkItDown。当前暂不使用 MinerU；仅在明确恢复该服务后切换高级策略。")
+      .setDesc("快速转换适合文字资料。使用 MinerU 前需先配置并连接该服务。")
       .addDropdown((dropdown) =>
         dropdown
           .addOption("markitdown-only", "MarkItDown（默认）")
-          .addOption("prefer-mineru", "高级：优先 MinerU，可降级")
-          .addOption("mineru-required", "高级：必须 MinerU")
+          .addOption("prefer-mineru", "优先 MinerU，失败时尝试快速转换")
+          .addOption("mineru-required", "仅使用 MinerU")
           .setValue(plugin.settings.documentParserPolicy)
           .onChange(async (value) => {
             plugin.settings.documentParserPolicy = value as OkfBrainSettings["documentParserPolicy"];
@@ -77,7 +77,9 @@ export function renderOkfServiceSettings(container: HTMLElement, plugin: OkfBrai
           await plugin.saveSettings();
         }),
       );
-    new Setting(container)
+    const advanced = container.createEl("details");
+    advanced.createEl("summary", { text: "高级启动设置" });
+    new Setting(advanced)
       .setName("Python 可执行文件")
       .setDesc("由安装器写入；用于随 Obsidian 启动本地服务。")
       .addText((text) =>
@@ -86,18 +88,18 @@ export function renderOkfServiceSettings(container: HTMLElement, plugin: OkfBrai
           await plugin.saveSettings();
         }),
       );
-    new Setting(container)
-      .setName("部署配置")
-      .setDesc("Vault 外 deployment.json 的完整路径。")
+    new Setting(advanced)
+      .setName("服务配置文件")
+      .setDesc("安装器创建的 deployment.json 路径，通常无需修改。")
       .addText((text) =>
         text.setValue(plugin.settings.deploymentConfig).onChange(async (value) => {
           plugin.settings.deploymentConfig = value.trim();
           await plugin.saveSettings();
         }),
       );
-    new Setting(container)
-      .setName("配对 token 文件")
-      .setDesc("由本机安装器创建在 Vault 外；这里只保存文件路径，不保存 token。")
+    new Setting(advanced)
+      .setName("认证凭据文件")
+      .setDesc("由安装器创建，保存在笔记库外。这里只设置凭据文件的位置。")
       .addText((text) =>
         text
           .setPlaceholder("E:\\ObsidianData\\OKF-Brain-State\\secrets\\local-api-token")
@@ -113,10 +115,10 @@ export function renderOkfServiceSettings(container: HTMLElement, plugin: OkfBrai
 export function okfServiceSettingDefinitions(plugin: OkfBrainPlugin): SettingDefinitionItem[] {
   return [{
     type: "group",
-    heading: "OKF / Engine",
+    heading: "连接与导入",
     items: [{
-      name: "OKF 与本地服务",
-      desc: "配置 Engine、本地文档转换和 Vault 外凭据路径。",
+      name: "连接与导入",
+      desc: "设置文档转换、服务连接与高级启动选项。",
       aliases: ["Engine", "MarkItDown", "Python", "token"],
       render: (setting) => {
         setting.settingEl.addClass("dashboard-settings-section");

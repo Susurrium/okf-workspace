@@ -2,19 +2,30 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 from okf_workspace.ingestion import FILE_IMPORT
-from okf_workspace.okf.frontmatter import OkfDocument
-from okf_workspace.okf.paths import slugify
+from okf_workspace.okf.file_io import FileWriteConflict, atomic_write_bytes, file_sha256
+from okf_workspace.okf.frontmatter import OkfDocument, render_document
+from okf_workspace.okf.paths import resolve_bundle_path, slugify
 from okf_workspace.sources import SourcePublisher
 
 from .models import ImportIntent, ImportRequest, OriginalRecord, ParserExport
 
 _HEADING = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
 _LINK = re.compile(r"(!?\[[^\]]*\]\()([^)#]+)(#[^)]*)?(\))")
+
+
+@dataclass(frozen=True)
+class PublishedImport:
+    source: Path
+    source_text: Path
+    routed_target: Path | None
+    text_sha256: str | None
 
 
 def _title(export: ParserExport, original: OriginalRecord) -> str:
@@ -33,15 +44,24 @@ def _copy_assets(
     vault: Path,
     slug: str,
     export: ParserExport,
+    *,
+    publish: bool = True,
 ) -> tuple[str, list[str]]:
     mapping: dict[str, str] = {}
     published: list[str] = []
     for relative, data in sorted(export.assets.items()):
         normalized = relative.replace("\\", "/").lstrip("./")
         target_relative = f"sources/assets/{slug}/{normalized}"
-        target = vault.joinpath(*Path(target_relative).parts)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
+        target = resolve_bundle_path(vault, target_relative)
+        if target.exists() and target.read_bytes() != data:
+            # Never change assets still referenced by the previous authority text.
+            digest = hashlib.sha256(data).hexdigest()
+            target_relative = f"sources/assets/{slug}/versions/{digest}/{normalized}"
+            target = resolve_bundle_path(vault, target_relative)
+        if not target.exists() and publish:
+            atomic_write_bytes(target, data, create_only=True)
+        elif target.exists() and target.read_bytes() != data:
+            raise FileWriteConflict(f"Source asset changed: {target}")
         mapping[normalized] = f"/{target_relative}"
         published.append(target_relative)
 
@@ -96,9 +116,15 @@ def publish_import(
     request: ImportRequest,
     original: OriginalRecord,
     export: ParserExport,
-) -> tuple[Path, Path, Path | None]:
+    *,
+    replace_existing: bool = False,
+    expected_text_sha256: str | None = None,
+) -> PublishedImport:
     with SourcePublisher(vault).transaction():
-        return _publish_import_locked(vault, request, original, export)
+        return _publish_import_locked(
+            vault, request, original, export,
+            replace_existing=replace_existing, expected_text_sha256=expected_text_sha256,
+        )
 
 
 def _publish_import_locked(
@@ -106,7 +132,10 @@ def _publish_import_locked(
     request: ImportRequest,
     original: OriginalRecord,
     export: ParserExport,
-) -> tuple[Path, Path, Path | None]:
+    *,
+    replace_existing: bool,
+    expected_text_sha256: str | None,
+) -> PublishedImport:
     vault = vault.resolve()
     publisher = SourcePublisher(vault)
     title = _title(export, original)
@@ -125,7 +154,16 @@ def _publish_import_locked(
         source_relative = source.relative_to(vault).as_posix()
         text_relative = source_text.relative_to(vault).as_posix()
         slug = source.stem
-    markdown, assets = _copy_assets(vault, slug, export)
+        if not replace_existing:
+            publisher.resolve_use(
+                source_document, purpose=_purpose(request.intent),
+                course=request.course, project=request.project,
+            )
+            publisher.publish_pair(source, source_text, source_document, text_document)
+            return PublishedImport(
+                source, source_text, _route_draft(vault, request, slug=slug), None,
+            )
+    markdown, assets = _copy_assets(vault, slug, export, publish=False)
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     source_document.frontmatter.update(
         {
@@ -175,6 +213,21 @@ def _publish_import_locked(
         markdown,
         text_title if isinstance(text_title, str) and text_title.strip() else title,
     )
+    text_sha256 = hashlib.sha256(
+        render_document(text_fields, text_document.body).encode("utf-8"),
+    ).hexdigest()
+    if existing is not None and file_sha256(source_text) not in {
+        expected_text_sha256, text_sha256,
+    }:
+        # The candidate hash also permits recovery after publication succeeded
+        # but the conversion receipt was not persisted before shutdown.
+        raise FileWriteConflict(
+            "Source Text has human changes or no publication baseline; preserved the note. "
+            "The new conversion is available in the runtime export directory."
+        )
+    published_markdown, _ = _copy_assets(vault, slug, export)
+    if published_markdown != markdown:
+        raise FileWriteConflict("Source assets changed during publication; retry the import")
     publisher.publish_pair(
         source,
         source_text,
@@ -186,7 +239,10 @@ def _publish_import_locked(
         request,
         slug=slug,
     )
-    return source, source_text, draft
+    return PublishedImport(
+        source, source_text, draft,
+        text_sha256,
+    )
 
 
 def route_existing_import(

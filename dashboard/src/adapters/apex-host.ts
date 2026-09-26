@@ -52,6 +52,7 @@ export interface ApexHostAdapterOptions {
     card: DashboardCard,
   ) => Promise<{ path: string; created: boolean }>;
   createManagedArtifact?: (artifactType: string) => Promise<boolean>;
+  openDocumentImportFromDrop?: (transfer: DataTransfer) => void;
 }
 
 /**
@@ -71,6 +72,7 @@ export class ApexHostAdapter implements ApexHost {
   private readonly artifactMutation: ApexHostAdapterOptions["mutateManagedArtifact"];
   private readonly memoConversion: ApexHostAdapterOptions["convertMemoToCapture"];
   private readonly managedArtifactCreation: ApexHostAdapterOptions["createManagedArtifact"];
+  public readonly openDocumentImportFromDrop: ApexHostAdapterOptions["openDocumentImportFromDrop"];
   public readonly backupService: BackupService;
   private readonly mediaTagService: MediaTagService;
   private readonly habitService: HabitService;
@@ -95,6 +97,7 @@ export class ApexHostAdapter implements ApexHost {
     this.artifactMutation = options.mutateManagedArtifact;
     this.memoConversion = options.convertMemoToCapture;
     this.managedArtifactCreation = options.createManagedArtifact;
+    this.openDocumentImportFromDrop = options.openDocumentImportFromDrop;
     this.backupService = new BackupService(this);
     this.mediaTagService = new MediaTagService(this);
     this.habitService = new HabitService(this);
@@ -179,7 +182,7 @@ export class ApexHostAdapter implements ApexHost {
     workspacePath: string,
     card: DashboardCard,
   ): Promise<{ path: string; created: boolean }> {
-    if (!this.memoConversion) return Promise.reject(new Error("Capture 转换服务未配置"));
+    if (!this.memoConversion) return Promise.reject(new Error("随手记录转换服务未配置"));
     return this.memoConversion(workspacePath, card);
   }
 

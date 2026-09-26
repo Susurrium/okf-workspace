@@ -3327,3 +3327,47 @@ button.okf-action-panel__action:focus-visible,
     display: none;
   }
 }
+.okf-dashboard__document-drop,
+.okf-document-import__drop {
+  border: 1px dashed var(--interactive-accent);
+  border-radius: var(--okf-radius-small, 8px);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.okf-dashboard__document-drop {
+  margin: -5px 0 14px;
+  padding: 9px 12px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.okf-document-drop--active {
+  background: var(--background-modifier-hover);
+  border-color: var(--text-accent);
+  color: var(--text-normal);
+}
+
+.okf-document-import-modal .modal-content {
+  max-height: min(75vh, 760px);
+  overflow-y: auto;
+}
+
+.okf-document-import__drop {
+  padding: 18px;
+  text-align: center;
+}
+
+.okf-document-import__drop strong { display: block; color: var(--text-normal); }
+.okf-document-import__drop > div { margin-top: 5px; }
+.okf-document-import__pickers { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.okf-document-import__files { margin: 14px 0; }
+.okf-document-import__files ul { max-height: 180px; overflow: auto; padding-left: 20px; overflow-wrap: anywhere; }
+.okf-document-import__settings { display: grid; gap: 11px; }
+.okf-document-import__field { display: grid; gap: 4px; }
+.okf-document-import__field select { width: 100%; }
+.okf-document-import__checkbox { display: flex; align-items: center; gap: 7px; }
+.okf-document-import__fixed-relation { padding: 8px 10px; background: var(--background-secondary); border-radius: 6px; }
+.okf-document-import__status { margin: 12px 0; color: var(--text-muted); }
+.okf-document-import__actions { display: flex; justify-content: flex-end; }

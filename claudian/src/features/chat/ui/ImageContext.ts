@@ -2,6 +2,7 @@ import { Notice } from 'obsidian';
 import * as path from 'path';
 
 import type { ImageAttachment, ImageMediaType } from '../../../core/types';
+import { t } from '../../../i18n/i18n';
 import { ComposerContextTray } from './ComposerContextTray';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
@@ -142,7 +143,7 @@ export class ImageContextManager {
     line.setAttribute('y1', '3');
     line.setAttribute('x2', '12');
     line.setAttribute('y2', '15');
-    dropContent.createSpan({ text: 'Drop image here' });
+    dropContent.createSpan({ text: t('chatUi.dropImageHere') });
 
     inputWrapper.addEventListener('dragenter', this.dragEnterHandler);
     inputWrapper.addEventListener('dragover', this.dragOverHandler);
@@ -155,7 +156,7 @@ export class ImageContextManager {
     e.preventDefault();
     e.stopPropagation();
 
-    if (e.dataTransfer?.types.includes('Files')) {
+    if (e.dataTransfer?.types.includes(t('chatUi.files'))) {
       this.dropOverlay?.addClass('visible');
     }
   }
@@ -239,7 +240,7 @@ export class ImageContextManager {
   private async addImageFromFile(file: File, source: 'paste' | 'drop'): Promise<boolean> {
     if (this.destroyed) return false;
     if (!this.enabled) {
-      new Notice('Image attachments are not supported by this provider.');
+      new Notice(t('chatUi.imageAttachmentsAreNotSupportedByThisProvider'));
       return false;
     }
 

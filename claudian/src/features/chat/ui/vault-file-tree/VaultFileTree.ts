@@ -14,6 +14,7 @@ import {
   scheduleDelayedFrame,
 } from '@/utils/animationFrame';
 
+import { t } from '../../../../i18n/i18n';
 import { showVaultFileCreateModal } from './VaultFileCreateModal';
 import { showVaultFileTreeMenu } from './VaultFileTreeMenu';
 import { toVaultFileTreePath, toVaultPath } from './vaultFileTreePaths';
@@ -210,12 +211,12 @@ export class VaultFileTree {
     ));
 
     const headerActions = this.createElement('div', 'claudian-vault-file-tree-header-actions');
-    const newNoteButton = this.createHeaderButton('New note', 'file-plus', () => {
+    const newNoteButton = this.createHeaderButton(t('chatUi.newNote'), 'file-plus', () => {
       const activeFilePath = this.options.app.workspace.getActiveFile()?.path ?? '';
       const parent = this.options.app.fileManager.getNewFileParent(activeFilePath);
       showVaultFileCreateModal(this.options.app, parent, 'note');
     });
-    const newFolderButton = this.createHeaderButton('New folder', 'folder-plus', () => {
+    const newFolderButton = this.createHeaderButton(t('chatUi.newFolder'), 'folder-plus', () => {
       showVaultFileCreateModal(this.options.app, this.options.app.vault.getRoot(), 'folder');
     });
     this.searchButtonEl = this.createElement(
@@ -223,7 +224,7 @@ export class VaultFileTree {
       'claudian-vault-file-tree-header-button',
     );
     this.searchButtonEl.type = 'button';
-    this.searchButtonEl.setAttribute('aria-label', 'Search files');
+    this.searchButtonEl.setAttribute('aria-label', t('chatUi.searchFiles'));
     this.searchButtonEl.setAttribute('aria-expanded', 'false');
     setIcon(this.searchButtonEl, 'search');
     this.searchButtonEl.addEventListener('click', () => {
@@ -249,8 +250,8 @@ export class VaultFileTree {
     );
     this.searchInputEl.type = 'search';
     this.searchInputEl.autocomplete = 'off';
-    this.searchInputEl.placeholder = 'Search files';
-    this.searchInputEl.setAttribute('aria-label', 'Search files');
+    this.searchInputEl.placeholder = t('chatUi.searchFiles');
+    this.searchInputEl.setAttribute('aria-label', t('chatUi.searchFiles'));
     let committedCompositionValue: string | null = null;
     this.searchInputEl.addEventListener('compositionstart', () => {
       this.isSearchComposing = true;

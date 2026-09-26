@@ -1,6 +1,7 @@
 import type { App } from 'obsidian';
 import { Notice, type TFolder } from 'obsidian';
 
+import { t } from '../../../../i18n/i18n';
 import {
   hasVaultPathConflict,
   joinVaultPath,
@@ -45,7 +46,7 @@ export function showVaultFileCreateModal(
     failureMessage: `Failed to create ${itemLabel}`,
     initialName: getAvailableInitialName(app, parent, kind),
     submitLabel: 'Create',
-    title: kind === 'note' ? 'New note' : 'New folder',
+    title: kind === 'note' ? t('chatUi.newNote') : t('chatUi.newFolder'),
     onSubmit: async (name) => {
       if (!parent.isRoot() && app.vault.getAbstractFileByPath(parent.path) !== parent) {
         return 'Destination folder is no longer available';

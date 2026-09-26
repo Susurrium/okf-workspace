@@ -80,7 +80,7 @@ export function createTodaySectionDefinition(host: TodaySectionHost): CustomSect
   return {
     type: OKF_TODAY_SECTION_TYPE,
     icon: "calendar-check-2",
-    label: "今天（OKF）",
+    label: "今天",
     defaultName: "今天",
     async render({ container, app }): Promise<void> {
       const actions = container.createDiv({ cls: "okf-today-section__actions" });
@@ -93,7 +93,7 @@ export function createTodaySectionDefinition(host: TodaySectionHost): CustomSect
       const tasks = todayFormalTasks(await collectVaultTasks(app), localIsoDate());
       loading.remove();
       if (tasks.length === 0) {
-        container.createDiv({ cls: "dashboard-library-empty", text: "今天没有已安排的正式任务。" });
+        container.createDiv({ cls: "dashboard-library-empty", text: "今天没有已安排的任务。" });
         return;
       }
       const list = container.createDiv({ cls: "okf-today-section__tasks" });

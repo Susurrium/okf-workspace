@@ -1,12 +1,12 @@
 ---
 type: System View
-title: 正式任务
+title: 任务
 created_at: 2026-08-20T00:00:00+08:00
 ---
 
-# 正式任务
+# 任务
 
-本页由 Tasks 插件动态展示 Markdown 中带 `#task` 的任务；任务本身仍保存在原笔记。
+这里汇总笔记中带 `#task` 的未完成任务。点击任务可返回原笔记。
 
 ```tasks
 not done

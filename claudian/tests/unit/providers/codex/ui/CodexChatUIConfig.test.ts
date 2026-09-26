@@ -609,15 +609,18 @@ describe('CodexChatUIConfig', () => {
   });
 
   describe('getPermissionModeToggle', () => {
-    it('should return yolo/safe toggle config with plan mode', () => {
+    it('should return access labels and descriptions with plan mode', () => {
       const toggle = codexChatUIConfig.getPermissionModeToggle!();
       expect(toggle).toEqual({
         inactiveValue: 'normal',
-        inactiveLabel: 'Safe',
+        inactiveLabel: 'Restricted',
         activeValue: 'yolo',
-        activeLabel: 'YOLO',
+        activeLabel: 'Full access',
         planValue: 'plan',
         planLabel: 'Plan',
+        inactiveDescription: 'Uses the access scope configured in settings and requests approval when needed.',
+        activeDescription: 'Full file and command access without approval prompts.',
+        planDescription: 'Prepare a plan before execution. File access is controlled separately.',
       });
     });
   });

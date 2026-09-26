@@ -1,5 +1,6 @@
 import { Notice } from 'obsidian';
 
+import { t } from '../../../i18n/i18n';
 import type { FeatureHost } from '../../FeatureHost';
 import type {
   AssembledTabRuntime,
@@ -156,7 +157,7 @@ async function destroyTabOnce(tab: AssembledTabRuntime): Promise<void> {
     try {
       await tab.controllers.conversationController.save(cancelledActiveTurn);
     } catch {
-      new Notice('Background task state could not be saved before closing the tab.');
+      new Notice(t('chatUi.backgroundTaskStateCouldNotBeSavedBeforeClosingTheTab'));
     }
   }
   await captureTeardownFailure(

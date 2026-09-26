@@ -12,6 +12,7 @@ import type {
   ProviderUIOption,
 } from '../../../core/providers/types';
 import type { UsageInfo } from '../../../core/types';
+import { t } from '../../../i18n/i18n';
 import { createProviderIconSvg } from '../../../shared/icons';
 import {
   cancelScheduledAnimationFrame,
@@ -116,7 +117,7 @@ export class ModelSelector {
       });
     }
     const labelEl = this.buttonEl.createSpan({ cls: 'claudian-model-label' });
-    labelEl.setText(displayModel?.label || 'Unknown');
+    labelEl.setText(displayModel?.label || t('interface.unknown'));
   }
 
   renderOptions() {
@@ -160,7 +161,7 @@ export class ModelSelector {
           await this.callbacks.onModelChange(model.value);
           this.updateDisplay();
           this.renderOptions();
-        }, 'Failed to change model');
+        }, t('interface.modelFailed'));
       });
     }
   }
@@ -189,7 +190,7 @@ export class ModeSelector {
     this.toggleEl = this.container.createDiv({ cls: 'claudian-toggle-switch' });
 
     this.toggleEl.addEventListener('click', () => {
-      runToolbarAction(() => this.toggle(), 'Failed to change mode');
+      runToolbarAction(() => this.toggle(), t('interface.modeFailed'));
     });
 
     this.updateDisplay();
@@ -276,13 +277,13 @@ export class ThinkingBudgetSelector {
     // Effort selector (for adaptive thinking models)
     this.effortEl = this.container.createDiv({ cls: 'claudian-thinking-effort' });
     const effortLabel = this.effortEl.createSpan({ cls: 'claudian-thinking-label-text' });
-    effortLabel.setText('Effort:');
+    effortLabel.setText(t('interface.effort'));
     this.effortGearsEl = this.effortEl.createDiv({ cls: 'claudian-thinking-gears' });
 
     // Legacy budget selector (for custom models)
     this.budgetEl = this.container.createDiv({ cls: 'claudian-thinking-budget' });
     const budgetLabel = this.budgetEl.createSpan({ cls: 'claudian-thinking-label-text' });
-    budgetLabel.setText('Thinking:');
+    budgetLabel.setText(t('interface.thinking'));
     this.budgetGearsEl = this.budgetEl.createDiv({ cls: 'claudian-thinking-gears' });
 
     this.updateDisplay();
@@ -427,7 +428,7 @@ export class PermissionToggle {
     this.updateDisplay();
 
     this.toggleEl.addEventListener('click', () => {
-      runToolbarAction(() => this.toggle(), 'Failed to change permission mode');
+      runToolbarAction(() => this.toggle(), t('interface.permissionFailed'));
     });
   }
 
@@ -451,6 +452,13 @@ export class PermissionToggle {
     const planValue = toggleConfig.planValue;
     const planLabel = toggleConfig.planLabel ?? 'PLAN';
     const canShowPlan = Boolean(planValue) && capabilities.supportsPlanMode;
+    const description = canShowPlan && mode === planValue
+      ? toggleConfig.planDescription
+      : mode === toggleConfig.activeValue
+        ? toggleConfig.activeDescription
+        : toggleConfig.inactiveDescription;
+    if (description) this.container.setAttribute('title', description);
+    else this.container.removeAttribute('title');
 
     if (canShowPlan && planValue && mode === planValue) {
       this.toggleEl.addClass('claudian-hidden');
@@ -668,7 +676,7 @@ export class ExternalContextSelector {
   addExternalContext(pathInput: string): AddExternalContextResult {
     const trimmed = pathInput?.trim();
     if (!trimmed) {
-      return { success: false, error: 'No path provided. Usage: /add-dir /absolute/path' };
+      return { success: false, error: t('interface.noPath') };
     }
 
     // Strip surrounding quotes if present (e.g., "/path/with spaces")
@@ -683,7 +691,7 @@ export class ExternalContextSelector {
     const normalizedPath = normalizePathForFilesystem(expandedPath);
 
     if (!path.isAbsolute(normalizedPath)) {
-      return { success: false, error: 'Path must be absolute. Usage: /add-dir /absolute/path' };
+      return { success: false, error: t('interface.absolutePath') };
     }
 
     // Validate path exists and is a directory with specific error messages
@@ -694,7 +702,7 @@ export class ExternalContextSelector {
 
     // Check for duplicate (normalized comparison for cross-platform support)
     if (isDuplicatePath(normalizedPath, this.externalContextPaths)) {
-      return { success: false, error: 'This folder is already added as an external context.' };
+      return { success: false, error: t('interface.duplicateFolder') };
     }
 
     // Check for nested/overlapping paths
@@ -761,7 +769,7 @@ export class ExternalContextSelector {
       }
       const result = await remote.dialog.showOpenDialog({
         properties: ['openDirectory'],
-        title: 'Select External Context',
+        title: t('interface.externalContext'),
       });
 
       if (!result.canceled && result.filePaths.length > 0) {
@@ -769,7 +777,7 @@ export class ExternalContextSelector {
 
         // Check for duplicate (normalized comparison for cross-platform support)
         if (isDuplicatePath(selectedPath, this.externalContextPaths)) {
-          new Notice('This folder is already added as an external context.', 3000);
+          new Notice(t('interface.duplicateFolder'), 3000);
           return;
         }
 
@@ -786,7 +794,7 @@ export class ExternalContextSelector {
         this.renderDropdown();
       }
     } catch {
-      new Notice('Unable to open folder picker.', 5000);
+      new Notice(t('interface.folderPickerFailed'), 5000);
     }
   }
 
@@ -806,14 +814,14 @@ export class ExternalContextSelector {
 
     // Header
     const headerEl = this.dropdownEl.createDiv({ cls: 'claudian-external-context-header' });
-    headerEl.setText('External contexts');
+    headerEl.setText(t('interface.externalContexts'));
 
     // Path list
     const listEl = this.dropdownEl.createDiv({ cls: 'claudian-external-context-list' });
 
     if (this.externalContextPaths.length === 0) {
       const emptyEl = listEl.createDiv({ cls: 'claudian-external-context-empty' });
-      emptyEl.setText('Click folder icon to add');
+      emptyEl.setText(t('interface.addFolder'));
     } else {
       for (const pathStr of this.externalContextPaths) {
         const itemEl = listEl.createDiv({ cls: 'claudian-external-context-item' });
@@ -831,7 +839,7 @@ export class ExternalContextSelector {
           lockBtn.addClass('locked');
         }
         setIcon(lockBtn, isPersistent ? 'lock' : 'unlock');
-        lockBtn.setAttribute('title', isPersistent ? 'Persistent (click to make session-only)' : 'Session-only (click to persist)');
+        lockBtn.setAttribute('title', isPersistent ? t('interface.persistentFolder') : t('interface.sessionFolder'));
         lockBtn.addEventListener('click', (e) => {
           e.stopPropagation();
           this.togglePersistence(pathStr);
@@ -839,7 +847,7 @@ export class ExternalContextSelector {
 
         const removeBtn = itemEl.createSpan({ cls: 'claudian-external-context-remove' });
         setIcon(removeBtn, 'x');
-        removeBtn.setAttribute('title', 'Remove path');
+        removeBtn.setAttribute('title', t('interface.removePath'));
         removeBtn.addEventListener('click', (e) => {
           e.stopPropagation();
           this.removePath(pathStr);
@@ -879,7 +887,7 @@ export class ExternalContextSelector {
 
     if (count > 0) {
       this.iconEl.addClass('active');
-      this.iconEl.setAttribute('title', `${count} external context${count > 1 ? 's' : ''} (click to add more)`);
+      this.iconEl.setAttribute('title', t('interface.externalCount', { count }));
 
       // Show badge only when more than 1 path
       if (count > 1) {
@@ -890,7 +898,7 @@ export class ExternalContextSelector {
       }
     } else {
       this.iconEl.removeClass('active');
-      this.iconEl.setAttribute('title', 'Add external contexts (click)');
+      this.iconEl.setAttribute('title', t('interface.addContexts'));
       this.badgeEl.removeClass('visible');
     }
   }
@@ -905,7 +913,7 @@ export class ContextUsageMeter {
   constructor(parentEl: HTMLElement) {
     this.container = parentEl.createDiv({ cls: 'claudian-context-meter' });
     this.container.setAttribute('role', 'progressbar');
-    this.container.setAttribute('aria-label', 'Context usage');
+    this.container.setAttribute('aria-label', t('interface.contextUsage'));
     this.container.setAttribute('aria-valuemin', '0');
     this.container.setAttribute('aria-valuemax', '100');
     this.render();
@@ -994,7 +1002,7 @@ export class ContextUsageMeter {
     // Set tooltip with detailed usage
     let tooltip = `${this.formatTokens(usage.contextTokens)} / ${this.formatTokens(usage.contextWindow)}`;
     if (usage.percentage > 80) {
-      tooltip += ' (Approaching limit, run `/compact` to continue)';
+      tooltip += t('interface.nearContextLimit');
     }
     this.container.setAttribute('data-tooltip', tooltip);
     this.container.setAttribute('aria-valuenow', String(usage.percentage));

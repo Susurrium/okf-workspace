@@ -76,7 +76,7 @@ describe("Reading section projections", () => {
   });
 
   it("shows persisted decision receipts consistently", () => {
-    expect(feedDecisionLabel("learn-now")).toBe("已开始学习");
+    expect(feedDecisionLabel("learn-now")).toBe("已选择学习");
     expect(feedDecisionLabel("source-only")).toBe("已保存来源");
     expect(feedDecisionLabel(undefined)).toBe("");
   });

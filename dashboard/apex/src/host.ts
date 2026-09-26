@@ -55,6 +55,7 @@ export interface ApexHost {
 		card: DashboardCard,
 	): Promise<{ path: string; created: boolean }>;
 	createManagedArtifact?(artifactType: string): Promise<boolean>;
+	openDocumentImportFromDrop?(transfer: DataTransfer): void;
 }
 
 export interface WorkspacePresetOption {

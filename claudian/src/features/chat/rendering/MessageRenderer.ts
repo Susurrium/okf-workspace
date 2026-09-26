@@ -379,11 +379,11 @@ export class MessageRenderer {
 
   appendInterruptIndicator(contentEl: HTMLElement): void {
     const textEl = contentEl.createDiv({ cls: 'claudian-text-block' });
-    textEl.createSpan({ cls: 'claudian-interrupted', text: 'Interrupted' });
+    textEl.createSpan({ cls: 'claudian-interrupted', text: t('chatUi.interrupted') });
     textEl.appendText(' ');
     textEl.createSpan({
       cls: 'claudian-interrupted-hint',
-      text: '\u00B7 What should Claudian do instead?',
+      text: t('chatUi.whatShouldClaudianDoInstead'),
     });
   }
 
@@ -423,7 +423,7 @@ export class MessageRenderer {
           }
         } else if (block.type === 'context_compacted') {
           const boundaryEl = contentEl.createDiv({ cls: 'claudian-compact-boundary' });
-          boundaryEl.createSpan({ cls: 'claudian-compact-boundary-label', text: 'Conversation compacted' });
+          boundaryEl.createSpan({ cls: 'claudian-compact-boundary-label', text: t('chatUi.conversationCompacted') });
         } else if (block.type === 'subagent') {
           const taskToolCall = msg.toolCalls?.find((toolCall) => {
             if (toolCall.id !== block.subagentId) return false;
@@ -813,7 +813,7 @@ export class MessageRenderer {
 
                 try {
                   await navigator.clipboard.writeText(code.textContent || '');
-                  label.setText('Copied!');
+                  label.setText(t('chatUi.copied'));
                   window.setTimeout(() => label.setText(originalLabel), 1500);
                 } catch {
                   // Clipboard API may fail in non-secure contexts
@@ -837,7 +837,7 @@ export class MessageRenderer {
     } catch {
       el.createDiv({
         cls: 'claudian-render-error',
-        text: 'Failed to render message content.',
+        text: t('chatUi.failedToRenderMessageContent'),
       });
     }
   }
@@ -876,7 +876,7 @@ export class MessageRenderer {
 
         // Show "copied!" feedback
         copyBtn.empty();
-        copyBtn.setText('Copied!');
+        copyBtn.setText(t('chatUi.copied'));
         copyBtn.classList.add('copied');
 
         feedbackTimeout = window.setTimeout(() => {
@@ -932,7 +932,7 @@ export class MessageRenderer {
     const toolbar = this.getOrCreateActionsToolbar(msgEl);
     const copyBtn = toolbar.createSpan({ cls: 'claudian-user-msg-copy-btn' });
     setIcon(copyBtn, 'copy');
-    copyBtn.setAttribute('aria-label', 'Copy message');
+    copyBtn.setAttribute('aria-label', t('chatUi.copyMessage'));
 
     let feedbackTimeout: number | null = null;
 
@@ -946,7 +946,7 @@ export class MessageRenderer {
         }
         if (feedbackTimeout) window.clearTimeout(feedbackTimeout);
         copyBtn.empty();
-        copyBtn.setText('Copied!');
+        copyBtn.setText(t('chatUi.copied'));
         copyBtn.classList.add('copied');
         feedbackTimeout = window.setTimeout(() => {
           copyBtn.empty();

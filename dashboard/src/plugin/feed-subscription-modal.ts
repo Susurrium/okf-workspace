@@ -383,12 +383,12 @@ export class FeedSubscriptionAddModal extends Modal {
       try {
         await this.actions.confirmed(result);
       } catch {
-        new Notice("订阅已保存，但列表刷新失败；请重新打开 Reading 查看。", 10_000);
+        new Notice("订阅已保存，但列表刷新失败；请重新打开订阅阅读 查看。", 10_000);
       }
       if (generation === this.requestGeneration) this.close();
     } catch (error) {
       if (generation !== this.requestGeneration) {
-        new Notice(`订阅保存未确认：${feedSubscriptionErrorMessage(error)}，请先检查 Reading 中的来源列表。`, 10_000);
+        new Notice(`订阅保存未确认：${feedSubscriptionErrorMessage(error)}，请先检查 订阅阅读中的来源列表。`, 10_000);
         return;
       }
       feedback.addClass("is-error");
@@ -514,7 +514,7 @@ export class FeedSubscriptionSettingsModal extends Modal {
       this.contentEl.createEl("h3", { text: this.projection.source_name });
       this.contentEl.createDiv({
         cls: "okf-dashboard__inline-alert",
-        text: "这个来源已不在订阅列表中。历史内容仍然保留，可继续从 Reading 打开。",
+        text: "这个来源已不在订阅列表中。历史内容仍然保留，可继续从订阅阅读打开。",
       });
       return;
     }
@@ -594,7 +594,7 @@ export class FeedSubscriptionSettingsModal extends Modal {
     if (source.required && source.status !== "removed") {
       this.contentEl.createDiv({
         cls: "okf-dashboard__muted",
-        text: "这是系统必需来源，可以暂停或恢复，但不能从 Dashboard 移除。",
+        text: "这是系统必需来源，可以暂停或恢复，但不能从工作台移除。",
       });
     }
   }
@@ -641,7 +641,7 @@ export class FeedSubscriptionSettingsModal extends Modal {
     });
     warning.createEl("strong", { text: "确认移除这个订阅？" });
     warning.createDiv({
-      text: "移除后会停止抓取。已有历史的来源卡、Digest、阅读位置和判断结果都会保留，并标为“已移除”；尚无历史的空卡会消失。",
+      text: "移除后会停止抓取。已有历史的来源卡、本期汇总、阅读位置和判断结果都会保留，并标为“已移除”；尚无历史的空卡会消失。",
     });
     const actions = warning.createDiv({ cls: "okf-feed-subscription-modal__actions" });
     const cancel = actions.createEl("button", {

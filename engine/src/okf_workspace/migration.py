@@ -1580,10 +1580,11 @@ def migrate_current_layout(
     root_index = root / "index.md"
     canonical_index = (templates / "index.md").read_text(encoding="utf-8")
     current_index = root_index.read_text(encoding="utf-8")
-    current_navigation = "# Workspace 总目录" in current_index
+    navigation_titles = ('# Workspace 总目录', '# 笔记导航')
+    current_navigation = any(title in current_index for title in navigation_titles)
     if not current_navigation or 'name="current-activity"' in current_index:
         root_index.write_text(canonical_index, encoding="utf-8", newline="\n")
-        changes.append("index.md (replaced with structured root directory)")
+        changes.append("index.md：已更新根目录导航")
     rebuild_root_index(root)
 
     with suppress(GitCheckpointError):

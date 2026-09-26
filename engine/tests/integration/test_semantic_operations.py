@@ -7,7 +7,9 @@ import json
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,6 +19,8 @@ import okf_workspace.semantic.worker as semantic_worker
 from okf_workspace.ai.provider import CodexSettings
 from okf_workspace.api import LocalTokenStore, create_app
 from okf_workspace.config import BrainPaths
+from okf_workspace.feeds.cache import FeedCache
+from okf_workspace.feeds.models import FeedEdition, FeedItem, FeedKind
 from okf_workspace.notes import NoteService
 from okf_workspace.okf.file_io import FileWriteConflict
 from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
@@ -29,6 +33,7 @@ from okf_workspace.semantic import (
     SemanticStage,
 )
 from okf_workspace.semantic.runner import CodexSemanticRunner, SemanticCancelled
+from okf_workspace.semantic.store import SemanticOperationStore
 from okf_workspace.semantic.worker import SemanticWorker
 
 
@@ -323,6 +328,120 @@ def test_duplicate_request_is_idempotent_and_does_not_create_two_operations(
 
     assert second["operation_id"] == first["operation_id"]
     assert len(service.store.list()) == 1
+
+
+def test_concurrent_requests_share_one_durable_operation(
+    vault: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _learning_note(vault)
+    state = tmp_path / "state"
+    original_find = SemanticOperationStore.find_active
+
+    def slow_find(self: SemanticOperationStore, fingerprint: str) -> dict[str, object] | None:
+        found = original_find(self, fingerprint)
+        time.sleep(0.03)
+        return found
+
+    monkeypatch.setattr(SemanticOperationStore, "find_active", slow_find)
+    barrier = threading.Barrier(8)
+
+    def enqueue(_index: int) -> str:
+        service = SemanticOperationService(vault, state)
+        barrier.wait(timeout=5)
+        return str(service.enqueue(
+            SemanticKind.GENERATE_STUDY_GUIDE, "learning/guides/vpn.md",
+        )["operation_id"])
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        identifiers = list(pool.map(enqueue, range(8)))
+    assert len(set(identifiers)) == 1
+    assert len(SemanticOperationStore(state).list()) == 1
+
+
+@pytest.mark.parametrize("legacy", [{"learned": True}, {"learning_status": "completed"}])
+def test_generation_never_infers_study_completion(
+    vault: Path, tmp_path: Path, legacy: dict[str, object],
+) -> None:
+    target = _learning_note(vault)
+    document = read_document(target)
+    document.frontmatter.update(legacy)
+    write_document(target, document)
+    service = SemanticOperationService(vault, tmp_path / "state")
+    service.enqueue(SemanticKind.GENERATE_STUDY_GUIDE, "learning/guides/vpn.md")
+    assert SemanticWorker(vault, tmp_path / "state", FixedRunner()).run_once()
+    assert "studied_at" not in read_document(target).frontmatter
+
+
+def test_durable_handoff_receipt_survives_completed_target_changes(
+    vault: Path, tmp_path: Path,
+) -> None:
+    _learning_note(vault)
+    service = SemanticOperationService(vault, tmp_path / "state")
+    first = service.enqueue(
+        SemanticKind.GENERATE_STUDY_GUIDE, "learning/guides/vpn.md",
+        idempotency_key="document:fixture:initial",
+    )
+    assert SemanticWorker(vault, tmp_path / "state", FixedRunner()).run_once()
+    second = service.enqueue(
+        SemanticKind.GENERATE_STUDY_GUIDE, "learning/guides/vpn.md",
+        idempotency_key="document:fixture:initial",
+    )
+    assert second["operation_id"] == first["operation_id"]
+    assert second["status"] == "completed"
+
+
+def test_retry_cannot_duplicate_a_newer_active_target(vault: Path, tmp_path: Path) -> None:
+    _learning_note(vault)
+    service = SemanticOperationService(vault, tmp_path / "state")
+    first = service.enqueue(SemanticKind.GENERATE_STUDY_GUIDE, "learning/guides/vpn.md")
+    assert SemanticWorker(vault, tmp_path / "state", FailingRunner()).run_once()
+    newer = service.enqueue(
+        SemanticKind.GENERATE_STUDY_GUIDE, "learning/guides/vpn.md", instruction="New request",
+    )
+    with pytest.raises(ValueError, match="already active"):
+        service.retry(str(first["operation_id"]))
+    assert service.store.load(str(first["operation_id"]))["status"] == "failed"
+    assert service.store.load(str(newer["operation_id"]))["status"] == "queued"
+
+
+@pytest.mark.parametrize("action", ["learn-now", "wiki-now"])
+def test_feed_generation_keeps_explicit_contexts_separate(
+    vault: Path, tmp_path: Path, action: str,
+) -> None:
+    notes = NoteService(vault)
+    notes.create_course("alpha", "Alpha")
+    notes.create_course("beta", "Beta")
+    notes.create_project("project", "Project")
+    state = tmp_path / "state"
+    item = FeedItem(
+        item_id="shared", feed=FeedKind.AI_DAILY, edition_id="edition", title="Shared",
+        body="A shared source used by two different courses.", url="https://example.test/shared",
+    )
+    FeedCache(state).put(FeedEdition(
+        edition_id="edition", feed=FeedKind.AI_DAILY, edition_at="2026-09-26",
+        title="Edition", items=(item,),
+    ))
+    paths = BrainPaths(vault, tmp_path / "originals", state)
+    # No lifespan: explicitly drive the real worker after each API request.
+    client = TestClient(create_app(paths, semantic_enabled=True, semantic_runner=FixedRunner()))
+    headers = {"Authorization": f"Bearer {LocalTokenStore(state).ensure()}"}
+    targets: list[Path] = []
+    for course in ("alpha", "beta"):
+        response = client.post(
+            "/feeds/ai-daily/items/shared/decision", headers=headers,
+            json={"action": action, "course": course, "project": "project"},
+        )
+        assert response.status_code == 200
+        payload = cast(dict[str, object], response.json())
+        operation = cast(dict[str, object], payload["semantic_operation"])
+        assert operation["course"] == f"/learning/courses/{course}/course.md"
+        assert operation["project"] == "/projects/project/project.md"
+        assert SemanticWorker(vault, state, FixedRunner()).run_once()
+        target = vault / str(operation["target"])
+        assert read_document(target).frontmatter["course"] == operation["course"]
+        targets.append(target)
+    assert targets[0] != targets[1]
+    assert read_document(targets[0]).frontmatter["course"] == "/learning/courses/alpha/course.md"
 
 
 def test_completed_prepare_request_can_be_explicitly_regenerated_after_content_changes(

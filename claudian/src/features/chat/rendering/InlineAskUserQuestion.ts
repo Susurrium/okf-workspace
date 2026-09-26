@@ -1,4 +1,5 @@
 import type { AskUserQuestionItem, AskUserQuestionOption } from '../../../core/types/tools';
+import { t } from '../../../i18n/i18n';
 
 const HINTS_TEXT = 'Enter to select \u00B7 Tab/Arrow keys to navigate \u00B7 Esc to cancel';
 const HINTS_TEXT_IMMEDIATE = 'Enter to select \u00B7 Arrow keys to navigate \u00B7 Esc to cancel';
@@ -202,7 +203,7 @@ export class InlineAskUserQuestion {
     const allAnswered = this.questions.every((_, i) => this.isQuestionAnswered(i));
     const submitTab = this.tabBar.createSpan({ cls: 'claudian-ask-tab' });
     submitTab.createSpan({ text: allAnswered ? '\u2713 ' : '', cls: 'claudian-ask-tab-submit-check' });
-    submitTab.createSpan({ text: 'Submit', cls: 'claudian-ask-tab-label' });
+    submitTab.createSpan({ text: t('chatUi.submit'), cls: 'claudian-ask-tab-label' });
     if (this.activeTabIndex === this.questions.length) submitTab.addClass('is-active');
     submitTab.addEventListener('click', () => this.switchTab(this.questions.length));
     this.tabElements.push(submitTab);
@@ -341,7 +342,7 @@ export class InlineAskUserQuestion {
 
   private renderSubmitTab(): void {
     this.contentArea.createDiv({
-      text: 'Review your answers',
+      text: t('chatUi.reviewYourAnswers'),
       cls: 'claudian-ask-review-title',
     });
 
@@ -363,7 +364,7 @@ export class InlineAskUserQuestion {
     }
 
     this.contentArea.createDiv({
-      text: 'Ready to submit your answers?',
+      text: t('chatUi.readyToSubmitYourAnswers'),
       cls: 'claudian-ask-review-prompt',
     });
 
@@ -375,7 +376,7 @@ export class InlineAskUserQuestion {
     if (!allAnswered) submitRow.addClass('is-disabled');
     submitRow.createSpan({ text: this.focusedItemIndex === 0 ? '\u203A' : '\u00A0', cls: 'claudian-ask-cursor' });
     submitRow.createSpan({ text: '1. ', cls: 'claudian-ask-item-num' });
-    submitRow.createSpan({ text: 'Submit answers', cls: 'claudian-ask-item-label' });
+    submitRow.createSpan({ text: t('chatUi.submitAnswers'), cls: 'claudian-ask-item-label' });
     submitRow.addEventListener('click', () => {
       this.focusedItemIndex = 0;
       this.updateFocusIndicator();
@@ -387,7 +388,7 @@ export class InlineAskUserQuestion {
     if (this.focusedItemIndex === 1) cancelRow.addClass('is-focused');
     cancelRow.createSpan({ text: this.focusedItemIndex === 1 ? '\u203A' : '\u00A0', cls: 'claudian-ask-cursor' });
     cancelRow.createSpan({ text: '2. ', cls: 'claudian-ask-item-num' });
-    cancelRow.createSpan({ text: 'Cancel', cls: 'claudian-ask-item-label' });
+    cancelRow.createSpan({ text: t('chatUi.cancel'), cls: 'claudian-ask-item-label' });
     cancelRow.addEventListener('click', () => {
       this.focusedItemIndex = 1;
       this.handleResolve(null);

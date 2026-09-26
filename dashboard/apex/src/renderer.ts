@@ -2587,7 +2587,7 @@ function renderCard(card: DashboardCard, columnName: string, sectionType: string
 	if (isMemo) {
 		const saveBtn = actions.createEl('button', {
 			cls: 'dashboard-card-btn',
-			attr: { 'aria-label': t('renderer.saveMemoAsNote') },
+			attr: { 'aria-label': t(getRegisteredApexHost()?.convertMemoToCapture ? 'renderer.moveMemoToInbox' : 'renderer.saveMemoAsNote') },
 		});
 		setIcon(saveBtn, 'file-down');
 		saveBtn.addEventListener('click', (e) => {

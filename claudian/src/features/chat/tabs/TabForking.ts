@@ -95,7 +95,7 @@ export async function handleForkRequest(
   const sourceConversationId = tab.conversationId;
 
   if (!getTabCapabilities(tab, plugin).supportsFork) {
-    new Notice('Fork is not supported by this provider.');
+    new Notice(t('chatUi.forkIsNotSupportedByThisProvider'));
     return;
   }
 
@@ -157,7 +157,7 @@ export async function handleForkAll(
   const sourceConversationId = tab.conversationId;
 
   if (!getTabCapabilities(tab, plugin).supportsFork) {
-    new Notice('Fork is not supported by this provider.');
+    new Notice(t('chatUi.forkIsNotSupportedByThisProvider'));
     return;
   }
 

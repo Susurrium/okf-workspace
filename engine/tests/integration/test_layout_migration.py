@@ -61,8 +61,8 @@ def test_migration_replaces_root_navigation_and_removes_nested_indexes(tmp_path:
     assert not (vault / "learning/index.md").exists()
     assert not (vault / "knowledge/index.md").exists()
     root_navigation = (vault / "index.md").read_text(encoding="utf-8")
-    assert "# Workspace 总目录" in root_navigation
-    assert "### Learning" in root_navigation
+    assert "# 笔记导航" in root_navigation
+    assert "## 文件位置参考" in root_navigation
     assert 'name="current-activity"' not in root_navigation
     assert "learning_status" not in root_navigation
     knowledge_view = (vault / "system/views/Knowledge.md").read_text(encoding="utf-8")

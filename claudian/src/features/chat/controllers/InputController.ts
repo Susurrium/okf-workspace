@@ -492,7 +492,7 @@ export class InputController {
     if (this.deps.ensureExecutionInitialized) {
       const ready = await this.deps.ensureExecutionInitialized();
       if (!ready) {
-        new Notice('Failed to initialize agent execution. Please try again.');
+        new Notice(t('chatUi.failedToInitializeAgentExecutionPleaseTryAgain'));
         this.restoreMessageToInput(this.createQueuedMessage(displayContent, turnRequest));
         this.rollbackFailedTurn(messagesBeforeTurn, hadPendingConversationSave);
         this.activeStreamingAssistantMessage = null;
@@ -504,7 +504,7 @@ export class InputController {
 
     const coordinator = this.getExecutionCoordinator();
     if (!coordinator) {
-      new Notice('Agent execution is not available. Please reload the plugin.');
+      new Notice(t('chatUi.agentExecutionIsNotAvailablePleaseReloadThePlugin'));
       this.restoreMessageToInput(this.createQueuedMessage(displayContent, turnRequest));
       this.rollbackFailedTurn(messagesBeforeTurn, hadPendingConversationSave);
       this.activeStreamingAssistantMessage = null;
@@ -577,7 +577,7 @@ export class InputController {
         );
         this.rollbackFailedTurn(messagesBeforeTurn, hadPendingConversationSave);
         didRollbackUnsentTurn = true;
-        new Notice('Message was not sent. Please try again.');
+        new Notice(t('chatUi.messageWasNotSentPleaseTryAgain'));
         this.reportDeferredReviewableSettlement();
       } else {
         shouldReportReviewableSettlement = true;
@@ -781,7 +781,7 @@ export class InputController {
       const isPendingSteerOnly = !state.queuedMessage && !!visiblePendingSteer;
       indicatorEl.createSpan({
         cls: 'claudian-queue-indicator-text',
-        text: `${isPendingSteerOnly ? '⌙ Steering: ' : '⌙ Queued: '}${this.getQueuedMessageDisplay(visibleQueuedMessage)}`,
+        text: `${isPendingSteerOnly ? t('interface.steering') : t('interface.queued')}${this.getQueuedMessageDisplay(visibleQueuedMessage)}`,
       });
 
       if (state.queuedMessage) {
@@ -791,8 +791,8 @@ export class InputController {
           const steerButton = actionsEl.createEl('button', {
             cls: 'claudian-queue-indicator-action',
             text: pendingSteer?.providerDisposition === 'awaiting-result'
-              ? 'Steering...'
-              : 'Steer Now',
+              ? t('interface.steeringBusy')
+              : t('interface.steerNow'),
           });
           steerButton.setAttribute('type', 'button');
           if (pendingSteer?.providerDisposition === 'awaiting-result') {
@@ -1395,7 +1395,7 @@ export class InputController {
       if (pending.providerDisposition === 'accepted-awaiting-correlation') return;
       if (error instanceof ChatExecutionPreHandoffError) {
         this.restoreDefinitelyUnsentSteer(pending);
-        new Notice('Failed to steer the queued message. It is still available.');
+        new Notice(t('interface.steerFailed'));
         return;
       }
 
@@ -1405,7 +1405,7 @@ export class InputController {
         this.releasePendingSteer(pending);
       }
       new Notice(
-        'Steer delivery could not be confirmed. The message was not requeued to avoid sending it twice.',
+        t('chatUi.steerDeliveryCouldNotBeConfirmedTheMessageWasNotRequeuedToAvoidSendingItTwice'),
       );
     }
   }
@@ -1742,7 +1742,7 @@ export class InputController {
     if (this.deps.ensureExecutionInitialized) {
       const ready = await this.deps.ensureExecutionInitialized();
       if (!ready) {
-        new Notice('Failed to initialize instruction refinement. Please try again.');
+        new Notice(t('chatUi.failedToInitializeInstructionRefinementPleaseTryAgain'));
         return;
       }
     }
@@ -1769,7 +1769,7 @@ export class InputController {
                 );
               });
 
-              new Notice('Instruction added to custom system prompt');
+              new Notice(t('chatUi.instructionAddedToCustomSystemPrompt'));
               instructionModeManager?.clear();
             })();
           },
@@ -1832,8 +1832,8 @@ export class InputController {
       } else if (result.refinedInstruction) {
         modal.showConfirmation(result.refinedInstruction);
       } else {
-        new Notice('No instruction received');
-        modal.showError('No instruction received');
+        new Notice(t('chatUi.noInstructionReceived'));
+        modal.showError(t('chatUi.noInstructionReceived'));
         instructionModeManager?.clear();
       }
     } catch (error) {
@@ -1910,7 +1910,7 @@ export class InputController {
       input,
       (inline) => { this.pendingApprovalInline = inline; },
       undefined,
-      { title: 'Permission required', headerEl, showCustomInput: false, immediateSelect: true },
+      { title: t('interface.permissionRequired'), headerEl, showCustomInput: false, immediateSelect: true },
     );
 
     if (!result) return 'cancel';
@@ -2160,7 +2160,7 @@ export class InputController {
       case 'add-dir': {
         const externalContextSelector = this.deps.getExternalContextSelector();
         if (!externalContextSelector) {
-          new Notice('External context selector not available.');
+          new Notice(t('interface.externalUnavailable'));
           return;
         }
         const result = externalContextSelector.addExternalContext(args);
@@ -2176,11 +2176,11 @@ export class InputController {
         break;
       case 'fork': {
         if (!this.getActiveCapabilities().supportsFork) {
-          new Notice('Fork is not supported by this provider.');
+          new Notice(t('interface.forkUnsupported'));
           return;
         }
         if (!this.deps.onForkAll) {
-          new Notice('Fork not available.');
+          new Notice(t('interface.forkUnavailable'));
           return;
         }
         await this.deps.onForkAll();
@@ -2190,10 +2190,10 @@ export class InputController {
         try {
           const toggled = await this.deps.toggleFastMode?.() ?? false;
           if (!toggled) {
-            new Notice('Fast mode is not available for this model.');
+            new Notice(t('chatUi.fastModeIsNotAvailableForThisModel'));
           }
         } catch {
-          new Notice('Failed to toggle fast mode.');
+          new Notice(t('chatUi.failedToToggleFastMode'));
         }
         break;
       }
@@ -2236,7 +2236,7 @@ export class InputController {
 
     const conversations = plugin.getConversationList();
     if (conversations.length === 0) {
-      new Notice('No conversations to resume');
+      new Notice(t('interface.noConversations'));
       return;
     }
 

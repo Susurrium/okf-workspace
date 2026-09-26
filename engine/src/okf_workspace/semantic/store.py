@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-import time
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
+
+from okf_workspace.okf.file_io import document_lock
 
 from .models import SemanticKind, SemanticRequest, SemanticStage, SemanticStatus
 
@@ -54,6 +55,7 @@ class SemanticOperationStore:
         *,
         fingerprint: str,
         source_hashes: Mapping[str, str],
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
         now = _now()
         payload: dict[str, object] = {
@@ -66,6 +68,7 @@ class SemanticOperationStore:
             "stage_started_at": now,
             "fingerprint": fingerprint,
             "source_hashes": dict(source_hashes),
+            "idempotency_key": idempotency_key,
             "attempt": 1,
             "worker_id": None,
             "heartbeat_at": None,
@@ -80,6 +83,40 @@ class SemanticOperationStore:
         with self._lock():
             self._write(self.path(request.operation_id), payload)
         return payload
+
+    def find_by_idempotency_key(self, key: str) -> dict[str, object] | None:
+        for record in self.list():
+            handoff_keys = record.get("handoff_keys")
+            if record.get("idempotency_key") == key or (
+                isinstance(handoff_keys, list) and key in handoff_keys
+            ):
+                return record
+        return None
+
+    def bind_handoff(self, record: dict[str, object], key: str | None) -> dict[str, object]:
+        if key is None:
+            return record
+        with self._lock():
+            current = self.load(str(record["operation_id"]))
+            existing = current.get("handoff_keys")
+            keys: list[str] = []
+            if isinstance(existing, list):
+                keys = [
+                    value
+                    for value in cast(list[object], existing)
+                    if isinstance(value, str)
+                ]
+            if key not in keys:
+                keys.append(key)
+            current["handoff_keys"] = keys
+            self._write(self.path(str(current["operation_id"])), current)
+            return current
+
+    @contextmanager
+    def transaction(self) -> Generator[None]:
+        """Serialize lookup, supersession and creation with worker claims."""
+        with document_lock(self.lock_path):
+            yield
 
     def find_active(self, fingerprint: str) -> dict[str, object] | None:
         active = {SemanticStatus.QUEUED.value, SemanticStatus.RUNNING.value}
@@ -459,28 +496,8 @@ class SemanticOperationStore:
 
     @contextmanager
     def _lock(self) -> Generator[None]:
-        self.root.mkdir(parents=True, exist_ok=True)
-        deadline = time.monotonic() + 5
-        descriptor: int | None = None
-        while descriptor is None:
-            try:
-                descriptor = os.open(self.lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            except FileExistsError:
-                try:
-                    stale = time.time() - self.lock_path.stat().st_mtime > 30
-                except FileNotFoundError:
-                    continue
-                if stale:
-                    self.lock_path.unlink(missing_ok=True)
-                    continue
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("semantic operation store is busy") from None
-                time.sleep(0.02)
-        try:
-            os.close(descriptor)
+        with self.transaction():
             yield
-        finally:
-            self.lock_path.unlink(missing_ok=True)
 
     @staticmethod
     def _write(path: Path, payload: Mapping[str, object]) -> None:

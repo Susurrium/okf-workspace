@@ -195,7 +195,7 @@ export function createProjectSectionDefinition(host: ProjectSectionHost): Custom
   return {
     type: OKF_PROJECT_SECTION_TYPE,
     icon: "folder-kanban",
-    label: "项目（OKF）",
+    label: "项目",
     defaultName: "项目",
     async render({ container, column, app, setConfig }): Promise<void> {
       const config = normalizeProjectSectionConfig(column.extensionConfig);

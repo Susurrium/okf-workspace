@@ -21,7 +21,7 @@ export class ArtifactEditPolicy {
     if (["Source", "Source Text"].includes(mutation.artifactType)) {
       return {
         outcome: "deny",
-        message: "Source 与 Source Text 的身份、配对、uses 和路径由资料工作流管理；请打开条目后使用资料操作。",
+        message: "这些资料属性不能在表格中修改，请打开资料详情后操作。",
       };
     }
     return { outcome: "allow" };
@@ -38,11 +38,11 @@ export class ArtifactEditPolicy {
         mutation.path,
         mutation.value as "active" | "paused" | "completed",
       );
-      return { outcome: "handled", message: "项目状态已通过 Project 动作更新。" };
+      return { outcome: "handled", message: "项目状态已更新。" };
     }
     return {
       outcome: "deny",
-      message: "Project 的身份、受管区域和路径不能在通用数据库中改写；请使用项目详情中的合法动作。",
+      message: "这些项目属性不能在表格中修改，请在项目详情中操作。",
     };
   }
 }

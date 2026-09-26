@@ -1,3 +1,4 @@
+import { t } from '../../../i18n/i18n';
 export interface InstructionModeCallbacks {
   onSubmit: (rawInstruction: string) => Promise<void>;
   getInputWrapper: () => HTMLElement | null;
@@ -9,7 +10,7 @@ export interface InstructionModeState {
   rawInstruction: string;
 }
 
-const INSTRUCTION_MODE_PLACEHOLDER = '# Save in custom system prompt';
+const getInstructionModePlaceholder = () => t('chatUi.saveInCustomSystemPrompt');
 
 export class InstructionModeManager {
   private inputEl: HTMLTextAreaElement;
@@ -66,7 +67,7 @@ export class InstructionModeManager {
 
     wrapper.addClass('claudian-input-instruction-mode');
     this.state = { active: true, rawInstruction: '' };
-    this.inputEl.placeholder = INSTRUCTION_MODE_PLACEHOLDER;
+    this.inputEl.placeholder = getInstructionModePlaceholder();
     return true;
   }
 

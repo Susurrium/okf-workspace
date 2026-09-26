@@ -5,6 +5,7 @@ import type {
 import type { App, PaneType, TAbstractFile } from 'obsidian';
 import { Menu, Notice, TFile, TFolder } from 'obsidian';
 
+import { t } from '../../../../i18n/i18n';
 import { showVaultFileCreateModal } from './VaultFileCreateModal';
 import { showVaultFileRenameModal } from './VaultFileRenameModal';
 import { toVaultPath } from './vaultFileTreePaths';
@@ -86,11 +87,11 @@ export function showVaultFileTreeMenu(options: VaultFileTreeMenuOptions): Menu |
 
   if (singleFolder) {
     menu.addItem(item => item
-      .setTitle('New note')
+      .setTitle(t('chatUi.newNote'))
       .setIcon('file-plus')
       .onClick(() => showVaultFileCreateModal(options.app, singleFolder, 'note')));
     menu.addItem(item => item
-      .setTitle('New folder')
+      .setTitle(t('chatUi.newFolder'))
       .setIcon('folder-plus')
       .onClick(() => showVaultFileCreateModal(options.app, singleFolder, 'folder')));
     menu.addSeparator();
@@ -98,15 +99,15 @@ export function showVaultFileTreeMenu(options: VaultFileTreeMenuOptions): Menu |
 
   if (singleFile) {
     menu.addItem(item => item
-      .setTitle('Open')
+      .setTitle(t('chatUi.open'))
       .setIcon('file')
       .onClick(() => openFile(options.app, singleFile, false)));
     menu.addItem(item => item
-      .setTitle('Open in new tab')
+      .setTitle(t('chatUi.openInNewTab'))
       .setIcon('file-plus')
       .onClick(() => openFile(options.app, singleFile, 'tab')));
     menu.addItem(item => item
-      .setTitle('Open in split')
+      .setTitle(t('chatUi.openInSplit'))
       .setIcon('columns-2')
       .onClick(() => openFile(options.app, singleFile, 'split')));
     menu.addSeparator();
@@ -114,7 +115,7 @@ export function showVaultFileTreeMenu(options: VaultFileTreeMenuOptions): Menu |
 
   if (files.length === 1) {
     menu.addItem(item => item
-      .setTitle('Rename')
+      .setTitle(t('chatUi.rename'))
       .setIcon('pencil')
       .onClick(() => showVaultFileRenameModal(options.app, files[0])));
   }
@@ -125,7 +126,7 @@ export function showVaultFileTreeMenu(options: VaultFileTreeMenuOptions): Menu |
     .onClick(() => copyPaths(options, resolvedPaths)));
 
   menu.addItem(item => item
-    .setTitle('Delete')
+    .setTitle(t('chatUi.delete'))
     .setIcon('trash-2')
     .setWarning(true)
     .onClick(() => {

@@ -23,13 +23,13 @@ export async function showChineseCalendar<TLeaf>(
     return "revealed";
   }
   if (host.pluginEnabled === false) {
-    throw new Error("Chinese Calendar 未启用，请先在第三方插件中启用它");
+    throw new Error("日历未启用，请先在第三方插件中启用它");
   }
   if (!host.executeCreateCommand()) {
     throw new Error(
       host.pluginEnabled
-        ? "Chinese Calendar 已启用，但创建日历视图的命令不可用；请重载该插件"
-        : "Chinese Calendar 未安装、未启用或命令不可用",
+        ? "日历已启用，但创建日历视图的命令不可用；请重载该插件"
+        : "日历未安装、未启用或命令不可用",
     );
   }
   const attempts = Math.max(1, host.creationAttempts ?? 20);
@@ -40,5 +40,5 @@ export async function showChineseCalendar<TLeaf>(
     await host.reveal(created);
     return "created";
   }
-  throw new Error("Chinese Calendar 创建命令已执行，但日历视图没有出现；请重载该插件后重试");
+  throw new Error("日历创建命令已执行，但日历视图没有出现；请重载该插件后重试");
 }

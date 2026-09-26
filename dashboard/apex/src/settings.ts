@@ -115,12 +115,12 @@ export class DashboardSettingTab extends PluginSettingTab {
 						},
 					},
 					{
-						name: "crafted by Pandora's Digital Garden",
+						name: "Based on Apex Dashboard by Pandora's Digital Garden",
 						searchable: false, // a footer, not a setting
 						render: (setting) => {
 							asBlock(setting);
 							onPage('general')(setting);
-							setting.settingEl.createDiv({ cls: 'dashboard-settings-footer', text: "crafted by Pandora's Digital Garden" });
+							setting.settingEl.createDiv({ cls: 'dashboard-settings-footer', text: "Based on Apex Dashboard by Pandora's Digital Garden" });
 						},
 					},
 					{
@@ -256,7 +256,7 @@ export class DashboardSettingTab extends PluginSettingTab {
 			this.renderGeneralSettings(host);
 			this.renderServiceSettings(host);
 			this.renderBackupSettings(host);
-			containerEl.createDiv({ cls: 'dashboard-settings-footer', text: "crafted by Pandora's Digital Garden" });
+			containerEl.createDiv({ cls: 'dashboard-settings-footer', text: "Based on Apex Dashboard by Pandora's Digital Garden" });
 		} else if (this.activePage === 'widgets') {
 			this.renderWeatherSettings(host);
 			this.renderCalendarSettings(host);
@@ -378,37 +378,41 @@ onyx: t('settings.styleOnyx'),
 
 		this.renderWorkspaceSettings(containerEl);
 
-		let memoInput: TextComponent | undefined;
-		new Setting(containerEl)
-			.setName(t('settings.memoSavePath'))
-			.setDesc(t('settings.memoSavePathDesc'))
-			.addText(text => {
-				memoInput = text;
-				text
-					.setPlaceholder('Memos')
-					.setValue(this.plugin.settings.memoSavePath)
-					.onChange(async (value) => {
-						this.plugin.settings = {
-							...this.plugin.settings,
-							memoSavePath: value.trim(),
-						};
-						await this.plugin.saveSettings();
-					});
-			})
-			// Browse button: pick an existing folder instead of typing its path.
-			.addExtraButton(btn => btn
-				.setIcon('folder-search')
-				.setTooltip(t('pathPicker.pickFolder'))
-				.onClick(() => {
-					new PathPickerModal(this.app, 'folder', (path) => {
-						this.plugin.settings = {
-							...this.plugin.settings,
-							memoSavePath: path,
-						};
-						void this.plugin.saveSettings();
-						memoInput?.setValue(path);
-					}).open();
-				}));
+		if (this.plugin.convertMemoToCapture) {
+			new Setting(containerEl).setName(t('settings.memoDestination')).setDesc(t('settings.memoDestinationDesc'));
+		} else {
+			let memoInput: TextComponent | undefined;
+			new Setting(containerEl)
+				.setName(t('settings.memoSavePath'))
+				.setDesc(t('settings.memoSavePathDesc'))
+				.addText(text => {
+					memoInput = text;
+					text
+						.setPlaceholder('Memos')
+						.setValue(this.plugin.settings.memoSavePath)
+						.onChange(async (value) => {
+							this.plugin.settings = {
+								...this.plugin.settings,
+								memoSavePath: value.trim(),
+							};
+							await this.plugin.saveSettings();
+						});
+				})
+				// Browse button: pick an existing folder instead of typing its path.
+				.addExtraButton(btn => btn
+					.setIcon('folder-search')
+					.setTooltip(t('pathPicker.pickFolder'))
+					.onClick(() => {
+						new PathPickerModal(this.app, 'folder', (path) => {
+							this.plugin.settings = {
+								...this.plugin.settings,
+								memoSavePath: path,
+							};
+							void this.plugin.saveSettings();
+							memoInput?.setValue(path);
+						}).open();
+					}));
+		}
 
 		let archiveInput: TextComponent | undefined;
 		new Setting(containerEl)

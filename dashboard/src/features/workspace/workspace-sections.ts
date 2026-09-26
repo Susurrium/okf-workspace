@@ -1,3 +1,4 @@
+import { noteTypeLabel, noteStatusLabel } from "../../ui/display-labels.js";
 import { Notice } from "obsidian";
 
 import type { CustomSectionDefinition } from "../../../apex/src/section-registry.js";
@@ -74,7 +75,7 @@ function noteRow(
     attr: { type: "button", title: note.path },
   });
   title.addEventListener("click", () => void host.openVaultPath(note.path));
-  body.createDiv({ cls: "okf-native-note__meta", text: [note.note_type, note.status, note.stale ? "需要复核" : ""].filter(Boolean).join(" · ") });
+  body.createDiv({ cls: "okf-native-note__meta", text: [noteTypeLabel(note.note_type), noteStatusLabel(note.status), note.stale ? "需要复核" : ""].filter(Boolean).join(" · ") });
   if (note.excerpt) body.createDiv({ cls: "okf-native-note__excerpt", text: note.excerpt });
   if (actions.length > 0) {
     const controls = row.createDiv({ cls: "okf-native-note__actions" });
@@ -87,7 +88,7 @@ function noteRow(
 
 function courseRow(container: HTMLElement, course: CourseSummary, host: WorkspaceSectionHost): void {
   noteRow(container, course, host, [
-    { label: "新建 Lesson", run: () => host.promptLessonForCourse(course.path) },
+    { label: "新建课堂笔记", run: () => host.promptLessonForCourse(course.path) },
   ]);
   const row = container.lastElementChild;
   if (row instanceof HTMLElement) {
@@ -101,12 +102,12 @@ export function createLearningSectionDefinition(host: WorkspaceSectionHost): Cus
   return {
     type: OKF_LEARNING_SECTION_TYPE,
     icon: "graduation-cap",
-    label: "学习（OKF）",
+    label: "学习",
     defaultName: "学习",
     async render({ container, app }): Promise<void> {
       toolbar(container, [
         { label: "新建课程", primary: true, run: () => host.promptCourse() },
-        { label: "新建 Lesson", run: () => host.promptLesson() },
+        { label: "新建课堂笔记", run: () => host.promptLesson() },
         { label: "导入资料", run: () => host.promptDocumentImport() },
       ]);
       const data = await new VaultDashboardReader(app).learning();
@@ -140,16 +141,16 @@ export function createKnowledgeSectionDefinition(host: WorkspaceSectionHost): Cu
   return {
     type: OKF_KNOWLEDGE_SECTION_TYPE,
     icon: "network",
-    label: "知识（OKF）",
+    label: "知识",
     defaultName: "知识",
     async render({ container, app }): Promise<void> {
-      toolbar(container, [{ label: "从资料创建 Wiki", primary: true, run: () => host.promptWikiFromSources() }]);
+      toolbar(container, [{ label: "从资料创建知识笔记", primary: true, run: () => host.promptWikiFromSources() }]);
       const data = await new VaultDashboardReader(app).knowledge();
-      const pending = group(container, "待整理为 Wiki", data.pending_wiki.length);
+      const pending = group(container, "待整理为知识笔记", data.pending_wiki.length);
       for (const note of data.pending_wiki) {
-        noteRow(pending, note, host, [{ label: "创建 Wiki", run: () => host.promptRoutePendingSource(note.path, "wiki") }]);
+        noteRow(pending, note, host, [{ label: "创建知识笔记", run: () => host.promptRoutePendingSource(note.path, "wiki") }]);
       }
-      const notes = group(container, "Wiki / Map", data.notes.length);
+      const notes = group(container, "知识笔记与导航", data.notes.length);
       for (const note of data.notes) noteRow(notes, note, host);
     },
   };
@@ -159,7 +160,7 @@ export function createInboxSectionDefinition(host: WorkspaceSectionHost): Custom
   return {
     type: OKF_INBOX_SECTION_TYPE,
     icon: "inbox",
-    label: "待处理（OKF）",
+    label: "待处理",
     defaultName: "待处理",
     async render({ container, app }): Promise<void> {
       toolbar(container, [
@@ -167,19 +168,19 @@ export function createInboxSectionDefinition(host: WorkspaceSectionHost): Custom
         { label: "导入文件", run: () => host.promptDocumentImport() },
       ]);
       const data = await new VaultDashboardReader(app).inbox();
-      const captures = group(container, "Capture", data.captures.length);
+      const captures = group(container, "随手记录", data.captures.length);
       for (const note of data.captures) {
         noteRow(captures, note, host, [
           { label: "进入项目", run: () => host.promptCaptureProject(note.path) },
-          { label: "转为 Lesson", run: () => host.promptCaptureLesson(note.path) },
+          { label: "转为课堂笔记", run: () => host.promptCaptureLesson(note.path) },
         ]);
       }
       const imports = group(container, "待归类资料", data.pending_imports.length);
       for (const note of data.pending_imports) {
         noteRow(imports, note, host, [
           { label: "学习", run: () => host.promptRoutePendingSource(note.path, "learn") },
-          { label: "Wiki", run: () => host.promptRoutePendingSource(note.path, "wiki") },
-          { label: "仅归档", run: () => host.promptRoutePendingSource(note.path, "source") },
+          { label: "知识笔记", run: () => host.promptRoutePendingSource(note.path, "wiki") },
+          { label: "只保存资料", run: () => host.promptRoutePendingSource(note.path, "source") },
         ]);
       }
     },

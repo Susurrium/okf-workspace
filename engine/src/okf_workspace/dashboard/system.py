@@ -280,7 +280,7 @@ def system_status(
         "mineru",
         "MinerU",
         "deferred",
-        "当前暂不使用；文档默认由 MarkItDown 转换，仅保留显式高级调用能力",
+        "当前使用快速转换。配置此服务后可选择其他转换方式。",
     )
     markitdown = _service_item(
         "markitdown",
@@ -322,10 +322,10 @@ def system_status(
         items.append(
             SystemItem(
                 "ai",
-                "AI Provider (可选)",
+                "其他 AI 服务 (可选)",
                 "configured" if ai_ready else "not-configured",
                 f"已配置模型：{ai_model}" if ai_ready else "尚未配置可调用的模型",
-                None if ai_ready else "配置 AI 地址、模型和 Vault 外密钥文件",
+                None if ai_ready else "配置 AI 服务地址、模型和凭据文件",
             )
         )
     index = runtime / "brain.sqlite"
@@ -353,13 +353,13 @@ def system_status(
     items.append(
         SystemItem(
             "semantic-operations",
-            "Codex 语义任务",
+            "后台生成",
             semantic_status,
             (
                 f"{failed_semantics} 个失败，{pending_semantics} 个运行或排队"
                 if failed_semantics
                 else (
-                    "后台 Worker 未运行，任务仍安全保留在队列中"
+                    "后台处理服务未运行，已排队任务仍然保留"
                     if pending_semantics and not semantic_worker_ready
                     else (
                         f"{pending_semantics} 个运行或排队" if pending_semantics else "没有失败任务"
@@ -368,7 +368,7 @@ def system_status(
             ),
             "查看并重试"
             if failed_semantics
-            else "重新打开 Obsidian 以启动 Worker"
+            else "重新打开 Obsidian 以启动后台处理"
             if pending_semantics and not semantic_worker_ready
             else None,
         )
@@ -377,14 +377,14 @@ def system_status(
     items.append(
         SystemItem(
             "governance",
-            "知识与链接治理",
+            "笔记与链接检查",
             "warning" if governance else "ok",
             (
                 f"{len(governance)} 个需要检查的问题"
                 if governance
-                else "标签、Wiki 状态和内部链接正常"
+                else "标签、知识笔记状态和内部链接正常"
             ),
-            "查看治理报告" if governance else None,
+            "查看检查结果" if governance else None,
         )
     )
     failures = _conversion_failures(runtime)
@@ -408,7 +408,7 @@ def system_status(
     livesync_configured = _livesync_is_configured(livesync_settings)
     if not livesync_required and not livesync_configured:
         livesync_status = "deferred"
-        livesync_detail = "已按计划延后；当前单机使用不受影响"
+        livesync_detail = "未启用，当前设备仍可正常使用"
         livesync_action = None
     elif not livesync.is_dir():
         livesync_status = "not-installed"
@@ -425,7 +425,7 @@ def system_status(
     items.append(
         SystemItem(
             "livesync",
-            "Self-hosted LiveSync (后续)",
+            "多设备同步 (LiveSync)",
             livesync_status,
             livesync_detail,
             livesync_action,
@@ -474,12 +474,12 @@ def system_status(
     items.append(
         SystemItem(
             "feeds",
-            "AI Daily / 树洞",
+            "每日资讯与树洞订阅",
             "not-configured"
             if not producer_config.is_file()
             else ("stale" if feed_stale else "ok"),
             (
-                "尚未配置 Feed producer"
+                "尚未连接订阅服务"
                 if not producer_config.is_file()
                 else (
                     f"最近更新：{latest_feed_at.astimezone().isoformat(timespec='minutes')}"
@@ -487,7 +487,7 @@ def system_status(
                     else "尚未完成首次同步"
                 )
             ),
-            "配置 Feed producer"
+            "配置订阅服务"
             if not producer_config.is_file()
             else ("立即同步" if feed_stale else None),
         )

@@ -13,6 +13,7 @@ import type {
   ProviderChatUIConfig,
   ProviderId,
 } from '../../../../core/providers/types';
+import { t } from '../../../../i18n/i18n';
 import { SlashCommandDropdown } from '../../../../shared/components/SlashCommandDropdown';
 import { getEnhancedPath } from '../../../../utils/env';
 import { getVaultPath } from '../../../../utils/path';
@@ -306,7 +307,7 @@ function buildInputToolbar(
       const boundProvider = tab.providerId;
       const modelProvider = getProviderForModel(model, plugin.settings);
       if (modelProvider !== boundProvider) {
-        new Notice('Cannot switch provider on a bound session. Start a new conversation instead.');
+        new Notice(t('chatUi.cannotSwitchProviderOnABoundSessionStartANewConversationInstead'));
         tab.ui.modelSelector.updateDisplay();
         return;
       }
@@ -431,8 +432,8 @@ function buildInputToolbar(
     cls: 'claudian-composer-action claudian-composer-stop claudian-hidden',
     attr: {
       type: 'button',
-      title: 'Stop response',
-      'aria-label': 'Stop response',
+      title: t('chatUi.stopResponse'),
+      'aria-label': t('chatUi.stopResponse'),
       'aria-hidden': 'true',
     },
   });
@@ -441,8 +442,8 @@ function buildInputToolbar(
     cls: 'claudian-composer-action claudian-composer-send',
     attr: {
       type: 'button',
-      title: 'Send message',
-      'aria-label': 'Send message',
+      title: t('chatUi.sendMessage'),
+      'aria-label': t('chatUi.sendMessage'),
     },
   });
   setIcon(sendButtonEl, 'send-horizontal');

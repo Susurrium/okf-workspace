@@ -1037,7 +1037,7 @@ export class TabManager implements TabManagerInterface {
     if (!error) {
       statusEl.createDiv({
         cls: 'claudian-tab-hydration-loading',
-        text: 'Loading conversation…',
+        text: t('chatUi.loadingConversation'),
       });
       return;
     }
@@ -1048,7 +1048,7 @@ export class TabManager implements TabManagerInterface {
     });
     const retryButton = statusEl.createEl('button', {
       cls: 'mod-cta claudian-tab-hydration-retry',
-      text: 'Retry',
+      text: t('chatUi.retry'),
     });
     retryButton.addEventListener('click', () => {
       if (!this.isTabAlive(tab)) return;

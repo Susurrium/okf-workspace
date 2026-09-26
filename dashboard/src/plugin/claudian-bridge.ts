@@ -70,7 +70,7 @@ export class ClaudianBridgeAdapter {
     const bridge = this.bridge();
     if (!bridge) {
       throw new Error(
-        "Claudian 面板未启用或版本不兼容；请启用 okf-claudian 后重新加载 Obsidian。",
+        "Claudian 面板未启用或版本不兼容；请启用 Claudian 插件 后重新加载 Obsidian。",
       );
     }
     return bridge;

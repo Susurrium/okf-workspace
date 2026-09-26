@@ -6,6 +6,6 @@
 
 ## 课程资料
 
-## Lessons
+## 课堂笔记
 
-## Study Guides
+## 学习笔记

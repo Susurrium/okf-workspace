@@ -237,9 +237,9 @@ export class HttpFeedApi implements FeedApi {
       });
     } catch (error) {
       if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) {
-        throw new FeedTransportError("Workspace 本地服务响应超时", { cause: error });
+        throw new FeedTransportError("本地服务响应超时", { cause: error });
       }
-      throw new FeedTransportError("Workspace 本地服务连接中断", {
+      throw new FeedTransportError("本地服务连接中断", {
         cause: error instanceof Error ? error : undefined,
       });
     }

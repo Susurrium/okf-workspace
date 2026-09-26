@@ -1,13 +1,13 @@
 # {{title}}
 
-## Scope
+## 主题范围
 
-## Core Wiki
+## 核心知识
 
-## Relationships
+## 知识联系
 
-## Reading Path
+## 阅读顺序
 
-## Learning in progress
+## 正在学习
 
-## Open Questions
+## 待解问题

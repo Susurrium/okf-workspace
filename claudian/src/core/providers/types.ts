@@ -237,10 +237,13 @@ export interface ProviderReasoningOption extends ProviderUIOption {
 export interface ProviderPermissionModeToggleConfig {
   inactiveValue: string;
   inactiveLabel: string;
+  inactiveDescription?: string;
   activeValue: string;
   activeLabel: string;
+  activeDescription?: string;
   planValue?: string;
   planLabel?: string;
+  planDescription?: string;
 }
 
 /** Compact service-tier toggle descriptor for providers that expose a fast/standard toolbar control. */

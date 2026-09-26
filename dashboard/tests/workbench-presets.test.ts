@@ -69,8 +69,8 @@ describe("OKF workbench presets", () => {
   it("does not claim project or reading context that the preset does not bind", () => {
     const project = workbenchPresetData("project");
     expect(project.columns.find((column) => column.id === "project-today")?.name).toBe("今日行动");
-    expect(project.columns.find((column) => column.id === "project-learning")?.name).toBe("学习工作区");
+    expect(project.columns.find((column) => column.id === "project-learning")?.name).toBe("学习");
     expect(workbenchPresetData("reading").columns.find((column) => column.id === "reading-knowledge")?.name)
-      .toBe("知识工作区");
+      .toBe("知识库");
   });
 });

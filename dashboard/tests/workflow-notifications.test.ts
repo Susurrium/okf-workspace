@@ -18,6 +18,6 @@ describe("workflow notifications", () => {
     expect(semanticCompletionTitle("generate-study-guide", "Import checklist"))
       .toBe("学习材料已生成：Import checklist");
     expect(semanticCompletionTitle("generate-wiki", "LiveSync 不是备份"))
-      .toBe("Wiki 已生成：LiveSync 不是备份");
+      .toBe("知识笔记已生成：LiveSync 不是备份");
   });
 });

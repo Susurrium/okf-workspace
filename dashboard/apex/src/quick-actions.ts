@@ -5,7 +5,7 @@ import { t } from './i18n';
 import type { AppWithCommands } from './obsidian-internal';
 import { iconForExtension } from './file-types';
 import { applyModalTheme } from './modal-theme';
-import { KANBAN_FILE_DRAG_TYPE } from './dnd';
+import { ITEM_DRAG_TYPE, KANBAN_FILE_DRAG_TYPE } from './dnd';
 
 function actionKey(action: QuickAction, isPreset: boolean): string {
 	return isPreset ? `p:${action.target}` : `c:${action.target}`;
@@ -84,6 +84,7 @@ export function renderQuickActions(
 	hiddenPresets?: string[],
 	onEdit?: (action: QuickAction) => void,
 	colors?: QuickButtonsColors,
+	onDocumentImportDrop?: (transfer: DataTransfer) => void,
 ): void {
 	const section = container.createDiv({ cls: 'dashboard-section dashboard-quick-actions' });
 	if (colors?.bg) section.style.background = colors.bg;
@@ -165,9 +166,17 @@ export function renderQuickActions(
 		// Library kanban card drag: not a quick-action reorder — decline without
 		// painting the reorder highlight.
 		if (e.dataTransfer?.types.includes(KANBAN_FILE_DRAG_TYPE)) return;
+		const item = (e.target as HTMLElement).closest('.dashboard-qa-item') as HTMLElement | null;
+		if (e.dataTransfer?.types.includes('Files') && !e.dataTransfer.types.includes(ITEM_DRAG_TYPE)
+			&& item?.dataset.qaImportDrop === 'true' && onDocumentImportDrop) {
+			e.preventDefault();
+			e.stopPropagation();
+			e.dataTransfer.dropEffect = 'copy';
+			item.addClass('dashboard-qa-item--drag-over');
+			return;
+		}
 		e.preventDefault();
 		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-		const item = (e.target as HTMLElement).closest('.dashboard-qa-item') as HTMLElement;
 		if (item && !item.hasClass('dashboard-qa-item--dragging')) {
 			list.querySelectorAll('.dashboard-qa-item--drag-over').forEach(el => el.removeClass('dashboard-qa-item--drag-over'));
 			item.addClass('dashboard-qa-item--drag-over');
@@ -180,6 +189,16 @@ export function renderQuickActions(
 	};
 
 	const onDrop = (e: DragEvent) => {
+		const item = (e.target as HTMLElement).closest('.dashboard-qa-item') as HTMLElement | null;
+		if (e.dataTransfer?.types.includes('Files') && !e.dataTransfer.types.includes(KANBAN_FILE_DRAG_TYPE)
+			&& !e.dataTransfer.types.includes(ITEM_DRAG_TYPE)
+			&& item?.dataset.qaImportDrop === 'true' && onDocumentImportDrop) {
+			e.preventDefault();
+			e.stopPropagation();
+			item.removeClass('dashboard-qa-item--drag-over');
+			onDocumentImportDrop(e.dataTransfer);
+			return;
+		}
 		e.preventDefault();
 		list.querySelectorAll('.dashboard-qa-item--drag-over').forEach(el => el.removeClass('dashboard-qa-item--drag-over'));
 		if (!draggedKey || !onReorder) return;
@@ -205,7 +224,11 @@ export function renderQuickActions(
 	for (const { action, isPreset, key } of ordered) {
 		const item = list.createDiv({
 			cls: 'dashboard-qa-item' + (isPreset ? ' dashboard-qa-item--preset' : ''),
-			attr: { draggable: 'true', 'data-qa-key': key },
+			attr: {
+				draggable: 'true',
+				'data-qa-key': key,
+				'data-qa-import-drop': action.target === 'okf-workspace-dashboard:import-document' ? 'true' : 'false',
+			},
 		});
 
 		const iconEl = item.createSpan({ cls: 'dashboard-qa-icon' });

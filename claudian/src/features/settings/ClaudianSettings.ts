@@ -454,15 +454,15 @@ export class ClaudianSettingTab extends PluginSettingTab {
     new Setting(container).setName(t('settings.content')).setHeading();
 
     new Setting(container)
-      .setName('Codex prompt mode')
+      .setName(t('interface.promptMode'))
       .setDesc(
-        'Applies when a new Codex conversation starts. Existing conversations keep the mode recorded in their provider state.',
+        t('interface.promptModeHelp'),
       )
       .addDropdown((dropdown) => {
         dropdown
-          .addOption('okf-native', 'Workspace native (recommended)')
-          .addOption('claudian-full', 'Claudian full')
-          .addOption('custom-replace', 'Custom replace')
+          .addOption('okf-native', t('interface.nativePrompt'))
+          .addOption('claudian-full', t('interface.fullPrompt'))
+          .addOption('custom-replace', t('interface.customPrompt'))
           .setValue(normalizeSystemPromptMode(this.plugin.settings.systemPromptMode))
           .onChange(async (value) => {
             await this.plugin.mutateSettings((settings) => {
@@ -472,13 +472,13 @@ export class ClaudianSettingTab extends PluginSettingTab {
       });
 
     new Setting(container)
-      .setName('Custom replacement instructions')
+      .setName(t('interface.replacementInstructions'))
       .setDesc(
-        'Used only by custom replace. This replaces the Claudian prompt instead of being appended to it.',
+        t('interface.replacementHelp'),
       )
       .addTextArea((text) => {
         text
-          .setPlaceholder('Follow applicable AGENTS.md instructions.')
+          .setPlaceholder(t('interface.replacementPlaceholder'))
           .setValue(this.plugin.settings.replacementSystemPrompt ?? '')
           .onChange(async (value) => {
             await this.plugin.mutateSettings((settings) => {
@@ -652,8 +652,8 @@ export class ClaudianSettingTab extends PluginSettingTab {
       plugin: this.plugin.providerHost,
       scope: 'shared',
       heading: t('settings.environment'),
-      name: 'Shared environment',
-      desc: 'Provider-neutral runtime variables shared across all providers. Use this for PATH, proxy, cert, and temp variables.',
+      name: t('interface.sharedEnvironment'),
+      desc: t('interface.sharedEnvironmentHelp'),
       placeholder: 'PATH=/opt/homebrew/bin:/usr/local/bin\nHTTPS_PROXY=http://proxy.example.com:8080\nSSL_CERT_FILE=/path/to/cert.pem',
     });
 
@@ -770,7 +770,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
         value: currentAlias,
       });
       aliasInputEl.setAttribute('aria-label', `Alias for ${modelId}`);
-      aliasInputEl.title = 'Custom label shown in the model selector. Leave empty to use the default.';
+      aliasInputEl.title = t('interface.aliasHelp');
 
       const inputEl = inputWrapper.createEl('input', {
         type: 'text',

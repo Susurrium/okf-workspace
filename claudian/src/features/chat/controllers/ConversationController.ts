@@ -885,7 +885,7 @@ export class ConversationController {
         });
         pinnedHeader.createSpan({
           cls: 'claudian-history-section-label',
-          text: 'Pinned',
+          text: t('chatUi.pinned'),
         });
         pinnedList = pinnedSection.createDiv({
           cls: 'claudian-history-section-items',
@@ -909,14 +909,14 @@ export class ConversationController {
       });
       sessionsHeader.createSpan({
         cls: 'claudian-history-section-label',
-        text: options.showArchivedSection ? 'Archived' : 'Sessions',
+        text: options.showArchivedSection ? 'Archived' : t('chatUi.sessions'),
       });
       sessionList = sessionsSection.createDiv({
         cls: 'claudian-history-section-items claudian-session-list-items',
       });
     } else {
       const dropdownHeader = container.createDiv({ cls: 'claudian-history-header' });
-      dropdownHeader.createSpan({ text: options.historyHeaderLabel ?? 'Sessions' });
+      dropdownHeader.createSpan({ text: options.historyHeaderLabel ?? t('chatUi.sessions') });
       list = container.createDiv({ cls: 'claudian-history-list' });
       sessionList = list;
     }
@@ -1117,7 +1117,7 @@ export class ConversationController {
     if (section.kind === 'missing') {
       groupHeader.createSpan({
         cls: 'claudian-session-group-status',
-        text: 'Missing',
+        text: t('chatUi.missing'),
       });
     }
     const groupRunningIndicator = hasRunningConversation
@@ -1132,7 +1132,7 @@ export class ConversationController {
       : null;
     if (groupRunningIndicator) {
       setIcon(groupRunningIndicator, 'loader-2');
-      groupRunningIndicator.setAttribute('aria-label', 'Running');
+      groupRunningIndicator.setAttribute('aria-label', t('chatUi.running'));
     }
     if (
       section.kind === 'note'
@@ -1247,7 +1247,7 @@ export class ConversationController {
           if (canToggleLinkedNotePin) menu.addSeparator();
           menu.addItem((menuItem) => {
             menuItem
-              .setTitle('Archive all sessions')
+              .setTitle(t('chatUi.archiveAllSessions'))
               .setDisabled(archivableConversationIds.length === 0);
             if (archivableConversationIds.length > 0) {
               menuItem.onClick(() => {
@@ -1453,11 +1453,11 @@ export class ConversationController {
         cls: 'claudian-action-btn claudian-action-loading',
       });
       setIcon(loadingEl, 'loader-2');
-      loadingEl.setAttribute('aria-label', 'Generating title...');
+      loadingEl.setAttribute('aria-label', t('chatUi.generatingTitle'));
     } else if (conversation.titleGenerationStatus === 'failed') {
       const regenerateBtn = actions.createEl('button', { cls: 'claudian-action-btn' });
       setIcon(regenerateBtn, 'refresh-cw');
-      regenerateBtn.setAttribute('aria-label', 'Regenerate title');
+      regenerateBtn.setAttribute('aria-label', t('chatUi.regenerateTitle'));
       regenerateBtn.addEventListener('click', (event) => {
         event.stopPropagation();
         runConversationAction(
@@ -1472,7 +1472,7 @@ export class ConversationController {
         cls: 'claudian-action-btn claudian-open-new-tab-btn',
       });
       setIcon(openInNewTabBtn, 'square-plus');
-      openInNewTabBtn.setAttribute('aria-label', 'Open in new tab');
+      openInNewTabBtn.setAttribute('aria-label', t('chatUi.openInNewTab'));
       openInNewTabBtn.addEventListener('click', (event) => {
         event.stopPropagation();
         runConversationAction(
@@ -1490,7 +1490,7 @@ export class ConversationController {
         cls: 'claudian-action-btn claudian-delete-btn',
       });
       setIcon(deleteBtn, 'trash-2');
-      deleteBtn.setAttribute('aria-label', 'Delete');
+      deleteBtn.setAttribute('aria-label', t('chatUi.delete'));
       deleteBtn.addEventListener('click', (event) => {
         event.stopPropagation();
         runConversationAction(
@@ -1530,7 +1530,7 @@ export class ConversationController {
         setIcon(archiveBtn, 'archive');
         archiveBtn.setAttribute(
           'aria-label',
-          isRunning ? 'Cannot archive a running session' : 'Archive',
+          isRunning ? 'Cannot archive a running session' : t('chatUi.archive'),
         );
         if (isRunning) {
           archiveBtn.setAttribute('disabled', '');
@@ -1552,7 +1552,7 @@ export class ConversationController {
         cls: 'claudian-action-btn claudian-restore-btn',
       });
       setIcon(restoreBtn, 'undo-2');
-      restoreBtn.setAttribute('aria-label', 'Restore');
+      restoreBtn.setAttribute('aria-label', t('chatUi.restore'));
       restoreBtn.addEventListener('click', (event) => {
         event.stopPropagation();
         runConversationAction(
@@ -1567,7 +1567,7 @@ export class ConversationController {
     } else {
       const renameBtn = actions.createEl('button', { cls: 'claudian-action-btn' });
       setIcon(renameBtn, 'pencil');
-      renameBtn.setAttribute('aria-label', 'Rename');
+      renameBtn.setAttribute('aria-label', t('chatUi.rename'));
       renameBtn.addEventListener('click', (event) => {
         event.stopPropagation();
         this.showRenameEditor(item, conversation.id, conversation.title, options);
@@ -1580,7 +1580,7 @@ export class ConversationController {
         cls: 'claudian-session-running-indicator',
       });
       setIcon(runningIndicator, 'loader-2');
-      runningIndicator.setAttribute('aria-label', 'Running');
+      runningIndicator.setAttribute('aria-label', t('chatUi.running'));
     }
   }
 
@@ -1679,7 +1679,7 @@ export class ConversationController {
     this.renderSessionMetadataRow(
       hoverEl,
       'calendar-days',
-      'Created',
+      t('chatUi.created'),
       this.formatMetadataDate(conversation.createdAt),
     );
     this.renderSessionMetadataRow(
@@ -1878,7 +1878,7 @@ export class ConversationController {
     }
 
     if (isRunning) {
-      if (openState === 'closed') return 'Running';
+      if (openState === 'closed') return t('chatUi.running');
       return `Running in ${this.getHistoryTabLabel(status)}`;
     }
 
@@ -1949,7 +1949,7 @@ export class ConversationController {
     if (options.showOpenStateActions !== false && openState !== 'current') {
       if (openState === 'closed' && options.onOpenConversationInNewTab) {
         menu.addItem((menuItem) => menuItem
-          .setTitle('Open in new tab')
+          .setTitle(t('chatUi.openInNewTab'))
           .onClick(() => {
             void this.runHistoryAction(
               () => options.onOpenConversationInNewTab?.(conversationId, true),
@@ -1957,7 +1957,7 @@ export class ConversationController {
             );
           }));
         menu.addItem((menuItem) => menuItem
-          .setTitle('Open in background tab')
+          .setTitle(t('chatUi.openInBackgroundTab'))
           .onClick(() => {
             void this.runHistoryAction(
               () => options.onOpenConversationInNewTab?.(conversationId, false),
@@ -1966,7 +1966,7 @@ export class ConversationController {
           }));
       } else if (openState === 'open') {
         menu.addItem((menuItem) => menuItem
-          .setTitle('Switch to open session')
+          .setTitle(t('chatUi.switchToOpenSession'))
           .onClick(() => {
             void this.runHistoryAction(
               () => options.onSelectConversation(conversationId),
@@ -1978,7 +1978,7 @@ export class ConversationController {
 
     if (options.sessionActionMode === 'archived') {
       menu.addItem((menuItem) => menuItem
-        .setTitle('Restore')
+        .setTitle(t('chatUi.restore'))
         .onClick(() => {
           void this.runHistoryAction(
             () => options.onSetConversationArchived?.(conversationId, false),
@@ -1986,7 +1986,7 @@ export class ConversationController {
           );
         }));
       menu.addItem((menuItem) => menuItem
-        .setTitle('Delete')
+        .setTitle(t('chatUi.delete'))
         .onClick(() => {
           void this.runHistoryAction(
             () => this.deleteHistoryConversation(conversationId, options),
@@ -2011,13 +2011,13 @@ export class ConversationController {
 
     if (options.sessionActionMode === 'active') {
       menu.addItem((menuItem) => menuItem
-        .setTitle('Rename')
+        .setTitle(t('chatUi.rename'))
         .onClick(() => {
           this.showRenameEditor(item, conversationId, title, options);
         }));
       menu.addItem((menuItem) => {
         menuItem
-          .setTitle('Archive')
+          .setTitle(t('chatUi.archive'))
           .setDisabled(isRunning);
         if (!isRunning) {
           menuItem.onClick(() => {
@@ -2033,12 +2033,12 @@ export class ConversationController {
     }
 
     menu.addItem((menuItem) => menuItem
-      .setTitle('Rename')
+      .setTitle(t('chatUi.rename'))
       .onClick(() => {
         this.showRenameEditor(item, conversationId, title, options);
       }));
     menu.addItem((menuItem) => menuItem
-      .setTitle('Delete')
+      .setTitle(t('chatUi.delete'))
       .onClick(() => {
         void this.runHistoryAction(
           () => this.deleteHistoryConversation(conversationId, options),
@@ -2123,7 +2123,7 @@ export class ConversationController {
         await this.deps.plugin.renameConversation(convId, newTitle);
         options.onRerender();
       } catch {
-        new Notice('Failed to rename conversation');
+        new Notice(t('chatUi.failedToRenameConversation'));
       } finally {
         isFinishing = false;
       }
@@ -2133,7 +2133,7 @@ export class ConversationController {
       if (this.activeInlineRename?.input === input) {
         this.activeInlineRename = null;
       }
-      runConversationAction(finishRename, 'Failed to rename conversation');
+      runConversationAction(finishRename, t('chatUi.failedToRenameConversation'));
     });
     input.addEventListener('keydown', (e) => {
       // Check !e.isComposing for IME support (Chinese, Japanese, Korean, etc.)

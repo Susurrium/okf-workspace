@@ -193,17 +193,17 @@ class NoteService:
         if period == "weekly":
             iso = value.isocalendar()
             key = f"{iso.year}-W{iso.week:02d}"
-            title = f"{key} Weekly Review"
+            title = f"{key} 每周复盘"
             start = value - timedelta(days=value.weekday())
             end = start + timedelta(days=6)
         elif period == "monthly":
             key = f"{value:%Y-%m}"
-            title = f"{key} Monthly Review"
+            title = f"{key} 每月复盘"
             start = value.replace(day=1)
             end = value.replace(day=calendar.monthrange(value.year, value.month)[1])
         elif period == "yearly":
             key = f"{value:%Y}"
-            title = f"{key} Yearly Review"
+            title = f"{key} 每年复盘"
             start = value.replace(month=1, day=1)
             end = value.replace(month=12, day=31)
         else:

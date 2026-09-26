@@ -3,6 +3,7 @@ import type {
   SessionManagerOrganization,
   SessionManagerSort,
 } from '../../../core/types';
+import { t } from '../../../i18n/i18n';
 import { isProvisionalNotePath } from './ProvisionalNoteNames';
 
 export { isProvisionalNotePath } from './ProvisionalNoteNames';
@@ -131,7 +132,7 @@ export function organizeSessionList(
     sections.push({
       key: 'ungrouped',
       kind: 'ungrouped',
-      label: 'Unlinked',
+      label: t('interface.unlinked'),
       conversations: ungrouped,
     });
   }

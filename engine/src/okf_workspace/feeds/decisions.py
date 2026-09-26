@@ -18,6 +18,7 @@ from okf_workspace.notes.web_captures import (
 from okf_workspace.okf.file_io import atomic_write_bytes, document_lock
 from okf_workspace.okf.frontmatter import OkfDocument
 from okf_workspace.okf.paths import slugify
+from okf_workspace.okf.relations import explicit_context_fields
 from okf_workspace.sources import SourcePublisher
 
 from .editions import materialize_media_references, render_treehole_comments
@@ -332,12 +333,28 @@ class FeedDecisionService:
     def _learning_target(
         self,
         item: FeedItem,
+        *,
+        course: str | None = None,
+        project: str | None = None,
     ) -> Path:
-        target = self.vault / "learning" / "guides" / f"{_slug(item)}.md"
+        context = explicit_context_fields(self.vault, course=course, project=project)
+        root = self.vault / "learning"
+        if "course" in context:
+            root = self.vault / context["course"].lstrip("/")
+            root = root.parent
+        suffix = f"-{Path(context['project']).parent.name}" if "project" in context else ""
+        target = root / "guides" / f"{_slug(item)}{suffix}.md"
         return target
 
-    def _wiki_target(self, item: FeedItem) -> Path:
-        target = self.vault / "knowledge" / "wiki" / f"{_slug(item)}.md"
+    def _wiki_target(
+        self, item: FeedItem, *, course: str | None = None, project: str | None = None,
+    ) -> Path:
+        context = explicit_context_fields(self.vault, course=course, project=project)
+        suffix = (
+            "-" + hashlib.sha256(json.dumps(context, sort_keys=True).encode()).hexdigest()[:10]
+            if context else ""
+        )
+        target = self.vault / "knowledge" / "wiki" / f"{_slug(item)}{suffix}.md"
         return target
 
     def decide(
@@ -379,9 +396,9 @@ class FeedDecisionService:
                 project=project,
             )
             if action is DecisionAction.LEARN_NOW:
-                study_guide = self._learning_target(item)
+                study_guide = self._learning_target(item, course=course, project=project)
             elif action is DecisionAction.WIKI_NOW:
-                wiki = self._wiki_target(item)
+                wiki = self._wiki_target(item, course=course, project=project)
             if checkpoint:
                 try:
                     create_checkpoint(self.vault, f"feed: {action.value} {item.item_id}")

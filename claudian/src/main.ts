@@ -67,7 +67,7 @@ import {
 import { registerFileMenu } from './features/chat/fileMenu';
 import { type InlineEditContext, InlineEditModal } from './features/inline-edit/ui/InlineEditModal';
 import { ClaudianSettingTab } from './features/settings/ClaudianSettings';
-import { setLocale } from './i18n/i18n';
+import { setLocale, t } from './i18n/i18n';
 import type { Locale } from './i18n/types';
 import { createOkfBridge } from './integrations/okf/OkfBridge';
 import { deleteLegacyMcpConfig } from './providers/claude/storage/LegacyMcpConfigCleanup';
@@ -199,13 +199,15 @@ export default class ClaudianPlugin extends Plugin {
         });
       }));
 
-      this.addRibbonIcon('bot', 'Open Claudian', () => {
+      // Keep the persisted ribbon identity while localizing its tooltip.
+      const ribbon = this.addRibbonIcon('bot', 'Open Claudian', () => {
         void this.activateView();
       });
+      ribbon?.setAttribute('aria-label', t('interface.openAssistant'));
 
       this.addCommand({
         id: 'open-view',
-        name: 'Open chat view',
+        name: t('interface.openChat'),
         callback: () => {
           void this.activateView();
         },
@@ -213,13 +215,13 @@ export default class ClaudianPlugin extends Plugin {
 
       this.addCommand({
         id: 'inline-edit',
-        name: 'Inline edit',
+        name: t('interface.inlineEdit'),
         editorCallback: async (editor: Editor, ctx) => {
           const view = ctx instanceof MarkdownView
             ? ctx
             : this.app.workspace.getActiveViewOfType(MarkdownView);
           if (!view) {
-            new Notice('Inline edit unavailable: could not access the active Markdown view.');
+            new Notice(t('interface.editUnavailable'));
             return;
           }
 
@@ -252,14 +254,14 @@ export default class ClaudianPlugin extends Plugin {
           const result = await modal.openAndWait();
 
           if (result.decision === 'accept' && result.editedText !== undefined) {
-            new Notice(editContext.mode === 'cursor' ? 'Inserted' : 'Edit applied');
+            new Notice(editContext.mode === 'cursor' ? t('interface.inserted') : t('interface.editApplied'));
           }
         },
       });
 
       this.addCommand({
         id: 'new-tab',
-        name: 'New',
+        name: t('interface.newChat'),
         checkCallback: (checking: boolean) => {
           if (!this.canCreateNewTab()) return false;
 
@@ -272,7 +274,7 @@ export default class ClaudianPlugin extends Plugin {
 
       this.addCommand({
         id: 'new-session',
-        name: 'Replace current conversation',
+        name: t('interface.replaceChat'),
         checkCallback: (checking: boolean) => {
           const view = this.getView();
           if (!view) return false;
@@ -295,7 +297,7 @@ export default class ClaudianPlugin extends Plugin {
 
       this.addCommand({
         id: 'close-current-tab',
-        name: 'Close current tab',
+        name: t('interface.closeTab'),
         checkCallback: (checking: boolean) => {
           const view = this.getView();
           if (!view) return false;
@@ -316,10 +318,10 @@ export default class ClaudianPlugin extends Plugin {
 
       this.addCommand({
         id: 'copy-startup-diagnostics',
-        name: 'Copy startup diagnostics',
+        name: t('interface.diagnostics'),
         callback: async () => {
           const copied = await StartupProfiler.copyToClipboard();
-          new Notice(copied ? 'Startup diagnostics copied to clipboard.' : 'Failed to copy startup diagnostics.');
+          new Notice(copied ? t('interface.diagnosticsCopied') : t('interface.diagnosticsFailed'));
         },
       });
 
