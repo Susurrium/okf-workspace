@@ -58,6 +58,7 @@ import { dashboardMarkdownPath, planDashboardUpdate, type DashboardUpdateSource 
 import { captureScrollStates, restoreScrollStates } from './scroll-preserve';
 import { normalizeWorkspacePath } from './workspace-registry';
 import { revealSectionType as revealApexSectionType } from './section-navigation';
+import { PaneSectionCollapseState } from './section-collapse-state';
 
 interface DailyNotesOptions {
 	folder?: string;
@@ -108,7 +109,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	private syncLease: SyncEngineLease;
 	private unsubscribeSync: () => void;
 	private workspacePath: string;
-	private collapsedSections = new Set<string>();
+	private readonly sectionCollapseState = new PaneSectionCollapseState();
 	private pendingPaneScroll: PaneScrollState | undefined;
 	private workspaceSwitchQueue: Promise<void> = Promise.resolve();
 	private data: DashboardData | null = null;
@@ -201,7 +202,8 @@ export class DashboardView extends ItemView implements HoverParent {
 		});
 		return {
 			workspacePath: this.workspacePath,
-			collapsedSections: [...this.collapsedSections],
+			collapsedSections: [...this.sectionCollapseState.forWorkspace(this.workspacePath)],
+			collapsedSectionsByWorkspace: this.sectionCollapseState.snapshot(),
 			scroll: {
 				kanban: (root?.querySelector('.dashboard-kanban') as HTMLElement | null)?.scrollTop ?? 0,
 				sidebar: (root?.querySelector('.dashboard-sidebar-scroll') as HTMLElement | null)?.scrollTop ?? 0,
@@ -217,9 +219,13 @@ export class DashboardView extends ItemView implements HoverParent {
 		const target = normalizeWorkspacePath(candidate);
 		if (!target || !this.plugin.settings.workspaceFiles.includes(target)) return;
 		const workspaceChanged = target !== this.workspacePath;
-		const collapsed = (state as Record<string, unknown>).collapsedSections;
-		if (Array.isArray(collapsed)) {
-			this.collapsedSections = new Set(collapsed.filter((value): value is string => typeof value === 'string'));
+		const savedState = state as Record<string, unknown>;
+		if (savedState.collapsedSectionsByWorkspace !== undefined || Array.isArray(savedState.collapsedSections)) {
+			this.sectionCollapseState.restore(
+				savedState.collapsedSectionsByWorkspace,
+				target,
+				savedState.collapsedSections,
+			);
 		}
 		const scroll = (state as Record<string, unknown>).scroll;
 		if (scroll && typeof scroll === 'object' && !Array.isArray(scroll)) {
@@ -452,7 +458,12 @@ export class DashboardView extends ItemView implements HoverParent {
 	}
 
 	revealSectionType(sectionType: string): boolean {
-		return revealApexSectionType(this.data, this.containerEl, this.collapsedSections, sectionType);
+		return revealApexSectionType(
+			this.data,
+			this.containerEl,
+			this.sectionCollapseState.forWorkspace(this.workspacePath),
+			sectionType,
+		);
 	}
 
 	/** Recreate one OKF page so a navigation-specific tab/filter patch is read. */
@@ -468,11 +479,13 @@ export class DashboardView extends ItemView implements HoverParent {
 	}
 
 	async replaceWorkspacePath(oldPath: string, newPath: string): Promise<void> {
+		this.sectionCollapseState.rename(oldPath, newPath);
 		if (this.workspacePath !== normalizeWorkspacePath(oldPath)) return;
 		await this.switchWorkspace(newPath);
 	}
 
 	async handleWorkspaceRemoved(path: string, fallback: string): Promise<void> {
+		this.sectionCollapseState.remove(path);
 		if (this.workspacePath !== normalizeWorkspacePath(path)) return;
 		await this.switchWorkspace(fallback);
 	}
@@ -1206,6 +1219,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	}
 
 	private createCallbacks() {
+		const collapseWorkspacePath = this.workspacePath;
 		return {
 			onCustomSectionCleanup: (sectionReference: string, cleanup: () => void) => {
 				this.runCustomSectionCleanup(sectionReference);
@@ -1330,9 +1344,9 @@ export class DashboardView extends ItemView implements HoverParent {
 						this.refreshSectionInPlace(columnName);
 					});
 				},
-				getCollapsedSections: () => new Set(this.collapsedSections),
+				getCollapsedSections: () => new Set(this.sectionCollapseState.forWorkspace(collapseWorkspacePath)),
 				onCollapsedSectionsChange: (collapsed: Set<string>) => {
-					this.collapsedSections = new Set(collapsed);
+					this.sectionCollapseState.replace(collapseWorkspacePath, collapsed);
 				},
 		};
 	}

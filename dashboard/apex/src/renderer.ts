@@ -40,6 +40,7 @@ import { SUPPORTED_FILE_EXTS, iconForExtension } from './file-types';
 import type { HolidayInfo } from './holiday-service';
 import { CountdownSettingsModal } from './countdown-modal';
 import { getSectionDefinition } from './section-registry';
+import { createSectionCollapseToggle } from './section-collapse-state';
 import { Chart, LineController, LineElement, PointElement, BarController, BarElement, LinearScale, CategoryScale, Filler, Tooltip } from 'chart.js';
 
 Chart.register(LineController, LineElement, PointElement, BarController, BarElement, LinearScale, CategoryScale, Filler, Tooltip);
@@ -1918,8 +1919,8 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	const sectionType = getSectionType(column);
 	el.dataset.sectionType = sectionType;
 
-	const collapsed = callbacks.getCollapsedSections?.() ?? getCollapsedSections(app);
-	if (collapsed.has(reference) || collapsed.has(column.name)) {
+	const initiallyCollapsed = callbacks.getCollapsedSections?.() ?? getCollapsedSections(app);
+	if (initiallyCollapsed.has(reference) || initiallyCollapsed.has(column.name)) {
 		el.addClass('dashboard-section-row--collapsed');
 	}
 
@@ -2005,19 +2006,24 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	const toggle = titleWrap.createDiv({ cls: 'dashboard-section-toggle' });
 	toggle.setAttribute('role', 'button');
 	toggle.setAttribute('aria-label', t('renderer.toggleSection'));
+	const persistCollapse = createSectionCollapseToggle(
+		() => callbacks.getCollapsedSections?.() ?? getCollapsedSections(app),
+		(next) => {
+			if (callbacks.onCollapsedSectionsChange) callbacks.onCollapsedSectionsChange(next);
+			else saveCollapsedSections(app, next);
+		},
+		reference,
+		column.name,
+	);
 	toggle.addEventListener('click', (e) => {
 		e.stopPropagation();
 		const isNowCollapsed = el.hasClass('dashboard-section-row--collapsed');
 		if (isNowCollapsed) {
 			el.removeClass('dashboard-section-row--collapsed');
-			collapsed.delete(reference);
-			collapsed.delete(column.name);
 		} else {
 			el.addClass('dashboard-section-row--collapsed');
-			collapsed.add(reference);
 		}
-		if (callbacks.onCollapsedSectionsChange) callbacks.onCollapsedSectionsChange(collapsed);
-		else saveCollapsedSections(app, collapsed);
+		persistCollapse(!isNowCollapsed);
 	});
 
 		const headerActions = header.createDiv({ cls: 'dashboard-section-header-actions' });
