@@ -11,12 +11,13 @@ from okf_workspace.importers.routing import choose_parser
 @pytest.mark.parametrize(
     ("filename", "quality", "expected"),
     [
-        ("paper.pdf", ImportQuality.HIGH, ParserName.MARKITDOWN),
-        ("paper.pdf", ImportQuality.QUICK, ParserName.MARKITDOWN),
-        ("manual.docx", ImportQuality.HIGH, ParserName.MARKITDOWN),
-        ("legacy.doc", ImportQuality.HIGH, ParserName.MARKITDOWN),
-        ("slides.pptx", ImportQuality.HIGH, ParserName.MARKITDOWN),
-        ("slides.ppt", ImportQuality.QUICK, ParserName.MARKITDOWN),
+        ("paper.pdf", ImportQuality.HIGH, ParserName.MINERU),
+        ("paper.pdf", ImportQuality.QUICK, ParserName.MINERU),
+        ("manual.docx", ImportQuality.HIGH, ParserName.MINERU),
+        ("legacy.doc", ImportQuality.HIGH, ParserName.MINERU),
+        ("slides.pptx", ImportQuality.HIGH, ParserName.MINERU),
+        ("slides.ppt", ImportQuality.QUICK, ParserName.MINERU),
+        ("diagram.PNG", ImportQuality.QUICK, ParserName.MINERU),
     ],
 )
 def test_user_facing_quality_routes_to_expected_parser(
@@ -27,7 +28,7 @@ def test_user_facing_quality_routes_to_expected_parser(
     assert choose_parser(Path(filename), quality) is expected
 
 
-def test_explicit_parser_is_respected_but_doc_cannot_use_mineru() -> None:
+def test_explicit_mineru_accepts_word_documents() -> None:
     assert (
         choose_parser(
             Path("slides.pptx"),
@@ -36,9 +37,7 @@ def test_explicit_parser_is_respected_but_doc_cannot_use_mineru() -> None:
         )
         is ParserName.MINERU
     )
-    with pytest.raises(ValueError):
-        choose_parser(
-            Path("manual.docx"),
-            ImportQuality.HIGH,
-            ParserName.MINERU,
-        )
+    assert (
+        choose_parser(Path("manual.docx"), ImportQuality.HIGH, ParserName.MINERU)
+        is ParserName.MINERU
+    )

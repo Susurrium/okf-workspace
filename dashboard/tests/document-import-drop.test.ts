@@ -57,6 +57,11 @@ describe("document folder drop", () => {
     expect(MAX_DOCUMENT_BYTES).toBe(64 * 1024 * 1024);
   });
 
+  it("accepts courseware images for OCR", () => {
+    expect(isSupportedDocument(new File(["image"], "figure.PNG"))).toBe(true);
+    expect(isSupportedDocument(new File(["image"], "figure.tiff"))).toBe(false);
+  });
+
   it("does not capture internal Apex drags", () => {
     expect(isExternalFileDrag({ types: ["Files"] } as unknown as DataTransfer)).toBe(true);
     expect(isExternalFileDrag({ types: ["Files", "application/x-apex-item"] } as unknown as DataTransfer)).toBe(false);

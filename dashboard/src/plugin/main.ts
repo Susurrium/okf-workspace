@@ -1795,7 +1795,7 @@ export default class OkfBrainPlugin extends Plugin {
     const api = new HttpDocumentImportApi(this.settings.baseUrl, this.settings.token);
     let serviceReady: Promise<void> | undefined;
     new DocumentImportModal(
-      this.app, files, relation, origin, this.settings.documentParserPolicy,
+      this.app, files, relation, origin,
       async (file, options) => {
         serviceReady ??= this.ensureLocalServiceAvailable();
         await serviceReady;

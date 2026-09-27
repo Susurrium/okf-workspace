@@ -11,13 +11,6 @@ try {
 }
 finally { Pop-Location }
 
-Push-Location (Join-Path $root 'services/markitdown')
-try {
-    & uv build
-    if ($LASTEXITCODE -ne 0) { throw 'MarkItDown service build failed' }
-}
-finally { Pop-Location }
-
 Push-Location (Join-Path $root 'dashboard')
 try {
     & npm.cmd run build

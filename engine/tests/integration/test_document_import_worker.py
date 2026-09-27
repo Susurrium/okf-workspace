@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from okf_workspace.importers.cloud_mineru import RetryableMinerUError
 from okf_workspace.importers.models import (
     ConversionStatus,
     ImportIntent,
@@ -75,7 +76,7 @@ def test_required_mineru_waits_after_a_transient_failure(tmp_path: Path) -> None
         vault=initialize_vault(tmp_path / "vault"),
         originals=tmp_path / "originals",
         state=tmp_path / "state",
-        clients={ParserName.MINERU: WorkerParser(RuntimeError("MinerU unavailable"))},
+        clients={ParserName.MINERU: WorkerParser(RetryableMinerUError("MinerU unavailable"))},
     )
     queued = importer.enqueue(_request(tmp_path))
 

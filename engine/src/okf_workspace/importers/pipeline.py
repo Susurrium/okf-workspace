@@ -14,10 +14,10 @@ from urllib.parse import quote
 
 from okf_workspace.git import GitCheckpointError, checkpointing_enabled, create_checkpoint
 
-from .clients import MarkItDownClient, MinerUClient, ParserClient
+from .clients import MarkItDownClient, ParserClient
+from .cloud_mineru import CloudMinerUClient
 from .config import ImportSettings
 from .export import load_export_contract, write_export_contract
-from .managed_mineru import managed_mineru_client
 from .models import (
     ConversionStatus,
     ImportIntent,
@@ -88,7 +88,12 @@ class DocumentImporter:
 
     def _default_client(self, parser: ParserName) -> ParserClient:
         if parser is ParserName.MINERU:
-            return MinerUClient(self.settings.mineru_url)
+            if self.settings.mineru_token_file is None:
+                raise RuntimeError("MinerU cloud token file is not configured")
+            return CloudMinerUClient(
+                self.settings.mineru_token_file,
+                model=self.settings.mineru_model,
+            )
         return MarkItDownClient(
             self.settings.markitdown_url,
             self.settings.markitdown_token(),
@@ -101,9 +106,6 @@ class DocumentImporter:
         working: Path,
     ) -> ParserExport:
         injected = self.clients.get(parser)
-        if injected is None and parser is ParserName.MINERU and self.settings.mineru_ssh_managed:
-            with managed_mineru_client(self.settings) as managed:
-                return managed.convert(source, working)
         client = injected or self._default_client(parser)
         try:
             return client.convert(source, working)
@@ -274,22 +276,7 @@ class DocumentImporter:
                 parser=selected_parser,
                 stages={"conversion": "running"},
             )
-            try:
-                export = self._convert_recorded(identifier, selected_parser, prepared, working)
-            except Exception:
-                can_fallback = request.parser is None and selected_parser is ParserName.MINERU
-                if not can_fallback:
-                    raise
-                fallback = self._convert_recorded(
-                    identifier,
-                    ParserName.MARKITDOWN,
-                    prepared,
-                    working,
-                )
-                export = replace(
-                    fallback,
-                    degraded_from=ParserName.MINERU,
-                )
+            export = self._convert_recorded(identifier, selected_parser, prepared, working)
             qc = inspect_export(
                 export,
                 strict_assets=request.quality is ImportQuality.HIGH,

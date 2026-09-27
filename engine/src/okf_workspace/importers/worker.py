@@ -10,6 +10,7 @@ from typing import cast
 
 from okf_workspace.semantic import SemanticKind, SemanticOperationService
 
+from .cloud_mineru import RetryableMinerUError
 from .models import ConversionStatus, ImportIntent, requires_semantic_generation
 from .pipeline import DocumentImporter
 
@@ -17,15 +18,6 @@ _ACTIVE = {
     ConversionStatus.QUEUED.value,
     ConversionStatus.WAITING_FOR_MINERU.value,
 }
-_TRANSIENT_MINERU = (
-    "unavailable",
-    "connect",
-    "timeout",
-    "timed out",
-    "ssh",
-    "busy",
-    "capacity",
-)
 
 
 class DocumentImportWorker:
@@ -61,12 +53,8 @@ class DocumentImportWorker:
             result = self.importer.retry(conversion_id)
             self.enqueue_semantic(result.conversion_id)
         except Exception as exc:
-            current = self.store.load(conversion_id)
-            requested = current.get("requested_parser")
             message = str(exc)
-            if requested == "mineru" and any(
-                marker in message.casefold() for marker in _TRANSIENT_MINERU
-            ):
+            if isinstance(exc, RetryableMinerUError):
                 self.store.transition(
                     conversion_id,
                     ConversionStatus.WAITING_FOR_MINERU,

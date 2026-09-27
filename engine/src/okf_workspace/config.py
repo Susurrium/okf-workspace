@@ -79,6 +79,8 @@ def apply_deployment_config(path: Path) -> BrainPaths:
         "OKF_BRAIN_ORIGINALS": config.get("originals"),
         "OKF_BRAIN_STATE": config.get("state"),
         "OKF_MINERU_URL": config.get("mineru_url"),
+        "OKF_MINERU_TOKEN_FILE": config.get("mineru_token_file"),
+        "OKF_MINERU_MODEL": config.get("mineru_model"),
         "OKF_MINERU_SSH_MANAGED": config.get("mineru_ssh_managed"),
         "OKF_MINERU_SSH_HOST": config.get("mineru_ssh_host"),
         "OKF_MINERU_SSH_REMOTE_PORT": config.get("mineru_ssh_remote_port"),

@@ -4,4 +4,3 @@ components:
   engine: 1.11.0
   dashboard: 1.15.0
   claudian: 2.1.4-okf.3
-  markitdown_service: 1.4.0

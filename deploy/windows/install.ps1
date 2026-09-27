@@ -6,12 +6,8 @@ param(
     [string]$Originals = '',
     [string]$State = '',
     [int]$ApiPort = 8765,
-    [string]$MinerUUrl = 'http://127.0.0.1:18000',
-    [bool]$MinerUSshManaged = $true,
-    [string]$MinerUSshHost = 'bjmu-inner',
-    [int]$MinerUSshRemotePort = 8000,
-    [string]$MarkItDownUrl = 'http://127.0.0.1:18010',
-    [string]$MarkItDownTokenFile = '',
+    [string]$MinerUTokenFile = '',
+    [ValidateSet('vlm', 'pipeline')][string]$MinerUModel = 'vlm',
     [ValidateSet('codex', 'provider')][string]$AIMode = 'codex',
     [string]$CodexCommand = '',
     [string]$CodexModel = '',
@@ -59,23 +55,11 @@ if (Test-Path -LiteralPath $configPath -PathType Leaf) {
     if (-not $PSBoundParameters.ContainsKey('ApiPort') -and $existingConfig.PSObject.Properties.Name -contains 'api_port') {
         $ApiPort = [int]$existingConfig.api_port
     }
-    if (-not $PSBoundParameters.ContainsKey('MinerUUrl') -and $existingConfig.PSObject.Properties.Name -contains 'mineru_url') {
-        $MinerUUrl = [string]$existingConfig.mineru_url
+    if (-not $PSBoundParameters.ContainsKey('MinerUTokenFile') -and $existingConfig.PSObject.Properties.Name -contains 'mineru_token_file') {
+        $MinerUTokenFile = [string]$existingConfig.mineru_token_file
     }
-    if (-not $PSBoundParameters.ContainsKey('MinerUSshManaged') -and $existingConfig.PSObject.Properties.Name -contains 'mineru_ssh_managed') {
-        $MinerUSshManaged = [bool]$existingConfig.mineru_ssh_managed
-    }
-    if (-not $PSBoundParameters.ContainsKey('MinerUSshHost') -and $existingConfig.PSObject.Properties.Name -contains 'mineru_ssh_host') {
-        $MinerUSshHost = [string]$existingConfig.mineru_ssh_host
-    }
-    if (-not $PSBoundParameters.ContainsKey('MinerUSshRemotePort') -and $existingConfig.PSObject.Properties.Name -contains 'mineru_ssh_remote_port') {
-        $MinerUSshRemotePort = [int]$existingConfig.mineru_ssh_remote_port
-    }
-    if (-not $PSBoundParameters.ContainsKey('MarkItDownUrl') -and $existingConfig.PSObject.Properties.Name -contains 'markitdown_url') {
-        $MarkItDownUrl = [string]$existingConfig.markitdown_url
-    }
-    if (-not $PSBoundParameters.ContainsKey('MarkItDownTokenFile') -and $existingConfig.PSObject.Properties.Name -contains 'markitdown_token_file') {
-        $MarkItDownTokenFile = [string]$existingConfig.markitdown_token_file
+    if (-not $PSBoundParameters.ContainsKey('MinerUModel') -and $existingConfig.PSObject.Properties.Name -contains 'mineru_model') {
+        $MinerUModel = [string]$existingConfig.mineru_model
     }
     if (-not $PSBoundParameters.ContainsKey('BackupRepository') -and
         $existingConfig.PSObject.Properties.Name -contains 'backup_repository' -and
@@ -237,12 +221,8 @@ $config = [ordered]@{
     originals = $originalsPath
     state = $statePath
     api_port = $ApiPort
-    mineru_url = $MinerUUrl
-    mineru_ssh_managed = $MinerUSshManaged
-    mineru_ssh_host = $MinerUSshHost
-    mineru_ssh_remote_port = $MinerUSshRemotePort
-    markitdown_url = $MarkItDownUrl
-    markitdown_token_file = $(if ($MarkItDownTokenFile) { Resolve-OkfPath $MarkItDownTokenFile } else { '' })
+    mineru_token_file = $(if ($MinerUTokenFile) { Resolve-OkfPath $MinerUTokenFile } else { '' })
+    mineru_model = $MinerUModel
     ai_mode = $AIMode
     codex_command = $(if ($CodexCommand) { Resolve-OkfPath $CodexCommand } else { '' })
     codex_model = $CodexModel.Trim()

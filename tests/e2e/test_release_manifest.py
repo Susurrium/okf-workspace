@@ -39,6 +39,7 @@ def _lockfile_version(path: Path) -> str:
 def test_release_manifest_matches_all_build_units() -> None:
     release = _yaml(ROOT / "release-manifest.yaml")
     components = cast(dict[str, object], release["components"])
+    assert set(components) == {"engine", "dashboard", "claudian"}
 
     engine_version = str(components["engine"])
     assert engine_version == _project_version(ROOT / "engine" / "pyproject.toml")
@@ -69,38 +70,7 @@ def test_release_manifest_matches_all_build_units() -> None:
     assert claudian_package["version"] == claudian_manifest["version"]
     assert claudian_package["version"] == _lockfile_version(ROOT / "claudian" / "package-lock.json")
 
-    markitdown_version = str(components["markitdown_service"])
-    assert markitdown_version == _project_version(ROOT / "services" / "markitdown" / "pyproject.toml")
-    assert markitdown_version == _quoted_version(
-        ROOT / "services" / "markitdown" / "src" / "markitdown_service" / "__init__.py",
-        "__version__",
-    )
-
-    release_surfaces = (
-        ROOT / "services" / "markitdown" / "Dockerfile",
-        ROOT / "deploy" / "markitdown" / "compose.yaml",
-        ROOT / "deploy" / "markitdown" / ".env.example",
-        ROOT / "deploy" / "markitdown" / "verify.py",
-        ROOT / "scripts" / "package-markitdown-deployment.ps1",
-    )
-    for path in release_surfaces:
-        assert markitdown_version in path.read_text(encoding="utf-8"), (
-            f"MarkItDown release surface does not declare {markitdown_version}: {path}"
-        )
-
-
 def test_workspace_schema_has_one_release_value() -> None:
     release = _yaml(ROOT / "release-manifest.yaml")
     workspace = _yaml(ROOT / "engine" / "workspace" / "manifest.yaml")
     assert release["workspace_schema"] == workspace["workspace_schema"]
-
-
-def test_markitdown_compose_builds_the_monorepo_service() -> None:
-    compose_path = ROOT / "deploy" / "markitdown" / "compose.yaml"
-    compose = _yaml(compose_path)
-    services = cast(dict[str, object], compose["services"])
-    api = cast(dict[str, object], services["api"])
-    build = cast(dict[str, object], api["build"])
-    context = (compose_path.parent / str(build["context"])).resolve()
-    assert context == (ROOT / "services" / "markitdown").resolve()
-    assert (context / str(build["dockerfile"])).is_file()

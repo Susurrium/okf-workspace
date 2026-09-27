@@ -14,18 +14,19 @@ cd E:\code\okf-workspace
 `check.ps1` 必须覆盖：
 
 - Engine：pytest、Ruff、Pyright；
-- MarkItDown：pytest、Ruff；
-- Engine ↔ MarkItDown 跨组件 bundle contract；
+- MinerU 云 API：模拟签名上传、轮询、断点恢复和 ZIP 归一化；
+- 课件逐页解析：基础解析保留原生文字，稀疏图片页仅补 OCR 目标页或原图；
+  扫描 PDF 按页补 OCR，单张图片直接开 OCR，结果发布到 fixture Vault；
 - Dashboard：TypeScript、Vitest；
 - Claudian：TypeScript、ESLint、架构边界测试。
 
-`build.ps1` 必须产生 Engine wheel、MarkItDown wheel、Dashboard 插件和 Claudian 插件。
+`build.ps1` 必须产生 Engine wheel、Dashboard 插件和 Claudian 插件。
 
 ## 2. Engine 关键矩阵
 
 - Contract：所有 Workspace 写入器产生合法 YAML，并保留未知扩展字段。
 - Sources：Source/Source Text 成对原子发布；Web/Feed 双向 URL 去重；文件哈希去重。
-- Intake：所有默认入口直接使用 MarkItDown；历史隐式 high 不触发 MinerU；保留显式解析器选择的单元覆盖。暂不验收 MinerU 服务。
+- Intake：所有默认入口使用 MinerU 云 API；本地 token 文件不进入仓库或 Vault；失败不隐式降级到旧服务。
 - Retry：切换 parser 不残留永远 queued 的旧 conversion。
 - Identity：原始文件名、resource、首个 `ingested_via` 不在 worker 中丢失。
 - Relations：Course、Project、双关联与 Independent 都传播到目标，不改写共享 Source 身份。
@@ -66,7 +67,7 @@ cd E:\code\okf-workspace
 
 1. 初始化 Vault 和 Contracts；
 2. 快速记录一个无归属 Capture、一个 Course 想法和一个 Project 想法；
-3. 上传测试 PDF/DOCX/PPTX，确认默认 MarkItDown 路径及图片完整性；
+3. 上传测试 PDF/DOCX/PPTX，确认默认 MinerU 云解析路径及图片完整性；
 4. 发布 Web Clip 和 Feed 中相同 URL，确认只产生一个 Source pair；
 5. 生成 Independent、Course、Project-related Study Guide；
 6. 更新 Study Guide，用户明确标记完成，再生成/更新 Wiki 和 Wiki Map；
@@ -79,7 +80,7 @@ cd E:\code\okf-workspace
 
 自动化全部通过后，只做一次短实机验收：
 
-- MarkItDown 真实转换带图 DOCX，并验证结果 bundle/图片完整性；MinerU 本轮明确跳过；
+- MinerU 云 API 真实转换带图 DOCX，并验证结果 ZIP/图片完整性；
 - 本机 Codex 完成一次可见会话和一次后台生成；
 - Today 的中国热点、AI 资讯、树洞热榜各打开一条；Reading 验证至少两个来源卡片，进入其中一个来源、加载两期内容并处理一条；
 - Obsidian 重启后 Dashboard、Claudian、本地服务生命周期正常；
@@ -93,5 +94,5 @@ LiveSync 属于以后启用多设备时的独立验收，不阻塞当前单机�
 - RSS 超过单批限制的条目保留在 pending 队列，同日补采、跨日排空，不因排序或多来源饥饿丢失。
 - 订阅预览只抓取一次；合法空 feed 与异常返回区分；坏条目不阻塞同源其他条目，并报告降级。
 - news、learning、papers、hotspot 的健康状态分别记录，不互相覆盖；保留上次成功时间。
-- MarkItDown 慢上传受空闲与总时限限制；回收过期隐藏临时文件而不删除活动任务文件。
+- MinerU 云任务超时后从原 batch_id 恢复；上传与结果下载受大小和总时限限制。
 - Windows 维护任务错过计划时间后补跑；恢复演练使用 monorepo 的 engine 可执行文件。

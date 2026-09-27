@@ -26,15 +26,6 @@ try {
 }
 finally { Pop-Location }
 
-Push-Location (Join-Path $root 'services/markitdown')
-try {
-    & uv run pytest
-    if ($LASTEXITCODE -ne 0) { throw 'MarkItDown service tests failed' }
-    & uv run ruff check src tests
-    if ($LASTEXITCODE -ne 0) { throw 'MarkItDown service Ruff check failed' }
-}
-finally { Pop-Location }
-
 Push-Location (Join-Path $root 'dashboard')
 try {
     & npm.cmd run check

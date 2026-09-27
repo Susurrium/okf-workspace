@@ -114,15 +114,11 @@ function Set-OkfEnvironment {
     $env:OKF_BRAIN_VAULT = [string]$Config.vault
     $env:OKF_BRAIN_ORIGINALS = [string]$Config.originals
     $env:OKF_BRAIN_STATE = [string]$Config.state
-    $env:OKF_MINERU_URL = [string]$Config.mineru_url
-    if ($Config.PSObject.Properties.Name -contains 'mineru_ssh_managed') {
-        $env:OKF_MINERU_SSH_MANAGED = [string]$Config.mineru_ssh_managed
-        $env:OKF_MINERU_SSH_HOST = [string]$Config.mineru_ssh_host
-        $env:OKF_MINERU_SSH_REMOTE_PORT = [string]$Config.mineru_ssh_remote_port
+    if ($Config.PSObject.Properties.Name -contains 'mineru_token_file') {
+        $env:OKF_MINERU_TOKEN_FILE = [string]$Config.mineru_token_file
     }
-    $env:OKF_MARKITDOWN_URL = [string]$Config.markitdown_url
-    if ($Config.PSObject.Properties.Name -contains 'markitdown_token_file') {
-        $env:OKF_MARKITDOWN_TOKEN_FILE = [string]$Config.markitdown_token_file
+    if ($Config.PSObject.Properties.Name -contains 'mineru_model') {
+        $env:OKF_MINERU_MODEL = [string]$Config.mineru_model
     }
     if ($Config.PSObject.Properties.Name -contains 'ai_base_url') {
         $env:OKF_AI_BASE_URL = [string]$Config.ai_base_url

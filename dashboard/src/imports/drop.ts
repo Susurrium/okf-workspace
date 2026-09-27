@@ -3,7 +3,9 @@ export interface ImportFile {
   relativePath: string;
 }
 
-export const DOCUMENT_EXTENSIONS = new Set(["pdf", "doc", "docx", "ppt", "pptx"]);
+export const DOCUMENT_EXTENSIONS = new Set([
+  "pdf", "doc", "docx", "ppt", "pptx", "png", "jpg", "jpeg", "webp", "bmp", "gif",
+]);
 export const MAX_DOCUMENT_BYTES = 64 * 1024 * 1024;
 
 export function isSupportedDocument(file: File): boolean {

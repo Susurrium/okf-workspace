@@ -26,7 +26,7 @@ class RecordingApi implements DocumentImportApi {
 }
 
 describe("DocumentImportPageModel", () => {
-  it("defaults to MarkItDown without invoking the advanced parser", async () => {
+  it("defaults to MinerU cloud parsing", async () => {
     const api = new RecordingApi();
     const page = new DocumentImportPageModel(api);
     page.selectFile(new File(["fixture"], "manual.docx"));
@@ -37,7 +37,7 @@ describe("DocumentImportPageModel", () => {
     expect(api.options).toEqual({
       intent: "wiki",
       quality: "quick",
-      parser: "markitdown",
+      parser: "mineru",
       generate: false,
     });
     expect(result.status).toBe("imported");

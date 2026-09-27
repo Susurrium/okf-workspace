@@ -1323,7 +1323,7 @@ def test_document_import_endpoint_accepts_upload_and_returns_vault_relative_resu
         vault=paths.vault,
         originals=paths.originals,
         state=paths.state,
-        clients={ParserName.MARKITDOWN: StaticParser(ParserName.MARKITDOWN)},
+        clients={ParserName.MINERU: StaticParser(ParserName.MINERU)},
     )
     token = LocalTokenStore(paths.state).ensure()
     client = TestClient(create_app(paths, document_importer=importer))
@@ -1338,7 +1338,7 @@ def test_document_import_endpoint_accepts_upload_and_returns_vault_relative_resu
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "imported"
-    assert payload["parser"] == "markitdown"
+    assert payload["parser"] == "mineru"
     assert payload["source"].startswith("sources/records/documents/")
     assert payload["source_text"].startswith("sources/text/documents/")
     assert "originals" not in str(payload)

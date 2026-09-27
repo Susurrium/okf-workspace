@@ -8,4 +8,4 @@ OKF Workspace is a modular monolith with three independently built applications:
 
 The production Vault is the semantic authority. Runtime State, Originals, indexes, caches, sessions, and secrets are operational data outside the source repository.
 
-Feed and Intake are first-class Engine modules, not independent local services. MarkItDown is an independent service; MinerU is an external shared service with a repository-owned client and deployment assets.
+Feed and Intake are first-class Engine modules, not independent local services. Document conversion uses MinerU's token-authenticated cloud API through an Engine client. The former MarkItDown service and self-hosted MinerU deployment assets are retained only for reference.

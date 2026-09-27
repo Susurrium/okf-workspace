@@ -19,7 +19,7 @@ AI 共读写的语义权威，Dashboard 是人类工作台，Claudian 是 Obsidi
 5. **Intake**：Capture、Web Clipper、文件上传、转换和 Source 发布。
 
 工程上只有三个应用构建单元：`engine/`、`dashboard/`、`claudian/`。Feeds 与 Intake
-是 Engine 内部强边界模块；MarkItDown 是独立服务，MinerU 是外部共享服务。这样既保留
+是 Engine 内部强边界模块；文档转换使用 MinerU 官方云 API。这样既保留
 用户能够理解的功能边界，又避免把同一 Vault 事务拆成难以维护的微服务。
 
 Engine 内的依赖方向固定为：
@@ -49,8 +49,8 @@ okf-workspace/
 │  └─ workspace/               # Contracts、模板、Skills、Policies、Views、Vault seed
 ├─ dashboard/                  # 独立 Obsidian Dashboard 构建
 ├─ claudian/                   # Claudian fork 与 OKF adapter
-├─ services/markitdown/        # 独立转换服务
-├─ integrations/mineru/        # 远端 MinerU 部署与运维资产
+├─ services/markitdown/        # 停用的旧服务资产
+├─ integrations/mineru/        # 停用的自建 MinerU 部署资产
 ├─ deploy/                     # 主机与服务器部署
 ├─ scripts/                    # 根级 bootstrap/check/build/deploy
 ├─ tests/e2e/                  # 跨组件契约与完整用户流程
@@ -59,7 +59,7 @@ okf-workspace/
 
 Dashboard 与 Claudian 各自保留 lockfile 和发布节奏；统一 Git 仓库不意味着强行共享 Node
 依赖。Engine、Dashboard 和 Workspace resources 使用同一 release train；Claudian 与
-MarkItDown 在 `release-manifest.yaml` 中锁定兼容版本。
+云端 MinerU 由 Engine 客户端对接，token 仅存放在仓库与 Vault 之外。
 
 ## 4. 实施阶段
 
@@ -86,7 +86,7 @@ MarkItDown 在 `release-manifest.yaml` 中锁定兼容版本。
 ### 阶段 C：Intake 与转换
 
 - Capture、Web Clipper、文件上传统一进入 Intake，但保留真实渠道字段。
-- 默认直接使用 MarkItDown；质量检查不再隐式启动 MinerU。显式 MinerU 高级能力保留，但当前暂停其专项维护。
+- 默认使用 MinerU 官方云 API；质量档位只控制导入检查，不切换解析服务。
 - 修复 parser 切换重试 ID、原始文件名、上传超时/取消、转换完成通知与目标跳转。
 - 识别转换结果中的无效图片占位；快速转换丢图时明确降级质量而非静默通过。
 - 导入前选择已有 Course/Project 或不关联；关系传给后续目标而不污染 Source 身份。
@@ -159,7 +159,7 @@ MarkItDown 在 `release-manifest.yaml` 中锁定兼容版本。
 ## 6. 发布门槛
 
 1. 根 `scripts/check.ps1`、`scripts/build.ps1` 全部通过。
-2. Engine、Dashboard、Claudian、MarkItDown 的独立测试通过。
+2. Engine、Dashboard、Claudian 的独立测试通过。
 3. 跨组件 contract 与合成 Vault 完整流程通过。
 4. 新部署配置不引用旧源码、旧 Python、旧 token 目录或旧 worker。
 5. 用户能在 Dashboard 看见动作状态和结果链接，也能直接在 Obsidian 原生文件中阅读成果。

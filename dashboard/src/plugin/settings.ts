@@ -22,7 +22,7 @@ export interface OkfBrainSettings {
   pythonExecutable: string;
   deploymentConfig: string;
   serviceLogDirectory: string;
-  documentParserPolicy: "prefer-mineru" | "mineru-required" | "markitdown-only";
+  documentParserPolicy: "mineru-cloud";
   dashboardUiState: DashboardUiState;
   /** Compatibility mirror for settings written before Dashboard UI state v1. */
   feedReadingPositions: Partial<Record<"ai-daily" | "treehole", FeedReadingPosition>>;
@@ -38,7 +38,7 @@ export const DEFAULT_SETTINGS: OkfBrainSettings = {
   pythonExecutable: "",
   deploymentConfig: "",
   serviceLogDirectory: "",
-  documentParserPolicy: "markitdown-only",
+  documentParserPolicy: "mineru-cloud",
   dashboardUiState: createDefaultDashboardUiState(),
   feedReadingPositions: {},
   apex: normalizeApexSettings(undefined),
@@ -53,20 +53,6 @@ export function renderOkfServiceSettings(container: HTMLElement, plugin: OkfBrai
           plugin.settings.manageLocalService = value;
           await plugin.saveSettings();
         }),
-      );
-    new Setting(container)
-      .setName("文档转换策略")
-      .setDesc("快速转换适合文字资料。使用 MinerU 前需先配置并连接该服务。")
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("markitdown-only", "MarkItDown（默认）")
-          .addOption("prefer-mineru", "优先 MinerU，失败时尝试快速转换")
-          .addOption("mineru-required", "仅使用 MinerU")
-          .setValue(plugin.settings.documentParserPolicy)
-          .onChange(async (value) => {
-            plugin.settings.documentParserPolicy = value as OkfBrainSettings["documentParserPolicy"];
-            await plugin.saveSettings();
-          }),
       );
     new Setting(container)
       .setName("本地服务地址")

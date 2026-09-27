@@ -8,6 +8,8 @@ from .models import ParserExport, QCReport
 
 _LOCAL_IMAGE = re.compile(r"!\[[^\]]*\]\((?!https?://|data:)([^)#]+)(?:#[^)]+)?\)")
 _EMBEDDED_IMAGE = re.compile(r"!\[[^\]]*\]\((data:image/[^)]*)\)", re.IGNORECASE)
+_IMAGE_MARKDOWN = re.compile(r"!\[[^\]]*\]\([^)]+\)")
+_LINK_MARKDOWN = re.compile(r"\[([^\]]+)\]\([^)]+\)")
 
 
 def _embedded_image_complete(value: str) -> bool:
@@ -61,12 +63,20 @@ def inspect_export(export: ParserExport, *, strict_assets: bool = False) -> QCRe
         message = f"parser omitted {missing_count} image reference(s) from the source document"
         (errors if strict_assets else warnings).append(message)
 
-    visible = sum(character.isalnum() for character in markdown)
+    text_without_images = _IMAGE_MARKDOWN.sub("", markdown)
+    text_without_links = _LINK_MARKDOWN.sub(r"\1", text_without_images)
+    visible = sum(character.isalnum() for character in text_without_links)
     replacement_ratio = markdown.count("\ufffd") / max(1, len(markdown))
     ocr_usable = visible >= 20 and replacement_ratio < 0.03
     checks["text_or_ocr_usable"] = ocr_usable
+    visual_fallback = bool((references and not missing) or embedded) and not incomplete_embedded
+    checks["visual_fallback_available"] = visual_fallback
     if markdown and not ocr_usable:
-        errors.append("converted text is too short or appears badly decoded")
+        message = "converted text is too short or appears badly decoded"
+        if visual_fallback:
+            warnings.append(message + "; original images remain available")
+        else:
+            errors.append(message)
 
     checks["parser_not_degraded"] = export.degraded_from is None
     if export.degraded_from is not None:

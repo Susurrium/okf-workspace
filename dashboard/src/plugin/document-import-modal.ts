@@ -22,7 +22,7 @@ export class DocumentImportModal extends Modal {
   private intent: ImportIntent;
   private generate = false;
   private quality: DocumentImportOptions["quality"] = "quick";
-  private parser: DocumentImportOptions["parser"] = "markitdown";
+  private parser: DocumentImportOptions["parser"] = "mineru";
   private fileList?: HTMLElement;
   private status?: HTMLElement;
   private submitButton?: HTMLButtonElement;
@@ -33,7 +33,6 @@ export class DocumentImportModal extends Modal {
     files: ImportFile[],
     initialRelation: Relation,
     origin: ImportOrigin,
-    private readonly parserPolicy: "prefer-mineru" | "mineru-required" | "markitdown-only",
     private readonly importFile: (file: File, options: DocumentImportOptions) => Promise<DocumentImportResult>,
   ) {
     super(app);
@@ -48,7 +47,7 @@ export class DocumentImportModal extends Modal {
     this.titleEl.setText("导入资料");
     const zone = this.contentEl.createDiv({ cls: "okf-document-import__drop okf-document-drop" });
     zone.createEl("strong", { text: "把文件或整个文件夹拖到这里" });
-    zone.createDiv({ text: "支持 PDF、Word、PowerPoint；导入前可检查清单和归属。" });
+    zone.createDiv({ text: "支持 PDF、Word、PowerPoint 和图片；导入前可检查清单和归属。" });
     this.unbindDrop = bindDocumentDropTarget(zone, (files) => this.addFiles(files), this.showError);
     const pickers = zone.createDiv({ cls: "okf-document-import__pickers" });
     this.picker(pickers, "选择文件", false);
@@ -62,13 +61,10 @@ export class DocumentImportModal extends Modal {
       ["learn", "用于学习"], ["wiki", "生成知识笔记"],
       ["source", "只保存资料"], ["later", "暂不确定，进入待归类"],
     ], this.intent, (value) => { this.intent = value as ImportIntent; this.renderGeneration(); });
-    this.select(settings, "解析", this.parserPolicy === "markitdown-only"
-      ? [["quick", "快速转换（MarkItDown）"]]
-      : [["quick", "快速转换（MarkItDown）"], ["high", "精细转换（按设置选择工具）"]],
+    this.select(settings, "解析", [["quick", "MinerU 云解析"], ["high", "MinerU 云解析（严格检查图片）"]],
     this.quality, (value) => {
       this.quality = value as DocumentImportOptions["quality"];
-      this.parser = value === "quick" ? "markitdown"
-        : this.parserPolicy === "mineru-required" ? "mineru" : "auto";
+      this.parser = "mineru";
     });
     const generation = settings.createDiv();
     this.generationContainer = generation;
@@ -95,7 +91,7 @@ export class DocumentImportModal extends Modal {
     const input = parent.createEl("input", { attr: { type: "file", multiple: "" } });
     input.hidden = true;
     if (directory) input.setAttribute("webkitdirectory", "");
-    else input.accept = ".pdf,.doc,.docx,.ppt,.pptx";
+    else input.accept = ".pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.webp,.bmp,.gif";
     button.addEventListener("click", () => input.click());
     input.addEventListener("change", () => {
       if (input.files) this.addFiles(importFilesFromPicker(input.files));
@@ -219,8 +215,7 @@ export class DocumentImportModal extends Modal {
         this.renderFiles();
         if (this.status) this.status.setText(`已提交 ${completed}/${files.length}；正在上传 ${item.relativePath}`);
         try {
-          const parser = /\.docx?$/iu.test(item.file.name) ? "markitdown" : options.parser;
-          await this.importFile(item.file, { ...options, parser });
+          await this.importFile(item.file, options);
           this.fileStates.set(item, "已提交");
           completed++;
         } catch (error) {

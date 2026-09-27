@@ -3272,15 +3272,6 @@ export class OkfDashboardView {
       const open = actions.createEl("button", { text: "打开结果" });
       open.addEventListener("click", () => void this.openPath(target));
     }
-    if (conversion.status === "waiting-for-mineru") {
-      const fallback = actions.createEl("button", { text: "本次改用 MarkItDown" });
-      fallback.addEventListener("click", () => {
-        void this.runButtonAction(fallback, async () => {
-          const record = await this.api().retryConversion(conversion.conversion_id, "markitdown");
-          this.plugin.watchDocumentConversion(record.conversion_id);
-        }, true, "已改用 MarkItDown 并重新排队");
-      });
-    }
     if (hasPendingGeneration(conversion)) {
       const retry = actions.createEl("button", { text: "重试生成入队" });
       retry.addEventListener("click", () => {
@@ -3312,9 +3303,8 @@ export class OkfDashboardView {
     }
   }
 
-  private availableImportParsers(): readonly ("markitdown" | "mineru")[] {
-    return (this.plugin.settings?.documentParserPolicy ?? "markitdown-only") === "markitdown-only"
-      ? ["markitdown"] : ["markitdown", "mineru"];
+  private availableImportParsers(): readonly "mineru"[] {
+    return ["mineru"];
   }
 
   private async renderLearning(container: HTMLElement): Promise<void> {
@@ -4749,19 +4739,6 @@ export class OkfDashboardView {
               ? `正在使用 ${conversion.parser} 转换`
               : "已排队",
       });
-      if (conversion.status === "waiting-for-mineru") {
-        const fallback = card.createEl("button", { text: "本次改用 MarkItDown" });
-        fallback.addEventListener("click", () => {
-          void this.runButtonAction(fallback, async () => {
-            const record = await this.api().retryConversion(
-              conversion.conversion_id,
-              "markitdown",
-            );
-            this.plugin.watchDocumentConversion(record.conversion_id);
-            return record;
-          }, true, "已改用 MarkItDown 并重新排队");
-        });
-      }
     }
   }
 

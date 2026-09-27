@@ -12,7 +12,7 @@ describe("shared document import window", () => {
     }));
     const modal = new DocumentImportModal({} as App,
       [{ file: new File(["pdf"], "wiki.pdf"), relativePath: "wiki.pdf" }],
-      { course: "algebra" }, "learning", "markitdown-only", importFile);
+      { course: "algebra" }, "learning", importFile);
     modal.open();
     const content = modal.contentEl as unknown as TestElement;
     const intent = content.descendants().find((item) => item.tagName === "select")!;
@@ -31,7 +31,7 @@ describe("shared document import window", () => {
       conversion_id: "conv-1", status: "queued", parser: "markitdown",
     }));
     const modal = new DocumentImportModal(
-      {} as App, files, { course: "algebra" }, "learning", "markitdown-only", importFile,
+      {} as App, files, { course: "algebra" }, "learning", importFile,
     );
     modal.open();
     const content = modal.contentEl as unknown as TestElement;
@@ -43,8 +43,8 @@ describe("shared document import window", () => {
 
     await vi.waitFor(() => expect(importFile).toHaveBeenCalledTimes(2));
     expect(importFile.mock.calls.map(([file, options]) => [file.name, options.course, options.intent, options.parser])).toEqual([
-      ["one.pdf", "algebra", "learn", "markitdown"],
-      ["two.docx", "algebra", "learn", "markitdown"],
+      ["one.pdf", "algebra", "learn", "mineru"],
+      ["two.docx", "algebra", "learn", "mineru"],
     ]);
   });
 
@@ -59,7 +59,7 @@ describe("shared document import window", () => {
       return { conversion_id: file.name, status: "queued", parser: "markitdown" };
     });
     const modal = new DocumentImportModal(
-      {} as App, files, { project: "workspace" }, "context", "markitdown-only", importFile,
+      {} as App, files, { project: "workspace" }, "context", importFile,
     );
     modal.open();
     const content = modal.contentEl as unknown as TestElement;
