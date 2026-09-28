@@ -4,7 +4,8 @@
 > recorded data-safety and lifecycle scenarios remain valid, but the new Apex sections do not yet preserve
 > the full reachable behavior of the former OKF Dashboard. The subsequent shared-Surface implementation
 > restored M4–M6 and the desktop runtime portion of M8. M7 has authenticated fixture-sync evidence; live
-> producer sync and subscription pagination remain. M9 remains open. P08 passed its reachable-surface
+> producer sync remains; source and history cursor pagination is covered by component and Engine integration
+> tests. M9 remains open. P08 passed its reachable-surface
 > inventory in the isolated run. See `APEX-OKF-FUNCTIONAL-PARITY-IMPLEMENTATION-2026-09-21.md`.
 
 This ledger is the implementation authority for the staged work described in
@@ -45,7 +46,7 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 | M4 | Full Project experience and managed-artifact edit policy | **Complete after parity repair:** shared Project Surface restores contextual Capture/import, Claudian, catalog, metrics and state-aware actions, while retaining formal tasks, dates and Decision creation; nonempty real Obsidian run passed |
 | M5 | Unified task/calendar/Daily/Capture loop | **Complete after parity repair:** shared Today and Life Surfaces restore continuation, attention, Feed, reflection/review and global entry points; anchored task/date regression and nonempty real run passed |
 | M6 | Learning/Knowledge/Inbox/Import sections and details | **Complete after parity repair:** registered Apex types mount the complete shared Surfaces; scope/context, operation states, filters, verification, decisions, recovery and Claudian paths are reachable; nonempty real run passed |
-| M7 | Feed/Reading and default workbench presets | **Conditional:** complete Reading controller, presets, cache/scroll/request lifecycle and sync UI are mounted and automated tests pass; authenticated isolated fixture sync passed, while live producer sync and subscription pagination remain |
+| M7 | Feed/Reading and default workbench presets | **Conditional:** complete Reading controller, presets, cache/scroll/request lifecycle and sync UI are mounted and automated tests pass; authenticated isolated fixture sync and source/history cursor pagination passed, while live producer sync remains |
 | M8 | Native-data takeover, UX, capability, and performance work | **Complete for desktop implementation:** native takeover remains intact; eight shared Surfaces, Life/System access, custom-section cleanup and 9-to-9 rerender stability passed in real Obsidian |
 | M9 | Full release, rollback, real Obsidian, and upstream-update exercise | **Reopened:** the recorded 19 scenarios and upstream exercise are valid but insufficient; release remains blocked until the functional-parity gate passes |
 
@@ -62,7 +63,7 @@ claim of complete Dashboard replacement. The following additional release gate i
 | P04 | Project feature parity | Registered Apex section exposes contextual capture/import, Claudian, catalog, status-aware action, and precise related navigation | **Passed:** full action panel, formal task/date and nonempty real Project run |
 | P05 | Today/Life feature parity | Registered Apex sections expose continuation, attention, Feed, reflection/review, calendar, and capture organization | **Passed:** nonempty Today task/continuation run and real Life navigation |
 | P06 | System/global controls | Registered surface exposes diagnostics, task center, failed-operation recovery, settings, search, quick create, and Ask Notes | **Passed:** registered System Surface, embedded navigation and existing recovery tests |
-| P07 | Reading controller parity | Registered Apex section passes full-load, pagination, cache, stale-response, scroll, refresh-failure, and sync scenarios | **Conditional:** automated scenarios pass; isolated Obsidian authenticated to a temporary Engine with a generated local token, synced checked-in Feed fixtures before and after a real process restart, rendered 12 synthetic papers, and restored a 220 px reading offset across workbench switches. Live producer sync and subscription pagination remain pending |
+| P07 | Reading controller parity | Registered Apex section passes full-load, pagination, cache, stale-response, scroll, refresh-failure, and sync scenarios | **Conditional:** Engine pagination integration and a Reading-section UI-component test now traverse multiple source and history cursor pages, including overlap deduplication and load-more completion. Isolated Obsidian authenticated to a temporary Engine with a generated local token, synced checked-in Feed fixtures before and after a real process restart, rendered 12 synthetic papers, and restored a 220 px reading offset across workbench switches. Live producer sync remains pending |
 | P08 | Reachable-surface acceptance | Nonempty real Obsidian run verifies every inventory action through the registered Apex surfaces | **Passed:** synthetic task-center walkthrough covers queued, generating, publishing, failed, cancelled, conversion fallback, cancel/retry/continue actions. Isolated Obsidian verified newer-schema preservation, duplicate sections, two-pane synchronization, authenticated synthetic Feed sync, repaired papers-scroll restoration, Calendar task times, multiple new-note templates and variable substitution, table-column hide/restore, card deletion, focal-point persistence, and 50-item progressive group rendering |
 
 | ID | Scenario | Required evidence | Status |
@@ -148,7 +149,8 @@ profile was not used. The isolated Vault contained only synthetic notes.
   changed during the exercise. Their JSON remained readable and key workbench/settings state remained
   available, but byte-preserving rollback is not proven and M9 remains open.
 - The temporary Engine uses checked-in synthetic Feed fixtures, not an external producer account. Actual
-  producer-backed sync and subscription-page pagination remain open.
-- The listed P08 reachable-surface inventory passed in this isolated run. Live producer-backed Feed sync,
-  subscription pagination, and byte-preserving UI rollback remain release gates; the run is evidence for P07
-  authenticated fixture handling and scroll restoration, P08, and part of M9 only.
+  producer-backed sync remains open. Source and history pagination are covered by Engine integration and
+  Reading-section UI-component tests.
+- The listed P08 reachable-surface inventory passed in this isolated run. Live producer-backed Feed sync and
+  byte-preserving UI rollback remain release gates; the run is evidence for P07 authenticated fixture handling,
+  pagination and scroll restoration, P08, and part of M9 only.

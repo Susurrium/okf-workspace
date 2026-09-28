@@ -83,7 +83,9 @@ missing AI Papers scroll-state initialization; the rebuilt plugin restored its s
 switches. Calendar week view rendered scheduled, reminder, and due-only task times as expected. The UI also
 verified multiple note templates and variable replacement, table-column hide/restore, card deletion, and
 50-item progressive rendering. The banner editor persisted and cleared a 30%,70% focal point in the synthetic
-board. P08 passed. The prior 3.6.0 package loaded during rollback, but settings and native-takeover audit byte
-hashes changed, so rollback preservation remains unverified. Live producer sync, subscription pagination, and
-byte-preserving UI rollback still need completion before changing the candidate status or advancing the
-locked baseline.
+board. P08 passed. A Reading-section component regression now traverses source and edition cursor pages through
+the visible load-more controls, checking cursor arguments, overlapping-source deduplication, and exhaustion;
+Engine pagination integration tests cover the backend pages. The prior 3.6.0 package loaded during rollback,
+but settings and native-takeover audit byte hashes changed, so rollback preservation remains unverified. Live
+producer sync and byte-preserving UI rollback still need completion before changing the candidate status or
+advancing the locked baseline.
