@@ -1,7 +1,7 @@
 # Apex upstream sync candidate: 3.6.5
 
 Date: 2026-09-28
-Status: **P01–P08 acceptance passed in the isolated Vault; branch is ready for integration/release review. Production cutover has not been performed.**
+Status: **P01–P08 acceptance passed in the isolated Vault; the integration was merged into `main` and release `v0.8.0` was published. Production Vault cutover has not been performed.**
 
 ## Baseline and upstream commits
 
