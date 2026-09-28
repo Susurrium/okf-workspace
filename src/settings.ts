@@ -1,7 +1,7 @@
 import { renderMusicAccountSettings } from './music-account-settings';
 import { App, Notice, PluginSettingTab, setIcon, Setting, type SettingDefinitionItem, type TextComponent } from 'obsidian';
 import type DashboardPlugin from './main';
-import { type DashboardSettings, type DashboardLayoutMode, type CountdownConfig, type AlbumConfig, type AnniversaryConfig, type BackupPeriod } from './types';
+import { type DashboardSettings, type DashboardLayoutMode, type CountdownConfig, type AlbumConfig, type AnniversaryConfig, type BackupPeriod, type WidgetHeightRatio } from './types';
 import { t, setLanguage, type Language } from './i18n';
 import { geocodeCity } from './weather-service';
 import { CountdownSettingsModal } from './countdown-modal';
@@ -76,7 +76,7 @@ export class DashboardSettingTab extends PluginSettingTab {
 					{
 						name: t('settings.general'),
 						desc: t('settings.languageDesc'),
-						aliases: [t('settings.layoutMode'), t('settings.language'), t('settings.stylePreset'), t('settings.recentCount'), t('quickNote.title'), t('settings.workspaceList'), t('settings.libraryNewNotePath')],
+						aliases: [t('settings.layoutMode'), t('settings.language'), t('settings.stylePreset'), t('settings.recentCount'), t('quickNote.title'), t('settings.workspaceList'), t('settings.libraryNewNotePath'), t('settings.memoTemplate')],
 						render: (setting) => {
 							asBlock(setting);
 							onPage('general')(setting);
@@ -480,23 +480,24 @@ onyx: t('settings.styleOnyx'),
 					}).open();
 				}));
 
-		let archiveInput: TextComponent | undefined;
+		let memoTplInput: TextComponent | undefined;
 		new Setting(containerEl)
-			.setName(t('settings.taskArchivePath'))
-			.setDesc(t('settings.taskArchivePathDesc'))
+			.setName(t('settings.memoTemplate'))
+			.setDesc(t('settings.memoTemplateDesc'))
 			.addText(text => {
-				archiveInput = text;
+				memoTplInput = text;
 				text
-					.setPlaceholder('Archive/Done.md')
-					.setValue(this.plugin.settings.taskArchivePath)
+					.setPlaceholder('Templates/memo.md')
+					.setValue(this.plugin.settings.memoTemplatePath)
 					.onChange(async (value) => {
 						this.plugin.settings = {
 							...this.plugin.settings,
-							taskArchivePath: value.trim(),
+							memoTemplatePath: value.trim(),
 						};
 						await this.plugin.saveSettings();
 					});
 			})
+			// Browse button: pick an existing template note instead of typing its path.
 			.addExtraButton(btn => btn
 				.setIcon('file-search')
 				.setTooltip(t('pathPicker.pickFile'))
@@ -504,12 +505,65 @@ onyx: t('settings.styleOnyx'),
 					new PathPickerModal(this.app, 'file', (path) => {
 						this.plugin.settings = {
 							...this.plugin.settings,
-							taskArchivePath: path,
+							memoTemplatePath: path,
 						};
 						void this.plugin.saveSettings();
-						archiveInput?.setValue(path);
+						memoTplInput?.setValue(path);
 					}).open();
 				}));
+
+		// Archive destination: a fixed file (the historical behavior) or
+		// today's daily note (created from the daily-notes template when
+		// missing). The path setting below only applies to file mode, so the
+		// tab refreshes on switch to show/hide it.
+		new Setting(containerEl)
+			.setName(t('settings.taskArchiveTarget'))
+			.setDesc(t('settings.taskArchiveTargetDesc'))
+			.addDropdown(dropdown => dropdown
+				.addOption('file', t('settings.taskArchiveTargetFile'))
+				.addOption('daily', t('settings.taskArchiveTargetDaily'))
+				.setValue(this.plugin.settings.taskArchiveTarget === 'daily' ? 'daily' : 'file')
+				.onChange(async (value) => {
+					this.plugin.settings = {
+						...this.plugin.settings,
+						taskArchiveTarget: value === 'daily' ? 'daily' : 'file',
+					};
+					await this.plugin.saveSettings();
+					this.refresh();
+				}));
+
+		if (this.plugin.settings.taskArchiveTarget !== 'daily') {
+			let archiveInput: TextComponent | undefined;
+			new Setting(containerEl)
+				.setName(t('settings.taskArchivePath'))
+				.setDesc(t('settings.taskArchivePathDesc'))
+				.addText(text => {
+					archiveInput = text;
+					text
+						.setPlaceholder('Archive/Done.md')
+						.setValue(this.plugin.settings.taskArchivePath)
+						.onChange(async (value) => {
+							this.plugin.settings = {
+								...this.plugin.settings,
+								taskArchivePath: value.trim(),
+							};
+							await this.plugin.saveSettings();
+						});
+				})
+				.addExtraButton(btn => btn
+					.setIcon('file-search')
+					.setTooltip(t('pathPicker.pickFile'))
+					.onClick(() => {
+						new PathPickerModal(this.app, 'file', (path) => {
+							this.plugin.settings = {
+								...this.plugin.settings,
+								taskArchivePath: path,
+							};
+							void this.plugin.saveSettings();
+							archiveInput?.setValue(path);
+						}).open();
+					}));
+		}
 
 		let libraryNewNoteInput: TextComponent | undefined;
 		new Setting(containerEl)
@@ -785,6 +839,7 @@ onyx: t('settings.styleOnyx'),
 					this.plugin.refreshAllDashboards();
 					this.refresh();
 				}));
+		this.renderWidgetBackgroundSetting(pomodoroCard, 'pomodoroBackground');
 
 		if (this.plugin.settings.pomodoroEnabled) {
 			const workSetting = new Setting(pomodoroCard)
@@ -924,6 +979,28 @@ onyx: t('settings.styleOnyx'),
 						};
 						await this.plugin.saveSettings();
 					}));
+			// Stacked-layout card height (side layout ignores it). The album
+			// i18n keys carry the generic "card size" wording, so they are
+			// reused instead of forking a third translation set.
+			new Setting(readingCard)
+				.setName(t('album.heightRatio'))
+				.setDesc(t('album.heightRatioDesc'))
+				.addDropdown(dropdown => dropdown
+					.addOption('full', t('album.size.full'))
+					.addOption('twoThirds', t('album.size.twoThirds'))
+					.addOption('half', t('album.size.half'))
+					.addOption('third', t('album.size.third'))
+					.setValue(this.plugin.settings.readingHeightRatio)
+					.onChange(async (value) => {
+						this.plugin.settings = {
+							...this.plugin.settings,
+							readingHeightRatio: value as WidgetHeightRatio,
+						};
+						await this.plugin.saveSettings();
+						// The widget signature includes the ratio → rebuild
+						// rewrites the packed grid spans.
+						this.plugin.refreshAllDashboards();
+					}));
 		}
 
 		// --- Habit card ---
@@ -942,6 +1019,27 @@ onyx: t('settings.styleOnyx'),
 					this.plugin.refreshAllDashboards();
 					this.refresh();
 				}));
+		if (this.plugin.settings.widgetHabitEnabled) {
+			// Stacked-layout card height (side layout ignores it); generic
+			// album.* wording reused — see the reading card.
+			new Setting(habitCard)
+				.setName(t('album.heightRatio'))
+				.setDesc(t('album.heightRatioDesc'))
+				.addDropdown(dropdown => dropdown
+					.addOption('full', t('album.size.full'))
+					.addOption('twoThirds', t('album.size.twoThirds'))
+					.addOption('half', t('album.size.half'))
+					.addOption('third', t('album.size.third'))
+					.setValue(this.plugin.settings.habitHeightRatio)
+					.onChange(async (value) => {
+						this.plugin.settings = {
+							...this.plugin.settings,
+							habitHeightRatio: value as WidgetHeightRatio,
+						};
+						await this.plugin.saveSettings();
+						this.plugin.refreshAllDashboards();
+					}));
+		}
 		this.renderWidgetBackgroundSetting(habitCard, 'habitBackground');
 
 		// --- Expense tracker card ---
@@ -1310,7 +1408,7 @@ onyx: t('settings.styleOnyx'),
 	 *  *Background settings keys (undefined = removed). */
 	private renderWidgetBackgroundSetting(
 		containerEl: HTMLElement,
-		key: 'quickActionsBackground' | 'habitBackground' | 'musicBackground' | 'yearProgressBackground',
+		key: 'quickActionsBackground' | 'pomodoroBackground' | 'habitBackground' | 'musicBackground' | 'yearProgressBackground',
 	): void {
 		new Setting(containerEl)
 			.setName(t('wbg.set'))
@@ -1358,10 +1456,6 @@ onyx: t('settings.styleOnyx'),
 						this.plugin.refreshAllDashboards();
 						this.refresh();
 					}));
-		}
-
-		if (albums.length === 0) {
-			card.createDiv({ cls: 'dashboard-empty', text: t('album.empty') });
 		}
 
 		new Setting(card)
@@ -1426,10 +1520,13 @@ onyx: t('settings.styleOnyx'),
 		const list = this.plugin.settings.anniversaries ?? [];
 		for (const cfg of list) {
 			const summary = cfg.label || cfg.startDate || t('anniversary.unnamed');
+			const dateSummary = cfg.calendar === 'lunar'
+				? `${t('anniversary.calendarLunar')} · ${cfg.startDate}`
+				: cfg.startDate;
 			new Setting(card)
 				.setName(summary)
 				.setDesc(cfg.startDate
-					? `${cfg.startDate} · ${cfg.annualReminder ? t('anniversary.reminderOn') : t('anniversary.reminderOff')}`
+					? `${dateSummary} · ${cfg.annualReminder ? t('anniversary.reminderOn') : t('anniversary.reminderOff')}`
 					: t('anniversary.setDate'))
 				.addExtraButton(btn => btn
 					.setIcon('pencil')
@@ -1461,6 +1558,7 @@ onyx: t('settings.styleOnyx'),
 			id: `av-${Date.now()}`,
 			label: '',
 			startDate: '',
+			calendar: 'solar',
 			precision: 'ymd',
 			annualReminder: false,
 		};
@@ -1597,6 +1695,124 @@ onyx: t('settings.styleOnyx'),
 					};
 					await this.plugin.saveSettings();
 				}));
+
+		// Fixed destination override: default chain (daily note → dashboard),
+		// a specific file, a folder with one YYYY-MM-DD note per day, or a
+		// folder with a NEW note per task (template-seeded, see below).
+		const currentTarget = this.plugin.settings.calendarTaskTarget;
+		const targetMode: () => string = () => currentTarget?.kind ?? 'default';
+		const isFolderish = (mode: string): boolean => mode === 'folder' || mode === 'note';
+		const targetSetting = new Setting(card)
+			.setName(t('settings.calendarTarget'))
+			.setDesc(t('settings.calendarTargetDesc'));
+		let targetInput: HTMLInputElement | null = null;
+		// Template picker for the 'note' kind — hidden for the other modes.
+		const noteTplSetting = new Setting(card)
+			.setName(t('settings.calendarTaskNoteTemplate'))
+			.setDesc(t('settings.calendarTaskNoteTemplateDesc'));
+		let noteTplInput: HTMLInputElement | null = null;
+		const applyNoteTplVisibility = (mode: string): void => {
+			noteTplSetting.settingEl.style.display = mode === 'note' ? '' : 'none';
+			if (noteTplInput) {
+				noteTplInput.value = this.plugin.settings.calendarTaskTarget?.templatePath ?? '';
+			}
+		};
+		noteTplSetting.addText(text => {
+			noteTplInput = text.inputEl;
+			text.setPlaceholder('Templates/task.md')
+				.setValue(currentTarget?.templatePath ?? '')
+				.onChange(async (value) => {
+					const tgt = this.plugin.settings.calendarTaskTarget;
+					if (tgt?.kind !== 'note') return;
+					this.plugin.settings = {
+						...this.plugin.settings,
+						calendarTaskTarget: { ...tgt, templatePath: value.trim() || undefined },
+					};
+					await this.plugin.saveSettings();
+				});
+		});
+		noteTplSetting.addExtraButton(btn => btn
+			.setIcon('file-search')
+			.setTooltip(t('pathPicker.pickFile'))
+			.onClick(() => {
+				if (this.plugin.settings.calendarTaskTarget?.kind !== 'note') return;
+				new PathPickerModal(this.app, 'file', (path) => {
+					const tgt = this.plugin.settings.calendarTaskTarget;
+					if (tgt?.kind !== 'note') return;
+					this.plugin.settings = {
+						...this.plugin.settings,
+						calendarTaskTarget: { ...tgt, templatePath: path },
+					};
+					void this.plugin.saveSettings();
+					if (noteTplInput) noteTplInput.value = path;
+				}).open();
+			}));
+		applyNoteTplVisibility(targetMode());
+		targetSetting.addDropdown(d => {
+			d.addOption('default', t('settings.calendarTargetDefault'))
+				.addOption('file', t('settings.calendarTargetFile'))
+				.addOption('folder', t('settings.calendarTargetFolder'))
+				.addOption('note', t('settings.calendarTargetNote'))
+				.setValue(targetMode())
+				.onChange(async (value) => {
+					if (value === 'default') {
+						this.plugin.settings = { ...this.plugin.settings, calendarTaskTarget: undefined };
+					} else {
+						const existing = this.plugin.settings.calendarTaskTarget;
+						this.plugin.settings = {
+							...this.plugin.settings,
+							// templatePath rides along across file/folder/note switches.
+							calendarTaskTarget: {
+								kind: value as 'file' | 'folder' | 'note',
+								path: existing?.path ?? '',
+								templatePath: existing?.templatePath,
+							},
+						};
+					}
+					await this.plugin.saveSettings();
+					if (targetInput) {
+						targetInput.value = this.plugin.settings.calendarTaskTarget?.path ?? '';
+						targetInput.disabled = value === 'default';
+						targetInput.placeholder = isFolderish(value)
+							? t('settings.calendarTargetFolderPlaceholder')
+							: 'Notes/tasks.md';
+					}
+					applyNoteTplVisibility(value);
+				});
+		});
+		targetSetting.addText(text => {
+			targetInput = text.inputEl;
+			text.inputEl.disabled = targetMode() === 'default';
+			text.setPlaceholder(isFolderish(targetMode())
+				? t('settings.calendarTargetFolderPlaceholder')
+				: 'Notes/tasks.md')
+				.setValue(currentTarget?.path ?? '')
+				.onChange(async (value) => {
+					const tgt = this.plugin.settings.calendarTaskTarget;
+					if (!tgt) return;
+					this.plugin.settings = {
+						...this.plugin.settings,
+						calendarTaskTarget: { ...tgt, path: value.trim() },
+					};
+					await this.plugin.saveSettings();
+				});
+		});
+		targetSetting.addExtraButton(btn => btn
+			.setIcon('file-search')
+			.setTooltip(t('pathPicker.pickFile'))
+			.onClick(() => {
+				const tgt = this.plugin.settings.calendarTaskTarget;
+				const mode: 'file' | 'folder' = tgt && isFolderish(tgt.kind) ? 'folder' : 'file';
+				new PathPickerModal(this.app, mode, (path) => {
+					if (!this.plugin.settings.calendarTaskTarget) return;
+					this.plugin.settings = {
+						...this.plugin.settings,
+						calendarTaskTarget: { ...this.plugin.settings.calendarTaskTarget, path },
+					};
+					void this.plugin.saveSettings();
+					if (targetInput) targetInput.value = path;
+				}).open();
+			}));
 	}
 
 	private renderBackupSettings(containerEl: HTMLElement): void {

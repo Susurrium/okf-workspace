@@ -11,6 +11,21 @@ import type {
 
 export type DashboardLayoutMode = 'side' | 'stacked';
 
+/** Fixed destination override for calendar-added tasks.
+ *  - 'file': the task is inserted into one pinned note (created when missing);
+ *  - 'folder': one YYYY-MM-DD note per day in the folder, created on the
+ *    day's first task;
+ *  - 'note': EVERY added task creates a brand-new note in the folder, seeded
+ *    from `templatePath` (when set) with the task line written into it.
+ */
+export interface CalendarTaskTarget {
+	kind: 'file' | 'folder' | 'note';
+	path: string;
+	/** 'note' only: template note that seeds each created task note (body with
+	 *  {{title}}/{{date:…}}/{{time:…}} substituted, frontmatter kept). */
+	templatePath?: string;
+}
+
 export interface DashboardSettings {
 	/** Path of the ACTIVE workspace file (no .md extension). */
 	dashboardFile: string;
@@ -26,6 +41,18 @@ export interface DashboardSettings {
 	    horizontal strip under the banner ('stacked'). Desktop/tablet only;
 	    phones keep their own layout regardless of this value. */
 	layoutMode: DashboardLayoutMode;
+	/** Habit card height ratio in the stacked layout (side layout ignores it;
+	    the card is content-height there). */
+	habitHeightRatio: WidgetHeightRatio;
+	/** Reading card height ratio in the stacked layout (side layout ignores it). */
+	readingHeightRatio: WidgetHeightRatio;
+	/** Side-layout sidebar width in px, clamped 180-420 (220 default). Desktop
+	    only; the drag handle persists it, and render applies it as the
+	    --db-sidebar-w CSS variable. */
+	sidebarWidth: number;
+	/** Stacked-layout widget strip unit height in px (the 6-row grid unit),
+	    clamped 240-560 (300 default). Applied as --db-widget-unit-h. */
+	widgetUnitHeight: number;
 	widgetWeatherEnabled: boolean;
 	widgetWeatherCity: string;
 	widgetWeatherLat: number;
@@ -54,6 +81,12 @@ export interface DashboardSettings {
 	/** Where calendar-added tasks land in the day's daily note: right below
 	    frontmatter ('start') or at the bottom ('end'). */
 	calendarTaskInsertPosition: 'start' | 'end';
+	/** Optional fixed destination for calendar-added tasks: a specific file
+	    (task inserted per calendarTaskInsertPosition), a folder (one note
+	    per day, named YYYY-MM-DD, created on first task), or a folder with a
+	    NEW note per task (optionally template-seeded). Unset = the historical
+	    daily-note chain (clicked day → today → dashboard → create). */
+	calendarTaskTarget?: CalendarTaskTarget;
 	/** Habit check-in widget: boolean daily check-offs tracked per habit. */
 	widgetHabitEnabled: boolean;
 	/** Expense tracker widget: quick expense/income entry in the sidebar. */
@@ -82,6 +115,7 @@ export interface DashboardSettings {
 	anniversaries: AnniversaryConfig[];
 	/** Singleton widget card backgrounds (undefined = none). */
 	quickActionsBackground?: WidgetBackground;
+	pomodoroBackground?: WidgetBackground;
 	habitBackground?: WidgetBackground;
 	musicBackground?: WidgetBackground;
 	yearProgressBackground?: WidgetBackground;
@@ -175,6 +209,13 @@ export interface DashboardSettings {
 	readingSoundEnabled: boolean;
 	taskTemplates: TaskTemplate[];
 	memoSavePath: string;
+	/** Template note applied when a memo card is saved as a note ('' = built-in
+	    default: 创建时间 + type: memo frontmatter). */
+	memoTemplatePath: string;
+	/** Where one-click archive writes completed tasks: a fixed file
+	    (taskArchivePath, the historical behavior) or today's daily note
+	    (created from the daily-notes template when missing). */
+	taskArchiveTarget: 'file' | 'daily';
 	taskArchivePath: string;
 	/** Library sections: folder where the toolbar "new note" button creates notes
 	 *  (frontmatter pre-filled to match the section's filters). '' = vault root. */
@@ -196,6 +237,11 @@ export type BackupPeriod = 'hourly' | 'daily' | 'weekly' | 'monthly';
  * `--db-*` CSS custom property (see CUSTOM_COLOR_TOKENS in appearance.ts). Only
  * non-empty values are applied inline on the root, overriding the `[data-theme]`
  * block via specificity; absent fields fall back to the theme.
+ *
+ * Value grammar (mirrors the widget-background foreground dropdown): `'light'`
+ * / `'dark'` are one-click preset sentinels resolved per field via
+ * resolveCustomColorValue; any other non-empty string is a concrete CSS color
+ * (`#rrggbb`, or `rgba(...)` once its alpha slider drops below 100).
  */
 export interface CustomColors {
 	/** Primary accent (buttons, highlights, progress, links). `--db-accent` */
@@ -262,8 +308,14 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
 	workspaceNames: [''],
 	recentDocCount: 5,
 	language: 'zh',
-	stylePreset: 'island',
+	stylePreset: 'mono',
 	layoutMode: 'side',
+	// Defaults match the historical hardcoded CSS spans/sizes so the upgrade
+	// is visually a no-op until the user drags or picks a tier.
+	habitHeightRatio: 'twoThirds',
+	readingHeightRatio: 'half',
+	sidebarWidth: 220,
+	widgetUnitHeight: 300,
 	widgetWeatherEnabled: false,
 	widgetWeatherCity: 'Shanghai',
 	widgetWeatherLat: 31.23,
@@ -337,6 +389,8 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
 	readingSoundEnabled: true,
 	taskTemplates: [],
 	memoSavePath: '',
+	memoTemplatePath: '',
+	taskArchiveTarget: 'file',
 	taskArchivePath: '归档/已完成.md',
 	libraryNewNotePath: '',
 	backupEnabled: false,
@@ -409,7 +463,18 @@ export interface BannerData {
 	quoteFont?: string;
 	quotes?: QuoteItem[];
 	images?: string[];
+	/** Focal point per banner image, keyed by its path/URL (0-100 percent;
+	 *  50/50 = center). Keyed by path so reordering/adding/removing images or
+	 *  the rotation timer switching them never loses an entry. */
+	imagePos?: Record<string, ImageFocalPoint>;
 	statsConfig?: BannerStatsConfig;
+}
+
+/** Focal point of a cover/banner image: 0-100 percent coordinates. 50/50 is
+ *  the center (the historical default — an absent value renders identically). */
+export interface ImageFocalPoint {
+	x: number;
+	y: number;
 }
 
 export interface QuickAction {
@@ -503,6 +568,10 @@ export interface DashboardCard {
 	blockquote: string;
 	color: string;
 	coverImage: string;
+	/** Focal point of the cover image (0-100 percent coordinates; 50/50 =
+	 *  center, the historical default). Rendered as background-position
+	 *  percentages so the crop stays stable at any container size. */
+	coverPos?: ImageFocalPoint;
 	width: number;
 	size: CardSize;
 	gridCols: number;
@@ -539,6 +608,12 @@ export interface LibraryConfig {
 	 *  kanbanGroupBy) or by the file's top-level subfolder under the configured
 	 *  scan folders (folder sections). */
 	groupMode?: 'property' | 'folder';
+	/** Toolbar grouping for grid/gallery/list/table: off (default), by the
+	    top-level folder under the scan folders ('folder'), or by a frontmatter
+	    property key (viewGroupBy). Kanban uses kanbanGroupBy/groupMode instead. */
+	viewGroupMode?: 'none' | 'folder' | 'property';
+	/** Property key when viewGroupMode === 'property'. */
+	viewGroupBy?: string;
 	/** Kanban view: show each card's cover image (same extraction as the
 	    gallery view — 封面/cover keys first, any image-shaped value fallback).
 	    Defaults to false. */
@@ -557,6 +632,18 @@ export interface LibraryConfig {
 	    falls back to the automatic first-`propertyLimit` display. Empty/undefined
 	    = automatic mode for every card. */
 	visibleProperties?: string[];
+	/** Table view: full column-picker row order (visible AND hidden keys,
+	    drag order). Unset = automatic order. Takes precedence over the legacy
+	    tableProperties form below. */
+	tableOrder?: string[];
+	/** Table view: property keys hidden via the picker's eye toggles. Keys
+	    not listed (including properties that appear later) stay visible. */
+	tableHidden?: string[];
+	/** Table view: legacy chip-picker form — exactly these columns, in this
+	    order. Superseded by tableOrder/tableHidden; still honored for configs
+	    saved by older plugin versions. Empty/undefined = automatic
+	    derivation (section filter properties + common keys from the results). */
+	tableProperties?: string[];
 	/** Quick date filter. When `days` is set it is a rolling "last N days"
 	    window evaluated relative to today (start/end ignored); otherwise the
 	    fixed start/end date range applies. */
@@ -569,6 +656,20 @@ export interface LibraryConfig {
 	 *  scans, images/videos scans). Matched by path prefix, case-insensitive;
 	 *  files inside them never reach the section. */
 	excludeFolders?: string[];
+	/** Media sections (images/videos): when non-empty, ONLY files under these
+	 *  folders reach the section (excludes still subtract within the scope).
+	 *  Empty = whole vault. */
+	includeFolders?: string[];
+	/** New notes created from this section's toolbar button start from these
+	 *  template notes' content ({{title}} / {{date:...}} substituted). With
+	 *  more than one entry the button first offers a template menu (dismissal
+	 *  falls back to the first entry). Empty = bare note. `templatePath` is the
+	 *  single-entry legacy form, kept for older plugin versions reading the
+	 *  same dashboard file. */
+	templatePaths?: string[];
+	/** Legacy single-template form; the first entry of templatePaths mirrors
+	 *  into it on save so pre-multi-template plugin versions keep working. */
+	templatePath?: string;
 	/** All-tasks section: dimension used to group tasks into list sections / kanban columns. */
 	taskGroupBy?: 'date' | 'priority' | 'none';
 }
@@ -631,8 +732,15 @@ export interface AnniversaryConfig {
 	id: string;
 	label: string;
 	/** Historical date the elapsed time is measured from (YYYY-MM-DD or
-	 *  YYYY-MM-DDTHH:mm). */
+	 *  YYYY-MM-DDTHH:mm). Always the SOLAR date — a lunar entry stores the
+	 *  solar equivalent of its lunar date (converted on save); `calendar`
+	 *  marks which system the user picked. */
 	startDate: string;
+	/** Which calendar the entry was entered in (and is displayed / reminded
+	 *  in). 'solar' (default) keeps the historical Gregorian behavior;
+	 *  'lunar' renders the date line in lunar form and fires the annual
+	 *  reminder on the lunar anniversary's solar date each year. */
+	calendar?: 'solar' | 'lunar';
 	/** Elapsed display granularity: calendar years/months/days, total days,
 	 *  or days + hours. */
 	precision: 'ymd' | 'days' | 'hours';
@@ -765,6 +873,11 @@ export interface DashboardColumn {
 	dataviewConfig?: DataviewConfig;
 	/** Web embed section config (sectionType 'web'). */
 	webConfig?: WebEmbedConfig;
+	/** Notes (projects) sections: render the cover strip on cards. Default
+	 *  true; false reproduces the retired standalone 'notes' (无封面) section
+	 *  type, which migrates to projects + showCover:false at parse time.
+	 *  Only the opt-out is persisted. */
+	showCover?: boolean;
 	/** User-set max height in px (drag-resize, desktop only). */
 	height?: number;
 	/** Side-by-side pairing: two adjacent `half` columns render as one row
@@ -817,6 +930,10 @@ export interface RenderCallbacks {
 	onMemoSaveAsNote(card: DashboardCard): void;
 	onTaskSaveToDaily(card: DashboardCard): void;
 	onDocAdd(cardId: string, path: string): void;
+	/** Per-card "new note" (notes/projects sections): create a vault note and
+	 *  attach it to the card's doc list. `pos` (the toolbar click point) anchors
+	 *  the template menu when the section lists several templates. */
+	onCardNewNote(cardId: string, pos?: { x: number; y: number }): void;
 	onDocDelete(cardId: string, docPath: number[]): void;
 	onDocReorder(cardId: string, fromPath: number[], toPath: number[], before: boolean): void;
 	onDocMoveToCard(srcCardId: string, fromPath: number[], destCardId: string, destPath: number[], mode: 'before' | 'after' | 'nest'): void;

@@ -11,13 +11,20 @@
  * 4. Toolbar integration — the button renders on both section types with a
  *    localized aria-label and dispatches `dashboard-library-new-note` with the
  *    column name (view.ts owns the creation flow).
+ * 5. Template pipeline — template body seeds the note ({{title}} substituted,
+ *    template's own frontmatter dropped), extension-less paths resolve,
+ *    missing templates reject; the folder-config save merge carries
+ *    templatePath (regression: the inline view.ts merge dropped it) and the
+ *    parser round-trips it.
  *
  * Run: `npm run test:library-new-note`
  */
 import { strict as assert } from 'node:assert';
-import { App, Menu } from 'obsidian';
+import { App, Menu, TFile } from 'obsidian';
 import { renderLibrarySection } from '../src/library-section';
 import { buildNewNoteProps, createNoteWithProps, pickFolderFromMenu, yamlFrontmatter } from '../src/library-new-note';
+import { folderResultToLibraryConfig } from '../src/folder-config-modal';
+import { parse, serialize } from '../src/parser';
 import { LibraryConfig } from '../src/types';
 import { El, findByClass } from './mini-dom';
 
@@ -308,6 +315,206 @@ async function main(): Promise<void> {
 	}
 
 	console.log('toolbar button integration: PASS');
+
+	// ---------- 5. Template pipeline + folder-config save regression ----------
+
+	const tplFile = (path: string) => Object.assign(new TFile(), { path });
+	const makeTplVaultApp = (templates: Record<string, string>) => {
+		const created: CreateCall[] = [];
+		const app = {
+			vault: {
+				adapter: { exists: async () => false, mkdir: async () => {} },
+				getAbstractFileByPath: (p: string): object | null => (p in templates ? tplFile(p) : null),
+				read: async (f: { path: string }): Promise<string> => templates[f.path]!,
+				create: async (path: string, content: string): Promise<{ path: string }> => {
+					created.push({ path, content });
+					return { path };
+				},
+			},
+		} as unknown as App;
+		return { app, created };
+	};
+
+	// Template body seeds the note, {{title}} substituted; the template's own
+	// frontmatter now MERGES under the filter props (props win collisions).
+	{
+		const { app, created } = makeTplVaultApp({
+			'Templates/note.md': '---\ncustom: from-template\nstatus: template-value\n---\n\n# {{title}}\n\n- [ ] first',
+		});
+		await createNoteWithProps(app, 'N', '新笔记', { status: '进行中' }, 'Templates/note.md');
+		assert.equal(
+			created[0]!.content,
+			'---\n"status": "进行中"\ncustom: from-template\n---\n# 新笔记\n\n- [ ] first\n',
+			'body applied + vars substituted, template fm merged (props win)',
+		);
+	}
+
+	// Real-world shapes: flow-style lists and block values survive byte-for-byte
+	// when the props do not touch their keys.
+	{
+		const { app, created } = makeTplVaultApp({
+			'T.md': [
+				'---',
+				'title: LME 周度工作安排',
+				'tags: [LME, 内容生产, 带货视频]',
+				'desc: |',
+				'  line one',
+				'',
+				'  line three',
+				'---',
+				'',
+				'Body {{title}}',
+			].join('\n'),
+		});
+		await createNoteWithProps(app, 'N', 'X', { status: '进行中' }, 'T.md');
+		assert.equal(
+			created[0]!.content,
+			[
+				'---',
+				'"status": "进行中"',
+				'title: LME 周度工作安排',
+				'tags: [LME, 内容生产, 带货视频]',
+				'desc: |',
+				'  line one',
+				'',
+				'  line three',
+				'---',
+				'Body X',
+				'',
+			].join('\n'),
+			'flow list + block value kept verbatim, blank line inside block preserved',
+		);
+	}
+
+	// No props + template: the template's frontmatter stands on its own.
+	{
+		const { app, created } = makeTplVaultApp({ 'T.md': '---\nstatus: draft\n---\nBody {{title}}' });
+		await createNoteWithProps(app, 'N', 'X', {}, 'T.md');
+		assert.equal(created[0]!.content, '---\nstatus: draft\n---\nBody X\n', 'template fm kept without props');
+	}
+
+	// Body-only template (no frontmatter): plain body, no fences.
+	{
+		const { app, created } = makeTplVaultApp({ 'T.md': 'Body {{title}}' });
+		await createNoteWithProps(app, 'N', 'X', {}, 'T.md');
+		assert.equal(created[0]!.content, 'Body X\n', 'body-only template, no fences');
+	}
+
+	// Extension-less path resolves via the .md fallback; a missing template
+	// rejects (view.ts catches and falls back to a bare note + notice).
+	{
+		const { app, created } = makeTplVaultApp({ 'Templates/note.md': 'b' });
+		await createNoteWithProps(app, 'N', 'X', {}, 'Templates/note');
+		assert.equal(created.length, 1, 'path without .md resolves the .md file');
+		const missing = makeTplVaultApp({});
+		await assert.rejects(
+			() => createNoteWithProps(missing.app, 'N', 'X', {}, 'nope.md'),
+			/Template not found/,
+			'missing template rejects',
+		);
+	}
+
+	// REGRESSION (folder sections): the config saved after FolderConfigModal
+	// must carry the modal's templates. The previous inline merge in view.ts
+	// omitted it, so a template picked in a folder section's settings was
+	// silently dropped and new notes never used it.
+	const folderResult = (over: Partial<Parameters<typeof folderResultToLibraryConfig>[1]> = {}) =>
+		({
+			folders: ['00_inbox'],
+			excludeFolders: [],
+			tags: ['lme'],
+			propertyFilters: [],
+			groupBy: undefined,
+			groupMode: 'property' as const,
+			kanbanShowCovers: false,
+			showProperties: true,
+			propertyLimit: 4,
+			visibleProperties: undefined,
+			templatePaths: ['Templates/note.md'],
+			...over,
+		});
+	{
+		const base: LibraryConfig = {
+			filters: [{ property: 'status', values: ['进行中'] }],
+			viewMode: 'kanban',
+			sortBy: 'modified',
+			sortDesc: true,
+			folders: ['old'],
+			pageSize: 20,
+		};
+		// The modal's property-filter editor owns non-tags filters: when the
+		// modal carries them (opened on an existing config), they round-trip
+		// ahead of the tags filter.
+		const saved = folderResultToLibraryConfig(base, folderResult({
+			propertyFilters: [{ property: 'status', values: ['进行中'] }],
+		}));
+		assert.deepEqual(saved.templatePaths, ['Templates/note.md'], 'templatePaths survives the folder-config save');
+		assert.equal(saved.templatePath, 'Templates/note.md', 'legacy templatePath mirrors the first entry');
+		assert.equal(saved.pageSize, 20, 'base-only fields (pageSize) preserved');
+		assert.deepEqual(saved.folders, ['00_inbox'], 'folders updated from the modal');
+		assert.deepEqual(saved.filters.map(f => f.property), ['status', 'tags'], 'property filters lead, tags filter appended');
+
+		// An empty editor clears the config's non-tags filters — the same
+		// authority contract as every other modal-managed field.
+		const clearedFilters = folderResultToLibraryConfig(saved, folderResult());
+		assert.deepEqual(clearedFilters.filters.map(f => f.property), ['tags'], 'empty property-filter editor clears non-tags filters');
+
+		const cleared = folderResultToLibraryConfig(saved, folderResult({ templatePaths: [] }));
+		assert.equal(cleared.templatePaths, undefined, 'clearing the templates in the modal clears them');
+		assert.equal(cleared.templatePath, undefined, 'the legacy mirror clears too');
+
+		const first = folderResultToLibraryConfig(undefined, folderResult({ templatePaths: ['T.md', 'U.md'] }));
+		assert.equal(first.viewMode, 'grid', 'first-time save fills required defaults');
+		assert.deepEqual(first.templatePaths, ['T.md', 'U.md'], 'first-time save keeps every template');
+		assert.equal(first.templatePath, 'T.md', 'first entry mirrors into the legacy key');
+	}
+
+	// sectionTemplatePaths: multi form wins, legacy single upgrades, entries
+	// trim + de-duplicate case-insensitively in order.
+	{
+		const { sectionTemplatePaths } = await import('../src/library-new-note');
+		assert.deepEqual(sectionTemplatePaths({ filters: [], viewMode: 'grid', sortBy: 'modified', sortDesc: true, templatePaths: [' A.md ', 'a.md', 'B.md'] }), ['A.md', 'B.md'], 'trims and de-dupes case-insensitively');
+		assert.deepEqual(sectionTemplatePaths({ filters: [], viewMode: 'grid', sortBy: 'modified', sortDesc: true, templatePath: 'legacy.md' }), ['legacy.md'], 'legacy single template upgrades into the list');
+		assert.deepEqual(sectionTemplatePaths({ filters: [], viewMode: 'grid', sortBy: 'modified', sortDesc: true }), [], 'no templates configured = empty list');
+	}
+
+	// Parser round-trip: templates persist through serialize → parse, the
+	// legacy single key upgrades, and serializing a list mirrors its first
+	// entry back into the legacy key (older plugin versions keep working).
+	{
+		const md = [
+			'---',
+			'columns:',
+			'  - name: 文案写作',
+			'    color: "#6366f1"',
+			'    type: folder',
+			'    library:',
+			'      viewMode: kanban',
+			'      sortBy: modified',
+			'      sortDesc: true',
+			'      templatePath: "Templates/note.md"',
+			'---',
+			'',
+			'## 文案写作',
+		].join('\n');
+		const parsed = parse(md).columns[0]!.libraryConfig!;
+		assert.equal(parsed.templatePath, 'Templates/note.md', 'templatePath parses out of the library block');
+		assert.deepEqual(parsed.templatePaths, ['Templates/note.md'], 'legacy templatePath upgrades into templatePaths');
+		const round = parse(serialize({ ...parse(md), columns: parse(md).columns })).columns[0]!.libraryConfig!;
+		assert.deepEqual(round.templatePaths, ['Templates/note.md'], 'templatePaths survives the serialize round-trip');
+		assert.equal(round.templatePath, 'Templates/note.md', 'legacy key mirrors the first entry after round-trip');
+
+		const multi = parse(serialize({
+			...parse(md),
+			columns: parse(md).columns.map(col => col.libraryConfig
+				? { ...col, libraryConfig: { ...col.libraryConfig, templatePaths: ['T1.md', 'T2.md', 'T3.md'] } }
+				: col),
+		})).columns[0]!.libraryConfig!;
+		assert.deepEqual(multi.templatePaths, ['T1.md', 'T2.md', 'T3.md'], 'every template survives the round-trip');
+		assert.equal(multi.templatePath, 'T1.md', 'the legacy key mirrors the first entry');
+	}
+
+	console.log('template pipeline + folder-config regression: PASS');
 }
 
 void main().then(() => {

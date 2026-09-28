@@ -1,6 +1,6 @@
 import { memoCardText } from './card-move';
 import { extractCardParts } from './parser';
-import { App, Platform, TFile, setIcon } from 'obsidian';
+import { App, Component, MarkdownRenderer, Platform, TFile, setIcon } from 'obsidian';
 import type { HoverParent, EventRef } from 'obsidian';
 import type { DashboardData, DashboardColumn, DashboardCard, RenderCallbacks, TaskItem, DocNode, DashboardSettings, CardSize, TrackerStyle } from './types';
 import { t, getLanguage } from './i18n';
@@ -13,12 +13,15 @@ import { renderDataviewSection, setDataviewApp } from './dataview-section';
 import { renderWebSection } from './web-section';
 import { renderQuickNoteRegion } from './quick-note-section';
 import { resolveVaultImage } from './banner';
+import { focalToBackgroundPosition, isCenterFocal } from './focal-point-picker';
 import { ITEM_DRAG_TYPE } from './dnd';
 import { captureScrollStates, restoreScrollStates } from './scroll-preserve';
 import { attachFileSuggest } from './file-suggest';
 import { showConfirmDialog } from './confirm-dialog';
 import { applyModalTheme } from './modal-theme';
 import { partnerIndexOf } from './column-pairs';
+import { RATIO_SPAN, buildStackedSpanSpecs, resolveStackedSpans, isTieredWidgetKey } from './widget-span';
+import { normalizeExcludeFolders, isUnderExcludedFolder } from './exclude-folders';
 import { attachNoteHover } from './hover-preview';
 import { fetchWeather, getCachedWeather, getWeatherEmoji, getWeatherDescription } from './weather-service';
 import { readTrackerData, computeStreak } from './tracker-service';
@@ -127,6 +130,10 @@ let docDragSource: { cardId: string; docPath: number[] } | null = null;
 // through every function signature. Mirrors the docDragSource module-level idiom.
 let activeHoverParent: HoverParent | null = null;
 let activeNoteOpener: ((file: TFile, subpath?: string) => void) | null = null;
+// The rendering view as a Component — MarkdownRenderer.render requires one for
+// its async lifecycle; null when the caller passed a bare hover parent, in
+// which case memo cards keep the synchronous plain-lines paint.
+let activeMarkdownComponent: Component | null = null;
 
 const VAULT_FILE_EXTS = SUPPORTED_FILE_EXTS;
 
@@ -295,10 +302,18 @@ export function sidebarWidgetSignature(
 		calendarEnabled: settings.widgetCalendarEnabled,
 		calendarExcludeFolders: settings.calendarExcludeFolders,
 		habitEnabled: settings.widgetHabitEnabled,
+		// Tier settings must break the reuse signature: they change the stacked
+		// grid spans, which are written as inline CSS variables at build time.
+		// (sidebarWidth / widgetUnitHeight deliberately stay OUT — those apply
+		// as plain CSS variables on the outer sidebar every render and must not
+		// churn the widgets DOM.)
+		habitHeightRatio: settings.habitHeightRatio,
+		readingHeightRatio: settings.readingHeightRatio,
 		expenseEnabled: settings.widgetExpenseEnabled,
 		expenseCurrency: settings.expenseCurrency,
 		albums: settings.albums ?? [],
 		quickActionsBackground: settings.quickActionsBackground,
+		pomodoroBackground: settings.pomodoroBackground,
 		habitBackground: settings.habitBackground,
 		musicBackground: settings.musicBackground,
 		yearProgressBackground: settings.yearProgressBackground,
@@ -338,7 +353,7 @@ export function sidebarWidgetSignature(
  *  countdown settings button uses). */
 function saveSingletonBackground(
 	app: App,
-	key: 'quickActionsBackground' | 'habitBackground' | 'musicBackground' | 'yearProgressBackground',
+	key: 'quickActionsBackground' | 'pomodoroBackground' | 'habitBackground' | 'musicBackground' | 'yearProgressBackground',
 	bg: import('./types').WidgetBackground | undefined,
 ): void {
 	const plugin = getWidgetPlugin(app);
@@ -403,7 +418,7 @@ export function renderSidebarWidgets(
 		enabled.push({ key: 'weather', render: (host) => renderSidebarWeather(host, settings, app) });
 	}
 	if (settings.pomodoroEnabled && pomodoroService) {
-		enabled.push({ key: 'pomodoro', render: (host) => renderSidebarPomodoro(host, pomodoroService, settings) });
+		enabled.push({ key: 'pomodoro', render: (host) => renderSidebarPomodoro(host, pomodoroService, settings, app, bg => saveSingletonBackground(app, 'pomodoroBackground', bg)) });
 	}
 	if (settings.readingEnabled && readingService) {
 		enabled.push({ key: 'reading', render: (host) => renderSidebarReading(host, readingService) });
@@ -477,10 +492,26 @@ export function renderSidebarWidgets(
 	};
 
 	// Stacked-mode height ratios: rows of the 6-row widget grid per fraction.
-	const RATIO_SPAN: Record<import('./types').WidgetHeightRatio, number> = { full: 6, twoThirds: 4, half: 3, third: 2 };
 	const albumById = new Map((settings.albums ?? []).map(a => [String(a.id), a]));
+	// Adaptive column packing ("首选档 + 放不下自动换挡"): simulate the sparse
+	// column-first grid over the DOM order and resolve each TIERED card's
+	// span (habit / reading / album-*). Fixed cards keep their hardcoded
+	// per-type CSS spans; tiered cards get the resolved span inline as
+	// --db-widget-span, which their CSS rule reads with a historical fallback.
+	const spans = stacked
+		? resolveStackedSpans(buildStackedSpanSpecs(buildOrder.map(e => e.key), {
+			// Explicit mapping: the settings field names (habitHeightRatio)
+			// differ from the StackedRatios shape, and a whole-settings pass
+			// would type-check (all-optional interface) while silently reading
+			// undefined -> default tiers.
+			habit: settings.habitHeightRatio,
+			reading: settings.readingHeightRatio,
+			albums: settings.albums,
+		}))
+		: null;
 
-	for (const { key, render } of buildOrder) {
+	for (let i = 0; i < buildOrder.length; i++) {
+		const { key, render } = buildOrder[i]!;
 		const host = hostFor(key);
 		const childCount = host.children.length;
 		render(host);
@@ -493,7 +524,7 @@ export function renderSidebarWidgets(
 				el.addClass('dashboard-sidebar-widget');
 				// Card background + config gear INSIDE the header's button group
 				// (left of palette/add) — a corner button would overlap them.
-				applyWidgetBackground(el, settings.quickActionsBackground, app);
+				applyWidgetBackground(el, settings.quickActionsBackground, app, { skipFrame: true });
 				const btnGroup = el.querySelector<HTMLElement>('.dashboard-qa-btn-group');
 				if (btnGroup) {
 					const gear = appendInlineBackgroundButton(btnGroup, app, settings.quickActionsBackground,
@@ -502,13 +533,13 @@ export function renderSidebarWidgets(
 				}
 			}
 			// Album cards carry their config id (the multi-instance refresh
-			// matches on it) and their stacked-mode grid span.
+			// matches on it).
 			if (key.startsWith('album-')) {
 				const cfg = albumById.get(key.slice('album-'.length));
-				if (cfg) {
-					el.dataset.albumId = String(cfg.id);
-					el.setCssProps({ '--db-widget-span': String(RATIO_SPAN[cfg.heightRatio] ?? 6) });
-				}
+				if (cfg) el.dataset.albumId = String(cfg.id);
+			}
+			if (spans && isTieredWidgetKey(key)) {
+				el.setCssProps({ '--db-widget-span': String(spans[i] ?? RATIO_SPAN.full) });
 			}
 		}
 	}
@@ -743,8 +774,11 @@ export function renderSidebarPomodoro(
 	container: HTMLElement,
 	service: PomodoroService,
 	settings: import('./types').DashboardSettings,
+	app?: App,
+	onBgChange?: (bg: import('./types').WidgetBackground | undefined) => void,
 ): void {
 	const widget = container.createDiv({ cls: 'dashboard-sidebar-widget dashboard-sidebar-pomodoro' });
+	if (app) applyWidgetBackground(widget, settings.pomodoroBackground, app);
 
 	const state = service.getState();
 	const isRunning = state.status === 'running';
@@ -766,6 +800,13 @@ export function renderSidebarPomodoro(
 
 	const statsBtn = topRow.createDiv({ cls: 'dashboard-sidebar-pomodoro-stats-btn' });
 	setIcon(statsBtn, 'bar-chart-2');
+
+	// Background gear rides the top row's right cluster (before stats), the
+	// inline pattern shared with habit/music/quick-actions.
+	if (app && onBgChange) {
+		const gear = appendInlineBackgroundButton(topRow, app, settings.pomodoroBackground, onBgChange);
+		topRow.insertBefore(gear, statsBtn);
+	}
 
 	// Ring
 	const ringWrap = widget.createDiv({ cls: 'dashboard-sidebar-pomodoro-ring-wrap' });
@@ -1803,6 +1844,9 @@ export function renderDashboard(
 ): void {
 	activeHoverParent = hoverParent;
 	activeNoteOpener = callbacks.onOpenNoteInPopover ?? null;
+	// The dashboard view doubles as the markdown Component (ItemView extends
+	// Component); other hover-parent callers fall back to plain memo lines.
+	activeMarkdownComponent = hoverParent instanceof Component ? hoverParent : null;
 
 	container.empty();
 	container.addClass('dashboard-kanban');
@@ -1831,11 +1875,52 @@ export function renderDashboard(
 const SCANNING_SECTION_TYPES = new Set(['library', 'folder']);
 const MEDIA_SECTION_TYPES = new Set(['images', 'videos']);
 
+/** Render-input signatures per scanning section, keyed
+ *  `<scope>|<index>:<name>` (scope = the owning board file, so two open
+ *  dashboards on different workspaces never share entries). Populated by
+ *  refreshScanningSections; see scanningSectionSignature. */
+const scanningSectionSignatures = new Map<string, string>();
+
+/** Drop every cached scanning-section signature. Called when the metadata
+ *  cache (re)resolves: a section first rendered before resolution may hold
+ *  partially-indexed frontmatter/tags, and a path+mtime signature cannot see
+ *  that difference — clearing forces the next vault event to rebuild it. */
+export function invalidateScanningSectionSignatures(): void {
+	scanningSectionSignatures.clear();
+}
+
+/** Cheap fingerprint of everything a library/folder section's render derives
+ *  from vault state: its libraryConfig plus the path, mtime, and ctime of
+ *  every in-scope markdown file. Frontmatter/tag changes ride mtime (any
+ *  content write bumps it). An equal signature means a rebuild would be
+ *  byte-identical, so the DOM swap can be skipped without visible loss. */
+function scanningSectionSignature(column: DashboardColumn, app: App): string {
+	const cfg = column.libraryConfig;
+	const folders = (cfg?.folders ?? [])
+		.map(f => f.trim().replace(/^\/+|\/+$/g, ''))
+		.filter(f => f.length > 0);
+	const excluded = normalizeExcludeFolders(cfg?.excludeFolders ?? []);
+	const parts: string[] = [];
+	for (const file of app.vault.getMarkdownFiles()) {
+		if (folders.length > 0) {
+			const lp = file.path.toLowerCase();
+			if (!folders.some(f => lp.startsWith(f.toLowerCase() + '/'))) continue;
+		}
+		if (isUnderExcludedFolder(file.path, excluded)) continue;
+		parts.push(`${file.path}|${file.stat.mtime}|${file.stat.ctime}`);
+	}
+	// Vault iteration order is not contractual; sort for a stable signature.
+	parts.sort();
+	return JSON.stringify([column.name, cfg ?? null, parts]);
+}
+
 /**
- * Re-render only the vault-scanning sections (library/folder/calendar)
- * in place, leaving media and card sections untouched. Used by the view's
- * vault-event debounce so editing a note no longer tears down the whole board
- * (and the media section's <video> thumbnails with it).
+ * Re-render only the vault-scanning sections (library/folder) in place,
+ * leaving media and card sections untouched. Used by the view's vault-event
+ * debounce so editing a note no longer tears down the whole board (and the
+ * media section's <video> thumbnails with it). `shouldRefresh` narrows the
+ * pass to sections whose scan scope intersects the changed paths;
+ * `signatureScope` keys the signature cache per board file.
  */
 export function refreshScanningSections(
 	kanban: HTMLElement,
@@ -1844,19 +1929,32 @@ export function refreshScanningSections(
 	app: App,
 	settings: DashboardSettings | undefined,
 	hoverParent: HoverParent | null,
-): void {
+	shouldRefresh?: (column: DashboardColumn) => boolean,
+	signatureScope?: string,
+): number {
 	activeHoverParent = hoverParent;
+	let refreshed = 0;
 	for (const column of data.columns) {
 		if (!SCANNING_SECTION_TYPES.has(getSectionType(column))) continue;
+		if (shouldRefresh && !shouldRefresh(column)) continue;
 		const oldEl = kanban.querySelector(`:scope > [data-column="${CSS.escape(column.name)}"]`);
 		if (!oldEl) continue;
+		// Skip the swap when the section's render inputs are unchanged since the
+		// last one (out-of-scope edit, write inside an excluded folder, non-md
+		// churn under a scan folder): rebuilding would flash identical content.
+		const key = `${signatureScope ?? ''}|${data.columns.indexOf(column)}:${column.name}`;
+		const signature = scanningSectionSignature(column, app);
+		if (scanningSectionSignatures.get(key) === signature) continue;
+		scanningSectionSignatures.set(key, signature);
 		const newEl = renderSection(column, callbacks, app, data, settings);
 		// Carry the old row's scroll positions over the swap (file lists,
 		// library kanban) so a vault-event refresh doesn't yank the viewport.
 		const scrollStates = captureScrollStates(oldEl);
 		oldEl.replaceWith(newEl);
 		restoreScrollStates(newEl, scrollStates);
+		refreshed++;
 	}
+	return refreshed;
 }
 
 /**
@@ -1872,10 +1970,13 @@ export function refreshMediaSections(
 	app: App,
 	settings: DashboardSettings | undefined,
 	hoverParent: HoverParent | null,
-): void {
+	shouldRefresh?: (column: DashboardColumn) => boolean,
+): number {
 	activeHoverParent = hoverParent;
+	let refreshed = 0;
 	for (const column of data.columns) {
 		if (!MEDIA_SECTION_TYPES.has(getSectionType(column))) continue;
+		if (shouldRefresh && !shouldRefresh(column)) continue;
 		const matched = kanban.querySelector(`:scope > [data-column="${CSS.escape(column.name)}"]`);
 		if (!(matched instanceof HTMLElement)) continue;
 		const scrollStates = captureScrollStates(matched);
@@ -1883,7 +1984,9 @@ export function refreshMediaSections(
 		const newEl = renderSection(column, callbacks, app, data, settings);
 		matched.replaceWith(newEl);
 		restoreScrollStates(newEl, scrollStates);
+		refreshed++;
 	}
+	return refreshed;
 }
 
 const COLLAPSED_KEY = 'apex-dashboard-collapsed';
@@ -2448,6 +2551,21 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	setIcon(addCardBtn, 'plus');
 	addCardBtn.addEventListener('click', () => callbacks.onCardAdd(column.name));
 
+	// Notes sections: gear opens the per-section settings (show covers, new-note
+	// template + save folder). Same dispatch the library sections' config button
+	// uses; view.ts routes it by sectionType.
+	if (sectionType === 'projects') {
+		const notesCfgBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn',
+			attr: { 'aria-label': t('notesCfg.title') },
+		});
+		setIcon(notesCfgBtn, 'settings');
+		notesCfgBtn.addEventListener('click', () => {
+			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: column.name }, bubbles: true });
+			el.dispatchEvent(event);
+		});
+	}
+
 	const deleteSectionBtn = headerActions.createEl('button', {
 		cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
 		attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
@@ -2462,7 +2580,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 
 	for (const card of column.cards) {
 		try {
-			const cardEl = renderCard(card, column.name, sectionType, callbacks, app, data, settings);
+			const cardEl = renderCard(card, column.name, sectionType, callbacks, app, data, settings, column.showCover !== false);
 			cardsContainer.appendChild(cardEl);
 		} catch (err) {
 			console.error('[Dashboard] renderCard error:', card.id, card.type, err);
@@ -2472,7 +2590,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	return el;
 }
 
-function renderCard(card: DashboardCard, columnName: string, sectionType: string, callbacks: RenderCallbacks, app: App, data?: DashboardData, settings?: DashboardSettings): HTMLElement {
+function renderCard(card: DashboardCard, columnName: string, sectionType: string, callbacks: RenderCallbacks, app: App, data?: DashboardData, settings?: DashboardSettings, sectionShowCover = true): HTMLElement {
 	const el = createDiv();
 	el.addClass('dashboard-card', `dashboard-card--${card.type}`);
 	el.dataset.cardId = card.id;
@@ -2492,7 +2610,9 @@ function renderCard(card: DashboardCard, columnName: string, sectionType: string
 	const isWidget = isWeather || isTracker;
 	const isProjectLike = !isMemo && !isTask && !isWidget;
 	const isDashboardSection = sectionType === 'dashboard';
-	const showCover = isProjectLike && !isDashboardSection && sectionType !== 'notes'
+	// Projects cards show covers unless the section's 显示封面 toggle is off
+	// (the retired standalone no-cover type); sticky picks per card instead.
+	const showCover = isProjectLike && !isDashboardSection && sectionShowCover
 		&& (sectionType !== 'sticky' || card.noteStyle !== 'plain');
 
 	if (showCover) {
@@ -2504,6 +2624,11 @@ function renderCard(card: DashboardCard, columnName: string, sectionType: string
 		if (resolved) {
 			const cover = el.createDiv({ cls: 'dashboard-project-cover' });
 			cover.style.backgroundImage = `url("${resolved}")`;
+			// Saved focal point (coverPos): background-position percentages;
+			// absent stays the CSS default `center`.
+			if (card.coverPos && !isCenterFocal(card.coverPos)) {
+				cover.style.backgroundPosition = focalToBackgroundPosition(card.coverPos);
+			}
 			cover.setAttribute('draggable', 'true');
 		} else {
 			const cover = el.createDiv({ cls: 'dashboard-project-cover dashboard-project-cover--default' });
@@ -2632,6 +2757,22 @@ function renderCard(card: DashboardCard, columnName: string, sectionType: string
 				input.remove();
 			});
 			input.click();
+		});
+	}
+
+	// Per-card "new note" (notes sections only): creates a note and attaches it
+	// to this card's doc list (view.handleCardNewNote). Rendered FIRST in the
+	// actions row so it sits left of edit + delete. The click point anchors the
+	// template menu when the section lists several templates.
+	if (isProjectLike && sectionType === 'projects') {
+		const newNoteBtn = actions.createEl('button', {
+			cls: 'dashboard-card-btn dashboard-card-btn--newnote',
+			attr: { 'aria-label': t('renderer.cardNewNote') },
+		});
+		setIcon(newNoteBtn, 'file-plus');
+		newNoteBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			callbacks.onCardNewNote(card.id, { x: e.clientX, y: e.clientY });
 		});
 	}
 
@@ -3319,6 +3460,7 @@ function renderMemoBody(container: HTMLElement, card: DashboardCard, callbacks: 
 
 function renderMemoViewContent(container: HTMLElement, text: string, app: App): void {
 	container.empty();
+	container.removeClass('dashboard-memo-view--md');
 	if (!text) {
 		container.addClass('dashboard-memo-view--empty');
 		container.setText(t('renderer.writeThoughts'));
@@ -3326,6 +3468,17 @@ function renderMemoViewContent(container: HTMLElement, text: string, app: App): 
 	}
 	container.removeClass('dashboard-memo-view--empty');
 
+	// Instant plain-lines paint so the card never flashes empty while the
+	// async markdown pass is in flight; renderMemoMarkdown swaps it out on
+	// success (and leaves this paint standing on failure).
+	renderMemoPlainLines(container, text, app);
+	const component = activeMarkdownComponent;
+	if (component) void renderMemoMarkdown(container, text, app, component);
+}
+
+/** The legacy line-per-line paint: blockquote lines + wikilink/URL lines.
+ *  Kept as the synchronous fallback under the markdown pass. */
+function renderMemoPlainLines(container: HTMLElement, text: string, app: App): void {
 	const lines = text.split('\n');
 	for (let i = 0; i < lines.length; i++) {
 		if (i > 0) container.createEl('br');
@@ -3337,6 +3490,105 @@ function renderMemoViewContent(container: HTMLElement, text: string, app: App): 
 			renderTextWithLinks(container, line, app);
 		}
 	}
+}
+
+/**
+ * Adapt memo text (written line-per-line in a plain textarea) for markdown
+ * rendering without changing how existing memos read: every plain line becomes
+ * its own paragraph (markdown would otherwise soft-wrap them together), while
+ * consecutive list-item lines stay grouped so `-`/`1.` lists and task lines
+ * render as real lists. Code-fence interiors are passed through untouched.
+ */
+export function memoMarkdownSource(text: string): string {
+	const lines = text.split('\n');
+	const out: string[] = [];
+	let listBuf: string[] = [];
+	let inFence = false;
+	const flush = (): void => {
+		if (listBuf.length > 0) {
+			out.push(...listBuf, '');
+			listBuf = [];
+		}
+	};
+	for (const line of lines) {
+		if (/^\s*(```|~~~)/.test(line)) {
+			flush();
+			inFence = !inFence;
+			out.push(line);
+			continue;
+		}
+		if (inFence) {
+			out.push(line);
+			continue;
+		}
+		const isListItem = /^(\s*)([-*+]|\d+\.)\s+/.test(line);
+		const isContinuation = listBuf.length > 0 && /^\s+\S/.test(line);
+		if (isListItem || isContinuation) {
+			listBuf.push(line);
+		} else {
+			flush();
+			out.push(line, '');
+		}
+	}
+	flush();
+	return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * Render the memo view's text as real markdown (Obsidian's renderer), then
+ * wire the produced links to the dashboard's open/hover semantics. Swaps the
+ * container's legacy plain-lines paint in one step on success; on any failure
+ * the plain paint stays. Exported for the verify scripts.
+ */
+export function renderMemoMarkdown(
+	container: HTMLElement,
+	text: string,
+	app: App,
+	component: Component,
+): Promise<void> {
+	const host = createDiv();
+	return MarkdownRenderer.render(app, memoMarkdownSource(text), host, '', component)
+		.then(() => {
+			if (!container.isConnected || !host.hasChildNodes()) return;
+			container.empty();
+			container.addClass('dashboard-memo-view--md');
+			while (host.firstChild) container.appendChild(host.firstChild);
+			wireMemoMarkdownLinks(container, app);
+		})
+		.catch(() => {
+			// Keep the plain-lines paint — a render failure must not blank the card.
+		});
+}
+
+/** Attach open/click (and desktop hover) behavior to the anchors Obsidian's
+ *  markdown pass produced — the same semantics renderWikilink/renderExternalLink
+ *  give the plain paint, so internal links open through the note opener and
+ *  external ones open in the browser. */
+function wireMemoMarkdownLinks(container: HTMLElement, app: App): void {
+	container.querySelectorAll('a').forEach(raw => {
+		const a = raw as HTMLElement;
+		const href = a.getAttribute('href') ?? '';
+		if (a.hasClass('internal-link') || href === '' || href.startsWith('#')) {
+			const target = a.getAttribute('data-href') ?? a.getText();
+			const path = target.split('#')[0]!;
+			const file = resolveNoteFile(app, path);
+			if (file && !Platform.isMobile && activeHoverParent) {
+				attachNoteHover(app, a, file, activeHoverParent, target.includes('#') ? `#${target.split('#').pop()}` : undefined);
+			}
+			a.addEventListener('click', (e) => {
+				e.stopPropagation();
+				e.preventDefault();
+				if (!file) return;
+				activeNoteOpener?.(file, target.includes('#') ? `#${target.split('#').pop()}` : undefined);
+			});
+		} else if (/^https?:/i.test(href)) {
+			a.addEventListener('click', (e) => {
+				e.stopPropagation();
+				e.preventDefault();
+				window.open(href, '_blank');
+			});
+		}
+	});
 }
 
 	function renderProjectBody(container: HTMLElement, card: DashboardCard, callbacks: RenderCallbacks, app: App): void {
@@ -3569,7 +3821,6 @@ function getSectionType(column: DashboardColumn): string {
 	if (lower === 'todo') return 'todo';
 	if (lower === 'sticky') return 'sticky';
 	if (lower === 'projects') return 'projects';
-	if (lower === 'notes') return 'notes';
 	if (lower === 'dashboard') return 'dashboard';
 	if (lower === 'library') return 'library';
 	if (lower === 'folder') return 'folder';
