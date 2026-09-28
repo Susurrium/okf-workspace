@@ -8,13 +8,14 @@ Status: **candidate; automated Apex and full root verification passed, real Obsi
 The previously exercised subtree baseline is Apex 3.6.0 (`f5d6f73e80435d4a5df81966d1ae2683f9220a92`).
 The candidate is 3.6.5 (`e8d99517c3e76a52a9bfe3ed75251a0d652d4a34`). The intervening upstream commits are:
 
-| Commit | Upstream change | Integration handling |
-| --- | --- | --- |
-| `36934d81` (3.6.1) | Section toolbar dropdowns, scoped media display, new-note templates, calendar task destination, per-theme glass buttons, theme studio and Pomodoro background behavior | Import the UI and lifecycle work. Keep section identity based on stable IDs and route writes to managed OKF artifacts through the host policy. |
-| `0dc25954` | First-install theme, widget backgrounds, countdown/anniversary presets and quote font | Keep new-install defaults; preserve existing users' saved settings during upgrade. |
-| `0be8e33c` (3.6.2) | Theme color presets, notes-section new-note settings and memo Markdown rendering | Import; preserve the OKF host's ownership of project/task semantics and note creation policy. |
-| `bf8ebf9b` (3.6.3) | Library grouping, memo templates, music `-110` recovery, refresh/scroll and widget sizing hardening | Import. Retain full-root scroll restoration and pane-local saved scroll restoration together. |
-| `e8d99517` (3.6.5) | Card deletion, multiple templates, table-column controls, lunar anniversaries, focal points, calendar task times and progressive group rendering | Import with identity-aware operations and host-mediated managed-artifact writes. Preserve unknown frontmatter, duplicate section names, and Apex-native formats. |
+| Commit/change | Upstream change | Decision | Handling and reason |
+| --- | --- | --- | --- |
+| `36934d81` (3.6.1) | Section toolbar dropdowns, scoped media display, new-note templates, calendar task destination, per-theme glass buttons, theme studio and Pomodoro background behavior | **Adapt** | Adopt the UI/lifecycle changes; keep stable section IDs and route OKF managed-artifact writes through host policy. |
+| `0dc25954` | First-install theme, widget backgrounds, countdown/anniversary presets and quote font | **Adapt** | Apply defaults only on first install; upgrades must preserve saved user choices. |
+| `0be8e33c` (3.6.2) | Theme color presets, notes-section new-note settings and memo Markdown rendering | **Direct adopt** | These are generic Apex features; retain OKF ownership of project/task semantics and target-path policy. |
+| `bf8ebf9b` (3.6.3) | Library grouping, memo templates, music `-110` recovery, refresh/scroll and widget sizing hardening | **Adapt** | Adopt upstream behavior while composing pane-local persisted positions with full-root scroll restoration. |
+| `e8d99517` (3.6.5) | Card deletion, multiple templates, table-column controls, lunar anniversaries, focal points, calendar task times and progressive group rendering | **Adapt** | Adopt generic features; preserve identity-aware operations, unknown frontmatter, duplicate section names, Apex-native formats, and host-mediated OKF writes. |
+| Release identity | Upstream `apex-dashboard` identity and independent release packaging | **Defer** | Keep only `okf-workspace-dashboard` enabled; a second plugin identity would create competing writers and violate the unified release boundary. |
 
 Keep the installed plugin ID `okf-workspace-dashboard`. The upstream ID `apex-dashboard` is source provenance
 only; do not enable or install a second plugin.
@@ -42,11 +43,15 @@ Completed in the candidate worktree:
 - All 44 Apex `test:*` scripts: passed.
 - The follow-up fixes to the five initially failing Apex checks were verified individually, then included in
   the 44-script rerun.
+- Focused P07 Reading and identity regressions: 76 Dashboard tests passed. P08 mixed operation/conversion
+  task-center scenario: passed in `dashboard-view.test.ts`.
+- Atomic upgrade/rollback fixture restores the prior plugin artifacts while preserving `data.json`; the
+  deployment migration test passes.
 - Apex `npm audit --omit=dev` reports zero production dependency advisories. The full development tree reports
   7 advisories (5 high, 2 moderate) across `@humanfs/node`, `ajv`, `brace-expansion`, `fast-uri`, `flatted`,
   `js-yaml` and `minimatch`; assess these separately before publishing build tooling changes.
-- Root `scripts/check.ps1`: passed. This includes plugin migration safety, Engine pytest (450), Ruff, Pyright,
-  cross-component E2E (7 passed, 1 skipped), Dashboard typecheck/tests (240)/build, and Claudian
+- Root `scripts/check.ps1`: passed. This includes plugin migration/rollback safety, Engine pytest (450), Ruff, Pyright,
+  cross-component E2E (7 passed, 1 skipped), Dashboard typecheck/tests (241)/build, and Claudian
   typecheck/lint/tests (6,587)/architecture/build.
 
 The first root-check attempts stopped because the isolated worktree lacked Engine dev tools and JavaScript

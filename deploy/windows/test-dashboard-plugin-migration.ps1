@@ -90,6 +90,26 @@ try {
     Assert-Test -Condition ((Get-Content -LiteralPath (Join-Path $installTarget 'data.json') -Raw) -ceq '{"userSetting":true}') `
         -Message 'Atomic Dashboard upgrade did not preserve data.json'
 
+    # Rollback is the same atomic artifact install with the backed-up prior
+    # bundle. It must restore the old code without rolling settings backward.
+    $rollbackPackageRoot = Join-Path $testRoot 'rollback-package'
+    New-Item -ItemType Directory -Force -Path (Join-Path $rollbackPackageRoot 'dist') | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $rollbackPackageRoot 'dist\main.js'), 'old-main')
+    [System.IO.File]::WriteAllText((Join-Path $rollbackPackageRoot 'dist\styles.css'), 'old-styles')
+    [System.IO.File]::WriteAllText(
+        (Join-Path $rollbackPackageRoot 'manifest.json'),
+        '{"id":"okf-workspace-dashboard","version":"1"}'
+    )
+    Install-OkfDashboardPluginAtomic -DashboardRoot $rollbackPackageRoot -Target $installTarget | Out-Null
+    Assert-Test -Condition ((Get-Content -LiteralPath (Join-Path $installTarget 'main.js') -Raw) -ceq 'old-main') `
+        -Message 'Rollback did not restore the backed-up main.js'
+    Assert-Test -Condition ((Get-Content -LiteralPath (Join-Path $installTarget 'styles.css') -Raw) -ceq 'old-styles') `
+        -Message 'Rollback did not restore the backed-up styles.css'
+    Assert-Test -Condition ((Get-Content -LiteralPath (Join-Path $installTarget 'manifest.json') -Raw | ConvertFrom-Json).version -ceq '1') `
+        -Message 'Rollback did not restore the prior plugin version'
+    Assert-Test -Condition ((Get-Content -LiteralPath (Join-Path $installTarget 'data.json') -Raw) -ceq '{"userSetting":true}') `
+        -Message 'Rollback changed user-owned plugin settings'
+
     $installedMain = [System.IO.File]::ReadAllBytes((Join-Path $installTarget 'main.js'))
     [System.IO.File]::WriteAllText((Join-Path $packageRoot 'dist\main.js'), 'must-not-install')
     [System.IO.File]::WriteAllText(

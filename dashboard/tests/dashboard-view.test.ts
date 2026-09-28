@@ -70,6 +70,58 @@ it("keeps a failed generation handoff actionable in the real Inbox card", async 
   expect(watchDocumentConversion).toHaveBeenCalledWith("conv-handoff");
 });
 
+it("walks mixed active, publishing, failed, cancelled, and conversion fallback states in the task center", () => {
+  const now = new Date().toISOString();
+  const queued = { ...operation("queued", "queued"), operation_id: "op-queued", updated_at: now };
+  const generating = { ...operation("generating"), operation_id: "op-generating", updated_at: now };
+  const publishing = { ...operation("publishing"), operation_id: "op-publishing", updated_at: now };
+  const failed = { ...operation("failed", "failed"), operation_id: "op-failed", updated_at: now };
+  const cancelled = { ...operation("cancelled", "cancelled"), operation_id: "op-cancelled", updated_at: now };
+  const queuedConversion: ConversionRecord = {
+    conversion_id: "conv-queued", status: "queued", source_filename: "queued.pdf",
+    intent: "learn", quality: "quick", parser: "mineru", outputs: {},
+  };
+  const failedPublish: ConversionRecord = {
+    conversion_id: "conv-publish", status: "failed", source_filename: "publish.pdf",
+    intent: "learn", quality: "quick", parser: "mineru",
+    stages: { conversion: "completed", routing: "failed" }, error: "fixture publish failure",
+    outputs: { source_text: "sources/text/publish.md" },
+  };
+  const failedHandoff: ConversionRecord = {
+    conversion_id: "conv-handoff", status: "imported", source_filename: "handoff.pdf",
+    intent: "learn", quality: "quick", parser: "mineru",
+    stages: { conversion: "completed", routing: "completed", semantic: "failed" },
+    error: "fixture generation handoff failure",
+    outputs: { source_text: "sources/text/handoff.md", routed_target: "learning/guides/handoff.md" },
+  };
+  const plugin = {
+    getDashboardUiState: () => normalizeDashboardUiState(undefined),
+    semanticOperationsSnapshot: () => [queued, generating, publishing, failed, cancelled],
+    conversionSnapshot: () => [queuedConversion, failedPublish, failedHandoff],
+  };
+  const view = new OkfDashboardView(
+    new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App),
+    plugin as never,
+  );
+  const runtime = view as unknown as {
+    taskCenterOpen: boolean;
+    renderBackgroundTasks(parent: HTMLElement): void;
+  };
+  runtime.taskCenterOpen = true;
+  const container = new TestElement();
+  runtime.renderBackgroundTasks(container as unknown as HTMLElement);
+
+  const text = container.descendants().map((item) => item.textContent).join("\n");
+  expect(text).toContain("排队中 · learning/guides/example.md");
+  expect(text).toContain("正在生成内容");
+  expect(text).toContain("正在写入目标笔记");
+  expect(text).toContain("失败");
+  expect(text).toContain("已取消");
+  expect(text).toContain("转换已完成，待继续保存");
+  expect(container.descendants().some((item) => item.textContent === "继续保存")).toBe(true);
+  expect(container.descendants().some((item) => item.textContent === "重试生成入队")).toBe(true);
+});
+
 function project(status: "active" | "paused" | "completed" = "active"): ProjectSummary {
   return {
     ...note({
