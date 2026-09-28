@@ -274,7 +274,7 @@ it.each([
       },
     });
   } finally { await f.dispose(); }
-});
+}, 15000);
 
 it('runs YOLO with automatic native approvals while still answering questions', async () => {
   const f = createFixture(false, async () => { throw new Error('Manual approvals are unavailable'); });

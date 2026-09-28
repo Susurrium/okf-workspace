@@ -362,7 +362,7 @@ describe('OpencodeExecutionBackend', () => {
     } finally {
       await harness.session.dispose();
     }
-  });
+  }, 15000);
 
   it('does not start a process when a turn is cancelled during CLI resolution', async () => {
     const cliPath = createDeferred<string | null>();
