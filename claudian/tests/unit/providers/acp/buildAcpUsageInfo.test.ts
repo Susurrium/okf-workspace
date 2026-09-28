@@ -1,8 +1,8 @@
-import { buildAcpUsageInfo } from '../../../../src/providers/acp';
+import { buildACPUsageInfo } from '../../../../src/providers/acp';
 
-describe('buildAcpUsageInfo', () => {
+describe('buildACPUsageInfo', () => {
   it('combines prompt usage and context window updates', () => {
-    const usage = buildAcpUsageInfo({
+    const usage = buildACPUsageInfo({
       contextWindow: {
         size: 200_000,
         used: 50_000,
@@ -22,7 +22,6 @@ describe('buildAcpUsageInfo', () => {
       cacheReadInputTokens: 300,
       contextTokens: 50_000,
       contextWindow: 200_000,
-      contextWindowIsAuthoritative: true,
       inputTokens: 1200,
       model: 'gemini-2.5-pro',
       percentage: 25,
@@ -30,11 +29,11 @@ describe('buildAcpUsageInfo', () => {
   });
 
   it('returns null when no ACP usage data exists', () => {
-    expect(buildAcpUsageInfo({})).toBeNull();
+    expect(buildACPUsageInfo({})).toBeNull();
   });
 
   it('rounds ACP usage percentages to whole numbers', () => {
-    const usage = buildAcpUsageInfo({
+    const usage = buildACPUsageInfo({
       contextWindow: {
         size: 200_000,
         used: 11_830,

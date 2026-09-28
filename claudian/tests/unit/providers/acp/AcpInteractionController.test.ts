@@ -1,10 +1,10 @@
 import type { ProviderInteractionPort } from '@/core/execution';
 import {
-  AcpInteractionController,
-  type AcpRequestPermissionRequest,
+  ACPInteractionController,
+  type ACPRequestPermissionRequest,
 } from '@/providers/acp';
 
-const PERMISSION_REQUEST: AcpRequestPermissionRequest = {
+const PERMISSION_REQUEST: ACPRequestPermissionRequest = {
   options: [
     { kind: 'allow_once', name: 'Allow once', optionId: 'allow-once' },
     { kind: 'reject_once', name: 'Reject', optionId: 'reject' },
@@ -22,18 +22,31 @@ function createPort(): jest.Mocked<ProviderInteractionPort> {
     askUserQuestion: jest.fn(),
     dismissInteraction: jest.fn(),
     requestApproval: jest.fn(),
-    requestPlanDecision: jest.fn(),
   };
 }
 
-describe('AcpInteractionController', () => {
+describe('ACPInteractionController', () => {
+  it.each(['caller-abort', 'cancel', 'dispose'] as const)('rejects an already-fulfilled approval after %s', reason => {
+    const port = createPort();
+    port.requestApproval.mockImplementation(async request => ({ decision: 'allow', interactionId: request.interactionId }));
+    const controller = new ACPInteractionController({
+      getTurnId: () => 'turn-1', interactionPort: port, sessionInstanceId: 'session-1',
+    });
+    const caller = new AbortController();
+    const pending = controller.requestPermission(PERMISSION_REQUEST, caller.signal);
+    if (reason === 'caller-abort') caller.abort();
+    else if (reason === 'cancel') controller.dismissAll('cancelled');
+    else controller.dispose();
+    return expect(pending).resolves.toEqual({ outcome: { outcome: 'cancelled' } });
+  });
+
   it('routes ACP permissions with stable local identity and validates the echoed response', async () => {
     const port = createPort();
     port.requestApproval.mockImplementation(async (request) => ({
       decision: 'allow',
       interactionId: request.interactionId,
     }));
-    const controller = new AcpInteractionController({
+    const controller = new ACPInteractionController({
       getTurnId: () => 'turn-1',
       interactionPort: port,
       sessionInstanceId: 'session-instance-1',
@@ -74,7 +87,7 @@ describe('AcpInteractionController', () => {
       decision: 'allow',
       interactionId: request.interactionId,
     }));
-    const controller = new AcpInteractionController({
+    const controller = new ACPInteractionController({
       getTurnId: () => 'turn-1',
       interactionPort: port,
       presentPermission: (_request, input) => ({
@@ -111,7 +124,7 @@ describe('AcpInteractionController', () => {
       resolveApproval = resolve;
       expect(request.turnId).toBe('turn-1');
     }));
-    const controller = new AcpInteractionController({
+    const controller = new ACPInteractionController({
       getTurnId: () => turnId,
       interactionPort: port,
       sessionInstanceId: 'session-instance-1',
@@ -141,7 +154,7 @@ describe('AcpInteractionController', () => {
         once: true,
       });
     }));
-    const controller = new AcpInteractionController({
+    const controller = new ACPInteractionController({
       getTurnId: () => 'turn-1',
       interactionPort: port,
       sessionInstanceId: 'session-instance-1',

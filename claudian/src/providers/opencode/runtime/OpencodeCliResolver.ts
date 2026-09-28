@@ -1,9 +1,9 @@
-import { CachedProviderCliResolver } from '../../../core/providers/cli/CachedProviderCliResolver';
+import { CachedProviderCLIResolver } from '../../../core/providers/cli/CachedProviderCLIResolver';
 import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
 import { getOpencodeProviderSettings } from '../settings';
 
-export class OpencodeCliResolver {
-  private readonly resolver = new CachedProviderCliResolver({
+export class OpencodeCLIResolver {
+  private readonly resolver = new CachedProviderCLIResolver({
     binaryName: 'opencode',
     getSettingsProjection: (settings) => {
       const providerSettings = getOpencodeProviderSettings(settings);
@@ -18,18 +18,6 @@ export class OpencodeCliResolver {
 
   resolveFromSettings(settings: Record<string, unknown>): string | null {
     return this.resolver.resolveFromSettings(settings);
-  }
-
-  resolve(
-    hostnamePaths: Record<string, string> | undefined,
-    legacyPath: string,
-    envText: string,
-  ): string | null {
-    return this.resolver.resolve({
-      cliPathsByHost: hostnamePaths,
-      environmentText: envText,
-      legacyCliPath: legacyPath,
-    });
   }
 
   reset(): void {

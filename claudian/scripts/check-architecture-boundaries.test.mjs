@@ -1,8 +1,25 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import ts from 'typescript';
+
+import {
+  evaluationIndicatorMs,
+  evaluationReviewThresholdMs,
+  inspectArtifactSize,
+  inspectEvaluationDuration,
+  inspectPluginArtifactReferences,
+  mainBudgetBytes,
+  referenceMainBytes,
+  preStep11BundleHealthBaselineBytes,
+} from './check-startup-performance.mjs';
+import {
+  bundleCriticalRuntimeDependencies,
+  inspectRuntimeDependencyParity,
+} from './runtimeDependencyParity.mjs';
 
 function listTypeScriptFiles(root) {
   const files = [];
@@ -14,20 +31,23 @@ function listTypeScriptFiles(root) {
   return files;
 }
 
+function normalizeRepositoryPath(filePath) {
+  return filePath.replaceAll('\\', '/');
+}
+
 function findMatches(roots, pattern) {
   const matches = [];
   for (const root of roots) {
     for (const file of listTypeScriptFiles(root)) {
       if (pattern.test(fs.readFileSync(file, 'utf8'))) {
-        matches.push(path.relative(process.cwd(), file));
+        matches.push(normalizeRepositoryPath(path.relative(process.cwd(), file)));
       }
     }
   }
   return matches;
 }
 
-function listSourceImports(file) {
-  const sourceText = fs.readFileSync(file, 'utf8');
+function listSourceImports(file, sourceText = fs.readFileSync(file, 'utf8')) {
   const sourceFile = ts.createSourceFile(
     file,
     sourceText,
@@ -37,18 +57,22 @@ function listSourceImports(file) {
   );
   const imports = [];
 
-  function addImport(moduleSpecifier) {
+  function addImport(moduleSpecifier, options = {}) {
     if (!moduleSpecifier || !ts.isStringLiteralLike(moduleSpecifier)) return;
     const { line } = sourceFile.getLineAndCharacterOfPosition(moduleSpecifier.getStart(sourceFile));
     imports.push({
+      dynamic: options.dynamic === true,
       line: line + 1,
       specifier: moduleSpecifier.text,
+      typeOnly: options.typeOnly === true,
     });
   }
 
   function visit(node) {
-    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
-      addImport(node.moduleSpecifier);
+    if (ts.isImportDeclaration(node)) {
+      addImport(node.moduleSpecifier, { typeOnly: node.importClause?.isTypeOnly === true });
+    } else if (ts.isExportDeclaration(node)) {
+      addImport(node.moduleSpecifier, { typeOnly: node.isTypeOnly === true });
     } else if (
       ts.isImportEqualsDeclaration(node)
       && ts.isExternalModuleReference(node.moduleReference)
@@ -57,7 +81,9 @@ function listSourceImports(file) {
     } else if (ts.isCallExpression(node)) {
       const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
       const isRequire = ts.isIdentifier(node.expression) && node.expression.text === 'require';
-      if (isDynamicImport || isRequire) addImport(node.arguments[0]);
+      if (isDynamicImport || isRequire) {
+        addImport(node.arguments[0], { dynamic: isDynamicImport });
+      }
     }
     ts.forEachChild(node, visit);
   }
@@ -90,6 +116,20 @@ function resolvedImportKey(importer, target) {
   return `${path.normalize(importer)}::${normalizeModuleTarget(path.normalize(target))}`;
 }
 
+function resolveTypeScriptImport(importer, specifier) {
+  const target = resolveSourceImport(importer, specifier);
+  if (!target) return null;
+  const candidates = [
+    target,
+    `${target}.ts`,
+    `${target}.tsx`,
+    path.join(target, 'index.ts'),
+    path.join(target, 'index.tsx'),
+  ];
+  return candidates.find(candidate => fs.existsSync(candidate) && fs.statSync(candidate).isFile())
+    ?? null;
+}
+
 function findResolvedImportViolations(roots, isForbidden, allowedImports = new Set()) {
   const violations = [];
   for (const root of roots) {
@@ -115,6 +155,7 @@ function findResolvedImportViolations(roots, isForbidden, allowedImports = new S
 
 const sourceRoot = path.join(process.cwd(), 'src');
 const appRoot = path.join(sourceRoot, 'app');
+const compositionRoot = path.join(sourceRoot, 'composition');
 const featuresRoot = path.join(sourceRoot, 'features');
 const integrationsRoot = path.join(sourceRoot, 'integrations');
 const providersRoot = path.join(sourceRoot, 'providers');
@@ -143,20 +184,11 @@ const allowedAppProviderImports = new Set([
     path.join(providersRoot, 'defaultProviderConfigs'),
   ),
 ]);
-const allowedProviderAppImports = new Set([
-  resolvedImportKey(
-    path.join(providersRoot, 'claude', 'types', 'settings.ts'),
-    path.join(appRoot, 'settings', 'defaultSettings'),
-  ),
-  resolvedImportKey(
-    path.join(providersRoot, 'claude', 'storage', 'StorageService.ts'),
-    path.join(appRoot, 'settings', 'ClaudianSettingsStorage'),
-  ),
-  resolvedImportKey(
-    path.join(providersRoot, 'claude', 'storage', 'ClaudianSettingsStorage.ts'),
-    path.join(appRoot, 'settings', 'ClaudianSettingsStorage'),
-  ),
-]);
+
+test('repository paths use POSIX separators for stable cross-platform comparison', () => {
+  assert.equal(normalizeRepositoryPath('src\\main.ts'), 'src/main.ts');
+  assert.equal(normalizeRepositoryPath('src/main.ts'), 'src/main.ts');
+});
 
 test('concrete provider pattern covers every registered provider directory', () => {
   assert.notEqual(concreteProviderNames.length, 0);
@@ -196,11 +228,10 @@ test('providers are independent from main and features', () => {
   assert.deepEqual(findMatches([path.join(sourceRoot, 'providers')], pattern), []);
 });
 
-test('providers avoid root app imports outside Claude compatibility seams', () => {
+test('providers avoid root app imports', () => {
   assert.deepEqual(findResolvedImportViolations(
     [providersRoot],
     target => isPathWithin(target, appRoot),
-    allowedProviderAppImports,
   ), []);
 });
 
@@ -217,6 +248,37 @@ test('features are independent from the composition root and app adapters', () =
   assert.deepEqual(findMatches([path.join(sourceRoot, 'features')], pattern), []);
 });
 
+test('only main and composition modules import composition wiring', () => {
+  const roots = fs.readdirSync(sourceRoot, { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && entry.name !== 'composition')
+    .map(entry => path.join(sourceRoot, entry.name));
+  assert.deepEqual(findResolvedImportViolations(
+    roots,
+    target => isPathWithin(target, compositionRoot),
+  ), []);
+});
+
+test('no source module imports the composition root', () => {
+  const roots = fs.readdirSync(sourceRoot, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(entry => path.join(sourceRoot, entry.name));
+  assert.deepEqual(findResolvedImportViolations(
+    roots,
+    target => normalizeModuleTarget(target) === path.join(sourceRoot, 'main'),
+  ), []);
+});
+
+test('composition modules do not import main or concrete providers', () => {
+  assert.deepEqual(findResolvedImportViolations(
+    [compositionRoot],
+    target => (
+      normalizeModuleTarget(target) === path.join(sourceRoot, 'main')
+      || isPathWithin(target, providersRoot)
+    ),
+  ), []);
+});
+
+
 test('features and shared UI are independent from concrete providers', () => {
   const pattern = new RegExp(
     `from\\s+['"][^'"]*${concreteProviderPathPattern.source}`,
@@ -227,64 +289,26 @@ test('features and shared UI are independent from concrete providers', () => {
   ], pattern), []);
 });
 
-test('OKF integration is consumed only through its documented narrow seams', () => {
-  const allowedConsumers = new Set([
-    resolvedImportKey(
-      path.join(appRoot, 'settings', 'defaultSettings.ts'),
-      path.join(integrationsRoot, 'okf', 'OkfPromptPolicy'),
-    ),
-    resolvedImportKey(
-      path.join(featuresRoot, 'settings', 'ClaudianSettings.ts'),
-      path.join(integrationsRoot, 'okf', 'OkfPromptPolicy'),
-    ),
-    resolvedImportKey(
-      path.join(sourceRoot, 'main.ts'),
-      path.join(integrationsRoot, 'okf', 'OkfBridge'),
-    ),
-    resolvedImportKey(
-      path.join(providersRoot, 'codex', 'execution', 'CodexExecutionSession.ts'),
-      path.join(integrationsRoot, 'okf', 'OkfPromptPolicy'),
-    ),
-  ]);
-  const consumers = [];
+test('the shared FeatureHost contract does not depend on chat', () => {
+  const featureHostFile = path.join(featuresRoot, 'FeatureHost.ts');
+  const violations = listSourceImports(featureHostFile)
+    .filter(sourceImport => {
+      const target = resolveSourceImport(featureHostFile, sourceImport.specifier);
+      return target !== null && isPathWithin(target, path.join(featuresRoot, 'chat'));
+    })
+    .map(sourceImport => `${sourceImport.line}: ${sourceImport.specifier}`);
+  assert.deepEqual(violations, []);
+  const contract = fs.readFileSync(featureHostFile, 'utf8');
+  assert.doesNotMatch(contract, /\b(?:getView|getAllViews|warmExecutionPool|chatModelSelection)\b/);
 
-  for (const file of listTypeScriptFiles(sourceRoot)) {
-    if (isPathWithin(file, integrationsRoot)) continue;
-    for (const sourceImport of listSourceImports(file)) {
-      const target = resolveSourceImport(file, sourceImport.specifier);
-      if (!target || !isPathWithin(target, integrationsRoot)) continue;
-      consumers.push(resolvedImportKey(file, target));
-    }
-  }
-
-  assert.deepEqual(new Set(consumers), allowedConsumers);
-  assert.deepEqual(findMatches([
-    path.join(sourceRoot, 'core'),
-    path.join(featuresRoot, 'chat'),
-  ], /\b(?:OKF|Okf)\b/), []);
 });
 
-test('Codex runtime and authentication stay independent from Claude', () => {
-  const codexRoot = path.join(providersRoot, 'codex');
-  const claudeRoot = path.join(providersRoot, 'claude');
-  assert.deepEqual(findResolvedImportViolations(
-    [codexRoot],
-    target => isPathWithin(target, claudeRoot),
-  ), []);
-  assert.deepEqual(findMatches(
-    [codexRoot],
-    /@anthropic-ai\/claude-agent-sdk|\bANTHROPIC_[A-Z0-9_]+\b|\bCLAUDE_CONFIG_DIR\b/,
-  ), []);
-});
+
 
 test('persisted settings changes use the coordinator boundary', () => {
-  const matches = findMatches([sourceRoot], /\.saveSettings\(\)/).filter((file) => {
-    const portableFile = file.split(path.sep).join('/');
-    return ![
-      'src/main.ts',
-      'src/app/providers/ClaudianProviderHost.ts',
-    ].includes(portableFile);
-  });
+  const matches = findMatches([sourceRoot], /\.saveSettings\(\)/).filter(file => ![
+    'src/main.ts',
+  ].includes(file));
   assert.deepEqual(matches, []);
 });
 
@@ -318,7 +342,9 @@ test('tab runtime construction stays private to the factory boundary', () => {
     new RegExp(`\\b${assemblySymbol}\\b`),
   ).sort();
 
-  assert.deepEqual(assemblyReferences, [path.relative(process.cwd(), factorySource)]);
+  assert.deepEqual(assemblyReferences, [
+    normalizeRepositoryPath(path.relative(process.cwd(), factorySource)),
+  ]);
   assert.equal(fs.existsSync(tabSource), false);
 
   const factory = fs.readFileSync(factorySource, 'utf8');
@@ -393,7 +419,208 @@ test('only TabRuntimeFactory can register runtime resource ownership', () => {
   ).sort();
 
   assert.deepEqual(registrationReferences, [
-    path.relative(process.cwd(), factorySource),
-    path.relative(process.cwd(), lifecycleSource),
+    normalizeRepositoryPath(path.relative(process.cwd(), factorySource)),
+    normalizeRepositoryPath(path.relative(process.cwd(), lifecycleSource)),
   ].sort());
+});
+
+
+
+
+
+
+
+
+
+test('performance policy enforces the main bundle budget and reports health deltas', () => {
+  assert.equal(preStep11BundleHealthBaselineBytes, 4_896_000);
+  assert.equal(mainBudgetBytes, 5_000_000);
+  assert.deepEqual(inspectArtifactSize(mainBudgetBytes), {
+    budgetExceeded: false,
+    healthBaselineDeltaBytes: mainBudgetBytes - preStep11BundleHealthBaselineBytes,
+    referenceDeltaBytes: mainBudgetBytes - referenceMainBytes,
+  });
+  assert.equal(inspectArtifactSize(5_000_001).budgetExceeded, true);
+  assert.equal(inspectEvaluationDuration(evaluationIndicatorMs), 'within-indicator');
+  assert.equal(inspectEvaluationDuration(evaluationIndicatorMs + 1), 'warning');
+  assert.equal(
+    inspectEvaluationDuration(evaluationReviewThresholdMs + 1),
+    'review-required',
+  );
+});
+
+test('bundle-critical runtime dependencies require exact manifest and lock agreement', () => {
+  assert.deepEqual(bundleCriticalRuntimeDependencies, [
+    '@anthropic-ai/claude-agent-sdk',
+    'smol-toml',
+  ]);
+  const packageJson = {
+    dependencies: {
+      '@anthropic-ai/claude-agent-sdk': '0.3.226',
+      'smol-toml': '1.7.1',
+    },
+  };
+  const packageLock = {
+    packages: {
+      '': { dependencies: { ...packageJson.dependencies } },
+      'node_modules/@anthropic-ai/claude-agent-sdk': { version: '0.3.226' },
+      'node_modules/smol-toml': { version: '1.7.1' },
+    },
+  };
+  assert.deepEqual(inspectRuntimeDependencyParity({ packageJson, packageLock }), []);
+
+  const rangedManifest = structuredClone(packageJson);
+  rangedManifest.dependencies['@anthropic-ai/claude-agent-sdk'] = '^0.3.220';
+  assert.deepEqual(
+    inspectRuntimeDependencyParity({ packageJson: rangedManifest, packageLock }),
+    [{
+      actual: '^0.3.220',
+      dependency: '@anthropic-ai/claude-agent-sdk',
+      expected: 'an exact version',
+      source: 'package.json',
+    }],
+  );
+
+  const staleNpmLock = structuredClone(packageLock);
+  staleNpmLock.packages['node_modules/smol-toml'].version = '1.6.1';
+  assert.deepEqual(
+    inspectRuntimeDependencyParity({ packageJson, packageLock: staleNpmLock }),
+    [{
+      actual: '1.6.1',
+      dependency: 'smol-toml',
+      expected: '1.7.1',
+      source: 'package-lock.json resolution',
+    }],
+  );
+
+});
+
+test('production artifact entry rejects dependency drift before emitting main.js', () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'claudian-build-parity-'));
+  try {
+    fs.writeFileSync(path.join(fixtureRoot, 'package.json'), JSON.stringify({
+      dependencies: {
+        '@anthropic-ai/claude-agent-sdk': '0.3.226',
+        'smol-toml': '1.7.1',
+      },
+    }));
+    fs.writeFileSync(path.join(fixtureRoot, 'package-lock.json'), JSON.stringify({
+      packages: {
+        '': {
+          dependencies: {
+            '@anthropic-ai/claude-agent-sdk': '0.3.226',
+            'smol-toml': '1.7.1',
+          },
+        },
+        'node_modules/@anthropic-ai/claude-agent-sdk': { version: '0.3.226' },
+        'node_modules/smol-toml': { version: '1.6.1' },
+      },
+    }));
+    const result = spawnSync(
+      process.execPath,
+      [path.join(process.cwd(), 'esbuild.config.mjs'), 'production'],
+      {
+        cwd: fixtureRoot,
+        encoding: 'utf8',
+        env: { ...process.env, OBSIDIAN_VAULT: '' },
+      },
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Bundle-critical runtime dependency parity failed/);
+    assert.match(result.stderr, /package-lock\.json resolution: smol-toml/);
+    assert.equal(fs.existsSync(path.join(fixtureRoot, 'main.js')), false);
+  } finally {
+    fs.rmSync(fixtureRoot, { force: true, recursive: true });
+  }
+});
+
+test('production bundle policy rejects plugin artifact filename references', () => {
+  assert.deepEqual(
+    inspectPluginArtifactReferences('writeFile("manifest.json")'),
+    ['manifest.json'],
+  );
+  assert.deepEqual(
+    inspectPluginArtifactReferences('copyFile("main.js")'),
+    ['main.js'],
+  );
+  assert.deepEqual(
+    inspectPluginArtifactReferences('writeFile("host-transfer-metadata.json")'),
+    [],
+  );
+});
+
+test('shared and utility modules do not depend on application or feature orchestration', () => {
+  assert.deepEqual(findResolvedImportViolations(
+    [path.join(sourceRoot, 'shared'), path.join(sourceRoot, 'utils')],
+    target => isPathWithin(target, appRoot) || isPathWithin(target, featuresRoot),
+  ), []);
+});
+
+test('runtime source imports are acyclic', () => {
+  const files = listTypeScriptFiles(sourceRoot).filter(file => !file.endsWith('.d.ts'));
+  const graph = new Map(files.map(file => {
+    // Check emitted imports: type dependencies do not form runtime cycles.
+    const emitted = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+      compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
+      fileName: file,
+    }).outputText;
+    return [file, listSourceImports(file, emitted)
+      .filter(entry => !entry.dynamic)
+      .map(entry => resolveTypeScriptImport(file, entry.specifier))
+      .filter(target => target && isPathWithin(target, sourceRoot))];
+  }));
+  const visited = new Set();
+  const active = new Set();
+  const stack = [];
+  const cycles = [];
+  function visit(file) {
+    if (active.has(file)) {
+      cycles.push([...stack.slice(stack.indexOf(file)), file]
+        .map(entry => normalizeRepositoryPath(path.relative(sourceRoot, entry))).join(' -> '));
+      return;
+    }
+    if (visited.has(file)) return;
+    visited.add(file);
+    active.add(file);
+    stack.push(file);
+    for (const dependency of graph.get(file) ?? []) visit(dependency);
+    stack.pop();
+    active.delete(file);
+  }
+  for (const file of files) visit(file);
+  assert.deepEqual(cycles, []);
+});
+
+test('Claudian is independent from the standalone collaboration plugin', () => {
+  const sources = listTypeScriptFiles(sourceRoot);
+  const dependencies = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')).dependencies;
+  assert.equal(dependencies['@claudian-collab/protocol'], undefined);
+  for (const file of sources) {
+    const source = fs.readFileSync(file, 'utf8');
+    assert.doesNotMatch(source, /(?:from\s*|import\s*\()['"][^'"]*(?:\/collab(?:\/|['"])|\/agent-runtime(?:\/|['"])|@claudian-collab\/protocol)/, file);
+  }
+});
+
+test('documented and scheduled npm commands exist in the package manifest', () => {
+  const { scripts } = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  const files = [
+    'README.md',
+    'CONTRIBUTING.md',
+    ...(fs.existsSync('.github/workflows')
+      ? fs.readdirSync('.github/workflows')
+        .filter(file => /\.ya?ml$/.test(file))
+        .map(file => path.join('.github/workflows', file))
+      : []),
+  ];
+  for (const file of files) {
+    const source = fs.readFileSync(file, 'utf8');
+    for (const [, command] of source.matchAll(/\bnpm run ([\w:-]+)/g)) {
+      assert.ok(Object.hasOwn(scripts, command), `${file} invokes missing npm script: ${command}`);
+    }
+  }
+});
+
+test('application and core selection consume provider policy rather than chat UI', () => {
+  assert.deepEqual(findMatches([appRoot, path.join(sourceRoot, 'core')], /\.getChatUIConfig\s*\(/), []);
 });

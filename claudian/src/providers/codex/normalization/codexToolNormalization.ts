@@ -1,3 +1,5 @@
+import { isCodexEncryptedMessage } from './codexSubagentNormalization';
+
 /**
  * Shared Codex tool normalization layer.
  *
@@ -16,6 +18,8 @@ const TOOL_NAME_MAP: Record<string, string> = {
   exec_command: 'Bash',
   update_plan: 'TodoWrite',
   request_user_input: 'AskUserQuestion',
+  request_user_input_async: 'AskUserQuestion',
+  web__run: 'WebSearch',
   view_image: 'Read',
   web_search: 'WebSearch',
   web_search_call: 'WebSearch',
@@ -458,6 +462,12 @@ export function normalizeCodexToolInput(
   rawName: string | undefined,
   input: Record<string, unknown>,
 ): Record<string, unknown> {
+  if (rawName && ['spawn_agent', 'followup_task', 'send_message', 'send_input'].includes(rawName)
+    && isCodexEncryptedMessage(input.message)) {
+    const displayInput = { ...input };
+    delete displayInput.message;
+    return displayInput;
+  }
   switch (rawName) {
     case 'command_execution':
     case 'shell_command':
@@ -470,6 +480,15 @@ export function normalizeCodexToolInput(
 
     case 'request_user_input':
       return { questions: normalizeQuestions(input) };
+
+    case 'request_user_input_async':
+      return {
+        questions: normalizeQuestions(input).map((question, index) => ({ ...question, id: String(index), isOther: true })),
+        replyMode: 'user-message',
+      };
+
+    case 'web__run':
+      return normalizeWebRunInput(input);
 
     case 'view_image':
       return {
@@ -539,7 +558,7 @@ function normalizeQuestions(input: Record<string, unknown>): Array<Record<string
       : [];
 
     return {
-      question: stringifyCodexValue(item.question) || `Question ${index + 1}`,
+      question: firstNonEmptyString(item.question, item.title) || `Question ${index + 1}`,
       ...(item.id ? { id: stringifyCodexValue(item.id) } : {}),
       header: typeof item.header === 'string' && item.header.trim()
         ? String(item.header)
@@ -572,6 +591,42 @@ function stringifyCodexValue(value: unknown): string {
   } catch {
     return '';
   }
+}
+
+function normalizeWebRunInput(input: Record<string, unknown>): Record<string, unknown> {
+  const actions: Record<string, unknown>[] = [];
+  const records = (key: string): Record<string, unknown>[] => Array.isArray(input[key])
+    ? input[key].filter((value): value is Record<string, unknown> => (
+      value !== null && typeof value === 'object' && !Array.isArray(value)
+    ))
+    : [];
+  const queries = [...records('search_query'), ...records('image_query')]
+    .map(query => firstNonEmptyString(query.q)).filter(Boolean);
+  if (queries.length > 0) {
+    actions.push({ actionType: 'search', query: queries[0], ...(queries.length > 1 ? { queries } : {}) });
+  }
+  for (const request of records('open')) {
+    const url = firstNonEmptyString(request.ref_id, request.url);
+    if (url) actions.push({ actionType: 'open_page', url });
+  }
+  for (const request of records('find')) {
+    const url = firstNonEmptyString(request.ref_id, request.url);
+    const pattern = firstNonEmptyString(request.pattern);
+    if (url && pattern) actions.push({ actionType: 'find_in_page', url, pattern });
+  }
+  for (const request of records('click')) {
+    const url = firstNonEmptyString(request.ref_id, request.url);
+    if (url) actions.push({ actionType: 'click', url, linkId: stringifyCodexValue(request.id) });
+  }
+  for (const [operation, requests] of Object.entries(input)) {
+    if (!['search_query', 'image_query', 'open', 'find', 'click'].includes(operation)
+      && Array.isArray(requests) && requests.length > 0) {
+      actions.push({ actionType: operation, requests });
+    }
+  }
+  return actions.length > 0
+    ? { ...actions[0], ...(actions.length > 1 ? { actions } : {}) }
+    : input;
 }
 
 function normalizeWebSearchInput(input: Record<string, unknown>): Record<string, unknown> {
@@ -634,30 +689,30 @@ function normalizeStringArray(value: unknown): string[] {
 // MCP tool normalization
 // ---------------------------------------------------------------------------
 
-interface CodexMcpResultPart {
+interface CodexMCPResultPart {
   type?: string;
   text?: string;
 }
 
-interface CodexMcpResultPayload {
-  content?: CodexMcpResultPart[] | null;
+interface CodexMCPResultPayload {
+  content?: CodexMCPResultPart[] | null;
 }
 
-export interface NormalizedCodexMcpToolState {
+export interface NormalizedCodexMCPToolState {
   isTerminal: boolean;
   isError: boolean;
   status: 'running' | 'completed' | 'error';
   result?: string;
 }
 
-export function normalizeCodexMcpToolName(server: unknown, tool: unknown): string {
+export function normalizeCodexMCPToolName(server: unknown, tool: unknown): string {
   const serverName = typeof server === 'string' ? server : '';
   const toolName = typeof tool === 'string' ? tool : '';
   if (!serverName && !toolName) return 'tool';
   return `mcp__${serverName}__${toolName}`;
 }
 
-export function normalizeCodexMcpToolInput(rawArguments: unknown): Record<string, unknown> {
+export function normalizeCodexMCPToolInput(rawArguments: unknown): Record<string, unknown> {
   if (typeof rawArguments === 'string') {
     return parseCodexArguments(rawArguments);
   }
@@ -669,14 +724,14 @@ export function normalizeCodexMcpToolInput(rawArguments: unknown): Record<string
   return {};
 }
 
-export function normalizeCodexMcpToolState(
+export function normalizeCodexMCPToolState(
   rawStatus: unknown,
   resultPayload?: unknown,
   rawError?: unknown,
-): NormalizedCodexMcpToolState {
+): NormalizedCodexMCPToolState {
   const status = typeof rawStatus === 'string' ? rawStatus : '';
   const error = typeof rawError === 'string' ? rawError : '';
-  const resultText = extractCodexMcpResultText(resultPayload);
+  const resultText = extractCodexMCPResultText(resultPayload);
   const isTerminalStatus = status === 'completed'
     || status === 'failed'
     || status === 'error'
@@ -697,10 +752,10 @@ export function normalizeCodexMcpToolState(
   };
 }
 
-function extractCodexMcpResultText(resultPayload?: unknown): string {
+function extractCodexMCPResultText(resultPayload?: unknown): string {
   if (!resultPayload || typeof resultPayload !== 'object') return '';
 
-  const content = (resultPayload as CodexMcpResultPayload).content;
+  const content = (resultPayload as CodexMCPResultPayload).content;
   if (!Array.isArray(content)) return '';
 
   return content
@@ -727,6 +782,22 @@ export function normalizeCodexToolResult(
   rawResult: string,
 ): string {
   if (!rawResult) return rawResult;
+  if (normalizedName === 'AskUserQuestion') {
+    try {
+      const result = JSON.parse(rawResult) as Record<string, unknown> | null;
+      if (result?.accepted === true && Object.keys(result).length === 1) {
+        return 'Question sent. Awaiting your reply.';
+      }
+    } catch { /* Keep non-JSON question results intact. */ }
+  }
+  if (normalizedName === 'exec') {
+    // Only remove the transport envelope; arbitrary script output may itself
+    // contain JSON objects or "Output:" labels that must remain intact.
+    return rawResult.replace(
+      /^Script (?:completed|failed|running with cell ID [^\r\n]+)\r?\nWall time [^\r\n]+\r?\nOutput:\r?\n/,
+      '',
+    );
+  }
   if (!TERMINAL_RESULT_TOOLS.has(normalizedName)) return rawResult;
   return unwrapTerminalResult(rawResult);
 }
@@ -804,6 +875,7 @@ function unwrapTerminalResult(raw: string): string {
 // ---------------------------------------------------------------------------
 
 export function isCodexToolOutputError(output: string): boolean {
+  if (/^Script failed(?:\r?\n|$)/.test(output.trimStart())) return true;
   const exitCodeMatch = output.match(/(?:Exit code:|Process exited with code)\s*(\d+)/i);
   if (exitCodeMatch) {
     return Number(exitCodeMatch[1]) !== 0;

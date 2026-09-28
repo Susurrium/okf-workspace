@@ -1,24 +1,24 @@
 import type { SlashCommand, StreamChunk } from '../../core/types';
 import type { SDKToolUseResult } from '../../core/types/diff';
-import { extractAcpDiffToolUseResult } from './AcpToolResultNormalization';
+import { extractACPDiffToolUseResult } from './ACPToolResultNormalization';
 import type {
-  AcpAvailableCommand,
-  AcpContentBlock,
-  AcpContentChunk,
-  AcpPlan,
-  AcpSessionConfigOption,
-  AcpSessionInfoUpdate,
-  AcpSessionUpdate,
-  AcpToolCall,
-  AcpToolCallContent,
-  AcpToolCallStatus,
-  AcpToolCallUpdate,
-  AcpUsageUpdate,
+  ACPAvailableCommand,
+  ACPContentBlock,
+  ACPContentChunk,
+  ACPPlan,
+  ACPSessionConfigOption,
+  ACPSessionInfoUpdate,
+  ACPSessionUpdate,
+  ACPToolCall,
+  ACPToolCallContent,
+  ACPToolCallStatus,
+  ACPToolCallUpdate,
+  ACPUsageUpdate,
 } from './types';
 
-export type AcpNormalizedUpdate =
+export type ACPNormalizedUpdate =
   | {
-    content: AcpContentBlock;
+    content: ACPContentBlock;
     messageId?: string | null;
     role: 'assistant' | 'thinking' | 'user';
     streamChunks: StreamChunk[];
@@ -29,7 +29,7 @@ export type AcpNormalizedUpdate =
     type: 'commands';
   }
   | {
-    configOptions: AcpSessionConfigOption[];
+    configOptions: ACPSessionConfigOption[];
     type: 'config_options';
   }
   | {
@@ -37,41 +37,41 @@ export type AcpNormalizedUpdate =
     type: 'current_mode';
   }
   | {
-    plan: AcpPlan;
+    plan: ACPPlan;
     type: 'plan';
   }
   | {
-    sessionInfo: AcpSessionInfoUpdate & { updatedAtMs?: number | null };
+    sessionInfo: ACPSessionInfoUpdate & { updatedAtMs?: number | null };
     type: 'session_info';
   }
   | {
     streamChunks: StreamChunk[];
-    toolCall: AcpToolCall;
-    toolState: AcpToolCallSnapshot;
+    toolCall: ACPToolCall;
+    toolState: ACPToolCallSnapshot;
     type: 'tool_call';
   }
   | {
     streamChunks: StreamChunk[];
-    toolCallUpdate: AcpToolCallUpdate;
-    toolState: AcpToolCallSnapshot;
+    toolCallUpdate: ACPToolCallUpdate;
+    toolState: ACPToolCallSnapshot;
     type: 'tool_call_update';
   }
   | {
     type: 'usage';
-    usage: AcpUsageUpdate;
+    usage: ACPUsageUpdate;
   }
   | {
     type: 'unknown';
     update: unknown;
   };
 
-export interface AcpToolCallSnapshot {
+export interface ACPToolCallSnapshot {
   input: Record<string, unknown>;
   name: string;
   output: string;
   rawInput?: unknown;
   rawOutput?: unknown;
-  status?: AcpToolCallStatus | null;
+  status?: ACPToolCallStatus | null;
   toolUseResult?: SDKToolUseResult;
 }
 
@@ -80,16 +80,16 @@ type MessageRole = 'assistant' | 'thinking' | 'user';
 // Sentinel key for anonymous (messageId-less) streams so we only emit one start per role.
 const ANONYMOUS_MESSAGE_KEY = '\u0000anonymous';
 
-export class AcpSessionUpdateNormalizer {
+export class ACPSessionUpdateNormalizer {
   private readonly seenMessages = new Map<MessageRole, Set<string>>();
-  private readonly toolCalls = new Map<string, AcpToolCallSnapshot>();
+  private readonly toolCalls = new Map<string, ACPToolCallSnapshot>();
 
   reset(): void {
     this.seenMessages.clear();
     this.toolCalls.clear();
   }
 
-  normalizeUnknown(update: unknown): AcpNormalizedUpdate {
+  normalizeUnknown(update: unknown): ACPNormalizedUpdate {
     if (
       !isPlainObject(update)
       || typeof update.sessionUpdate !== 'string'
@@ -97,17 +97,17 @@ export class AcpSessionUpdateNormalizer {
     ) {
       return { type: 'unknown', update };
     }
-    return this.normalize(update as unknown as AcpSessionUpdate);
+    return this.normalize(update as unknown as ACPSessionUpdate);
   }
 
-  normalize(update: AcpSessionUpdate): AcpNormalizedUpdate {
+  normalize(update: ACPSessionUpdate): ACPNormalizedUpdate {
     switch (update.sessionUpdate) {
       case 'user_message_chunk':
-        return this.normalizeMessageChunk('user', update);
+        return this.#normalizeMessageChunk('user', update);
       case 'agent_message_chunk':
-        return this.normalizeMessageChunk('assistant', update);
+        return this.#normalizeMessageChunk('assistant', update);
       case 'agent_thought_chunk':
-        return this.normalizeMessageChunk('thinking', update);
+        return this.#normalizeMessageChunk('thinking', update);
       case 'tool_call':
         return this.normalizeToolCall(update);
       case 'tool_call_update':
@@ -116,7 +116,7 @@ export class AcpSessionUpdateNormalizer {
         return { plan: update, type: 'plan' };
       case 'available_commands_update':
         return {
-          commands: normalizeAcpAvailableCommands(update.availableCommands),
+          commands: normalizeACPAvailableCommands(update.availableCommands),
           type: 'commands',
         };
       case 'current_mode_update':
@@ -133,26 +133,26 @@ export class AcpSessionUpdateNormalizer {
     }
   }
 
-  private normalizeMessageChunk(
+  #normalizeMessageChunk(
     role: MessageRole,
-    update: AcpContentChunk,
-  ): Extract<AcpNormalizedUpdate, { type: 'message_chunk' }> {
+    update: ACPContentChunk,
+  ): Extract<ACPNormalizedUpdate, { type: 'message_chunk' }> {
     const streamChunks: StreamChunk[] = [];
 
-    if (role === 'user' && this.claimMessageStart('user', update.messageId)) {
+    if (role === 'user' && this.#claimMessageStart('user', update.messageId)) {
       streamChunks.push({
         content: extractPrimaryText(update.content),
         itemId: update.messageId ?? undefined,
         type: 'user_message_start',
       });
-    } else if (role === 'assistant' && this.claimMessageStart('assistant', update.messageId)) {
+    } else if (role === 'assistant' && this.#claimMessageStart('assistant', update.messageId)) {
       streamChunks.push({
         itemId: update.messageId ?? undefined,
         type: 'assistant_message_start',
       });
     }
 
-    const text = renderAcpContentBlock(update.content);
+    const text = renderACPContentBlock(update.content);
     if (text && role === 'thinking') {
       streamChunks.push({ content: text, type: 'thinking' });
     } else if (text && role === 'assistant') {
@@ -168,9 +168,9 @@ export class AcpSessionUpdateNormalizer {
     };
   }
 
-  private normalizeToolCall(toolCall: AcpToolCall): Extract<AcpNormalizedUpdate, { type: 'tool_call' }> {
-    const toolUseResult = extractAcpDiffToolUseResult(toolCall.content);
-    const toolState: AcpToolCallSnapshot = {
+  private normalizeToolCall(toolCall: ACPToolCall): Extract<ACPNormalizedUpdate, { type: 'tool_call' }> {
+    const toolUseResult = extractACPDiffToolUseResult(toolCall.content);
+    const toolState: ACPToolCallSnapshot = {
       input: normalizeToolInput(toolCall.rawInput),
       name: normalizeToolName(toolCall.title, toolCall.kind),
       output: renderToolPayload(toolCall.content, toolCall.rawOutput),
@@ -202,8 +202,8 @@ export class AcpSessionUpdateNormalizer {
   }
 
   private normalizeToolCallUpdate(
-    toolCallUpdate: AcpToolCallUpdate,
-  ): Extract<AcpNormalizedUpdate, { type: 'tool_call_update' }> {
+    toolCallUpdate: ACPToolCallUpdate,
+  ): Extract<ACPNormalizedUpdate, { type: 'tool_call_update' }> {
     const current = this.toolCalls.get(toolCallUpdate.toolCallId) ?? {
       input: {},
       name: 'tool',
@@ -224,7 +224,7 @@ export class AcpSessionUpdateNormalizer {
     if (toolCallUpdate.rawOutput !== undefined) {
       current.rawOutput = toolCallUpdate.rawOutput;
     }
-    const toolUseResult = extractAcpDiffToolUseResult(toolCallUpdate.content);
+    const toolUseResult = extractACPDiffToolUseResult(toolCallUpdate.content);
     if (toolUseResult) {
       current.toolUseResult = {
         ...current.toolUseResult,
@@ -272,7 +272,7 @@ export class AcpSessionUpdateNormalizer {
 
   // A message-start chunk must fire exactly once per (role, messageId). Anonymous streams
   // share a single slot per role so repeated chunks without an id do not restart the message.
-  private claimMessageStart(role: 'assistant' | 'user', messageId?: string | null): boolean {
+  #claimMessageStart(role: 'assistant' | 'user', messageId?: string | null): boolean {
     const key = messageId ?? ANONYMOUS_MESSAGE_KEY;
     let seen = this.seenMessages.get(role);
     if (!seen) {
@@ -301,13 +301,13 @@ const KNOWN_SESSION_UPDATES = new Set([
   'user_message_chunk',
 ]);
 
-export function normalizeAcpAvailableCommands(
-  commands: readonly AcpAvailableCommand[],
+export function normalizeACPAvailableCommands(
+  commands: readonly ACPAvailableCommand[],
 ): SlashCommand[] {
-  return commands.map(mapAcpCommandToSlashCommand);
+  return commands.map(mapACPCommandToSlashCommand);
 }
 
-function mapAcpCommandToSlashCommand(command: AcpAvailableCommand): SlashCommand {
+function mapACPCommandToSlashCommand(command: ACPAvailableCommand): SlashCommand {
   const name = command.name.replace(/^\//, '');
   return {
     argumentHint: command.input?.hint ?? undefined,
@@ -334,7 +334,7 @@ function normalizeToolInput(rawInput: unknown): Record<string, unknown> {
 }
 
 function renderToolPayload(
-  content: AcpToolCallContent[] | null | undefined,
+  content: ACPToolCallContent[] | null | undefined,
   rawOutput: unknown,
 ): string {
   if (Array.isArray(content) && content.length > 0) {
@@ -347,10 +347,10 @@ function renderToolPayload(
   return rawOutput === undefined ? '' : formatUnknownValue(rawOutput);
 }
 
-function renderToolCallContent(content: AcpToolCallContent): string {
+function renderToolCallContent(content: ACPToolCallContent): string {
   switch (content.type) {
     case 'content':
-      return renderAcpContentBlock(content.content);
+      return renderACPContentBlock(content.content);
     case 'diff':
       return `Diff: ${content.path}`;
     case 'terminal':
@@ -358,13 +358,13 @@ function renderToolCallContent(content: AcpToolCallContent): string {
   }
 }
 
-function defaultToolResultText(status: AcpToolCallStatus): string {
+function defaultToolResultText(status: ACPToolCallStatus): string {
   return status === 'failed' ? 'Tool failed' : 'Tool completed';
 }
 
 // User-visible preview text for the first chunk of a user message. Non-textual blocks
 // show nothing here because they round-trip through the message content itself.
-function extractPrimaryText(content: AcpContentBlock): string {
+function extractPrimaryText(content: ACPContentBlock): string {
   if (content.type === 'text') {
     return content.text;
   }
@@ -374,7 +374,7 @@ function extractPrimaryText(content: AcpContentBlock): string {
   return '';
 }
 
-export function renderAcpContentBlock(content: AcpContentBlock): string {
+export function renderACPContentBlock(content: ACPContentBlock): string {
   switch (content.type) {
     case 'text':
       return content.text;

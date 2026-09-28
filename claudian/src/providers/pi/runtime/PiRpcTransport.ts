@@ -1,13 +1,13 @@
 import type { Readable, Writable } from 'node:stream';
 
-import { subscribePiJsonlLines, writePiJsonl } from './PiJsonl';
+import { subscribePiJSONLLines, writePiJSONL } from './PiJSONL';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-export type PiRpcRecord = Record<string, unknown>;
-export type PiRpcEventHandler = (event: PiRpcRecord) => void;
+export type PiRPCRecord = Record<string, unknown>;
+export type PiRPCEventHandler = (event: PiRPCRecord) => void;
 
-export interface PiRpcStreams {
+export interface PiRPCStreams {
   input: Readable | NodeJS.ReadableStream;
   onClose?: (listener: (error?: Error) => void) => () => void;
   output: Writable | NodeJS.WritableStream;
@@ -20,14 +20,14 @@ interface PendingRequest {
   type: string;
 }
 
-export class PiRpcTransportClosedError extends Error {
+export class PiRPCTransportClosedError extends Error {
   constructor(message = 'Pi RPC transport closed') {
     super(message);
     this.name = 'PiRpcTransportClosedError';
   }
 }
 
-export class PiRpcResponseError extends Error {
+export class PiRPCResponseError extends Error {
   constructor(
     readonly commandType: string,
     message: string,
@@ -37,17 +37,17 @@ export class PiRpcResponseError extends Error {
   }
 }
 
-export class PiRpcTransport {
+export class PiRPCTransport {
   private readonly closeListeners = new Set<(error?: Error) => void>();
   private disposed = false;
-  private readonly eventHandlers = new Set<PiRpcEventHandler>();
+  private readonly eventHandlers = new Set<PiRPCEventHandler>();
   private nextId = 1;
   private readonly pending = new Map<string, PendingRequest>();
   private unregisterClose?: () => void;
   private unsubscribeLines?: () => void;
 
   constructor(
-    private readonly streams: PiRpcStreams,
+    private readonly streams: PiRPCStreams,
     private readonly defaultTimeoutMs = DEFAULT_TIMEOUT_MS,
   ) {}
 
@@ -60,12 +60,12 @@ export class PiRpcTransport {
       return;
     }
 
-    this.unsubscribeLines = subscribePiJsonlLines(
+    this.unsubscribeLines = subscribePiJSONLLines(
       this.streams.input,
-      (line) => this.handleLine(line),
+      (line) => this.#handleLine(line),
       () => {
         if (!this.disposed) {
-          this.dispose(new PiRpcTransportClosedError('Pi RPC input closed'));
+          this.dispose(new PiRPCTransportClosedError('Pi RPC input closed'));
         }
       },
       (error) => {
@@ -77,12 +77,12 @@ export class PiRpcTransport {
 
     this.unregisterClose = this.streams.onClose?.((error) => {
       if (!this.disposed) {
-        this.dispose(error ?? new PiRpcTransportClosedError());
+        this.dispose(error ?? new PiRPCTransportClosedError());
       }
     });
   }
 
-  onEvent(handler: PiRpcEventHandler): () => void {
+  onEvent(handler: PiRPCEventHandler): () => void {
     this.eventHandlers.add(handler);
     return () => {
       this.eventHandlers.delete(handler);
@@ -104,7 +104,7 @@ export class PiRpcTransport {
   ): Promise<T> {
     this.start();
     if (this.disposed) {
-      return Promise.reject(new PiRpcTransportClosedError());
+      return Promise.reject(new PiRPCTransportClosedError());
     }
 
     const id = `req_${this.nextId++}`;
@@ -150,7 +150,7 @@ export class PiRpcTransport {
       });
 
       try {
-        this.sendRaw({ id, type: commandType, ...payload });
+        this.#sendRaw({ id, type: commandType, ...payload });
       } catch (error) {
         this.pending.delete(id);
         cleanup();
@@ -161,15 +161,15 @@ export class PiRpcTransport {
     });
   }
 
-  send(record: PiRpcRecord): void {
+  send(record: PiRPCRecord): void {
     this.start();
     if (this.disposed) {
       return;
     }
-    this.sendRaw(record);
+    this.#sendRaw(record);
   }
 
-  dispose(error: Error = new PiRpcTransportClosedError('Pi RPC transport disposed')): void {
+  dispose(error: Error = new PiRPCTransportClosedError('Pi RPC transport disposed')): void {
     if (this.disposed) {
       return;
     }
@@ -179,7 +179,7 @@ export class PiRpcTransport {
     this.unsubscribeLines = undefined;
     this.unregisterClose?.();
     this.unregisterClose = undefined;
-    this.rejectAllPending(error);
+    this.#rejectAllPending(error);
     for (const listener of this.closeListeners) {
       try {
         listener(error);
@@ -191,16 +191,16 @@ export class PiRpcTransport {
     this.eventHandlers.clear();
   }
 
-  private sendRaw(record: PiRpcRecord): void {
-    writePiJsonl(this.streams.output, record);
+  #sendRaw(record: PiRPCRecord): void {
+    writePiJSONL(this.streams.output, record);
   }
 
-  private handleLine(line: string): void {
+  #handleLine(line: string): void {
     if (!line.trim()) {
       return;
     }
 
-    let record: PiRpcRecord;
+    let record: PiRPCRecord;
     try {
       const parsed = JSON.parse(line) as unknown;
       if (!isPlainObject(parsed)) {
@@ -212,7 +212,7 @@ export class PiRpcTransport {
     }
 
     if (record.type === 'response' && typeof record.id === 'string') {
-      this.handleResponse(record.id, record);
+      this.#handleResponse(record.id, record);
       return;
     }
 
@@ -221,7 +221,7 @@ export class PiRpcTransport {
     }
   }
 
-  private handleResponse(id: string, record: PiRpcRecord): void {
+  #handleResponse(id: string, record: PiRPCRecord): void {
     const pending = this.pending.get(id);
     if (!pending) {
       return;
@@ -233,7 +233,7 @@ export class PiRpcTransport {
       const errorText = typeof record.error === 'string'
         ? record.error
         : `Pi RPC command failed: ${pending.type}`;
-      pending.reject(new PiRpcResponseError(pending.type, errorText));
+      pending.reject(new PiRPCResponseError(pending.type, errorText));
       return;
     }
 
@@ -248,7 +248,7 @@ export class PiRpcTransport {
     pending.resolve(record);
   }
 
-  private rejectAllPending(error: Error): void {
+  #rejectAllPending(error: Error): void {
     for (const pending of this.pending.values()) {
       pending.cleanup();
       pending.reject(error);
@@ -257,6 +257,6 @@ export class PiRpcTransport {
   }
 }
 
-function isPlainObject(value: unknown): value is PiRpcRecord {
+function isPlainObject(value: unknown): value is PiRPCRecord {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

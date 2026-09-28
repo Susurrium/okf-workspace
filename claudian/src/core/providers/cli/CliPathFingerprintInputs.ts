@@ -1,18 +1,18 @@
-export type CliPathFingerprintInputs = Readonly<Record<
+export type CLIPathFingerprintInputs = Readonly<Record<
   'hostnameCliPath' | 'legacyCliPath',
   string
 >>;
 
-export function createCliPathFingerprintInputs(
+export function createCLIPathFingerprintInputs(
   hostnameCliPath: string | undefined,
   legacyCliPath: string | undefined,
-): CliPathFingerprintInputs {
+): CLIPathFingerprintInputs {
   return {
     hostnameCliPath: (hostnameCliPath ?? '').trim(),
     legacyCliPath: (legacyCliPath ?? '').trim(),
   };
 }
 
-export function hasCliPathFingerprintInputs(inputs: CliPathFingerprintInputs): boolean {
+export function hasCLIPathFingerprintInputs(inputs: CLIPathFingerprintInputs): boolean {
   return Boolean(inputs.hostnameCliPath || inputs.legacyCliPath);
 }

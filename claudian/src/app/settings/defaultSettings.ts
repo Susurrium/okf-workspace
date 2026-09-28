@@ -1,3 +1,4 @@
+
 import { getDefaultHiddenProviderCommands } from '../../core/providers/commands/hiddenCommands';
 import { DEFAULT_REASONING_VALUE } from '../../core/providers/reasoning';
 import { type ClaudianSettings } from '../../core/types/settings';
@@ -22,12 +23,10 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
   systemPrompt: '',
   systemPromptMode: DEFAULT_OKF_SYSTEM_PROMPT_MODE,
   replacementSystemPrompt: '',
-  persistentExternalContextPaths: [],
 
   sharedEnvironmentVariables: '',
   envSnippets: [],
   customContextLimits: {},
-  customModelAliases: {},
 
   keyboardNavigation: {
     scrollUpKey: 'w',
@@ -49,19 +48,18 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
   savedProviderPermissionMode: {},
   pendingProviderSessionInvalidations: {},
 
-  lastCustomModel: '',
-
   maxWarmAgentProcesses: 5,
   enableAutoScroll: true,
+  showMessageTimestamps: false,
   deferMathRenderingDuringStreaming: true,
   expandFileEditsByDefault: false,
   chatViewPlacement: 'right-sidebar',
   enableDualPane: true,
-  enableFilePane: true,
   dualPaneSide: 'right',
+  restoreTabsOnStartup: true,
   sessionManagerOrganization: 'list',
   sessionManagerSort: 'last-updated',
-  pinnedLinkedNotePaths: [],
+  pinnedLinkedContentPaths: [],
 
   hiddenProviderCommands: getDefaultHiddenProviderCommands(),
 };

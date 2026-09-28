@@ -1,4 +1,4 @@
-import { escapeHtml } from './html';
+import { escapeHTML } from './html';
 import { transformMarkdownSegments } from './markdownSegments';
 
 /**
@@ -8,10 +8,10 @@ import { transformMarkdownSegments } from './markdownSegments';
  * user text like `<meta-name>` renders as plain text while intentional plugin
  * markup can still be inserted afterward.
  */
-export function escapeRawHtmlTags(markdown: string): string {
+export function escapeRawHTMLTags(markdown: string): string {
   if (!markdown.includes('<')) {
     return markdown;
   }
 
-  return transformMarkdownSegments(markdown, { rawHtml: escapeHtml });
+  return transformMarkdownSegments(markdown, { rawHtml: escapeHTML });
 }

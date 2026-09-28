@@ -136,9 +136,8 @@ export function resolveCodexExecutionTarget(
   if (codexSettings.installationMethod === 'wsl') {
     const distroName = codexSettings.wslDistroOverride
       || inferWslDistroFromWindowsPath(options.hostVaultPath)
-      || (options.resolveDefaultWslDistro
-        ? options.resolveDefaultWslDistro()
-        : resolveDefaultWslDistroName());
+      || options.resolveDefaultWslDistro?.()
+      || resolveDefaultWslDistroName();
 
     return {
       method: 'wsl',
@@ -173,7 +172,8 @@ export async function resolveCodexExecutionTargetAsync(
       || inferWslDistroFromWindowsPath(options.hostVaultPath)
       || (options.resolveDefaultWslDistro
         ? await Promise.resolve(options.resolveDefaultWslDistro())
-        : await resolveDefaultWslDistroNameAsync());
+        : undefined)
+      || await resolveDefaultWslDistroNameAsync();
 
     return {
       method: 'wsl',

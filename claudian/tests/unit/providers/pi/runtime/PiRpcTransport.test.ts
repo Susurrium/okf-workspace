@@ -1,22 +1,22 @@
 import { PassThrough } from 'node:stream';
 
 import {
-  PiRpcResponseError,
-  PiRpcTransport,
-  PiRpcTransportClosedError,
-} from '@/providers/pi/runtime/PiRpcTransport';
+  PiRPCResponseError,
+  PiRPCTransport,
+  PiRPCTransportClosedError,
+} from '@/providers/pi/runtime/PiRPCTransport';
 
 function createTransport() {
   const input = new PassThrough();
   const output = new PassThrough();
   const writes: string[] = [];
   output.on('data', chunk => writes.push(chunk.toString('utf8')));
-  const transport = new PiRpcTransport({ input, output }, 100);
+  const transport = new PiRPCTransport({ input, output }, 100);
   transport.start();
   return { input, output, transport, writes };
 }
 
-describe('PiRpcTransport', () => {
+describe('PiRPCTransport', () => {
   afterEach(() => {
     jest.useRealTimers();
   });
@@ -93,11 +93,11 @@ describe('PiRpcTransport', () => {
     const failed = transport.request('prompt');
     input.write('{"type":"response","id":"req_1","success":false,"error":"boom"}\n');
 
-    await expect(failed).rejects.toBeInstanceOf(PiRpcResponseError);
+    await expect(failed).rejects.toBeInstanceOf(PiRPCResponseError);
 
     const pending = transport.request('prompt');
     transport.dispose();
-    await expect(pending).rejects.toBeInstanceOf(PiRpcTransportClosedError);
+    await expect(pending).rejects.toBeInstanceOf(PiRPCTransportClosedError);
   });
 
   it('rejects timed-out requests and removes them from the pending set', async () => {

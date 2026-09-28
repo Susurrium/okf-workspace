@@ -1,50 +1,51 @@
 import type { StreamChunk } from '../../../core/types';
-import type { PiRpcRecord, PiRpcTransport } from './PiRpcTransport';
+import type { PiRPCRecord, PiRPCTransport } from './PiRPCTransport';
 
-export interface PiExtensionUiSelectRequest extends PiRpcRecord {
+export interface PiExtensionUISelectRequest extends PiRPCRecord {
   id: string;
 }
 
-export interface PiExtensionUiConfirmRequest extends PiRpcRecord {
+export interface PiExtensionUIConfirmRequest extends PiRPCRecord {
   id: string;
 }
 
-export interface PiExtensionUiInputRequest extends PiRpcRecord {
+export interface PiExtensionUIInputRequest extends PiRPCRecord {
   id: string;
 }
 
-export interface PiExtensionUiEditorRequest extends PiRpcRecord {
+export interface PiExtensionUIEditorRequest extends PiRPCRecord {
   id: string;
 }
 
-export type PiExtensionUiNotifyRequest = PiRpcRecord;
-export type PiExtensionUiSetEditorTextRequest = PiRpcRecord;
-export type PiExtensionUiSetStatusRequest = PiRpcRecord;
-export type PiExtensionUiSetTitleRequest = PiRpcRecord;
-export type PiExtensionUiSetWidgetRequest = PiRpcRecord;
+export type PiExtensionUINotifyRequest = PiRPCRecord;
+export type PiExtensionUISetEditorTextRequest = PiRPCRecord;
+export type PiExtensionUISetStatusRequest = PiRPCRecord;
+export type PiExtensionUISetTitleRequest = PiRPCRecord;
+export type PiExtensionUISetWidgetRequest = PiRPCRecord;
 
-export interface PiExtensionUiRenderer {
-  confirm(request: PiExtensionUiConfirmRequest, signal: AbortSignal): Promise<{ cancelled?: boolean; confirmed?: boolean }>;
-  editor(request: PiExtensionUiEditorRequest, signal: AbortSignal): Promise<{ cancelled?: boolean; value?: string }>;
-  input(request: PiExtensionUiInputRequest, signal: AbortSignal): Promise<{ cancelled?: boolean; value?: string }>;
-  notify(request: PiExtensionUiNotifyRequest): void;
-  select(request: PiExtensionUiSelectRequest, signal: AbortSignal): Promise<{ cancelled?: boolean; value?: string }>;
-  setEditorText(request: PiExtensionUiSetEditorTextRequest): void;
-  setStatus(request: PiExtensionUiSetStatusRequest): void;
-  setTitle(request: PiExtensionUiSetTitleRequest): void;
-  setWidget(request: PiExtensionUiSetWidgetRequest): void;
+export interface PiExtensionUIRenderer {
+  confirm(request: PiExtensionUIConfirmRequest, signal: AbortSignal): Promise<{ cancelled?: boolean; confirmed?: boolean }>;
+  editor(request: PiExtensionUIEditorRequest, signal: AbortSignal): Promise<{ cancelled?: boolean; value?: string }>;
+  input(request: PiExtensionUIInputRequest, signal: AbortSignal): Promise<{ cancelled?: boolean; value?: string }>;
+  notify(request: PiExtensionUINotifyRequest): void;
+  select(request: PiExtensionUISelectRequest, signal: AbortSignal): Promise<{ cancelled?: boolean; value?: string }>;
+  setEditorText(request: PiExtensionUISetEditorTextRequest): void;
+  setStatus(request: PiExtensionUISetStatusRequest): void;
+  setTitle(request: PiExtensionUISetTitleRequest): void;
+  setWidget(request: PiExtensionUISetWidgetRequest): void;
 }
 
-export class PiExtensionUiBridge {
+export class PiExtensionUIBridge {
   private readonly pending = new Map<string, AbortController>();
 
   constructor(
-    private readonly transport: PiRpcTransport,
-    private readonly renderer: PiExtensionUiRenderer | null,
+    private readonly transport: PiRPCTransport,
+    private readonly renderer: PiExtensionUIRenderer | null,
     private readonly emit?: (chunk: StreamChunk) => void,
+    private readonly admitDialog: (request: PiRPCRecord) => boolean = () => true,
   ) {}
 
-  handleRequest(request: PiRpcRecord): boolean {
+  handleRequest(request: PiRPCRecord): boolean {
     if (request.type !== 'extension_ui_request') {
       return false;
     }
@@ -52,19 +53,19 @@ export class PiExtensionUiBridge {
     const method = getString(request.method) ?? getString(request.action) ?? getString(request.uiType);
     switch (method) {
       case 'select':
-        this.handleDialog(request, (renderer, signal) =>
+        this.#handleDialog(request, (renderer, signal) =>
           renderer.select(requireDialogRequest(request), signal));
         return true;
       case 'confirm':
-        this.handleDialog(request, (renderer, signal) =>
+        this.#handleDialog(request, (renderer, signal) =>
           renderer.confirm(requireDialogRequest(request), signal));
         return true;
       case 'input':
-        this.handleDialog(request, (renderer, signal) =>
+        this.#handleDialog(request, (renderer, signal) =>
           renderer.input(requireDialogRequest(request), signal));
         return true;
       case 'editor':
-        this.handleDialog(request, (renderer, signal) =>
+        this.#handleDialog(request, (renderer, signal) =>
           renderer.editor(requireDialogRequest(request), signal));
         return true;
       case 'notify':
@@ -92,7 +93,7 @@ export class PiExtensionUiBridge {
         this.renderer?.setEditorText(request);
         return true;
       default:
-        this.sendCancellation(request);
+        this.#sendCancellation(request);
         return true;
     }
   }
@@ -100,21 +101,21 @@ export class PiExtensionUiBridge {
   cleanup(): void {
     for (const [id, controller] of this.pending) {
       controller.abort();
-      this.sendResponse(id, { cancelled: true });
+      this.#sendResponse(id, { cancelled: true });
     }
     this.pending.clear();
   }
 
-  private handleDialog(
-    request: PiRpcRecord,
+  #handleDialog(
+    request: PiRPCRecord,
     render: (
-      renderer: PiExtensionUiRenderer,
+      renderer: PiExtensionUIRenderer,
       signal: AbortSignal,
     ) => Promise<Record<string, unknown>>,
   ): void {
     const id = getString(request.id);
-    if (!id || !this.renderer) {
-      this.sendCancellation(request);
+    if (!id || !this.renderer || !this.admitDialog(request)) {
+      this.#sendCancellation(request);
       return;
     }
 
@@ -123,12 +124,12 @@ export class PiExtensionUiBridge {
     render(this.renderer, controller.signal)
       .then((response) => {
         if (!controller.signal.aborted) {
-          this.sendResponse(id, response.cancelled ? { cancelled: true } : response);
+          this.#sendResponse(id, response.cancelled ? { cancelled: true } : response);
         }
       })
       .catch(() => {
         if (!controller.signal.aborted) {
-          this.sendResponse(id, { cancelled: true });
+          this.#sendResponse(id, { cancelled: true });
         }
       })
       .finally(() => {
@@ -136,14 +137,14 @@ export class PiExtensionUiBridge {
       });
   }
 
-  private sendCancellation(request: PiRpcRecord): void {
+  #sendCancellation(request: PiRPCRecord): void {
     const id = getString(request.id);
     if (id) {
-      this.sendResponse(id, { cancelled: true });
+      this.#sendResponse(id, { cancelled: true });
     }
   }
 
-  private sendResponse(id: string, response: Record<string, unknown>): void {
+  #sendResponse(id: string, response: Record<string, unknown>): void {
     this.transport.send({
       id,
       type: 'extension_ui_response',
@@ -152,7 +153,7 @@ export class PiExtensionUiBridge {
   }
 }
 
-function requireDialogRequest<T extends PiRpcRecord & { id: string }>(request: PiRpcRecord): T {
+function requireDialogRequest<T extends PiRPCRecord & { id: string }>(request: PiRPCRecord): T {
   return request as T;
 }
 

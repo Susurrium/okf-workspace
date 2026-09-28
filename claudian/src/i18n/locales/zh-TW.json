@@ -4,6 +4,7 @@
     "cancel": "取消",
     "delete": "刪除",
     "edit": "編輯",
+    "preview": "預覽",
     "add": "添加",
     "remove": "移除",
     "clear": "清除",
@@ -22,6 +23,8 @@
     "rewind": "回退"
   },
   "chat": {
+    "selectAvailableModel": "請先選擇可用的模型再傳送。",
+    "selectAvailableTitleModel": "請在 Claudian 設定中選擇可用的標題產生模型。",
     "rewind": {
       "confirmMessage": "回退到此處？此訊息之後的檔案變更可能被覆寫或刪除。此操作無法復原。",
       "confirmMessageConflicts": "回退到此處？偵測到 {count} 個檔案在代理之外被修改，繼續操作將覆寫這些變更：\n{files}",
@@ -57,23 +60,38 @@
       "commandNoMessages": "無法分叉：對話中沒有訊息",
       "commandNoAssistantUuid": "無法分叉：沒有帶識別碼的助手回覆"
     },
-    "bangBash": {
-      "placeholder": "> 執行 bash 指令...",
-      "commandPanel": "指令面板",
-      "copyAriaLabel": "複製最新的指令輸出",
-      "clearAriaLabel": "清除 bash 輸出",
-      "commandLabel": "{command}",
-      "statusLabel": "狀態：{status}",
-      "collapseOutput": "摺疊指令輸出",
-      "expandOutput": "展開指令輸出",
-      "running": "執行中...",
-      "copyFailed": "複製到剪貼簿失敗"
+    "quote": {
+      "buttonLabel": "引用"
+    },
+    "sideChat": {
+      "title": "側邊對話",
+      "collapse": "收合",
+      "discard": "捨棄",
+      "statusPreparing": "準備中",
+      "statusQueued": "{count} 則排隊中",
+      "statusWorking": "處理中",
+      "statusError": "需要處理",
+      "statusActionRequired": "需要輸入",
+      "placeholder": "在側邊對話中繼續提問",
+      "composerLabel": "側邊對話訊息",
+      "needsPrompt": "請在 /side 後輸入提示詞以開始側邊對話。",
+      "unsupportedProvider": "此提供者不支援側邊對話。",
+      "unavailableBusy": "側邊對話需要一則已完成的回覆。請等待目前回合結束。",
+      "unavailableNoCheckpoint": "請先在此對話中完成一次回覆，再開始側邊對話。",
+      "unavailableNoSession": "無法解析此對話的提供者工作階段。",
+      "alreadyExists": "此對話已有側邊對話。請先捨棄後再新建。",
+      "nestedUnavailable": "側邊對話中無法再開啟側邊對話。請先收合回到主對話。",
+      "mainOnlyCommand": "/{command} 僅能在主對話中使用。",
+      "startFailed": "側邊對話啟動失敗：{error}",
+      "queued": "已加入側聊佇列。",
+      "busySide": "側邊對話仍在回覆，請稍候。"
     }
   },
   "settings": {
     "title": "Claudian 設定",
     "tabs": {
       "general": "一般",
+      "providers": "提供者",
       "claude": "Claude",
       "codex": "Codex"
     },
@@ -112,7 +130,8 @@
     "titleModel": {
       "name": "標題生成模型",
       "desc": "用於自動生成對話標題的模型。",
-      "auto": "自動 (Haiku)"
+      "select": "選擇模型",
+      "unavailableWarning": "自動標題已暫停。請選擇一個可用的標題模型。"
     },
     "navMappings": {
       "name": "Vim 風格導航映射",
@@ -124,39 +143,19 @@
     },
     "hotkeys": "快捷鍵",
     "inlineEditHotkey": {
-      "name": "內嵌編輯",
-      "descWithKey": "目前快捷鍵：{hotkey}",
-      "descNoKey": "未設定快捷鍵",
-      "btnChange": "變更",
-      "btnSet": "設定快捷鍵"
+      "name": "內嵌編輯"
     },
     "openChatHotkey": {
-      "name": "開啟聊天",
-      "descWithKey": "目前快捷鍵：{hotkey}",
-      "descNoKey": "未設定快捷鍵",
-      "btnChange": "變更",
-      "btnSet": "設定快捷鍵"
+      "name": "開啟聊天"
     },
     "newSessionHotkey": {
-      "name": "取代目前對話",
-      "descWithKey": "目前快捷鍵：{hotkey}",
-      "descNoKey": "未設定快捷鍵",
-      "btnChange": "變更",
-      "btnSet": "設定快捷鍵"
+      "name": "取代目前對話"
     },
     "newTabHotkey": {
-      "name": "新增",
-      "descWithKey": "目前快捷鍵：{hotkey}",
-      "descNoKey": "未設定快捷鍵",
-      "btnChange": "變更",
-      "btnSet": "設定快捷鍵"
+      "name": "新增"
     },
     "closeTabHotkey": {
-      "name": "關閉分頁",
-      "descWithKey": "目前快捷鍵：{hotkey}",
-      "descNoKey": "未設定快捷鍵",
-      "btnChange": "變更",
-      "btnSet": "設定快捷鍵"
+      "name": "關閉分頁"
     },
     "slashCommands": {
       "name": "命令與技能",
@@ -167,58 +166,10 @@
       "desc": "從下拉選單中隱藏特定的命令與技能。適用於隱藏與 Claudian 無關的 Claude Code 項目。每行輸入一個名稱，無需前導斜線。",
       "placeholder": "commit\nbuild\ntest"
     },
-    "mcpServers": {
-      "name": "MCP 伺服器",
-      "descBeforeCommand": "Claude Code 透過自己的 CLI 管理 MCP 伺服器。請使用 ",
-      "descAfterCommand": " 進行設定，它們會在 Claudian 中可用。",
-      "learnMore": "了解更多"
-    },
-    "plugins": {
-      "name": "Claude Code 外掛程式",
-      "desc": "管理從 ~/.claude/plugins 發現的 Claude Code 外掛程式。已啟用的外掛程式按 Vault 儲存在 .claude/settings.json 中。"
-    },
-    "subagents": {
-      "name": "子代理",
-      "desc": "管理儲存在 .claude/agents/ 中的 Vault 級子代理。每個 Markdown 檔案定義一個自訂代理。",
-      "noAgents": "尚未設定子代理。點擊 + 建立一個。",
-      "deleteConfirm": "刪除子代理「{name}」？",
-      "saveFailed": "儲存子代理失敗：{message}",
-      "refreshFailed": "重新整理子代理失敗：{message}",
-      "deleteFailed": "刪除子代理失敗：{message}",
-      "renameCleanupFailed": "警告：無法移除「{name}」的舊檔案",
-      "created": "已建立子代理「{name}」",
-      "updated": "已更新子代理「{name}」",
-      "deleted": "已刪除子代理「{name}」",
-      "duplicateName": "已存在名為「{name}」的代理",
-      "descriptionRequired": "描述為必填",
-      "promptRequired": "系統提示詞為必填",
-      "modal": {
-        "titleEdit": "編輯子代理",
-        "titleAdd": "新增子代理",
-        "name": "名稱",
-        "nameDesc": "僅限小寫字母、數字與連字號",
-        "namePlaceholder": "code-reviewer",
-        "description": "描述",
-        "descriptionDesc": "此代理的簡短描述",
-        "descriptionPlaceholder": "檢查程式碼中的錯誤與風格問題",
-        "advancedOptions": "進階選項",
-        "model": "模型",
-        "modelDesc": "此代理的模型覆寫",
-        "tools": "工具",
-        "toolsDesc": "允許工具的逗號分隔清單（留空 = 全部）",
-        "disallowedTools": "禁用工具",
-        "disallowedToolsDesc": "要禁用的工具清單，以逗號分隔",
-        "skills": "技能",
-        "skillsDesc": "技能清單，以逗號分隔",
-        "prompt": "系統提示詞",
-        "promptDesc": "給代理的指示",
-        "promptPlaceholder": "你是一名程式碼審查員。請分析給定的程式碼..."
-      }
-    },
     "safety": "安全",
     "loadUserSettings": {
       "name": "載入使用者 Claude 設定",
-      "desc": "載入 ~/.claude/settings.json。啟用後，使用者的 Claude Code 權限規則可能繞過安全模式。"
+      "desc": "從 ~/.claude 載入使用者層級 Claude Code 設定：settings.json、技能、指令、代理程式和外掛。停用時僅能使用儲存庫層級設定。啟用後，使用者的權限規則可能繞過安全模式。"
     },
     "claudeSafeMode": {
       "name": "安全模式",
@@ -264,21 +215,9 @@
       "desc": "為您的自訂模型設定上下文視窗大小。留空使用預設值（200k 權杖）。",
       "invalid": "格式無效。使用：256k、1m 或精確數量（1000-10000000）。"
     },
-    "customModels": {
-      "name": "自訂模型",
-      "desc": "向選擇器追加額外的 Claude 模型 ID，每行一個。環境中的模型覆寫仍會取代選擇器。",
-      "placeholder": "claude-opus-4-6\nclaude-opus-4-5-20251101"
-    },
     "enableChrome": {
       "name": "啟用 Chrome 擴充功能",
       "desc": "允許 Claude 透過 claude-in-chrome 擴充功能與 Chrome 互動。需要安裝該擴充功能。需要重新啟動工作階段。"
-    },
-    "enableBangBash": {
-      "name": "啟用 bash 模式 (!)",
-      "desc": "在空白輸入框中輸入 ! 以進入 bash 模式。透過 Node.js child_process 直接執行指令。需要重新開啟檢視。",
-      "validation": {
-        "noNode": "在 PATH 中找不到 Node.js。請安裝 Node.js 或檢查 PATH 設定。"
-      }
     },
     "maxWarmAgentProcesses": {
       "name": "最大並行執行工作階段數",
@@ -287,6 +226,10 @@
     "enableDualPane": {
       "name": "啟用雙欄模式",
       "desc": "當檢視寬度至少為 600 像素時，自動在聊天旁顯示工作階段管理器。"
+    },
+    "restoreTabsOnStartup": {
+      "name": "啟動時還原分頁",
+      "desc": "單欄模式下重新開啟所有分頁，雙欄模式下僅重新開啟上次使用的分頁。"
     },
     "enableFilePane": {
       "name": "啟用檔案面板",
@@ -302,6 +245,10 @@
       "name": "串流傳輸時自動捲動",
       "desc": "在 Claude 串流傳輸回應時自動捲動到底部。停用後將停留在頂部，從頭開始閱讀。"
     },
+    "showMessageTimestamps": {
+      "name": "顯示訊息時間戳",
+      "desc": "在聊天串中顯示每則訊息的本機傳送或到達時間。"
+    },
     "deferMathRenderingDuringStreaming": {
       "name": "串流傳輸時延遲渲染數學公式",
       "desc": "回應串流傳輸時顯示原始 LaTeX，並在每個文字區塊完成後只渲染一次數學公式。"
@@ -316,6 +263,17 @@
       "rightSidebar": "右側邊欄",
       "leftSidebar": "左側邊欄",
       "mainTab": "主編輯器分頁"
+    },
+    "cliInstallation": {
+      "disclosure": "{name} 安裝",
+      "description": "此電腦的選用 CLI 路徑。留空以自動偵測。",
+      "checking": "正在偵測 CLI…",
+      "versionUnavailable": "版本未知",
+      "notFound": "未找到",
+      "custom": "自訂路徑",
+      "auto": "自動偵測",
+      "checkFailed": "無法偵測 CLI",
+      "saveFailed": "無法儲存路徑，請重試。"
     },
     "cliPath": {
       "name": "Claude CLI 路徑",
@@ -336,6 +294,14 @@
       "desc": "讓已啟用的 {provider} 模型可用於新對話。停用後，現有工作階段仍會保留。",
       "lastProviderWarning": "至少需要啟用一個提供者，Claudian 才能正常運作。",
       "noModelsWarning": "未啟用任何 {provider} 模型。請前往下方的「模型」區段並至少啟用一個模型。"
+    },
+    "claude": {
+      "responseStyle": {
+        "name": "回覆風格",
+        "desc": "預設使用 Claude 的一般風格。簡潔模式先提供結果，省略開場白。需要 Claude Code 2.1.237 或更新版本。",
+        "default": "預設",
+        "concise": "簡潔"
+      }
     },
     "codex": {
       "installationMethod": {
@@ -361,10 +327,11 @@
         "workspaceWrite": "工作區可寫",
         "readOnly": "唯讀"
       },
-      "customModels": {
-        "name": "自訂模型",
-        "desc": "向選擇器追加額外的 Codex 模型 ID，每行一個。設定 `OPENAI_MODEL` 時仍優先生效。",
-        "placeholder": "gpt-5.4\ngpt-5.3-codex-spark"
+      "responseStyle": {
+        "name": "回覆風格",
+        "desc": "選擇支援此功能的模型中 Codex 的溝通風格。從下一則訊息開始生效。",
+        "pragmatic": "務實",
+        "friendly": "友善"
       },
       "reasoningSummary": {
         "name": "推理摘要",
@@ -384,15 +351,6 @@
         "hiddenName": "隱藏技能",
         "hiddenDesc": "從下拉選單中隱藏特定 Codex 技能。每行輸入一個技能名稱，不帶前導 $。",
         "hiddenPlaceholder": "analyze\nexplain\nfix"
-      },
-      "subagents": {
-        "name": "Codex 子代理",
-        "desc": "管理儲存在 .codex/agents/ 中的 Vault 層級 Codex 子代理。每個 TOML 檔案定義一個自訂代理。"
-      },
-      "mcp": {
-        "descBeforeCommand": "Codex 透過自己的 CLI 管理 MCP 伺服器。請使用 ",
-        "descAfterCommand": " 進行設定，它們會在 Claudian 中可用。",
-        "learnMore": "了解更多"
       },
       "environment": {
         "name": "Codex 環境",
@@ -434,124 +392,9 @@
         "description": "The entire skill folder, including scripts, references, and assets, will be moved to trash.",
         "confirm": "Move to trash"
       }
-    },
-    "codexSkills": {
-      "modal": {
-        "titleEdit": "編輯 Codex 技能",
-        "titleAdd": "新增 Codex 技能",
-        "directory": "目錄",
-        "directoryDesc": "技能的儲存位置",
-        "skillName": "技能名稱",
-        "skillNameDesc": "在 $ 後使用的名稱（例如 $analyze 的名稱為「analyze」）",
-        "description": "描述",
-        "descriptionDesc": "下拉選單中顯示的可選描述",
-        "instructions": "指令",
-        "instructionsDesc": "技能指令（SKILL.md 內容）",
-        "instructionsPlaceholder": "Analyze the code for..."
-      },
-      "instructionsRequired": "指令為必填項",
-      "saveFailed": "儲存 Codex 技能失敗",
-      "header": "Codex 技能",
-      "noSkills": "Vault 中沒有 Codex 技能。點擊 + 建立一個。",
-      "skillBadge": "技能",
-      "deleted": "已刪除 Codex 技能「{name}」",
-      "deleteFailed": "刪除 Codex 技能失敗",
-      "created": "已建立 Codex 技能「{name}」",
-      "updated": "已更新 Codex 技能「{name}」"
-    },
-    "codexSubagents": {
-      "modal": {
-        "titleEdit": "編輯 Codex 子代理",
-        "titleAdd": "新增 Codex 子代理",
-        "nameDesc": "Codex 衍生代理時使用的代理名稱（小寫、連字符、底線）",
-        "descriptionDesc": "Codex 應在何時使用該代理",
-        "modelDesc": "模型覆寫（留空表示繼承）",
-        "namePlaceholder": "code_reviewer"
-      },
-      "reasoningEffort": {
-        "name": "推理強度",
-        "desc": "模型推理強度級別",
-        "inherit": "繼承",
-        "low": "低",
-        "medium": "中",
-        "high": "高",
-        "xhigh": "極高"
-      },
-      "sandboxMode": {
-        "name": "沙盒模式",
-        "desc": "該代理的沙盒限制",
-        "inherit": "繼承",
-        "readOnly": "唯讀",
-        "dangerFullAccess": "完整存取",
-        "workspaceWrite": "工作區可寫"
-      },
-      "nicknameCandidates": {
-        "name": "暱稱候選",
-        "desc": "顯示暱稱，使用逗號分隔（例如 atlas, delta, echo）"
-      },
-      "developerInstructions": {
-        "name": "開發者指令",
-        "desc": "定義代理行為的核心指令",
-        "placeholder": "Review code like an owner.\nPrioritize correctness, security, and missing test coverage.",
-        "required": "開發者指令為必填項"
-      },
-      "validation": {
-        "nameRequired": "子代理名稱為必填項",
-        "nameTooLong": "子代理名稱必須不超過 {count} 個字元",
-        "nameInvalid": "子代理名稱只能包含小寫字母、數字、連字符和底線",
-        "nicknameInvalid": "暱稱候選只能包含 ASCII 字母、數字、空格、連字符和底線",
-        "nicknameDuplicate": "暱稱候選必須唯一"
-      },
-      "header": "Codex 子代理",
-      "noAgents": "Vault 中沒有 Codex 子代理。點擊 + 建立一個。"
     }
   },
   "interface": {
-    "openChat": "Open chat view",
-    "inlineEdit": "Inline edit",
-    "newChat": "New",
-    "replaceChat": "Replace current conversation",
-    "closeTab": "Close current tab",
-    "diagnostics": "Copy startup diagnostics",
-    "diagnosticsCopied": "Startup diagnostics copied to clipboard.",
-    "diagnosticsFailed": "Failed to copy startup diagnostics.",
-    "inserted": "Inserted",
-    "editApplied": "Edit applied",
-    "editUnavailable": "Inline edit unavailable: could not access the active Markdown view.",
-    "planReady": "Plan complete",
-    "implement": "Implement",
-    "planFeedback": "Enter feedback to revise plan...",
-    "cancel": "Cancel",
-    "planPermissions": "Requested permissions:",
-    "approveNew": "Approve (new session)",
-    "approveCurrent": "Approve (current session)",
-    "continuePlan": "Enter feedback to continue planning...",
-    "abandon": "Abandon",
-    "keyHints": "Arrow keys to navigate · Enter to select · Esc to cancel",
-    "abandonHints": "Arrow keys to navigate · Enter to select · Shift+Tab to abandon",
-    "insertInstructions": "Insert instructions...",
-    "editInstructions": "Edit instructions...",
-    "editActions": "Inline edit actions",
-    "accept": "Accept",
-    "reject": "Reject",
-    "acceptKey": "Accept (enter)",
-    "rejectKey": "Reject (esc)",
-    "visibleModels": "Visible models",
-    "browseModels": "Browse models",
-    "discover": "Discover",
-    "modelFilter": "Filter by model, provider, or ID...",
-    "visible": "Visible: ",
-    "loadingModels": "Loading models...",
-    "noModels": "No models discovered yet",
-    "loading": "Loading...",
-    "refresh": "Refresh",
-    "clearAll": "Clear all",
-    "default": "Default",
-    "alias": "Alias (optional)",
-    "aliasHelp": "Custom label shown in the model selector. Leave empty to use the default.",
-    "reorderModels": "Drag or use arrow keys to reorder",
-    "noMatchingModels": "No models match your filter.",
-    "modelHelp": "Choose which models are available in the chat selector. Drag to reorder them; the provider uses the first currently usable model as its default. Select at least one model to use this provider.",
     "promptMode": "Codex prompt mode",
     "promptModeHelp": "Applies when a new Codex conversation starts. Existing conversations keep the mode recorded in their provider state.",
     "nativePrompt": "Workspace native (recommended)",
@@ -559,157 +402,6 @@
     "customPrompt": "Custom replace",
     "replacementInstructions": "Custom replacement instructions",
     "replacementHelp": "Used only by custom replace. This replaces the Claudian prompt instead of being appended to it.",
-    "replacementPlaceholder": "Follow applicable AGENTS.md instructions.",
-    "sharedEnvironment": "Shared environment",
-    "sharedEnvironmentHelp": "Provider-neutral runtime variables shared across all providers. Use this for PATH, proxy, cert, and temp variables.",
-    "restricted": "Restricted",
-    "fullAccess": "Full access",
-    "plan": "Plan",
-    "standard": "Standard",
-    "unknown": "Unknown",
-    "modelFailed": "Failed to change model",
-    "modeFailed": "Failed to change mode",
-    "permissionFailed": "Failed to change permission mode",
-    "externalContext": "Select External Context",
-    "externalContexts": "External contexts",
-    "addFolder": "Click folder icon to add",
-    "duplicateFolder": "This folder is already added as an external context.",
-    "noPath": "No path provided. Usage: /add-dir /absolute/path",
-    "absolutePath": "Path must be absolute. Usage: /add-dir /absolute/path",
-    "permissionRequired": "Permission required",
-    "steering": "⌙ Steering: ",
-    "queued": "⌙ Queued: ",
-    "steeringBusy": "Steering...",
-    "steerNow": "Steer Now",
-    "steerFailed": "Failed to steer the queued message. It is still available.",
-    "externalUnavailable": "External context selector not available.",
-    "forkUnsupported": "Fork is not supported by this provider.",
-    "forkUnavailable": "Fork not available.",
-    "noConversations": "No conversations to resume",
-    "unlinked": "Unlinked",
-    "restrictedHelp": "Uses the access scope configured in settings and requests approval when needed.",
-    "fullAccessHelp": "Full file and command access without approval prompts.",
-    "planHelp": "Prepare a plan before execution. File access is controlled separately.",
-    "modelCount": " of {count} discovered",
-    "providerCount": " | {count} providers",
-    "availableCount": "{count} available",
-    "selectedCount": "Selected ({count})",
-    "allProviders": "All providers ({count})",
-    "clearModels": "Clear all selected {provider} models",
-    "planReadError": "Could not read plan file: {error}. A new conversation will not include the plan details.",
-    "openAssistant": "Open Claudian",
-    "effort": "Effort:",
-    "thinking": "Thinking:",
-    "folderPickerFailed": "Unable to open folder picker.",
-    "persistentFolder": "Persistent (click to make session-only)",
-    "sessionFolder": "Session-only (click to persist)",
-    "removePath": "Remove path",
-    "addContexts": "Add external contexts (click)",
-    "contextUsage": "Context usage",
-    "externalCount": "{count} external folders (click to add more)",
-    "nearContextLimit": " (Approaching limit, run `/compact` to continue)"
-  },
-  "chatUi": {
-    "resizeConversationSessions": "Resize conversation sessions",
-    "sidebarView": "Sidebar view",
-    "sessions": "Sessions",
-    "files": "Files",
-    "newTab": "New tab",
-    "newConversation": "New conversation",
-    "chatHistory": "Chat history",
-    "failedToCreateTab": "Failed to create tab",
-    "failedToCreateConversation": "Failed to create conversation",
-    "failedToStartANewConversation": "Failed to start a new conversation",
-    "failedToStartTheApprovedPlanInANewConversation": "Failed to start the approved plan in a new conversation",
-    "failedToSwitchTab": "Failed to switch tab",
-    "failedToCloseTab": "Failed to close tab",
-    "new": "New",
-    "search": "Search",
-    "runningSessionsCannotBeArchived": "Running sessions cannot be archived",
-    "organizeSessions": "Organize sessions",
-    "inOneList": "In one list",
-    "byLinkedNote": "By linked note",
-    "sortSessionsBy": "Sort sessions by",
-    "lastActivity": "Last activity",
-    "created": "Created",
-    "failedToUpdateSessionOrganization": "Failed to update session organization",
-    "failedToUpdateSessionSorting": "Failed to update session sorting",
-    "failedToCloseTheProvisionalSessionPreview": "Failed to close the provisional session preview",
-    "pinned": "Pinned",
-    "missing": "Missing",
-    "running": "Running...",
-    "archiveAllSessions": "Archive all sessions",
-    "generatingTitle": "Generating title...",
-    "regenerateTitle": "Regenerate title",
-    "openInNewTab": "Open in new tab",
-    "delete": "Delete",
-    "restore": "Restore",
-    "rename": "Rename",
-    "openInBackgroundTab": "Open in background tab",
-    "switchToOpenSession": "Switch to open session",
-    "archive": "Archive",
-    "failedToRenameConversation": "Failed to rename conversation",
-    "failedToInitializeAgentExecutionPleaseTryAgain": "Failed to initialize agent execution. Please try again.",
-    "agentExecutionIsNotAvailablePleaseReloadThePlugin": "Agent execution is not available. Please reload the plugin.",
-    "messageWasNotSentPleaseTryAgain": "Message was not sent. Please try again.",
-    "steerDeliveryCouldNotBeConfirmedTheMessageWasNotRequeuedToAvoidSendingItTwice": "Steer delivery could not be confirmed. The message was not requeued to avoid sending it twice.",
-    "failedToInitializeInstructionRefinementPleaseTryAgain": "Failed to initialize instruction refinement. Please try again.",
-    "instructionAddedToCustomSystemPrompt": "Instruction added to custom system prompt",
-    "noInstructionReceived": "No instruction received",
-    "fastModeIsNotAvailableForThisModel": "Fast mode is not available for this model.",
-    "failedToToggleFastMode": "Failed to toggle fast mode.",
-    "conversationCompacted": "Conversation compacted",
-    "claudianChatIsNotReady": "Claudian chat is not ready.",
-    "failedToAddFileToClaudian": "Failed to add file to Claudian.",
-    "addToClaudian": "Add to Claudian",
-    "memoryUsed": "Memory used",
-    "noChanges": "No changes",
-    "submit": "Submit",
-    "reviewYourAnswers": "Review your answers",
-    "readyToSubmitYourAnswers": "Ready to submit your answers?",
-    "submitAnswers": "Submit answers",
-    "cancel": "Cancel",
-    "interrupted": "Interrupted",
-    "whatShouldClaudianDoInstead": "· What should Claudian do instead?",
-    "copied": "Copied!",
-    "failedToRenderMessageContent": "Failed to render message content.",
-    "copyMessage": "Copy message",
-    "statusRunning": "Status: running",
-    "initializing": "Initializing",
-    "runningInBackground": "Running in background",
-    "orphaned": "Orphaned",
-    "extendedThinkingClickToExpand": "Extended thinking - click to expand",
-    "thinking0s": "Thinking 0s...",
-    "openPage": "Open page",
-    "urlUnavailable": "URL unavailable",
-    "findInPage": "Find in page",
-    "noResult": "No result",
-    "noMatchesFound": "No matches found",
-    "fileDeleted": "File deleted",
-    "noTextualDiffAvailable": "No textual diff available",
-    "tasksUpdated": "Tasks updated",
-    "noOptionsRecorded": "No options recorded",
-    "writing": "Writing...",
-    "statusError": "Status: error",
-    "done": "DONE",
-    "askToMakeChangesMentionFilesRunCommands": "Ask to make changes, @mention files, run /commands",
-    "cannotSwitchProviderOnABoundSessionStartANewConversationInstead": "Cannot switch provider on a bound session. Start a new conversation instead.",
-    "stopResponse": "Stop response",
-    "sendMessage": "Send message",
-    "forkIsNotSupportedByThisProvider": "Fork is not supported by this provider.",
-    "backgroundTaskStateCouldNotBeSavedBeforeClosingTheTab": "Background task state could not be saved before closing the tab.",
-    "loadingConversation": "Loading conversation…",
-    "retry": "Retry",
-    "dropImageHere": "Drop image here",
-    "imageAttachmentsAreNotSupportedByThisProvider": "Image attachments are not supported by this provider.",
-    "conversationDirectory": "Conversation directory",
-    "noUserPromptsInThisConversation": "No user prompts in this conversation",
-    "name": "Name",
-    "searchFiles": "Search files",
-    "newNote": "New note",
-    "newFolder": "New folder",
-    "open": "Open",
-    "openInSplit": "Open in split",
-    "saveInCustomSystemPrompt": "# Save in custom system prompt"
+    "replacementPlaceholder": "Follow applicable AGENTS.md instructions."
   }
 }

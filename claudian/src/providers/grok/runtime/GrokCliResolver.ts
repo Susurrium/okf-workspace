@@ -1,9 +1,9 @@
-import { CachedProviderCliResolver } from '../../../core/providers/cli/CachedProviderCliResolver';
+import { CachedProviderCLIResolver } from '../../../core/providers/cli/CachedProviderCLIResolver';
 import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
 import { getGrokProviderSettings } from '../settings';
 
-export class GrokCliResolver {
-  private readonly resolver = new CachedProviderCliResolver({
+export class GrokCLIResolver {
+  private readonly resolver = new CachedProviderCLIResolver({
     binaryName: 'grok',
     getSettingsProjection: (settings) => {
       const providerSettings = getGrokProviderSettings(settings);
@@ -18,18 +18,6 @@ export class GrokCliResolver {
 
   resolveFromSettings(settings: Record<string, unknown>): string | null {
     return this.resolver.resolveFromSettings(settings);
-  }
-
-  resolve(
-    hostnamePaths: Record<string, string> | undefined,
-    legacyPath: string,
-    environmentText: string,
-  ): string | null {
-    return this.resolver.resolve({
-      cliPathsByHost: hostnamePaths,
-      environmentText,
-      legacyCliPath: legacyPath,
-    });
   }
 
   reset(): void {

@@ -1,0 +1,104 @@
+const { readFileSync, readdirSync } = require('node:fs');
+const path = require('node:path');
+const {
+  brotliCompressSync,
+  constants: zlibConstants,
+} = require('node:zlib');
+
+const localeFilter = /[\\/]src[\\/]i18n[\\/]locales[\\/][^\\/]+\.json$/;
+const localeCatalogSpecifier = 'claudian:compressed-locale-catalog';
+const localeCatalogNamespace = 'compressed-locale-catalog';
+const reservedBindings = new Set([
+  'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default',
+  'delete', 'do', 'else', 'enum', 'export', 'extends', 'false', 'finally', 'for',
+  'function', 'if', 'implements', 'import', 'in', 'instanceof', 'interface', 'let',
+  'new', 'null', 'package', 'private', 'protected', 'public', 'return', 'static',
+  'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'var', 'void', 'while',
+  'with', 'yield',
+]);
+
+function compress(contents, mode) {
+  return brotliCompressSync(contents, {
+    params: {
+      [zlibConstants.BROTLI_PARAM_MODE]: mode,
+      [zlibConstants.BROTLI_PARAM_QUALITY]: 9,
+    },
+  }).toString('base64');
+}
+
+function decodeExpression(base64) {
+  return `brotliDecompressSync(Buffer.from(${JSON.stringify(base64)}, "base64"))`;
+}
+
+function createCompressedStaticAssetsPlugin({ root = process.cwd() } = {}) {
+  const localeDirectory = path.join(root, 'src', 'i18n', 'locales');
+
+  return {
+    name: 'compressed-static-assets',
+    setup(build) {
+      build.onResolve({ filter: /^claudian:compressed-locale-catalog$/ }, () => ({
+        namespace: localeCatalogNamespace,
+        path: 'all',
+      }));
+
+      build.onLoad({ filter: /.*/, namespace: localeCatalogNamespace }, () => {
+        const catalog = Object.fromEntries(
+          readdirSync(localeDirectory)
+            .filter(fileName => fileName.endsWith('.json'))
+            .sort()
+            .map(fileName => [
+              path.basename(fileName, '.json'),
+              JSON.parse(readFileSync(path.join(localeDirectory, fileName), 'utf8')),
+            ]),
+        );
+        const base64 = compress(
+          Buffer.from(JSON.stringify(catalog)),
+          zlibConstants.BROTLI_MODE_TEXT,
+        );
+        return {
+          contents: [
+            'import { brotliDecompressSync } from "node:zlib";',
+            `const compressedCatalog = ${JSON.stringify(base64)};`,
+            'export function loadCompressedLocale(locale) {',
+            '  const bytes = brotliDecompressSync(Buffer.from(compressedCatalog, "base64"));',
+            '  const catalog = JSON.parse(bytes.toString("utf8"));',
+            '  const dictionary = catalog[locale];',
+            '  if (!dictionary) throw new Error(`Unsupported compressed locale: ${locale}`);',
+            '  return dictionary;',
+            '}',
+          ].join('\n'),
+          loader: 'js',
+        };
+      });
+
+      build.onLoad({ filter: localeFilter }, (args) => {
+        const dictionary = JSON.parse(readFileSync(args.path, 'utf8'));
+        const exportNames = Object.keys(dictionary);
+        if (!exportNames.every(name => /^[$A-Z_a-z][$\w]*$/.test(name))) {
+          throw new Error(`Locale ${args.path} has a top-level key that cannot be exported`);
+        }
+        const locale = path.basename(args.path, '.json');
+        const namedExports = exportNames.map(name => {
+          const binding = reservedBindings.has(name) ? `${name}_locale` : name;
+          return {
+            binding,
+            declaration: `const ${binding} = dictionary[${JSON.stringify(name)}];`,
+            export: binding === name ? name : `${binding} as ${name}`,
+          };
+        });
+        return {
+          contents: [
+            `import { loadCompressedLocale } from ${JSON.stringify(localeCatalogSpecifier)};`,
+            `const dictionary = loadCompressedLocale(${JSON.stringify(locale)});`,
+            ...namedExports.map(item => item.declaration),
+            `export { ${namedExports.map(item => item.export).join(', ')} };`,
+            'export default dictionary;',
+          ].join('\n'),
+          loader: 'js',
+        };
+      });
+    },
+  };
+}
+
+module.exports = { createCompressedStaticAssetsPlugin };

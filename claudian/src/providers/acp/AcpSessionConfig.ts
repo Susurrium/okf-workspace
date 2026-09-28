@@ -1,18 +1,18 @@
 import type {
-  AcpLoadSessionResponse,
-  AcpMetadata,
-  AcpModelInfo,
-  AcpSessionConfigOption,
-  AcpSessionConfigSelectGroup,
-  AcpSessionConfigSelectOption,
-  AcpSessionConfigSelectOptions,
-  AcpSessionMode,
-  AcpSessionModelState,
-  AcpSessionModeState,
+  ACPLoadSessionResponse,
+  ACPMetadata,
+  ACPModelInfo,
+  ACPSessionConfigOption,
+  ACPSessionConfigSelectGroup,
+  ACPSessionConfigSelectOption,
+  ACPSessionConfigSelectOptions,
+  ACPSessionMode,
+  ACPSessionModelState,
+  ACPSessionModeState,
 } from './types';
 
-export function resolveAcpLoadSessionId(
-  response: Pick<AcpLoadSessionResponse, 'sessionId'>,
+export function resolveACPLoadSessionId(
+  response: Pick<ACPLoadSessionResponse, 'sessionId'>,
   requestedSessionId: string,
 ): string {
   const returnedSessionId = typeof response.sessionId === 'string' && response.sessionId.trim()
@@ -24,25 +24,25 @@ export function resolveAcpLoadSessionId(
   return requestedSessionId;
 }
 
-export interface AcpResolvedModelInfo {
-  _meta?: AcpMetadata | null;
+export interface ACPResolvedModelInfo {
+  _meta?: ACPMetadata | null;
   description?: string | null;
   id: string;
   name: string;
 }
 
-export interface AcpResolvedSessionModelState {
-  _meta?: AcpMetadata | null;
-  availableModels: AcpResolvedModelInfo[];
+export interface ACPResolvedSessionModelState {
+  _meta?: ACPMetadata | null;
+  availableModels: ACPResolvedModelInfo[];
   currentModelId: string | null;
 }
 
-export interface AcpResolvedSessionModeState {
-  availableModes: AcpSessionMode[];
+export interface ACPResolvedSessionModeState {
+  availableModes: ACPSessionMode[];
   currentModeId: string | null;
 }
 
-export interface AcpResolvedSessionThoughtLevelState {
+export interface ACPResolvedSessionThoughtLevelState {
   availableLevels: SelectItem[];
   configId: string | null;
   currentLevel: string | null;
@@ -50,22 +50,22 @@ export interface AcpResolvedSessionThoughtLevelState {
 
 type SelectItem = { description?: string; id: string; name: string };
 
-export function flattenAcpSessionConfigSelectOptions(
-  options: AcpSessionConfigSelectOptions,
-): AcpSessionConfigSelectOption[] {
+function flattenACPSessionConfigSelectOptions(
+  options: ACPSessionConfigSelectOptions,
+): ACPSessionConfigSelectOption[] {
   if (options.length === 0) {
     return [];
   }
   if (isSelectGroup(options[0])) {
-    return (options as AcpSessionConfigSelectGroup[]).flatMap((group) => group.options);
+    return (options as ACPSessionConfigSelectGroup[]).flatMap((group) => group.options);
   }
-  return options as AcpSessionConfigSelectOption[];
+  return options as ACPSessionConfigSelectOption[];
 }
 
-export function extractAcpSessionModelState(params: {
-  configOptions?: AcpSessionConfigOption[] | null;
-  models?: AcpSessionModelState | null;
-}): AcpResolvedSessionModelState {
+export function extractACPSessionModelState(params: {
+  configOptions?: ACPSessionConfigOption[] | null;
+  models?: ACPSessionModelState | null;
+}): ACPResolvedSessionModelState {
   const { items, current } = resolveSelectItems(params.configOptions, 'model');
   const metadata = params.models && '_meta' in params.models
     ? { _meta: params.models._meta }
@@ -75,15 +75,15 @@ export function extractAcpSessionModelState(params: {
   }
   return {
     ...metadata,
-    availableModels: params.models?.availableModels.map(normalizeAcpModelInfo) ?? [],
+    availableModels: params.models?.availableModels.map(normalizeACPModelInfo) ?? [],
     currentModelId: params.models?.currentModelId ?? current,
   };
 }
 
-export function extractAcpSessionModeState(params: {
-  configOptions?: AcpSessionConfigOption[] | null;
-  modes?: AcpSessionModeState | null;
-}): AcpResolvedSessionModeState {
+export function extractACPSessionModeState(params: {
+  configOptions?: ACPSessionConfigOption[] | null;
+  modes?: ACPSessionModeState | null;
+}): ACPResolvedSessionModeState {
   const { items, current } = resolveSelectItems(params.configOptions, 'mode');
   if (items) {
     return { availableModes: items, currentModeId: current };
@@ -94,9 +94,9 @@ export function extractAcpSessionModeState(params: {
   };
 }
 
-export function extractAcpSessionThoughtLevelState(params: {
-  configOptions?: AcpSessionConfigOption[] | null;
-}): AcpResolvedSessionThoughtLevelState {
+export function extractACPSessionThoughtLevelState(params: {
+  configOptions?: ACPSessionConfigOption[] | null;
+}): ACPResolvedSessionThoughtLevelState {
   const { configId, items, current } = resolveSelectItems(params.configOptions, 'thought_level');
   return {
     availableLevels: items ?? [],
@@ -109,7 +109,7 @@ export function extractAcpSessionThoughtLevelState(params: {
 // the session's own metadata. `current` is always the config option's `currentValue`
 // when one exists, so fallbacks can still seed a current id from it.
 function resolveSelectItems(
-  configOptions: AcpSessionConfigOption[] | null | undefined,
+  configOptions: ACPSessionConfigOption[] | null | undefined,
   category: 'model' | 'mode' | 'thought_level',
 ): { configId: string | null; current: string | null; items: SelectItem[] | null } {
   const selectOption = findSessionConfigSelectOption(configOptions, category);
@@ -117,7 +117,7 @@ function resolveSelectItems(
     return { configId: null, current: null, items: null };
   }
 
-  const items = flattenAcpSessionConfigSelectOptions(selectOption.options).map((option) => ({
+  const items = flattenACPSessionConfigSelectOptions(selectOption.options).map((option) => ({
     ...(option.description ? { description: option.description } : {}),
     id: option.value,
     name: option.name,
@@ -131,37 +131,25 @@ function resolveSelectItems(
 }
 
 function findSessionConfigSelectOption(
-  configOptions: AcpSessionConfigOption[] | null | undefined,
+  configOptions: ACPSessionConfigOption[] | null | undefined,
   category: 'model' | 'mode' | 'thought_level',
-): Extract<AcpSessionConfigOption, { type: 'select' }> | null {
+): Extract<ACPSessionConfigOption, { type: 'select' }> | null {
   if (!configOptions) {
     return null;
   }
-  // Prefer explicit `category` metadata; fall back to id-based matching for older agents
-  // that have not yet migrated their config options to tag a category.
   const byCategory = configOptions.find((option) => (
     option.type === 'select' && normalizeComparableKey(option.category) === category
   ));
-  if (byCategory?.type === 'select') {
-    return byCategory;
-  }
-  const byLegacyId = configOptions.find((option) => (
-    option.type === 'select' && normalizeComparableKey(option.id) === legacyConfigIdForCategory(category)
-  ));
-  return byLegacyId?.type === 'select' ? byLegacyId : null;
-}
-
-function legacyConfigIdForCategory(category: 'model' | 'mode' | 'thought_level'): string {
-  return category === 'thought_level' ? 'effort' : category;
+  return byCategory?.type === 'select' ? byCategory : null;
 }
 
 function isSelectGroup(
-  option: AcpSessionConfigSelectOption | AcpSessionConfigSelectGroup,
-): option is AcpSessionConfigSelectGroup {
+  option: ACPSessionConfigSelectOption | ACPSessionConfigSelectGroup,
+): option is ACPSessionConfigSelectGroup {
   return 'options' in option;
 }
 
-function normalizeAcpModelInfo(model: AcpModelInfo): AcpResolvedModelInfo {
+function normalizeACPModelInfo(model: ACPModelInfo): ACPResolvedModelInfo {
   const id = model.modelId ?? model.id;
   if (id === undefined) {
     throw new Error('ACP model entry must include modelId or id');

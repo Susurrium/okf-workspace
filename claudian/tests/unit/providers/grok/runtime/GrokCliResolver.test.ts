@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { GrokCliResolver } from '@/providers/grok/runtime/GrokCliResolver';
+import { GrokCLIResolver } from '@/providers/grok/runtime/GrokCLIResolver';
 
 jest.mock('fs');
 jest.mock('@/utils/env', () => ({
@@ -11,7 +11,7 @@ jest.mock('@/utils/env', () => ({
 
 const mockedStat = fs.statSync as jest.Mock;
 
-describe('GrokCliResolver', () => {
+describe('GrokCLIResolver', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (fs.existsSync as jest.Mock).mockReturnValue(false);
@@ -25,10 +25,15 @@ describe('GrokCliResolver', () => {
       throw new Error(`ENOENT: ${filePath}`);
     });
 
-    expect(new GrokCliResolver().resolve({
-      'current-host': '/current/grok',
-      'other-host': '/other/grok',
-    }, '/legacy/grok', '')).toBe('/current/grok');
+    expect(new GrokCLIResolver().resolveFromSettings({
+      providerConfigs: { grok: {
+        cliPathsByHost: {
+          'current-host': '/current/grok',
+          'other-host': '/other/grok',
+        },
+        cliPath: '/legacy/grok',
+      } },
+    })).toBe('/current/grok');
   });
 
   it('falls back through the legacy path and PATH binary named grok', () => {
@@ -38,7 +43,9 @@ describe('GrokCliResolver', () => {
       }
       throw new Error(`ENOENT: ${filePath}`);
     });
-    expect(new GrokCliResolver().resolve({}, '/legacy/grok', '')).toBe('/legacy/grok');
+    expect(new GrokCLIResolver().resolveFromSettings({
+      providerConfigs: { grok: { cliPath: '/legacy/grok' } },
+    })).toBe('/legacy/grok');
 
     const pathBinary = path.join('/provider/bin', 'grok');
     mockedStat.mockImplementation((filePath: string) => {
@@ -47,7 +54,9 @@ describe('GrokCliResolver', () => {
       }
       throw new Error(`ENOENT: ${filePath}`);
     });
-    expect(new GrokCliResolver().resolve({}, '', 'PATH=/provider/bin')).toBe(pathBinary);
+    expect(new GrokCLIResolver().resolveFromSettings({
+      providerConfigs: { grok: { environmentVariables: 'PATH=/provider/bin' } },
+    })).toBe(pathBinary);
   });
 
   it('uses merged provider settings, caches the result, and can be reset', () => {
@@ -64,7 +73,7 @@ describe('GrokCliResolver', () => {
         },
       },
     };
-    const resolver = new GrokCliResolver();
+    const resolver = new GrokCLIResolver();
 
     expect(resolver.resolveFromSettings(settings)).toBe('/configured/grok');
     expect(resolver.resolveFromSettings(settings)).toBe('/configured/grok');
@@ -81,7 +90,7 @@ describe('GrokCliResolver', () => {
     mockedStat.mockImplementation(() => {
       throw new Error('ENOENT');
     });
-    const resolver = new GrokCliResolver();
+    const resolver = new GrokCLIResolver();
     const settings = { providerConfigs: { grok: {} } };
 
     expect(resolver.resolveFromSettings(settings)).toBeNull();

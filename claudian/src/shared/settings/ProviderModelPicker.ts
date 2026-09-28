@@ -1,66 +1,25 @@
 import { Setting } from 'obsidian';
 
-import { t } from '../../i18n/i18n';
+import type { ProviderCatalogModel, ProviderModelCatalogSnapshot, ProviderModelSelectionChange } from '../../core/providers/models/ProviderModelCatalog';
 
 const ALL_PROVIDERS_KEY = 'all';
-const getVisibleModelsDescription = () => t('interface.modelHelp');
-
-export function reorderProviderModelIds(
-  selectedIds: readonly string[],
-  modelId: string,
-  targetIndex: number,
-): string[] {
-  const currentIndex = selectedIds.indexOf(modelId);
-  if (currentIndex < 0) {
-    return [...selectedIds];
-  }
-
-  const next = [...selectedIds];
-  next.splice(currentIndex, 1);
-  const boundedIndex = Math.max(0, Math.min(targetIndex, next.length));
-  next.splice(boundedIndex, 0, modelId);
-  return next;
-}
-
-export interface ProviderModelPickerModel {
-  aliasPlaceholder?: string;
-  catalogBadge?: string;
-  description?: string;
-  id: string;
-  isAvailable?: boolean;
-  name: string;
-  providerKey?: string;
-  providerLabel?: string;
-  unavailableMessage?: string;
-  unavailableTitle?: string;
-}
-
-export interface ProviderModelPickerState {
-  aliases: Record<string, string>;
-  defaultModelId?: string | null;
-  discoveredCount: number;
-  models: ProviderModelPickerModel[];
-  selectedIds: string[];
-}
+const VISIBLE_MODELS_DESCRIPTION = 'Choose which models are available in the chat selector. Drag to reorder them; the provider uses the first currently usable model as its default. Select at least one model to use this provider.';
 
 export interface ProviderModelPickerController {
   refresh(): void;
+  dispose(): void;
 }
 
 export interface ProviderModelPickerOptions {
-  checkCatalogFreshnessWhenCached?: boolean;
   container: HTMLElement;
   emptyCatalogText: string;
-  failedCatalogText: string;
-  getState(): ProviderModelPickerState;
+  getState(): ProviderModelCatalogSnapshot;
   initiallyOpen?: boolean;
-  loadCatalog(force: boolean): Promise<'empty' | 'failed' | 'loaded'>;
-  loadCatalogOnRender?: boolean;
+  loadCatalog(force: boolean): Promise<void>;
   loadingCatalogText: string;
   modifier: string;
-  onAliasesChange(aliases: Record<string, string>): Promise<void>;
-  onModelSelected?(model: ProviderModelPickerModel): Promise<void>;
-  onSelectedIdsChange(selectedIds: string[]): Promise<void>;
+  onAliasChange(modelId: string, alias: string): Promise<void>;
+  onSelectionChange(change: ProviderModelSelectionChange): Promise<void>;
   providerName: string;
   searchPlaceholder?: string;
 }
@@ -69,8 +28,8 @@ export function renderProviderModelPicker(
   options: ProviderModelPickerOptions,
 ): ProviderModelPickerController {
   const visibleModelsSetting = new Setting(options.container)
-    .setName(t('interface.visibleModels'))
-    .setDesc(getVisibleModelsDescription());
+    .setName('Visible models')
+    .setDesc(VISIBLE_MODELS_DESCRIPTION);
   visibleModelsSetting.settingEl.addClass('claudian-provider-model-picker-setting');
 
   const pickerEl = options.container.createDiv({
@@ -78,8 +37,8 @@ export function renderProviderModelPicker(
   });
   let searchQuery = '';
   let providerFilter = ALL_PROVIDERS_KEY;
-  let loadingCatalog = false;
-  let catalogLoadFailed = false;
+  let disposed = false;
+  const isLoading = () => options.getState().status === 'loading';
   let draggedModelId: string | null = null;
 
   const summaryEl = pickerEl.createDiv({ cls: 'claudian-provider-model-picker-summary' });
@@ -91,12 +50,8 @@ export function renderProviderModelPicker(
     cls: 'claudian-provider-model-picker-catalog-summary',
   });
   catalogSummaryEl.createSpan({
-    cls: 'claudian-provider-model-picker-catalog-caret',
-    text: '▸',
-  });
-  catalogSummaryEl.createSpan({
     cls: 'claudian-provider-model-picker-catalog-title',
-    text: t('interface.browseModels'),
+    text: 'Browse models',
   });
   const catalogSummaryCountEl = catalogSummaryEl.createSpan({
     cls: 'claudian-provider-model-picker-catalog-count',
@@ -107,7 +62,8 @@ export function renderProviderModelPicker(
     cls: 'claudian-provider-model-picker-search',
     type: 'search',
   });
-  searchInput.placeholder = options.searchPlaceholder ?? t('interface.modelFilter');
+  searchInput.setAttribute('aria-label', `Filter ${options.providerName} models`);
+  searchInput.placeholder = options.searchPlaceholder ?? 'Filter by model, provider, or ID...';
   searchInput.addEventListener('input', () => {
     searchQuery = searchInput.value.trim().toLowerCase();
     renderList();
@@ -116,6 +72,7 @@ export function renderProviderModelPicker(
   const providerSelectEl = controlsEl.createEl('select', {
     cls: 'claudian-provider-model-picker-provider',
   });
+  providerSelectEl.setAttribute('aria-label', 'Filter model providers');
   providerSelectEl.addEventListener('change', () => {
     providerFilter = providerSelectEl.value;
     renderList();
@@ -123,7 +80,7 @@ export function renderProviderModelPicker(
 
   const catalogActionEl = controlsEl.createEl('button', {
     cls: 'claudian-provider-model-picker-action',
-    text: t('interface.discover'),
+    text: 'Discover',
   });
   catalogActionEl.setAttribute('type', 'button');
   catalogActionEl.addEventListener('click', () => {
@@ -139,49 +96,36 @@ export function renderProviderModelPicker(
       state.models.map(model => model.providerKey).filter((key): key is string => Boolean(key)),
     ).size;
 
-    summaryEl.createSpan({ text: t('interface.visible') });
+    summaryEl.createSpan({ text: 'Visible: ' });
     summaryEl.createSpan({
       cls: 'claudian-provider-model-picker-summary-value',
       text: String(state.selectedIds.length),
     });
     summaryEl.createSpan({
       text: providerCount > 0
-        ? t('interface.modelCount', { count: state.discoveredCount }) + t('interface.providerCount', { count: providerCount })
-        : t('interface.modelCount', { count: state.discoveredCount }),
+        ? ` of ${state.discoveredCount} discovered | ${providerCount} ${providerCount === 1 ? 'provider' : 'providers'}`
+        : ` of ${state.discoveredCount} discovered`,
     });
 
     catalogSummaryCountEl.setText(
-      loadingCatalog
-        ? t('interface.loadingModels')
+      isLoading()
+        ? 'Loading models...'
         : state.discoveredCount > 0
-        ? t('interface.availableCount', { count: state.discoveredCount })
-        : t('interface.noModels'),
+        ? `${state.discoveredCount} available`
+        : 'No models discovered yet',
     );
-    catalogActionEl.disabled = loadingCatalog;
+    catalogActionEl.disabled = isLoading();
     catalogActionEl.setText(
-      loadingCatalog
-        ? t('interface.loading')
+      isLoading()
+        ? 'Loading...'
         : state.discoveredCount > 0
-        ? t('interface.refresh')
-        : t('interface.discover'),
+        ? 'Refresh'
+        : 'Discover',
     );
   };
 
   const persistAlias = async (modelId: string, value: string): Promise<void> => {
-    const state = options.getState();
-    const existing = state.aliases[modelId] ?? '';
-    const next = value.trim();
-    if (next === existing) {
-      return;
-    }
-
-    const aliases = { ...state.aliases };
-    if (next) {
-      aliases[modelId] = next;
-    } else {
-      delete aliases[modelId];
-    }
-    await options.onAliasesChange(aliases);
+    await options.onAliasChange(modelId, value);
     renderSelected();
   };
 
@@ -195,22 +139,20 @@ export function renderProviderModelPicker(
 
     selectedEl.toggleClass('claudian-hidden', false);
     const modelsById = new Map(state.models.map(model => [model.id, model] as const));
-    const defaultModelId = state.defaultModelId === undefined
-      ? state.selectedIds[0]
-      : state.defaultModelId;
+    const defaultModelId = state.defaultModelId;
     const headerEl = selectedEl.createDiv({ cls: 'claudian-provider-model-picker-selected-header' });
     headerEl.createSpan({
       cls: 'claudian-provider-model-picker-selected-label',
-      text: t('interface.selectedCount', { count: state.selectedIds.length }),
+      text: `Selected (${state.selectedIds.length})`,
     });
     const clearAllButton = headerEl.createEl('button', {
       cls: 'claudian-provider-model-picker-selected-clear',
-      text: t('interface.clearAll'),
+      text: 'Clear all',
     });
     clearAllButton.setAttribute('type', 'button');
-    clearAllButton.setAttribute('aria-label', t('interface.clearModels', { provider: options.providerName }));
+    clearAllButton.setAttribute('aria-label', `Clear all selected ${options.providerName} models`);
     clearAllButton.addEventListener('click', () => {
-      void persistSelectedIds([]);
+      void persistSelection({ type: 'clear' });
     });
 
     const rowsEl = selectedEl.createDiv({ cls: 'claudian-provider-model-picker-selected-rows' });
@@ -220,8 +162,7 @@ export function renderProviderModelPicker(
         isAvailable: false,
         name: modelId,
       };
-      const defaultLabel = model.aliasPlaceholder
-        ?? (model.providerLabel ? `${model.providerLabel}/${model.name}` : model.name);
+      const defaultLabel = model.providerLabel ? `${model.providerLabel}/${model.name}` : model.name;
       const rowEl = rowsEl.createDiv({ cls: 'claudian-provider-model-picker-selected-row' });
       rowEl.setAttribute('data-model-id', modelId);
       if (model.isAvailable === false) {
@@ -246,12 +187,7 @@ export function renderProviderModelPicker(
         if (!sourceModelId || sourceModelId === modelId) {
           return;
         }
-        const targetIndex = options.getState().selectedIds.indexOf(modelId);
-        void persistSelectedIds(reorderProviderModelIds(
-          options.getState().selectedIds,
-          sourceModelId,
-          targetIndex,
-        ));
+        void persistSelection({ type: 'move', modelId: sourceModelId, target: modelId });
       });
 
       const dragHandle = rowEl.createEl('button', {
@@ -263,7 +199,6 @@ export function renderProviderModelPicker(
         'aria-label',
         `Reorder ${defaultLabel}; drag or use the Up and Down Arrow keys`,
       );
-      dragHandle.setAttribute('title', t('interface.reorderModels'));
       dragHandle.draggable = state.selectedIds.length > 1;
       dragHandle.addEventListener('dragstart', (event) => {
         draggedModelId = modelId;
@@ -288,17 +223,7 @@ export function renderProviderModelPicker(
         }
 
         event.preventDefault();
-        const selectedIds = options.getState().selectedIds;
-        const currentIndex = selectedIds.indexOf(modelId);
-        const targetIndex = currentIndex + offset;
-        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= selectedIds.length) {
-          return;
-        }
-        void persistSelectedIds(reorderProviderModelIds(
-          selectedIds,
-          modelId,
-          targetIndex,
-        ));
+        void persistSelection({ type: 'move', modelId, target: offset });
       });
 
       const infoEl = rowEl.createDiv({ cls: 'claudian-provider-model-picker-selected-info' });
@@ -316,7 +241,7 @@ export function renderProviderModelPicker(
       if (modelId === defaultModelId) {
         titleEl.createSpan({
           cls: 'claudian-provider-model-picker-selected-default',
-          text: t('interface.default'),
+          text: 'Default',
         });
       }
       if (model.isAvailable === false && model.unavailableMessage) {
@@ -336,7 +261,7 @@ export function renderProviderModelPicker(
       });
       aliasFieldEl.createSpan({
         cls: 'claudian-provider-model-picker-selected-alias-label',
-        text: t('interface.alias'),
+        text: 'Alias (optional)',
       });
       const aliasInput = aliasFieldEl.createEl('input', {
         cls: 'claudian-provider-model-picker-selected-alias',
@@ -345,7 +270,7 @@ export function renderProviderModelPicker(
       aliasInput.placeholder = defaultLabel;
       aliasInput.value = state.aliases[model.id] ?? '';
       aliasInput.setAttribute('aria-label', `Alias for ${defaultLabel}`);
-      aliasInput.title = t('interface.aliasHelp');
+      aliasInput.setAttribute('aria-description', 'Custom label shown in the model selector. Leave empty to use the default.');
       aliasInput.addEventListener('blur', () => {
         void persistAlias(model.id, aliasInput.value);
       });
@@ -367,7 +292,7 @@ export function renderProviderModelPicker(
       removeButton.setAttribute('type', 'button');
       removeButton.setAttribute('aria-label', `Remove ${defaultLabel}`);
       removeButton.addEventListener('click', () => {
-        void persistSelectedIds(options.getState().selectedIds.filter(id => id !== model.id));
+        void persistSelection({ type: 'set', modelId: model.id, selected: false });
       });
     }
   };
@@ -390,7 +315,7 @@ export function renderProviderModelPicker(
     providerSelectEl.toggleClass('claudian-hidden', providers.size === 0);
     providerSelectEl.empty();
     providerSelectEl.createEl('option', {
-      text: t('interface.allProviders', { count: models.length }),
+      text: `All providers (${models.length})`,
       value: ALL_PROVIDERS_KEY,
     });
     for (const [key, { count, label }] of Array.from(providers.entries())
@@ -407,7 +332,7 @@ export function renderProviderModelPicker(
     providerSelectEl.value = providerFilter;
   };
 
-  const matchesFilter = (model: ProviderModelPickerModel): boolean => {
+  const matchesFilter = (model: ProviderCatalogModel): boolean => {
     if (providerFilter !== ALL_PROVIDERS_KEY && model.providerKey !== providerFilter) {
       return false;
     }
@@ -419,8 +344,8 @@ export function renderProviderModelPicker(
       .some(value => value.toLowerCase().includes(searchQuery));
   };
 
-  const persistSelectedIds = async (selectedIds: string[]): Promise<void> => {
-    await options.onSelectedIdsChange(selectedIds);
+  const persistSelection = async (change: ProviderModelSelectionChange): Promise<void> => {
+    await options.onSelectionChange(change);
     renderAll();
   };
 
@@ -433,13 +358,11 @@ export function renderProviderModelPicker(
     if (models.length === 0) {
       listEl.createDiv({
         cls: 'claudian-provider-model-picker-empty',
-        text: loadingCatalog
+        text: isLoading()
           ? options.loadingCatalogText
-          : catalogLoadFailed
-          ? options.failedCatalogText
           : state.models.length === 0
           ? options.emptyCatalogText
-          : t('interface.noMatchingModels'),
+          : 'No models match your filter.',
       });
       return;
     }
@@ -454,19 +377,8 @@ export function renderProviderModelPicker(
 
       const checkboxEl = rowEl.createEl('input', { type: 'checkbox' });
       checkboxEl.checked = isSelected;
-      const persistSelection = async (): Promise<void> => {
-        const selecting = checkboxEl.checked;
-        const currentIds = options.getState().selectedIds;
-        const nextIds = selecting
-          ? [...currentIds, model.id]
-          : currentIds.filter(id => id !== model.id);
-        await persistSelectedIds(nextIds);
-        if (selecting) {
-          await options.onModelSelected?.(model);
-        }
-      };
       checkboxEl.addEventListener('change', () => {
-        void persistSelection();
+        void persistSelection({ type: 'set', modelId: model.id, selected: checkboxEl.checked });
       });
 
       const textEl = rowEl.createDiv({ cls: 'claudian-provider-model-picker-row-text' });
@@ -477,7 +389,7 @@ export function renderProviderModelPicker(
       });
       const badgeLabel = model.isAvailable === false
         ? 'Unavailable'
-        : model.catalogBadge ?? model.providerLabel;
+        : model.providerLabel;
       if (badgeLabel) {
         const badgeEl = headerEl.createSpan({
           cls: 'claudian-provider-model-picker-row-badge',
@@ -485,7 +397,7 @@ export function renderProviderModelPicker(
         });
         if (model.isAvailable === false) {
           badgeEl.classList.add('claudian-provider-model-picker-row-badge--unavailable');
-          badgeEl.title = model.unavailableTitle ?? `Configured model not currently reported by ${options.providerName}`;
+          badgeEl.title = model.unavailableMessage ?? `Configured model not currently reported by ${options.providerName}`;
         }
       }
       textEl.createDiv({
@@ -502,6 +414,7 @@ export function renderProviderModelPicker(
   };
 
   const renderAll = (): void => {
+    if (disposed) return;
     renderSummary();
     renderSelected();
     renderProviderSelect();
@@ -509,38 +422,14 @@ export function renderProviderModelPicker(
   };
 
   const loadCatalog = async (force: boolean): Promise<void> => {
-    if (
-      loadingCatalog
-      || (
-        !force
-        && !options.checkCatalogFreshnessWhenCached
-        && options.getState().discoveredCount > 0
-      )
-    ) {
-      return;
-    }
-
-    loadingCatalog = true;
-    catalogLoadFailed = false;
-    renderAll();
-    try {
-      catalogLoadFailed = await options.loadCatalog(force) === 'failed';
-    } catch {
-      catalogLoadFailed = true;
-    } finally {
-      loadingCatalog = false;
-      renderAll();
-    }
+    if (disposed || isLoading()) return;
+    await options.loadCatalog(force);
   };
 
   renderAll();
-  catalogEl.addEventListener('toggle', () => {
-    if (catalogEl.open) {
-      void loadCatalog(false);
-    }
-  });
-  if (options.loadCatalogOnRender) {
-    void loadCatalog(false);
-  }
-  return { refresh: renderAll };
+  void loadCatalog(false);
+  return {
+    refresh: renderAll,
+    dispose() { disposed = true; },
+  };
 }

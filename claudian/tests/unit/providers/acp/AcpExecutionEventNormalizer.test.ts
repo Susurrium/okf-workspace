@@ -1,16 +1,16 @@
 import {
-  AcpExecutionEventNormalizer,
-  type AcpExecutionNormalizationResult,
-  AcpToolStreamAdapter,
+  ACPExecutionEventNormalizer,
+  type ACPExecutionNormalizationResult,
+  ACPToolStreamAdapter,
 } from '@/providers/acp';
 
-function eventTypes(result: AcpExecutionNormalizationResult): string[] {
+function eventTypes(result: ACPExecutionNormalizationResult): string[] {
   return result.events.map(({ type }) => type);
 }
 
-describe('AcpExecutionEventNormalizer', () => {
+describe('ACPExecutionEventNormalizer', () => {
   it('adds one requested correlation envelope with monotonic sequence values', () => {
-    const normalizer = new AcpExecutionEventNormalizer({
+    const normalizer = new ACPExecutionEventNormalizer({
       scope: {
         executionId: 'execution-1',
         kind: 'requested',
@@ -63,7 +63,7 @@ describe('AcpExecutionEventNormalizer', () => {
   });
 
   it('preserves tool identity, subagent scope, output, and raw ACP metadata', () => {
-    const normalizer = new AcpExecutionEventNormalizer({
+    const normalizer = new ACPExecutionEventNormalizer({
       resolveToolScope: ({ toolCallId }) => (
         toolCallId.startsWith('subagent-')
           ? { kind: 'subagent', subagentId: 'agent-1' }
@@ -122,7 +122,7 @@ describe('AcpExecutionEventNormalizer', () => {
   });
 
   it('applies an injected provider-owned tool presentation to live events', () => {
-    const toolStreamAdapter = new AcpToolStreamAdapter({
+    const toolStreamAdapter = new ACPToolStreamAdapter({
       normalizeToolInput: (_rawName, input) => ({
         file_path: input.file_path ?? input.target_file,
       }),
@@ -136,7 +136,7 @@ describe('AcpExecutionEventNormalizer', () => {
         rawName: update.title ?? 'tool',
       }),
     });
-    const normalizer = new AcpExecutionEventNormalizer({
+    const normalizer = new ACPExecutionEventNormalizer({
       scope: {
         executionId: 'execution-1',
         kind: 'requested',
@@ -178,7 +178,7 @@ describe('AcpExecutionEventNormalizer', () => {
   });
 
   it('preserves unknown forward-compatible updates in an opaque notice payload', () => {
-    const normalizer = new AcpExecutionEventNormalizer({
+    const normalizer = new ACPExecutionEventNormalizer({
       scope: {
         executionId: 'execution-1',
         kind: 'requested',
@@ -208,7 +208,7 @@ describe('AcpExecutionEventNormalizer', () => {
   });
 
   it('fences every update after disposal', () => {
-    const normalizer = new AcpExecutionEventNormalizer({
+    const normalizer = new ACPExecutionEventNormalizer({
       scope: {
         executionId: 'execution-1',
         kind: 'requested',

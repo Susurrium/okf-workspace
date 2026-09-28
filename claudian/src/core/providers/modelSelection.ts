@@ -4,7 +4,7 @@ const PROVIDER_MODEL_SELECTION_PREFIXES: Partial<Record<ProviderId, string>> = {
   claude: 'claude-code/',
   codex: 'openai-codex/',
   grok: 'grok/',
-  opencode: 'opencode/',
+  opencode: 'opencode:',
   pi: 'pi/',
 };
 
@@ -13,16 +13,12 @@ export interface ProviderModelSelection {
   providerId: ProviderId;
 }
 
-export function getProviderModelSelectionPrefix(providerId: ProviderId): string | null {
-  return PROVIDER_MODEL_SELECTION_PREFIXES[providerId] ?? null;
-}
-
 export function encodeProviderModelSelectionId(
   providerId: ProviderId,
   modelId: string,
 ): string {
   const normalized = modelId.trim();
-  const prefix = getProviderModelSelectionPrefix(providerId);
+  const prefix = PROVIDER_MODEL_SELECTION_PREFIXES[providerId] ?? null;
   if (!prefix || !normalized || normalized.startsWith(prefix)) {
     return normalized;
   }

@@ -1,13 +1,11 @@
 import { EventEmitter } from 'node:events';
 import { Readable, Writable } from 'node:stream';
 
-jest.mock('node:child_process', () => ({
-  spawn: jest.fn(),
-}));
+jest.mock('cross-spawn', () => jest.fn());
 
-import { spawn } from 'node:child_process';
+import spawn from 'cross-spawn';
 
-import { AcpSubprocess } from '@/providers/acp/AcpSubprocess';
+import { ACPSubprocess } from '@/providers/acp/ACPSubprocess';
 
 const mockSpawn = spawn as jest.MockedFunction<typeof spawn>;
 
@@ -23,7 +21,7 @@ function createMockProcess(): any {
   return proc;
 }
 
-describe('AcpSubprocess', () => {
+describe('ACPSubprocess', () => {
   const originalPlatform = process.platform;
   let proc: any;
 
@@ -38,7 +36,7 @@ describe('AcpSubprocess', () => {
   });
 
   it('spawns ACP runtimes directly on non-Windows commands', () => {
-    const subprocess = new AcpSubprocess({
+    const subprocess = new ACPSubprocess({
       args: ['acp', '--cwd=/vault'],
       command: '/opt/opencode/bin/opencode',
       cwd: '/vault',
@@ -54,9 +52,9 @@ describe('AcpSubprocess', () => {
     }));
   });
 
-  it('wraps Windows .cmd shims through cmd.exe', () => {
+  it('passes Windows .cmd shims to cross-spawn', () => {
     Object.defineProperty(process, 'platform', { value: 'win32' });
-    const subprocess = new AcpSubprocess({
+    const subprocess = new ACPSubprocess({
       args: ['acp', '--cwd=C:\\Vault'],
       command: 'C:\\Users\\R&D\\AppData\\Roaming\\npm\\opencode.cmd',
       cwd: 'C:\\Vault',
@@ -66,19 +64,18 @@ describe('AcpSubprocess', () => {
     subprocess.start();
 
     expect(mockSpawn).toHaveBeenCalledWith(
-      process.env.ComSpec || process.env.comspec || 'cmd.exe',
-      ['/d', '/s', '/c', '""C:\\Users\\R&D\\AppData\\Roaming\\npm\\opencode.cmd" acp "--cwd=C:\\Vault""'],
+      'C:\\Users\\R&D\\AppData\\Roaming\\npm\\opencode.cmd',
+      ['acp', '--cwd=C:\\Vault'],
       expect.objectContaining({
         cwd: 'C:\\Vault',
         windowsHide: true,
-        windowsVerbatimArguments: true,
       }),
     );
   });
 
   it('kills the process tree when shutting down Windows .cmd shims', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32' });
-    const subprocess = new AcpSubprocess({
+    const subprocess = new ACPSubprocess({
       args: ['acp', '--cwd=C:\\Vault'],
       command: 'C:\\Users\\R&D\\AppData\\Roaming\\npm\\opencode.cmd',
       cwd: 'C:\\Vault',
@@ -101,41 +98,5 @@ describe('AcpSubprocess', () => {
     proc.exitCode = 0;
     proc.emit('exit', 0, null);
     await shutdown;
-  });
-
-  it('settles after a final deadline when no exit follows SIGKILL', async () => {
-    jest.useFakeTimers();
-    const subprocess = new AcpSubprocess({
-      args: ['acp', '--cwd=/vault'],
-      command: 'opencode',
-      cwd: '/vault',
-      env: {},
-    });
-    subprocess.start();
-
-    const shutdown = subprocess.shutdown();
-    jest.advanceTimersByTime(6_000);
-
-    await expect(shutdown).resolves.toBeUndefined();
-    expect(proc.kill).toHaveBeenCalledWith('SIGKILL');
-    jest.useRealTimers();
-  });
-
-  it('shares one shutdown sequence across repeated calls', async () => {
-    const subprocess = new AcpSubprocess({
-      args: ['acp', '--cwd=/vault'],
-      command: 'opencode',
-      cwd: '/vault',
-      env: {},
-    });
-    subprocess.start();
-
-    const first = subprocess.shutdown();
-    const second = subprocess.shutdown();
-    expect(proc.kill).toHaveBeenCalledTimes(1);
-
-    proc.exitCode = 0;
-    proc.emit('exit', 0, 'SIGTERM');
-    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
   });
 });

@@ -1,18 +1,17 @@
 import {
-  type ProviderExecutionBackend,
-  type ProviderExecutionEvent,
-  ProviderExecutionLifecycleRegistry,
-  ProviderExecutionRegistryDisposedError,
-  type ProviderExecutionRequest,
-  type ProviderExecutionRun,
-  type ProviderExecutionSession,
-  ProviderExecutionTransitionError,
-  type ProviderExecutionTransitionHook,
-  type ProviderExecutionTransitionScope,
-  type ProviderSessionConfig,
-  type ProviderSessionEvent,
-  type ProviderSessionSnapshot,
-  type ProviderSessionStatus,
+type ProviderExecutionBackend,
+ProviderExecutionLifecycleRegistry,
+ProviderExecutionRegistryDisposedError,
+type ProviderExecutionRequest,
+type ProviderExecutionRun,
+type ProviderExecutionSession,
+ProviderExecutionTransitionError,
+type ProviderExecutionTransitionHook,
+type ProviderExecutionTransitionScope,
+type ProviderSessionConfig,
+type ProviderSessionEvent,
+type ProviderSessionSnapshot,
+type ProviderSessionStatus
 } from '@/core/execution';
 
 class TestSession implements ProviderExecutionSession {
@@ -94,7 +93,6 @@ function createSessionConfig(
     interactionPort: {
       requestApproval: jest.fn(),
       askUserQuestion: jest.fn(),
-      requestPlanDecision: jest.fn(),
       dismissInteraction: jest.fn(),
     },
   };
@@ -205,7 +203,7 @@ describe('ProviderExecutionLifecycleRegistry', () => {
     const barrier = deferred();
     const registry = new ProviderExecutionLifecycleRegistry();
     const backend = new TestBackend('pi', barrier.promise);
-    const lease = registry.acquire(backend, createSessionConfig(), 'instruction');
+    const lease = registry.acquire(backend, createSessionConfig(), 'inline-edit');
 
     const release = lease.release();
     const disposal = registry.dispose();
@@ -269,7 +267,7 @@ describe('ProviderExecutionLifecycleRegistry', () => {
     const registry = new ProviderExecutionLifecycleRegistry();
     const backend = new TestBackend('grok');
     const first = registry.acquire(backend, createSessionConfig(), 'chat');
-    const second = registry.acquire(backend, createSessionConfig('ephemeral'), 'instruction');
+    const second = registry.acquire(backend, createSessionConfig('ephemeral'), 'inline-edit');
     const observations: Array<{ current: boolean; kind: string; generation: number }> = [];
 
     first.onInvalidated((reason) => {
@@ -614,25 +612,5 @@ describe('ProviderExecutionLifecycleRegistry', () => {
         afterTransition: jest.fn(),
       }),
     ).toThrow(ProviderExecutionRegistryDisposedError);
-  });
-
-  it('keeps requested-run events out of the session listener contract', () => {
-    const requested: ProviderExecutionEvent = {
-      type: 'text_delta',
-      scope: {
-        kind: 'requested',
-        sessionInstanceId: 'session',
-        executionId: 'execution',
-        turnId: 'turn',
-        sequence: 1,
-      },
-      text: 'hello',
-    };
-    const sessionListener = (_event: ProviderSessionEvent): void => undefined;
-
-    // The compile-time contracts are distinct even though requested and session
-    // events share normalized payloads.
-    expect(requested.scope.kind).toBe('requested');
-    expect(sessionListener).toBeDefined();
   });
 });

@@ -1,14 +1,19 @@
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
+import type { ClaudianSettings } from '@/core/types';
+type MutableTestHost = ProviderHost & { settings: ClaudianSettings };
 import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
 import type { SlashCommand } from '@/core/types';
 import {
   createClaudeWorkspaceServices,
 } from '@/providers/claude/app/ClaudeWorkspaceServices';
+import { getClaudeProviderSettings } from '@/providers/claude/settings';
+import { createClaudeSettingsTabRenderer } from '@/providers/claude/ui/ClaudeSettingsTab';
+
+jest.mock('@/providers/claude/ui/ClaudeSettingsTab', () => ({ createClaudeSettingsTabRenderer: jest.fn(() => ({ render: jest.fn() })) }));
 
 function createAdapter(): VaultFileAdapter {
   return {
-    append: jest.fn(),
     delete: jest.fn(),
     deleteFolder: jest.fn(),
     ensureFolder: jest.fn(),
@@ -25,9 +30,10 @@ function createAdapter(): VaultFileAdapter {
 
 function createPlugin(
   executionLifecycleRegistry: ProviderExecutionLifecycleRegistry,
-): ProviderHost {
+): MutableTestHost {
   return {
     app: {
+      workspace: { onLayoutReady: jest.fn() },
       vault: {
         adapter: { basePath: '/tmp/claude-workspace' },
       },
@@ -37,10 +43,66 @@ function createPlugin(
     loadData: jest.fn().mockResolvedValue({}),
     saveData: jest.fn().mockResolvedValue(undefined),
     settings: {},
-  } as unknown as ProviderHost;
+  } as unknown as MutableTestHost;
 }
 
 describe('ClaudeWorkspaceServices', () => {
+  it.each([true, false])('does not fetch on workspace creation or configuration invalidation (enabled: %s)', async enabled => {
+    const registry = new ProviderExecutionLifecycleRegistry();
+    const plugin = createPlugin(registry);
+    plugin.settings.providerConfigs = { claude: { enabled, visibleModels: [] } };
+    plugin.mutateSettingsConditionally = jest.fn(async mutation => { await mutation(plugin.settings); });
+    plugin.notifyProviderChatOptionsChanged = jest.fn();
+    const modelProbe = jest.fn().mockResolvedValue([{ value: 'sdk-only', label: 'SDK model', description: '' }]);
+    const services = await createClaudeWorkspaceServices(plugin, createAdapter(), { modelProbe });
+    const ready = plugin.app.workspace.onLayoutReady as jest.Mock;
+    expect(modelProbe).not.toHaveBeenCalled();
+    await registry.runTransition(['claude'], async () => {});
+    expect(services.modelCatalog!.getSnapshot().stale).toBe(true);
+    expect(ready).not.toHaveBeenCalled();
+    expect(modelProbe).not.toHaveBeenCalled();
+    await services.dispose();
+    await registry.dispose();
+  });
+
+  it.each([false, true])('fences panel discovery across a runtime transition (start during transition: %s)', async startDuring => {
+    const registry = new ProviderExecutionLifecycleRegistry();
+    const plugin = createPlugin(registry);
+    plugin.settings.providerConfigs = { claude: { enabled: true, visibleModels: ['sonnet'] } };
+    plugin.mutateSettingsConditionally = jest.fn(async mutation => { await mutation(plugin.settings); });
+    plugin.notifyProviderChatOptionsChanged = jest.fn();
+    let started!: () => void;
+    const probeStarted = new Promise<void>(resolve => { started = resolve; });
+    let release!: () => void;
+    let signal!: AbortSignal;
+    const rows = [{ value: 'sonnet', label: 'Sonnet', description: '' }];
+    const modelProbe = jest.fn((_host, probeSignal) => {
+      signal = probeSignal;
+      started();
+      return new Promise<typeof rows>(resolve => {
+        release = () => resolve(rows);
+        signal.addEventListener('abort', () => resolve([]), { once: true });
+      });
+    });
+    const services = await createClaudeWorkspaceServices(plugin, createAdapter(), { modelProbe });
+    const catalog = jest.mocked(createClaudeSettingsTabRenderer).mock.calls.at(-1)![0].modelCatalog;
+    let discovery: Promise<unknown> | undefined;
+    const ready = () => { discovery = catalog.refresh(); };
+    if (!startDuring) { ready(); await probeStarted; }
+    await registry.runTransition(['claude'], async () => {
+      if (startDuring) ready();
+      plugin.settings.userName = 'Updated name';
+    });
+    await probeStarted;
+    expect(signal.aborted).toBe(!startDuring);
+    release();
+    await discovery;
+    expect(getClaudeProviderSettings(plugin.settings).discoveredModels).toEqual(startDuring ? rows : []);
+    expect(modelProbe).toHaveBeenCalledTimes(1);
+    await services.dispose();
+    await registry.dispose();
+  });
+
   it('quiesces the command probe before a Claude provider transition mutation', async () => {
     const registry = new ProviderExecutionLifecycleRegistry();
     const plugin = createPlugin(registry);

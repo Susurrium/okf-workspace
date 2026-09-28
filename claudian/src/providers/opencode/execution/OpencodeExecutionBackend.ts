@@ -6,14 +6,16 @@ import type {
 import type { ProviderHost } from '@/core/providers/ProviderHost';
 
 import type { OpencodeCommandCatalog } from '../commands/OpencodeCommandCatalog';
+import type { OpencodeServerService } from '../http/OpencodeServerService';
 import {
-  type OpencodeAcpSessionKernelFactory,
+  type OpencodeACPSessionKernelFactory,
   OpencodeExecutionSession,
 } from './OpencodeExecutionSession';
 
 export interface OpencodeExecutionBackendOptions {
   readonly commandCatalog?: Pick<OpencodeCommandCatalog, 'setCommandSnapshot'>;
-  readonly createKernel?: OpencodeAcpSessionKernelFactory;
+  readonly serverService: OpencodeServerService;
+  readonly createKernel?: OpencodeACPSessionKernelFactory;
 }
 
 export class OpencodeExecutionBackend implements ProviderExecutionBackend {
@@ -21,7 +23,7 @@ export class OpencodeExecutionBackend implements ProviderExecutionBackend {
 
   constructor(
     private readonly plugin: ProviderHost,
-    private readonly options: OpencodeExecutionBackendOptions = {},
+    private readonly options: OpencodeExecutionBackendOptions,
   ) {}
 
   createSession(config: ProviderSessionConfig): ProviderExecutionSession {

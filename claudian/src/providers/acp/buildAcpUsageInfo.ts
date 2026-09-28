@@ -1,13 +1,13 @@
 import type { UsageInfo } from '../../core/types';
-import type { AcpUsage, AcpUsageUpdate } from './types';
+import type { ACPUsage, ACPUsageUpdate } from './types';
 
-export interface BuildAcpUsageInfoParams {
-  contextWindow?: AcpUsageUpdate | null;
+export interface BuildACPUsageInfoParams {
+  contextWindow?: ACPUsageUpdate | null;
   model?: string;
-  promptUsage?: AcpUsage | null;
+  promptUsage?: ACPUsage | null;
 }
 
-export function buildAcpUsageInfo(params: BuildAcpUsageInfoParams): UsageInfo | null {
+export function buildACPUsageInfo(params: BuildACPUsageInfoParams): UsageInfo | null {
   const promptUsage = params.promptUsage ?? null;
   const contextWindow = params.contextWindow ?? null;
 
@@ -16,16 +16,16 @@ export function buildAcpUsageInfo(params: BuildAcpUsageInfoParams): UsageInfo | 
   }
 
   const contextTokens = contextWindow?.used ?? promptUsage?.totalTokens ?? 0;
-  const contextWindowSize = contextWindow?.size ?? 0;
+  const reportedSize = contextWindow?.size;
+  const contextWindowSize = typeof reportedSize === 'number' && Number.isFinite(reportedSize) && reportedSize > 0
+    ? reportedSize
+    : 0;
 
   return {
     cacheCreationInputTokens: promptUsage?.cachedWriteTokens ?? 0,
     cacheReadInputTokens: promptUsage?.cachedReadTokens ?? 0,
     contextTokens,
     contextWindow: contextWindowSize,
-    // Only the contextWindow update speaks authoritatively about window size; falling back
-    // to promptUsage alone is a best-effort approximation.
-    contextWindowIsAuthoritative: Boolean(contextWindow),
     inputTokens: promptUsage?.inputTokens ?? 0,
     model: params.model,
     percentage: computePercentage(contextTokens, contextWindowSize),

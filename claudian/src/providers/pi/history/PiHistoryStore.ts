@@ -5,7 +5,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { isWriteEditTool } from '../../../core/tools/toolNames';
-import type { ChatMessage, ContentBlock, ImageAttachment, ToolCallInfo } from '../../../core/types';
+import type { ChatMessage, ContentBlock, ImageAttachment, ToolCallInfo, TurnStats } from '../../../core/types';
+import { createTurnStats, isTokenCount } from '../../../core/types';
 import { extractUserQuery } from '../../../utils/context';
 import { extractDiffData } from '../../../utils/diff';
 import { buildImageAttachmentFromBase64 } from '../../../utils/imageAttachment';
@@ -15,6 +16,7 @@ import {
   normalizePiToolInput,
   normalizePiToolName,
 } from '../normalizations/piToolNormalization';
+import type { PiTreeCursor } from '../types';
 import { decodePiRecoveryPrompt } from './PiRecoveryPromptCodec';
 
 export interface PiSessionEntry {
@@ -31,7 +33,8 @@ export interface ParsedPiSessionEntries {
 }
 
 export interface ParsePiSessionContentOptions {
-  leafEntryId?: string;
+  leafEntryId?: string | null;
+  includeBranches?: boolean;
   requireLeafEntryId?: boolean;
   syntheticIdNamespace?: string;
 }
@@ -66,6 +69,7 @@ export function parsePiSessionContent(
   options: ParsePiSessionContentOptions = {},
 ): ChatMessage[] {
   const parsed = parsePiSessionEntries(content);
+  if (options.leafEntryId === null) return [];
   const leafEntryId = options.leafEntryId?.trim();
   if (
     options.requireLeafEntryId
@@ -74,16 +78,105 @@ export function parsePiSessionContent(
     return [];
   }
 
-  return mapPiSessionEntries(
+  const messages = mapPiSessionEntries(
     resolvePiActivePath(parsed.entries, leafEntryId),
     options.syntheticIdNamespace,
   );
+  if (options.includeBranches !== false) {
+    const branches = getPiConversationBranches(parsed.entries);
+    for (const message of messages) {
+      if (message.userMessageId && branches[message.userMessageId]) {
+        message.treeBranches = branches[message.userMessageId];
+      }
+    }
+  }
+  return messages;
+}
+
+/** Configuration entries between prompts do not create conversation alternatives. */
+/** Match ordered gaps between native IDs, preserving unconsumed steering input as unbound. */
+export function correlatePiUserMessages(live: readonly ChatMessage[], native: readonly ChatMessage[]): Record<string, string> {
+  const users = live.filter(message => message.role === 'user' && !message.isInterrupt && !message.isRebuiltContext);
+  const nativeUsers = native.filter(message => message.role === 'user' && message.userMessageId);
+  const nativeIndexes = new Map(nativeUsers.map((message, index) => [message.userMessageId!, index]));
+  const result: Record<string, string> = {};
+  let localStart = 0;
+  let nativeStart = 0;
+  const matchGap = (localEnd: number, nativeEnd: number) => {
+    const nativeCount = nativeEnd - nativeStart;
+    if (localEnd - localStart < nativeCount) return;
+    const gap = users.slice(localStart, localStart + nativeCount);
+    if (localEnd - localStart > nativeCount) {
+      // Only main submitted inputs carry an accepted execution snapshot. Extra
+      // steering rows can be acknowledged locally before Pi consumes the queue.
+      if (!gap.every(message => message.executionInput)
+        || users.slice(localStart + nativeCount, localEnd).some(message => message.executionInput)) return;
+    }
+    if (!gap.every((message, offset) => {
+      const candidate = nativeUsers[nativeStart + offset];
+      const text = (item: ChatMessage) => extractUserQuery(item.displayContent ?? item.content);
+      return !message.userMessageId && text(message) === text(candidate)
+        && (message.images?.length ?? 0) === (candidate.images?.length ?? 0)
+        && (message.images ?? []).every((image, index) => image.data === candidate.images![index].data
+          && image.mediaType === candidate.images![index].mediaType);
+    })) return;
+    gap.forEach((message, offset) => { result[message.id] = nativeUsers[nativeStart + offset].userMessageId!; });
+  };
+  for (let index = 0; index < users.length; index++) {
+    const id = users[index].userMessageId;
+    if (!id) continue;
+    const nativeIndex = nativeIndexes.get(id);
+    if (nativeIndex === undefined) {
+      // Previous-session messages precede the active native transcript.
+      if (nativeStart === 0) localStart = index + 1;
+      continue;
+    }
+    if (nativeIndex < nativeStart) continue;
+    matchGap(index, nativeIndex);
+    result[users[index].id] = id;
+    localStart = index + 1;
+    nativeStart = nativeIndex + 1;
+  }
+  matchGap(users.length, nativeUsers.length);
+  return result;
+}
+
+export function getPiConversationBranches(entries: readonly PiSessionEntry[]): Record<string, string[]> {
+  const byId = new Map(entries.filter(entry => entry.id).map(entry => [entry.id!, entry]));
+  const groups = new Map<string | undefined, string[]>();
+  for (const entry of entries) {
+    if (!entry.id || entry.message?.role !== 'user') continue;
+    if (!entry.parentId && entry.raw.parentId !== null && entry.raw.parent_id !== null) continue;
+    let parent = entry.parentId;
+    const visited = new Set<string>();
+    while (parent && !visited.has(parent)) {
+      visited.add(parent);
+      const ancestor = byId.get(parent);
+      if (!ancestor || ancestor.message || ancestor.type === 'branch_summary') break;
+      parent = ancestor.parentId;
+    }
+    const group = groups.get(parent) ?? [];
+    group.push(entry.id);
+    groups.set(parent, group);
+  }
+  return Object.fromEntries([...groups.values()].flatMap(ids => ids.map(id => [id, ids])));
+}
+
+/** Native appends after a selected cursor include interrupted turns and configuration entries. */
+export function resolvePiTreeCursor(entries: PiSessionEntry[], cursor: PiTreeCursor): PiTreeCursor {
+  const latest = entries.at(-1)?.id;
+  if (!cursor.appendId || !latest || latest === cursor.appendId) return cursor;
+  if (!entries.some(entry => entry.id === cursor.appendId)) throw new Error('Pi branch history changed since navigation.');
+  const path = resolvePiActivePath(entries, latest);
+  if (cursor.leafId !== null && !path.some(entry => entry.id === cursor.leafId)) return cursor;
+  return { targetId: latest, leafId: latest, appendId: latest };
 }
 
 export function parsePiSessionModel(
   content: string,
-  leafEntryId?: string,
+  leafEntryId?: string | null,
 ): string | null {
+  if (leafEntryId === null) return null;
   const parsed = parsePiSessionEntries(content);
   const persistedLeafEntryId = leafEntryId?.trim();
   if (
@@ -205,7 +298,7 @@ export function resolvePiActivePath(entries: PiSessionEntry[], leafId?: string):
     : includePiLinearPathEntries(entries, activePath);
 }
 
-export function resolvePiEntryPath(entries: PiSessionEntry[], leafId: string): PiSessionEntry[] {
+function resolvePiEntryPath(entries: PiSessionEntry[], leafId: string): PiSessionEntry[] {
   const entriesWithIds = entries.filter((entry): entry is PiSessionEntry & { id: string } => !!entry.id);
   const byId = new Map(entriesWithIds.map(entry => [entry.id, entry] as const));
   if (!byId.has(leafId)) {
@@ -421,20 +514,13 @@ export function findPiSessionFileInRoot(
   return findSessionFileInRoot(root, trimmed);
 }
 
-export function derivePiSessionsRootFromSessionPath(sessionPath: string): string | null {
-  const normalized = sessionPath.trim();
-  if (!normalized) {
-    return null;
-  }
-
-  return path.dirname(normalized);
-}
-
 function mapPiSessionEntries(
   entries: PiSessionEntry[],
   syntheticIdNamespace?: string,
 ): ChatMessage[] {
   const messages: ChatMessage[] = [];
+  let turnStartedAt: number | undefined;
+  const stats = new PiTurnStats();
 
   for (const entry of entries) {
     const mapped = mapPiSessionEntry(entry, messages, syntheticIdNamespace);
@@ -445,10 +531,68 @@ function mapPiSessionEntries(
       } else {
         messages.push(mapped);
       }
+
+      const nativeMessage = entry.message ?? entry.raw;
+      const turnStats = stats.add(entry);
+      if (mapped.role === 'user') {
+        turnStartedAt = parseTimestamp(nativeMessage.timestamp) ?? parseTimestamp(entry.raw.timestamp);
+      } else if (isBoundaryMessage(mapped)) {
+        turnStartedAt = undefined;
+      } else if (isAssistantMessageEntry(entry)) {
+        const stopReason = getString(nativeMessage.stopReason);
+        // Pi's inner assistant timestamp is generation start; the entry is written on completion.
+        const completedAt = parseTimestamp(entry.raw.timestamp);
+        if ((stopReason === 'stop' || stopReason === 'length')
+          && turnStartedAt !== undefined && completedAt !== undefined && completedAt >= turnStartedAt) {
+          messages[messages.length - 1].turnStats = turnStats;
+          messages[messages.length - 1].completedAt = completedAt;
+          messages[messages.length - 1].durationSeconds = Math.floor((completedAt - turnStartedAt) / 1_000);
+        }
+        if (stopReason && stopReason !== 'toolUse') turnStartedAt = undefined;
+      }
     }
   }
 
   return messages;
+}
+
+/** Account on the resolved native branch; tool results never contribute usage. */
+class PiTurnStats {
+  private startedAt: number | undefined;
+  private outputTokens: number | undefined = 0;
+
+  add(entry: PiSessionEntry): TurnStats | undefined {
+    const message = entry.message ?? entry.raw;
+    const role = getString(message.role) ?? inferRole(entry.type);
+    if (role === 'user') {
+      if (isHiddenPiRecoveryInput(message)) return undefined;
+      this.startedAt = parseTimestamp(message.timestamp) ?? parseTimestamp(entry.raw.timestamp);
+      this.outputTokens = 0;
+    } else if (entry.type === 'compaction') {
+      this.startedAt = undefined;
+    } else if (role === 'assistant') {
+      const output = getRecord(message.usage)?.output;
+      this.outputTokens = this.outputTokens !== undefined && isTokenCount(output)
+        ? this.outputTokens + output : undefined;
+      const stopReason = getString(message.stopReason);
+      const completedAt = parseTimestamp(entry.raw.timestamp);
+      const stats = (stopReason === 'stop' || stopReason === 'length')
+        && this.startedAt !== undefined && completedAt !== undefined
+        ? createTurnStats(this.outputTokens, completedAt - this.startedAt) : undefined;
+      if (stopReason && stopReason !== 'toolUse') this.startedAt = undefined;
+      return stats;
+    }
+    return undefined;
+  }
+}
+
+export function getPiTurnStats(entries: PiSessionEntry[], assistantId: string | undefined): TurnStats | undefined {
+  const stats = new PiTurnStats();
+  for (const entry of entries) {
+    const result = stats.add(entry);
+    if (assistantId && entry.id === assistantId) return result;
+  }
+  return undefined;
 }
 
 function isAssistantMessageEntry(entry: PiSessionEntry): boolean {
@@ -516,7 +660,7 @@ function mapPiSessionEntry(
       message.content ?? message.parts ?? message.blocks,
       messageId,
     );
-    if (recoveryPrompt?.currentInput === null && images.length === 0) {
+    if (isHiddenPiRecoveryInput(message, images.length > 0)) {
       return null;
     }
     return {
@@ -594,6 +738,12 @@ function mapPiSessionEntry(
   }
 
   return null;
+}
+
+function isHiddenPiRecoveryInput(message: Record<string, unknown>, hasImages?: boolean): boolean {
+  const content = extractTextContent(message.content ?? message.text ?? message.message);
+  if (decodePiRecoveryPrompt(content)?.currentInput !== null) return false;
+  return !(hasImages ?? (extractUserImages(message.content ?? message.parts ?? message.blocks, 'recovery').length > 0));
 }
 
 function createSyntheticPiMessageId(
@@ -837,6 +987,10 @@ function fileExists(filePath: string): boolean {
 }
 
 function getTimestamp(value: unknown): number {
+  return parseTimestamp(value) ?? Date.now();
+}
+
+function parseTimestamp(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
     return value;
   }
@@ -846,7 +1000,7 @@ function getTimestamp(value: unknown): number {
       return parsed;
     }
   }
-  return Date.now();
+  return undefined;
 }
 
 function getRecord(value: unknown): Record<string, unknown> | null {

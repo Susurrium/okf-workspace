@@ -1,8 +1,8 @@
 import type { SDKToolUseResult } from '@/core/types/diff';
-import { AcpToolStreamAdapter } from '@/providers/acp/AcpToolStreamAdapter';
+import { ACPToolStreamAdapter } from '@/providers/acp/ACPToolStreamAdapter';
 
-function createAdapter(): AcpToolStreamAdapter {
-  return new AcpToolStreamAdapter({
+function createAdapter(): ACPToolStreamAdapter {
+  return new ACPToolStreamAdapter({
     normalizeToolInput: (_rawName, input) => input,
     normalizeToolName: rawName => rawName === 'read_file'
       ? 'Read'
@@ -25,7 +25,7 @@ function createAdapter(): AcpToolStreamAdapter {
   });
 }
 
-describe('AcpToolStreamAdapter', () => {
+describe('ACPToolStreamAdapter', () => {
   it('carries validated provider payload on tool start and raw-state updates', () => {
     const adapter = createAdapter();
     const rawInput = { path: 'private.md', unknown: ['future'] };

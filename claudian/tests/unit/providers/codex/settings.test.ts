@@ -2,7 +2,6 @@ import { CODEX_SPARK_MODEL, TEST_CODEX_CATALOG } from '@test/helpers/codexModels
 
 import {
   applyCodexModelDefaults,
-  createCodexVisibleModelFilter,
   DEFAULT_CODEX_PROVIDER_SETTINGS,
   getCodexProviderSettings,
   getEffectiveCodexReasoningSummary,
@@ -10,6 +9,7 @@ import {
   normalizeCodexModelAliases,
   normalizeCodexStoredConfig,
   normalizeCodexVisibleModels,
+  projectCodexModelSettings,
   updateCodexProviderSettings,
 } from '@/providers/codex/settings';
 
@@ -31,10 +31,23 @@ describe('codex settings', () => {
     Object.defineProperty(process, 'platform', { value: originalPlatform });
   });
 
+  it.each(['pragmatic', 'friendly'] as const)('persists the %s response style while stripping retired manual model settings', (responseStyle) => {
+    const settings = { providerConfigs: { codex: { customModels: 'custom' } } };
+    updateCodexProviderSettings(settings, { responseStyle });
+    expect(getCodexProviderSettings(settings)).toMatchObject({ responseStyle });
+    expect(settings.providerConfigs.codex).not.toHaveProperty('customModels');
+  });
+
+  it.each([undefined, null, '', 'invalid', 42, {}, []])('normalizes invalid response style %p to pragmatic', (responseStyle) => {
+    const settings = { providerConfigs: { codex: { responseStyle } } };
+    expect(getCodexProviderSettings(settings)).toMatchObject({ responseStyle: 'pragmatic' });
+    expect(normalizeCodexStoredConfig(settings).config).toMatchObject({ responseStyle: 'pragmatic' });
+  });
+
   it('defaults installationMethod to native-windows, ultra effort off, and leaves wslDistroOverride empty', () => {
     const settings = getCodexProviderSettings({});
 
-    expect(settings.customModels).toBe('');
+    expect(settings).not.toHaveProperty('customModels');
     expect(settings.modelAliases).toEqual({});
     expect(settings.visibleModels).toBeNull();
     expect(settings.enableUltraEffort).toBe(false);
@@ -112,12 +125,8 @@ describe('codex settings', () => {
     expect(normalizeCodexVisibleModels(
       [' gpt-5.4-mini ', 'missing-model', 'gpt-5.4-mini', 42],
       discoveredModels,
-    )).toEqual(['gpt-5.4-mini']);
+    )).toEqual(['gpt-5.4-mini', 'missing-model']);
     expect(normalizeCodexVisibleModels(undefined, discoveredModels)).toBeNull();
-    expect(createCodexVisibleModelFilter(
-      ['gpt-5.5', 'gpt-5.4-mini'],
-      discoveredModels,
-    )).toEqual(['gpt-5.5', 'gpt-5.4-mini']);
   });
 
   it('normalizes model aliases against the discovered catalog', () => {
@@ -127,7 +136,7 @@ describe('codex settings', () => {
       missing: 'Missing',
       invalid: 42,
     }, TEST_CODEX_CATALOG as any)).toEqual({
-      'gpt-5.5': 'Primary',
+      'gpt-5.5': 'Primary', missing: 'Missing',
     });
   });
 
@@ -213,7 +222,7 @@ describe('codex settings', () => {
     });
   });
 
-  it('retargets global Codex projections when their discovered model is hidden', () => {
+  it('preserves global Codex projections when their model is hidden', () => {
     const settingsBag: Record<string, unknown> = {
       settingsProvider: 'codex',
       model: 'gpt-5.5',
@@ -234,17 +243,17 @@ describe('codex settings', () => {
     updateCodexProviderSettings(settingsBag, { visibleModels: ['gpt-5.4-mini'] });
 
     expect(settingsBag).toMatchObject({
-      model: 'gpt-5.4-mini',
-      effortLevel: 'medium',
-      serviceTier: 'default',
-      titleGenerationModel: 'gpt-5.4-mini',
-      savedProviderModel: { codex: 'gpt-5.4-mini' },
-      savedProviderEffort: { codex: 'medium' },
-      savedProviderServiceTier: { codex: 'default' },
+      model: 'gpt-5.5',
+      effortLevel: 'high',
+      serviceTier: 'priority',
+      titleGenerationModel: 'gpt-5.5',
+      savedProviderModel: { codex: 'gpt-5.5' },
+      savedProviderEffort: { codex: 'high' },
+      savedProviderServiceTier: { codex: 'priority' },
     });
   });
 
-  it('retargets projections to the first ordered model that is currently available', () => {
+  it('preserves projections when only another ordered model is available', () => {
     const ultraOnlyModel = {
       ...TEST_CODEX_CATALOG[1],
       model: 'gpt-ultra-only',
@@ -269,8 +278,8 @@ describe('codex settings', () => {
     });
 
     expect(settingsBag).toMatchObject({
-      model: 'gpt-5.4-mini',
-      savedProviderModel: { codex: 'gpt-5.4-mini' },
+      model: 'gpt-5.5',
+      savedProviderModel: { codex: 'gpt-5.5' },
     });
   });
 
@@ -475,11 +484,11 @@ describe('codex settings', () => {
         'host-b': 'Debian',
       },
     });
-    expect(result.config).not.toHaveProperty('installationMethod');
-    expect(result.config).not.toHaveProperty('wslDistroOverride');
+    expect(result.config).toHaveProperty('installationMethod');
+    expect(result.config).toHaveProperty('wslDistroOverride');
   });
 
-  it('migrates legacy Windows Codex installation scalars into current host maps', () => {
+  it('does not import retired Windows installation scalars', () => {
     const result = normalizeCodexStoredConfig(
       {
         providerConfigs: {
@@ -495,15 +504,11 @@ describe('codex settings', () => {
       },
     );
 
-    expect(result.changed).toBe(true);
-    expect(result.config.installationMethodsByHost).toEqual({
-      'host-a': 'wsl',
-    });
-    expect(result.config.wslDistroOverridesByHost).toEqual({
-      'host-a': 'Ubuntu',
-    });
-    expect(result.config).not.toHaveProperty('installationMethod');
-    expect(result.config).not.toHaveProperty('wslDistroOverride');
+    expect(result.changed).toBe(false);
+    expect(result.config.installationMethodsByHost).toEqual({});
+    expect(result.config.wslDistroOverridesByHost).toEqual({});
+    expect(result.config).toHaveProperty('installationMethod');
+    expect(result.config).toHaveProperty('wslDistroOverride');
   });
 
   it('forces reasoning summary off for GPT-5.3 Codex Spark', () => {
@@ -532,4 +537,12 @@ describe('codex settings', () => {
 
     expect(getCodexProviderSettings(settingsBag).reasoningSummary).toBe('none');
   });
+});
+
+it('strips legacy manual models when decoding, writing, and projecting settings', () => {
+  const settings = { providerConfigs: { codex: { customModels: 'legacy-endpoint-model' } } };
+  expect(normalizeCodexStoredConfig(settings).config).not.toHaveProperty('customModels');
+  expect(projectCodexModelSettings(settings)).not.toHaveProperty('customModels');
+  updateCodexProviderSettings(settings, { responseStyle: 'friendly' });
+  expect(settings.providerConfigs.codex).not.toHaveProperty('customModels');
 });

@@ -3,15 +3,15 @@ import type {
   ProviderInteractionPort,
 } from '../../core/execution';
 import {
-  buildAcpApprovalDecisionOptions,
-  mapAcpApprovalDecision,
-} from './AcpPermissionAdapter';
+  buildACPApprovalDecisionOptions,
+  mapACPApprovalDecision,
+} from './ACPPermissionAdapter';
 import type {
-  AcpRequestPermissionRequest,
-  AcpRequestPermissionResponse,
+  ACPRequestPermissionRequest,
+  ACPRequestPermissionResponse,
 } from './types';
 
-const CANCELLED_RESPONSE: AcpRequestPermissionResponse = {
+const CANCELLED_RESPONSE: ACPRequestPermissionResponse = {
   outcome: { outcome: 'cancelled' },
 };
 
@@ -20,34 +20,34 @@ interface PendingInteraction {
   dismissed: boolean;
 }
 
-export interface AcpPermissionPresentation {
+export interface ACPPermissionPresentation {
   readonly blockedPath?: string;
   readonly decisionReason?: string;
   readonly description: string;
   readonly toolName: string;
 }
 
-export interface AcpInteractionControllerOptions {
+export interface ACPInteractionControllerOptions {
   readonly getTurnId: () => string | null;
   readonly interactionPort: ProviderInteractionPort;
   readonly presentPermission?: (
-    request: AcpRequestPermissionRequest,
+    request: ACPRequestPermissionRequest,
     input: Readonly<Record<string, unknown>>,
-  ) => AcpPermissionPresentation;
+  ) => ACPPermissionPresentation;
   readonly sessionInstanceId: string;
 }
 
-export class AcpInteractionController {
+export class ACPInteractionController {
   private disposed = false;
   private interactionSequence = 0;
   private readonly pending = new Map<string, PendingInteraction>();
 
-  constructor(private readonly options: AcpInteractionControllerOptions) {}
+  constructor(private readonly options: ACPInteractionControllerOptions) {}
 
   async requestPermission(
-    request: AcpRequestPermissionRequest,
+    request: ACPRequestPermissionRequest,
     signal?: AbortSignal,
-  ): Promise<AcpRequestPermissionResponse> {
+  ): Promise<ACPRequestPermissionResponse> {
     const turnId = this.options.getTurnId();
     if (this.disposed || !turnId || signal?.aborted) {
       return CANCELLED_RESPONSE;
@@ -66,7 +66,7 @@ export class AcpInteractionController {
     this.pending.set(interactionId, pending);
 
     const abortFromCaller = (): void => {
-      this.dismiss(interactionId, 'cancelled');
+      this.#dismiss(interactionId, 'cancelled');
       abortController.abort();
     };
     signal?.addEventListener('abort', abortFromCaller, { once: true });
@@ -81,7 +81,7 @@ export class AcpInteractionController {
         ...(presentation.blockedPath
           ? { blockedPath: presentation.blockedPath }
           : {}),
-        decisionOptions: buildAcpApprovalDecisionOptions(request.options),
+        decisionOptions: buildACPApprovalDecisionOptions(request.options),
         ...(presentation.decisionReason
           ? { decisionReason: presentation.decisionReason }
           : {}),
@@ -98,19 +98,20 @@ export class AcpInteractionController {
         turnId,
       }, abortController.signal);
 
+      if (this.disposed || abortController.signal.aborted) return CANCELLED_RESPONSE;
       if (response.interactionId !== interactionId) {
-        this.dismiss(interactionId, 'native-rejected');
+        this.#dismiss(interactionId, 'native-rejected');
         return CANCELLED_RESPONSE;
       }
       if (this.options.getTurnId() !== turnId) {
-        this.dismiss(interactionId, 'superseded');
+        this.#dismiss(interactionId, 'superseded');
         return CANCELLED_RESPONSE;
       }
 
-      this.dismiss(interactionId, 'resolved');
-      return mapAcpApprovalDecision(response.decision, request.options);
+      this.#dismiss(interactionId, 'resolved');
+      return mapACPApprovalDecision(response.decision, request.options);
     } catch {
-      this.dismiss(interactionId, 'cancelled');
+      this.#dismiss(interactionId, 'cancelled');
       return CANCELLED_RESPONSE;
     } finally {
       signal?.removeEventListener('abort', abortFromCaller);
@@ -120,7 +121,7 @@ export class AcpInteractionController {
 
   dismissAll(reason: ProviderInteractionDismissReason): void {
     for (const [interactionId, pending] of this.pending) {
-      this.dismiss(interactionId, reason);
+      this.#dismiss(interactionId, reason);
       pending.abortController.abort();
     }
   }
@@ -131,7 +132,7 @@ export class AcpInteractionController {
     this.dismissAll('session-disposed');
   }
 
-  private dismiss(
+  #dismiss(
     interactionId: string,
     reason: ProviderInteractionDismissReason,
   ): void {

@@ -6,27 +6,27 @@
 // JSON-RPC base
 // ---------------------------------------------------------------------------
 
-export interface JsonRpcRequest {
+export interface JSONRPCRequest {
   jsonrpc: '2.0';
   id: number;
   method: string;
   params?: unknown;
 }
 
-export interface JsonRpcNotification {
+export interface JSONRPCNotification {
   jsonrpc: '2.0';
   method: string;
   params?: unknown;
 }
 
-export interface JsonRpcResponse {
+export interface JSONRPCResponse {
   jsonrpc: '2.0';
   id: number;
   result?: unknown;
-  error?: JsonRpcError;
+  error?: JSONRPCError;
 }
 
-export interface JsonRpcError {
+export interface JSONRPCError {
   code: number;
   message: string;
   data?: unknown;
@@ -65,6 +65,8 @@ export interface Thread {
   updatedAt: number;
   name: string | null;
   modelProvider: string;
+  model?: string | null;
+  reasoningEffort?: string | null;
   source: string;
   agentNickname: string | null;
   agentRole: string | null;
@@ -84,6 +86,7 @@ export interface GitInfo {
 
 export interface Turn {
   id: string;
+  durationMs?: number | null;
   items: ThreadItem[];
   status: 'inProgress' | 'completed' | 'failed' | 'interrupted';
   error: TurnError | null;
@@ -108,8 +111,9 @@ export type ThreadItem =
   | FileChangeItem
   | ImageViewItem
   | WebSearchItem
+  | SubAgentActivityItem
   | CollabAgentToolCallItem
-  | McpToolCallItem
+  | MCPToolCallItem
   | DynamicToolCallItem
   | ContextCompactionItem;
 
@@ -120,6 +124,8 @@ export interface UserMessageItem {
 }
 
 export interface AgentMessageItem {
+  delivery?: 'async' | null;
+  questions?: Array<{ title: string; options: string[] | null }> | null;
   type: 'agentMessage';
   id: string;
   text: string;
@@ -215,6 +221,14 @@ export interface WebSearchItem {
   status?: string;
 }
 
+export interface SubAgentActivityItem {
+  type: 'subAgentActivity';
+  id: string;
+  kind: 'started' | 'interacted' | 'interrupted' | 'completed';
+  agentThreadId: string;
+  agentPath: string;
+}
+
 export interface CollabAgentToolCallItem {
   type: 'collabAgentToolCall';
   id: string;
@@ -222,9 +236,15 @@ export interface CollabAgentToolCallItem {
   status?: string;
   arguments?: Record<string, unknown>;
   result?: unknown;
+  senderThreadId?: string;
+  receiverThreadIds?: string[];
+  prompt?: string | null;
+  model?: string | null;
+  reasoningEffort?: string | null;
+  agentsStates?: Record<string, { status: string; message: string | null }>;
 }
 
-export interface McpToolCallItem {
+export interface MCPToolCallItem {
   type: 'mcpToolCall';
   id: string;
   server: string;
@@ -374,6 +394,7 @@ export interface ThreadStartParams {
   serviceTier?: string | null;
   baseInstructions?: string;
   experimentalRawEvents?: boolean;
+  ephemeral?: boolean;
   persistExtendedHistory?: boolean;
   sandboxPolicy?: SandboxPolicy;
   dynamicTools?: LegacyDynamicToolSpec[];
@@ -778,6 +799,22 @@ export interface PermissionsApprovalRequest {
 export interface PermissionsApprovalResponse {
   permissions: GrantedPermissionProfile;
   scope?: PermissionGrantScope;
+}
+
+// -- MCP elicitation (mcpServer/elicitation/request) -------------------------
+
+export interface MCPElicitationRequest {
+  threadId: string;
+  turnId: string | null;
+  serverName: string;
+  mode: 'form' | 'openai/form' | 'url';
+  message: string;
+  requestedSchema?: unknown;
+}
+
+export interface MCPElicitationResponse {
+  action: 'accept' | 'decline' | 'cancel';
+  content: Record<string, unknown> | null;
 }
 
 // -- Tool request user input (item/tool/requestUserInput) --------------------

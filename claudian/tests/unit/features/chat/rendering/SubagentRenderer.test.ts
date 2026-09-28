@@ -3,16 +3,12 @@ import { setIcon } from 'obsidian';
 
 import type { SubagentInfo, ToolCallInfo } from '@/core/types';
 import {
-  addSubagentToolCall,
   createAsyncSubagentBlock,
   createSubagentBlock,
-  finalizeAsyncSubagent,
-  finalizeSubagentBlock,
-  markAsyncSubagentOrphaned,
   renderStoredAsyncSubagent,
   renderStoredSubagent,
-  updateAsyncSubagentRunning,
-  updateSubagentToolResult,
+  updateAsyncSubagentBlock,
+  updateSubagentBlock,
 } from '@/features/chat/rendering/SubagentRenderer';
 
 const getTextByClass = (el: MockElement, cls: string): string[] => {
@@ -36,130 +32,50 @@ describe('Sync Subagent Renderer', () => {
   });
 
   describe('createSubagentBlock', () => {
-    it('should start collapsed by default', () => {
-      const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
+    it('should toggle expand/collapse on header click', () => {
+      const state = createSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, ...{ description: 'Test task' } });
 
-      expect(state.info.isExpanded).toBe(false);
-      expect((state.wrapperEl as any).hasClass('expanded')).toBe(false);
-    });
-
-    it('should set aria-expanded to false by default', () => {
-      const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
-
+      // Initially collapsed
       expect(state.headerEl.getAttribute('aria-expanded')).toBe('false');
-    });
-
-    it('should hide content by default', () => {
-      const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
-
+      expect((state.wrapperEl as any).hasClass('expanded')).toBe(false);
       expect((state.contentEl as any).style.display).toBe('none');
-    });
-
-    it('should set correct ARIA attributes for accessibility', () => {
-      const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
 
       expect(state.headerEl.getAttribute('role')).toBe('button');
       expect(state.headerEl.getAttribute('tabindex')).toBe('0');
       expect(state.headerEl.getAttribute('aria-expanded')).toBe('false');
       expect(state.headerEl.getAttribute('aria-label')).toContain('click to expand');
-    });
-
-    it('should toggle expand/collapse on header click', () => {
-      const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
-
-      // Initially collapsed
-      expect(state.info.isExpanded).toBe(false);
-      expect((state.wrapperEl as any).hasClass('expanded')).toBe(false);
-      expect((state.contentEl as any).style.display).toBe('none');
 
       // Trigger click
       (state.headerEl as any).click();
 
       // Should be expanded
-      expect(state.info.isExpanded).toBe(true);
+      expect(state.headerEl.getAttribute('aria-expanded')).toBe('true');
       expect((state.wrapperEl as any).hasClass('expanded')).toBe(true);
       expect((state.contentEl as any).hasClass('claudian-hidden')).toBe(false);
+      expect(state.headerEl.getAttribute('aria-expanded')).toBe('true');
 
       // Click again to collapse
       (state.headerEl as any).click();
-      expect(state.info.isExpanded).toBe(false);
+      expect(state.headerEl.getAttribute('aria-expanded')).toBe('false');
       expect((state.wrapperEl as any).hasClass('expanded')).toBe(false);
       expect((state.contentEl as any).style.display).toBe('none');
-    });
-
-    it('should update aria-expanded on toggle', () => {
-      const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
-
-      // Initially collapsed
-      expect(state.headerEl.getAttribute('aria-expanded')).toBe('false');
-
-      // Expand
-      (state.headerEl as any).click();
-      expect(state.headerEl.getAttribute('aria-expanded')).toBe('true');
-
-      // Collapse
-      (state.headerEl as any).click();
       expect(state.headerEl.getAttribute('aria-expanded')).toBe('false');
     });
 
     it('should show description in label', () => {
-      const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'My task description' });
+      const state = createSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, ...{ description: 'My task description' } });
 
       expect(state.labelEl.textContent).toBe('My task description');
     });
 
     it('should not show a tool count badge in the header', () => {
-      const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
+      const state = createSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, ...{ description: 'Test task' } });
 
       expect(getTextByClass(state.wrapperEl as any, 'claudian-subagent-count')).toEqual([]);
     });
   });
 
   describe('renderStoredSubagent', () => {
-    it('should start collapsed by default', () => {
-      const subagent: SubagentInfo = {
-        id: 'task-1',
-        description: 'Test task',
-        status: 'completed',
-        toolCalls: [],
-        isExpanded: false,
-      };
-
-      const wrapperEl = renderStoredSubagent(parentEl as any, subagent);
-
-      expect((wrapperEl as any).hasClass('expanded')).toBe(false);
-    });
-
-    it('should set aria-expanded to false by default', () => {
-      const subagent: SubagentInfo = {
-        id: 'task-1',
-        description: 'Test task',
-        status: 'completed',
-        toolCalls: [],
-        isExpanded: false,
-      };
-
-      const wrapperEl = renderStoredSubagent(parentEl as any, subagent);
-
-      const headerEl = (wrapperEl as any).children[0];
-      expect(headerEl.getAttribute('aria-expanded')).toBe('false');
-    });
-
-    it('should hide content by default', () => {
-      const subagent: SubagentInfo = {
-        id: 'task-1',
-        description: 'Test task',
-        status: 'completed',
-        toolCalls: [],
-        isExpanded: false,
-      };
-
-      const wrapperEl = renderStoredSubagent(parentEl as any, subagent);
-
-      const contentEl = (wrapperEl as any).children[1];
-      expect(contentEl.style.display).toBe('none');
-    });
-
     it('should toggle expand/collapse on click', () => {
       const subagent: SubagentInfo = {
         id: 'task-1',
@@ -176,6 +92,8 @@ describe('Sync Subagent Renderer', () => {
       // Initially collapsed
       expect((wrapperEl as any).hasClass('expanded')).toBe(false);
       expect(contentEl.style.display).toBe('none');
+
+      expect(headerEl.getAttribute('aria-expanded')).toBe('false');
 
       // Click to expand
       headerEl.click();
@@ -201,32 +119,21 @@ describe('keyboard navigation', () => {
   });
 
   it('should support keyboard navigation (Enter/Space) on createSubagentBlock', () => {
-    const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
+    const state = createSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, ...{ description: 'Test task' } });
 
-    // Simulate keydown event
-    const keydownHandlers: Array<(e: any) => void> = [];
-    const originalAddEventListener = state.headerEl.addEventListener;
-    state.headerEl.addEventListener = (event: string, handler: (e: any) => void) => {
-      if (event === 'keydown') {
-        keydownHandlers.push(handler);
-      }
-      originalAddEventListener.call(state.headerEl, event, handler);
-    };
-
-    // Re-check - the handler should already be registered
-    // We need to dispatch a keydown event
+    // Enter expands the registered header.
     const enterEvent = { key: 'Enter', preventDefault: jest.fn() };
     (state.headerEl as any).dispatchEvent({ type: 'keydown', ...enterEvent });
 
     // The handler should have been called and expanded
-    expect(state.info.isExpanded).toBe(true);
+    expect(state.headerEl.getAttribute('aria-expanded')).toBe('true');
     expect((state.wrapperEl as any).hasClass('expanded')).toBe(true);
 
     // Space to collapse
     const spaceEvent = { key: ' ', preventDefault: jest.fn() };
     (state.headerEl as any).dispatchEvent({ type: 'keydown', ...spaceEvent });
 
-    expect(state.info.isExpanded).toBe(false);
+    expect(state.headerEl.getAttribute('aria-expanded')).toBe('false');
     expect((state.wrapperEl as any).hasClass('expanded')).toBe(false);
   });
 
@@ -265,65 +172,44 @@ describe('Async Subagent Renderer', () => {
   });
 
   describe('inline display behavior', () => {
-    it('should start collapsed', () => {
-      const state = createAsyncSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
-
-      expect(state.info.isExpanded).toBe(false);
-      expect((state.wrapperEl as any).hasClass('expanded')).toBe(false);
-    });
-
-    it('should have aria-label indicating expand action', () => {
-      const state = createAsyncSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
-
-      expect(state.headerEl.getAttribute('aria-label')).toContain('click to expand');
-    });
-
-    it('should expand content when header is clicked', () => {
-      const state = createAsyncSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
-
-      // Initially collapsed
-      expect(state.info.isExpanded).toBe(false);
-
-      // Trigger click to expand
-      (state.headerEl as any).click();
-
-      expect(state.info.isExpanded).toBe(true);
-      expect((state.wrapperEl as any).hasClass('expanded')).toBe(true);
-    });
-
     it('should toggle expansion on repeated clicks', () => {
-      const state = createAsyncSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
+      const state = createAsyncSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, mode: 'async', asyncStatus: 'pending', ...{ description: 'Test task' } });
+
+      expect(state.headerEl.getAttribute('aria-expanded')).toBe('false');
+      expect((state.wrapperEl as any).hasClass('expanded')).toBe(false);
+      expect(state.headerEl.getAttribute('aria-label')).toContain('click to expand');
 
       // Click to expand
       (state.headerEl as any).click();
-      expect(state.info.isExpanded).toBe(true);
+      expect(state.headerEl.getAttribute('aria-expanded')).toBe('true');
+      expect((state.wrapperEl as any).hasClass('expanded')).toBe(true);
 
       // Click to collapse
       (state.headerEl as any).click();
-      expect(state.info.isExpanded).toBe(false);
+      expect(state.headerEl.getAttribute('aria-expanded')).toBe('false');
     });
 
     it('should expand when Enter key is pressed', () => {
-      const state = createAsyncSubagentBlock(parentEl as any, 'task-1', { description: 'Test' });
+      const state = createAsyncSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, mode: 'async', asyncStatus: 'pending', ...{ description: 'Test' } });
 
       const enterEvent = { key: 'Enter', preventDefault: jest.fn() };
       (state.headerEl as any).dispatchEvent({ type: 'keydown', ...enterEvent });
 
-      expect(state.info.isExpanded).toBe(true);
+      expect(state.headerEl.getAttribute('aria-expanded')).toBe('true');
     });
 
     it('should expand when Space key is pressed', () => {
-      const state = createAsyncSubagentBlock(parentEl as any, 'task-1', { description: 'Test' });
+      const state = createAsyncSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, mode: 'async', asyncStatus: 'pending', ...{ description: 'Test' } });
 
       const spaceEvent = { key: ' ', preventDefault: jest.fn() };
       (state.headerEl as any).dispatchEvent({ type: 'keydown', ...spaceEvent });
 
-      expect(state.info.isExpanded).toBe(true);
+      expect(state.headerEl.getAttribute('aria-expanded')).toBe('true');
     });
   });
 
   it('shows label immediately and initializing status text', () => {
-    const state = createAsyncSubagentBlock(parentEl as any, 'task-1', { description: 'Background job' });
+    const state = createAsyncSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, mode: 'async', asyncStatus: 'pending', ...{ description: 'Background job' } });
 
     expect(state.labelEl.textContent).toBe('Background job');
     expect(state.statusTextEl.textContent).toBe('Initializing');
@@ -331,9 +217,9 @@ describe('Async Subagent Renderer', () => {
   });
 
   it('shows prompt in content and keeps label visible while running', () => {
-    const state = createAsyncSubagentBlock(parentEl as any, 'task-2', { description: 'Background job', prompt: 'Do the work' });
+    const state = createAsyncSubagentBlock(parentEl as any, { id: 'task-2', status: 'running', toolCalls: [], isExpanded: false, mode: 'async', asyncStatus: 'pending', ...{ description: 'Background job', prompt: 'Do the work' } });
 
-    updateAsyncSubagentRunning(state, 'agent-xyz');
+    updateAsyncSubagentBlock(state, { ...state.info, agentId: 'agent-xyz', asyncStatus: 'running' });
 
     expect(state.labelEl.textContent).toBe('Background job');
     expect(state.statusTextEl.textContent).toBe('Running in background');
@@ -343,7 +229,7 @@ describe('Async Subagent Renderer', () => {
   });
 
   it('finalizes to completed and reveals description', () => {
-    const state = createAsyncSubagentBlock(parentEl as any, 'task-3', { description: 'Background job' });
+    const state = createAsyncSubagentBlock(parentEl as any, { id: 'task-3', status: 'running', toolCalls: [], isExpanded: false, mode: 'async', asyncStatus: 'pending', ...{ description: 'Background job' } });
     state.info.toolCalls.push(
       {
         id: 'tool-1',
@@ -362,10 +248,10 @@ describe('Async Subagent Renderer', () => {
         isExpanded: false,
       }
     );
-    updateAsyncSubagentRunning(state, 'agent-complete');
+    updateAsyncSubagentBlock(state, { ...state.info, agentId: 'agent-complete', asyncStatus: 'running' });
 
     (setIcon as jest.Mock).mockClear();
-    finalizeAsyncSubagent(state, 'all done', false);
+    updateAsyncSubagentBlock(state, { ...state.info, result: 'all done', status: 'completed', asyncStatus: 'completed' });
 
     expect(state.labelEl.textContent).toBe('Background job');
     expect(state.statusTextEl.textContent).toBe('');
@@ -376,12 +262,12 @@ describe('Async Subagent Renderer', () => {
     expect(lastIcon?.[1]).toBe('check');
   });
 
-  it('finalizes to error and truncates error message', () => {
-    const state = createAsyncSubagentBlock(parentEl as any, 'task-4', { description: 'Background job' });
-    updateAsyncSubagentRunning(state, 'agent-error');
+  it('finalizes to error and displays result text', () => {
+    const state = createAsyncSubagentBlock(parentEl as any, { id: 'task-4', status: 'running', toolCalls: [], isExpanded: false, mode: 'async', asyncStatus: 'pending', ...{ description: 'Background job' } });
+    updateAsyncSubagentBlock(state, { ...state.info, agentId: 'agent-error', asyncStatus: 'running' });
 
     (setIcon as jest.Mock).mockClear();
-    finalizeAsyncSubagent(state, 'failure happened', true);
+    updateAsyncSubagentBlock(state, { ...state.info, result: 'failure happened', status: 'error', asyncStatus: 'error' });
 
     expect(state.statusTextEl.textContent).toBe('Error');
     expect((state.wrapperEl as any).hasClass('error')).toBe(true);
@@ -392,9 +278,9 @@ describe('Async Subagent Renderer', () => {
   });
 
   it('marks async subagent as orphaned', () => {
-    const state = createAsyncSubagentBlock(parentEl as any, 'task-5', { description: 'Background job' });
+    const state = createAsyncSubagentBlock(parentEl as any, { id: 'task-5', status: 'running', toolCalls: [], isExpanded: false, mode: 'async', asyncStatus: 'pending', ...{ description: 'Background job' } });
 
-    markAsyncSubagentOrphaned(state);
+    updateAsyncSubagentBlock(state, { ...state.info, status: 'error', asyncStatus: 'orphaned' });
 
     expect(state.statusTextEl.textContent).toBe('Orphaned');
     expect((state.wrapperEl as any).hasClass('orphaned')).toBe(true);
@@ -403,43 +289,6 @@ describe('Async Subagent Renderer', () => {
   });
 
   describe('renderStoredAsyncSubagent', () => {
-    it('should return wrapper element', () => {
-      const subagent: SubagentInfo = {
-        id: 'task-1',
-        description: 'Test task',
-        status: 'completed',
-        toolCalls: [],
-        isExpanded: false,
-        mode: 'async',
-        asyncStatus: 'completed',
-      };
-
-      const wrapperEl = renderStoredAsyncSubagent(parentEl as any, subagent);
-
-      expect(wrapperEl).toBeDefined();
-      expect((wrapperEl as any).hasClass('claudian-subagent-list')).toBe(true);
-    });
-
-    it('should expand content when header is clicked', () => {
-      const subagent: SubagentInfo = {
-        id: 'task-1',
-        description: 'Test task',
-        status: 'completed',
-        toolCalls: [],
-        isExpanded: false,
-        mode: 'async',
-        asyncStatus: 'completed',
-      };
-
-      const wrapperEl = renderStoredAsyncSubagent(parentEl as any, subagent);
-      const headerEl = (wrapperEl as any).children[0];
-
-      // Click to expand
-      headerEl.click();
-
-      expect((wrapperEl as any).hasClass('expanded')).toBe(true);
-    });
-
     it('should expand on Enter key', () => {
       const subagent: SubagentInfo = {
         id: 'task-1',
@@ -460,23 +309,6 @@ describe('Async Subagent Renderer', () => {
       expect((wrapperEl as any).hasClass('expanded')).toBe(true);
     });
 
-    it('should have aria-label indicating expand action', () => {
-      const subagent: SubagentInfo = {
-        id: 'task-1',
-        description: 'Test task',
-        status: 'completed',
-        toolCalls: [],
-        isExpanded: false,
-        mode: 'async',
-        asyncStatus: 'completed',
-      };
-
-      const wrapperEl = renderStoredAsyncSubagent(parentEl as any, subagent);
-      const headerEl = (wrapperEl as any).children[0];
-
-      expect(headerEl.getAttribute('aria-label')).toContain('click to expand');
-    });
-
     it('should toggle expansion on repeated clicks', () => {
       const subagent: SubagentInfo = {
         id: 'task-1',
@@ -489,7 +321,10 @@ describe('Async Subagent Renderer', () => {
       };
 
       const wrapperEl = renderStoredAsyncSubagent(parentEl as any, subagent);
+      expect(wrapperEl).toBeDefined();
+      expect((wrapperEl as any).hasClass('claudian-subagent-list')).toBe(true);
       const headerEl = (wrapperEl as any).children[0];
+      expect(headerEl.getAttribute('aria-label')).toContain('click to expand');
 
       // Click to expand
       headerEl.click();
@@ -559,7 +394,7 @@ describe('Async Subagent Renderer', () => {
       expect(contentText).toContain('Do some work');
     });
 
-    it('renders pending status as running', () => {
+    it('renders pending status consistently with live cards', () => {
       const subagent: SubagentInfo = {
         id: 'task-1',
         description: 'Pending task',
@@ -572,13 +407,13 @@ describe('Async Subagent Renderer', () => {
 
       const wrapperEl = renderStoredAsyncSubagent(parentEl as any, subagent);
 
-      // pending maps to running display status
-      expect((wrapperEl as any).hasClass('running')).toBe(true);
+      // Pending cards retain their initializing state.
+      expect((wrapperEl as any).hasClass('pending')).toBe(true);
     });
   });
 });
 
-describe('addSubagentToolCall', () => {
+describe('tool snapshots', () => {
   let parentEl: MockElement;
 
   beforeEach(() => {
@@ -586,25 +421,8 @@ describe('addSubagentToolCall', () => {
     parentEl = createMockEl('div');
   });
 
-  it('adds tool call to state without rendering a header count', () => {
-    const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
-
-    const toolCall: ToolCallInfo = {
-      id: 'tool-1',
-      name: 'Read',
-      input: { file_path: 'test.md' },
-      status: 'running',
-      isExpanded: false,
-    };
-
-    addSubagentToolCall(state, toolCall);
-
-    expect(state.info.toolCalls).toHaveLength(1);
-    expect(getTextByClass(state.wrapperEl as any, 'claudian-subagent-count')).toEqual([]);
-  });
-
-  it('clears previous content and renders new tool item', () => {
-    const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
+  it('retains distinct tool calls without rendering a header count', () => {
+    const state = createSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, ...{ description: 'Test task' } });
 
     const toolCall1: ToolCallInfo = {
       id: 'tool-1',
@@ -613,7 +431,9 @@ describe('addSubagentToolCall', () => {
       status: 'running',
       isExpanded: false,
     };
-    addSubagentToolCall(state, toolCall1);
+    updateSubagentBlock(state, { ...state.info, toolCalls: [...state.info.toolCalls, toolCall1] });
+    expect(state.info.toolCalls).toHaveLength(1);
+    expect(getTextByClass(state.wrapperEl as any, 'claudian-subagent-count')).toEqual([]);
 
     const toolCall2: ToolCallInfo = {
       id: 'tool-2',
@@ -622,30 +442,30 @@ describe('addSubagentToolCall', () => {
       status: 'running',
       isExpanded: false,
     };
-    addSubagentToolCall(state, toolCall2);
+    updateSubagentBlock(state, { ...state.info, toolCalls: [...state.info.toolCalls, toolCall2] });
 
     expect(state.info.toolCalls).toHaveLength(2);
     expect(getTextByClass(state.wrapperEl as any, 'claudian-subagent-count')).toEqual([]);
   });
 
-  it('merges repeated tool IDs instead of duplicating tool rows', () => {
-    const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
+  it('updates the same tool row from successive snapshots', () => {
+    const state = createSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, ...{ description: 'Test task' } });
 
-    addSubagentToolCall(state, {
+    updateSubagentBlock(state, { ...state.info, toolCalls: [...state.info.toolCalls, {
       id: 'tool-1',
       name: 'Write',
       input: {},
       status: 'running',
       isExpanded: false,
-    });
+    }] });
 
-    addSubagentToolCall(state, {
+    updateSubagentBlock(state, { ...state.info, toolCalls: [{
       id: 'tool-1',
       name: 'Write',
       input: { file_path: 'notes.md' },
       status: 'running',
       isExpanded: false,
-    });
+    }] });
 
     expect(state.info.toolCalls).toHaveLength(1);
     expect(state.info.toolCalls[0]).toEqual(
@@ -660,7 +480,7 @@ describe('addSubagentToolCall', () => {
   });
 });
 
-describe('updateSubagentToolResult', () => {
+describe('tool result snapshots', () => {
   let parentEl: MockElement;
 
   beforeEach(() => {
@@ -669,7 +489,7 @@ describe('updateSubagentToolResult', () => {
   });
 
   it('updates tool call status in state', () => {
-    const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
+    const state = createSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, ...{ description: 'Test task' } });
 
     const toolCall: ToolCallInfo = {
       id: 'tool-1',
@@ -678,20 +498,20 @@ describe('updateSubagentToolResult', () => {
       status: 'running',
       isExpanded: false,
     };
-    addSubagentToolCall(state, toolCall);
+    updateSubagentBlock(state, { ...state.info, toolCalls: [...state.info.toolCalls, toolCall] });
 
     const updatedToolCall: ToolCallInfo = {
       ...toolCall,
       status: 'completed',
       result: 'File contents here',
     };
-    updateSubagentToolResult(state, 'tool-1', updatedToolCall);
+    updateSubagentBlock(state, { ...state.info, toolCalls: [updatedToolCall] });
 
     expect(state.info.toolCalls[0].status).toBe('completed');
   });
 
-  it('does not update tool call for non-matching tool ID', () => {
-    const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
+  it('removes tool rows absent from the next snapshot', () => {
+    const state = createSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, ...{ description: 'Test task' } });
 
     const toolCall: ToolCallInfo = {
       id: 'tool-1',
@@ -700,15 +520,15 @@ describe('updateSubagentToolResult', () => {
       status: 'running',
       isExpanded: false,
     };
-    addSubagentToolCall(state, toolCall);
+    updateSubagentBlock(state, { ...state.info, toolCalls: [...state.info.toolCalls, toolCall] });
 
-    updateSubagentToolResult(state, 'tool-999', { ...toolCall, id: 'tool-999', status: 'completed' });
+    updateSubagentBlock(state, { ...state.info, toolCalls: [] });
 
-    expect(state.info.toolCalls[0].status).toBe('running');
+    expect(state.toolElements.size).toBe(0);
   });
 });
 
-describe('finalizeSubagentBlock', () => {
+describe('terminal snapshots', () => {
   let parentEl: MockElement;
 
   beforeEach(() => {
@@ -717,10 +537,10 @@ describe('finalizeSubagentBlock', () => {
   });
 
   it('sets status to completed and adds done class', () => {
-    const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
+    const state = createSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, ...{ description: 'Test task' } });
 
     (setIcon as jest.Mock).mockClear();
-    finalizeSubagentBlock(state, 'All done', false);
+    updateSubagentBlock(state, { ...state.info, result: 'All done', status: 'completed' });
 
     expect(state.info.status).toBe('completed');
     expect(state.info.result).toBe('All done');
@@ -729,63 +549,56 @@ describe('finalizeSubagentBlock', () => {
   });
 
   it('sets status to error and adds error class', () => {
-    const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
+    const state = createSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, ...{ description: 'Test task' } });
 
     (setIcon as jest.Mock).mockClear();
-    finalizeSubagentBlock(state, 'Something failed', true);
+    updateSubagentBlock(state, { ...state.info, result: 'Something failed', status: 'error' });
 
     expect(state.info.status).toBe('error');
     expect(state.info.result).toBe('Something failed');
     expect((state.wrapperEl as any).hasClass('error')).toBe(true);
     expect(setIcon).toHaveBeenCalledWith(expect.anything(), 'x');
+    const errorText = getTextByClass(state.contentEl as any, 'claudian-subagent-result-output')[0];
+    expect(errorText).toBe('Something failed');
   });
 
-  it('keeps tool history and shows result section text', () => {
-    const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
+  it('shows result section text after a task with tools', () => {
+    const state = createSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, ...{ description: 'Test task' } });
 
     // Add a tool call first to populate content
-    addSubagentToolCall(state, {
+    updateSubagentBlock(state, { ...state.info, toolCalls: [...state.info.toolCalls, {
       id: 'tool-1',
       name: 'Read',
       input: { file_path: 'test.md' },
       status: 'running',
       isExpanded: false,
-    });
+    }] });
 
-    finalizeSubagentBlock(state, 'Done', false);
+    updateSubagentBlock(state, { ...state.info, result: 'Done', status: 'completed' });
 
     const doneText = getTextByClass(state.contentEl as any, 'claudian-subagent-result-output')[0];
     expect(doneText).toBe('Done');
   });
 
-  it('shows ERROR text when isError is true', () => {
-    const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
-
-    finalizeSubagentBlock(state, 'Error occurred', true);
-
-    const errorText = getTextByClass(state.contentEl as any, 'claudian-subagent-result-output')[0];
-    expect(errorText).toBe('Error occurred');
-  });
-
   it('does not restore a tool count badge after finalization', () => {
-    const state = createSubagentBlock(parentEl as any, 'task-1', { description: 'Test task' });
+    const state = createSubagentBlock(parentEl as any, { id: 'task-1', status: 'running', toolCalls: [], isExpanded: false, ...{ description: 'Test task' } });
 
-    addSubagentToolCall(state, {
+    updateSubagentBlock(state, { ...state.info, toolCalls: [...state.info.toolCalls, {
       id: 'tool-1',
       name: 'Read',
       input: {},
       status: 'running',
       isExpanded: false,
-    });
-    addSubagentToolCall(state, {
+    }] });
+    updateSubagentBlock(state, { ...state.info, toolCalls: [...state.info.toolCalls, {
       id: 'tool-2',
       name: 'Grep',
       input: {},
       status: 'running',
       isExpanded: false,
-    });
+    }] });
 
-    finalizeSubagentBlock(state, 'Done', false);
+    updateSubagentBlock(state, { ...state.info, result: 'Done', status: 'completed' });
 
     expect(getTextByClass(state.wrapperEl as any, 'claudian-subagent-count')).toEqual([]);
   });
@@ -835,7 +648,7 @@ describe('renderStoredSubagent status variants', () => {
     expect(errorText).toBe('ERROR');
   });
 
-  it('renders running subagent with tool list', () => {
+  it('keeps running stored subagents free of terminal classes', () => {
     const subagent: SubagentInfo = {
       id: 'task-1',
       description: 'Running task',

@@ -6,98 +6,53 @@ import {
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
-import type {
-  ProviderSessionConfig,
-  ProviderSystemInstructions,
-} from '@/core/execution';
-import type { SystemPromptSettings } from '@/core/prompt/mainAgent';
-import type { ProviderHost } from '@/core/providers/ProviderHost';
+import { resolveTitleGenerationLocale } from '@/core/prompt/titleGeneration';
 import {
-  AcpClientConnection,
-  AcpInteractionController,
-  AcpJsonRpcTransport,
-  type AcpPermissionPresentation,
-  type AcpPromptRequest,
-  type AcpPromptResponse,
-  type AcpReadTextFileRequest,
-  type AcpRequestPermissionRequest,
-  type AcpRequestPermissionResponse,
-  type AcpSessionConfigOption,
-  type AcpSessionModelState,
-  type AcpSessionModeState,
-  type AcpSessionNotification,
-  AcpSubprocess,
-  type AcpWriteTextFileRequest,
-  JsonRpcErrorResponse,
-  resolveAcpLoadSessionId,
+  ACPClientConnection,
+  ACPInteractionController,
+  ACPJSONRPCTransport,
+  type ACPPermissionPresentation,
+  type ACPPromptRequest,
+  type ACPPromptResponse,
+  type ACPReadTextFileRequest,
+  type ACPRequestPermissionRequest,
+  type ACPRequestPermissionResponse,
+  type ACPSessionConfigOption,
+  ACPSubprocess,
+  type ACPWriteTextFileRequest,
+  JSONRPCErrorResponse,
+  mapACPApprovalDecision,
+  resolveACPLoadSessionId,
 } from '@/providers/acp';
 import { getEnhancedPath } from '@/utils/env';
 
+import { OPENCODE_YOLO_MODE_ID } from '../modes';
+import { getSystemPromptSettings } from '../runtime/OpencodeExecutionAgents';
 import {
-  type OpencodeManagedAgentConfig,
   prepareOpencodeLaunchArtifacts,
 } from '../runtime/OpencodeLaunchArtifacts';
 import { buildOpencodeRuntimeEnv } from '../runtime/OpencodeRuntimeEnvironment';
+import { assertOpencodeSessionCompatibility, detectOpencodeNativeVersion, parseOpencodeNativeVersion } from '../runtime/OpencodeVersion';
+import {
+  type OpencodeExecutionProfile, type OpencodeKernelConnectOptions, type OpencodeNativeSessionInfo,
+  type OpencodeSessionKernel as OpencodeACPSessionKernel,
+  type OpencodeSessionKernelOptions as OpencodeACPSessionKernelOptions,
+  OpencodeSessionMissingError,
+} from './OpencodeSessionContract';
 
-export type OpencodeExecutionProfile = 'managed' | 'passive' | 'readonly';
-
-export interface OpencodeKernelConnectOptions {
-  readonly profile: OpencodeExecutionProfile;
-  readonly systemInstructions: ProviderSystemInstructions;
-}
-
-export interface OpencodeNativeSessionInfo {
-  readonly sessionId: string;
-  readonly databasePath: string | null;
-  readonly configOptions?: AcpSessionConfigOption[] | null;
-  readonly models?: AcpSessionModelState | null;
-  readonly modes?: AcpSessionModeState | null;
-}
-
-export interface OpencodeAcpSessionKernelOptions {
-  readonly artifactsSubdir?: string;
-  readonly config: ProviderSessionConfig;
-  readonly databasePath?: string;
-  readonly getActiveTurnId: () => string | null;
-  readonly onClosed: (error: Error) => void;
-  readonly onNotification: (notification: AcpSessionNotification) => void;
-  readonly plugin: ProviderHost;
-  readonly sessionInstanceId: string;
-}
-
-export interface OpencodeAcpSessionKernel {
-  connect(options: OpencodeKernelConnectOptions): Promise<void>;
-  openSession(resumeSessionId?: string): Promise<OpencodeNativeSessionInfo>;
-  setConfigOption(request: Record<string, unknown>): Promise<{
-    configOptions?: AcpSessionConfigOption[] | null;
-  }>;
-  prompt(request: AcpPromptRequest): Promise<Pick<
-    AcpPromptResponse,
-    'usage' | 'userMessageId'
-  > & Partial<Pick<AcpPromptResponse, 'stopReason'>>>;
-  cancel(sessionId: string): void;
-  dispose(): Promise<void>;
-}
-
-export class OpencodeSessionMissingError extends Error {
-  readonly name = 'OpencodeSessionMissingError';
-
-  constructor(
-    readonly sessionId: string,
-    readonly providerError: unknown,
-  ) {
-    super(providerError instanceof Error
-      ? providerError.message
-      : 'OpenCode session is missing');
-  }
-}
+export type {
+  OpencodeSessionKernel as OpencodeACPSessionKernel,
+  OpencodeSessionKernelOptions as OpencodeACPSessionKernelOptions,
+  OpencodeExecutionProfile, OpencodeKernelConnectOptions, OpencodeNativeSessionInfo,
+} from './OpencodeSessionContract';
+export { OpencodeSessionMissingError } from './OpencodeSessionContract';
 
 export function classifyOpencodeSessionLoadError(
   error: unknown,
   attemptedSessionId: string,
 ): unknown {
   if (
-    !(error instanceof JsonRpcErrorResponse)
+    !(error instanceof JSONRPCErrorResponse)
     || (error.method !== 'session/load' && error.method !== 'loadSession')
   ) {
     return error;
@@ -120,31 +75,30 @@ export function classifyOpencodeSessionLoadError(
     : error;
 }
 
-const AUX_AGENT_IDS: Record<Exclude<OpencodeExecutionProfile, 'managed'>, string> = {
-  passive: 'claudian-execution-passive',
-  readonly: 'claudian-execution-readonly',
-};
+export interface OpencodeLaunchContext {
+  cliPath: string;
+  environment: NodeJS.ProcessEnv;
+  version: 1 | 2 | undefined;
+}
 
-const READ_PERMISSION = Object.freeze({
-  '*': 'allow',
-  '*.env': 'deny',
-  '*.env.*': 'deny',
-  '*.env.example': 'allow',
-});
-
-export class DefaultOpencodeAcpSessionKernel
-  implements OpencodeAcpSessionKernel {
-  private connection: AcpClientConnection | null = null;
-  private process: AcpSubprocess | null = null;
-  private transport: AcpJsonRpcTransport | null = null;
-  private interactionController: AcpInteractionController | null = null;
+export class DefaultOpencodeACPSessionKernel
+  implements OpencodeACPSessionKernel {
+  private connection: ACPClientConnection | null = null;
+  private process: ACPSubprocess | null = null;
+  private transport: ACPJSONRPCTransport | null = null;
+  private interactionController: ACPInteractionController | null = null;
+  private nativeVersion: 1 | 2 | undefined;
   private databasePath: string | null = null;
   private profile: OpencodeExecutionProfile = 'managed';
   private disposed = false;
+  private autoApprove = false;
   private connectPromise: Promise<void> | null = null;
   private disposePromise: Promise<void> | null = null;
 
-  constructor(private readonly options: OpencodeAcpSessionKernelOptions) {}
+  constructor(
+    private readonly options: OpencodeACPSessionKernelOptions,
+    private readonly launchContext?: OpencodeLaunchContext,
+  ) {}
 
   connect(options: OpencodeKernelConnectOptions): Promise<void> {
     if (this.disposed) {
@@ -161,80 +115,78 @@ export class DefaultOpencodeAcpSessionKernel
     });
     this.connectPromise = pending;
     pending.then(
-      () => this.clearConnectPromise(pending),
-      () => this.clearConnectPromise(pending),
+      () => this.#clearConnectPromise(pending),
+      () => this.#clearConnectPromise(pending),
     );
-    void this.connectInternal(options).then(resolve, reject);
+    void this.#connectInternal(options).then(resolve, reject);
     return pending;
   }
 
-  private async connectInternal(
+  async #connectInternal(
     options: OpencodeKernelConnectOptions,
   ): Promise<void> {
     this.profile = options.profile;
     try {
-      const cliPath = await this.options.plugin
-        .getResolvedProviderCliPath('opencode') ?? 'opencode';
-      this.assertNotDisposed();
-      const runtimeEnv = buildOpencodeRuntimeEnv(
+      const cliPath = this.launchContext?.cliPath
+        ?? await this.options.plugin.getResolvedProviderCliPath('opencode') ?? 'opencode';
+      this.#assertNotDisposed();
+      const runtimeEnv = this.launchContext?.environment ?? buildOpencodeRuntimeEnv(
         this.options.plugin.settings,
         cliPath,
         this.options.databasePath,
       );
+      this.nativeVersion = this.launchContext
+        ? this.launchContext.version
+        : await detectOpencodeNativeVersion(cliPath, runtimeEnv);
+      this.#assertNotDisposed();
+      assertOpencodeSessionCompatibility(this.options.nativeVersion, this.nativeVersion);
       const artifacts = await prepareOpencodeLaunchArtifacts({
-        artifactsSubdir: this.options.artifactsSubdir
-          ?? `opencode/execution/${this.options.sessionInstanceId}`,
-        ...(options.profile === 'managed'
-          ? {}
-          : {
-            defaultAgentId: AUX_AGENT_IDS[options.profile],
-            managedAgents: [buildAgentConfig(options.profile)],
-          }),
+        profile: options.profile,
+        settings: getSystemPromptSettings(this.options.plugin, this.options.config.vaultWorkingDirectory),
+        titleLocale: resolveTitleGenerationLocale(this.options.plugin.settings),
         runtimeEnv,
+        nativeVersion: this.nativeVersion,
         ...(options.systemInstructions.kind === 'explicit'
           ? {
             systemPromptKey: options.systemInstructions.instructions,
             systemPromptText: options.systemInstructions.instructions,
           }
           : {
-            settings: getSystemPromptSettings(
-              this.options.plugin,
-              this.options.config.vaultWorkingDirectory,
-            ),
+            dynamicSystemPromptSections: options.systemInstructions.dynamicSections,
           }),
         workspaceRoot: this.options.config.vaultWorkingDirectory,
       });
-      this.assertNotDisposed();
+      this.#assertNotDisposed();
       this.databasePath = artifacts.databasePath;
 
       const processEnv: NodeJS.ProcessEnv = {
         ...process.env,
         ...runtimeEnv,
-        OPENCODE_CONFIG: artifacts.configPath,
+        OPENCODE_CONFIG: artifacts.nativeConfigPath,
         OPENCODE_CONFIG_CONTENT: artifacts.configContent,
         PATH: getEnhancedPath(
           runtimeEnv.PATH,
           path.isAbsolute(cliPath) ? cliPath : undefined,
         ),
       };
-      const subprocess = new AcpSubprocess({
-        args: ['acp', `--cwd=${this.options.config.vaultWorkingDirectory}`],
+      const subprocess = new ACPSubprocess({
+        args: ['acp'],
         command: cliPath,
         cwd: this.options.config.vaultWorkingDirectory,
         env: processEnv,
       });
       this.process = subprocess;
-      this.assertNotDisposed();
+      this.#assertNotDisposed();
       subprocess.start();
-      this.assertNotDisposed();
+      this.#assertNotDisposed();
 
-      const transport = new AcpJsonRpcTransport({
+      const transport = new ACPJSONRPCTransport({
         input: subprocess.stdout,
         onClose: (listener) => subprocess.onClose(listener),
         output: subprocess.stdin,
       });
       this.transport = transport;
-      this.assertNotDisposed();
+      this.#assertNotDisposed();
       transport.onClose((error) => {
         if (!this.disposed && this.transport === transport) {
           this.options.onClosed(
@@ -243,41 +195,47 @@ export class DefaultOpencodeAcpSessionKernel
         }
       });
 
-      this.interactionController = new AcpInteractionController({
+      this.interactionController = new ACPInteractionController({
         getTurnId: this.options.getActiveTurnId,
         interactionPort: this.options.config.interactionPort,
         presentPermission: presentOpencodePermission,
         sessionInstanceId: this.options.sessionInstanceId,
       });
-      this.assertNotDisposed();
-      const connection = new AcpClientConnection({
+      this.#assertNotDisposed();
+      const connection = new ACPClientConnection({
         clientInfo: {
           name: 'claudian',
           version: this.options.plugin.manifest?.version ?? '0.0.0',
         },
         delegate: {
-          fileSystem: this.createFileSystemDelegate(),
+          fileSystem: this.#createFileSystemDelegate(),
           onSessionNotification: (notification) => {
             if (!this.disposed) this.options.onNotification(notification);
           },
-          requestPermission: (request) => this.handlePermissionRequest(request),
+          requestPermission: (request) => this.#handlePermissionRequest(request),
         },
         transport,
       });
       this.connection = connection;
-      this.assertNotDisposed();
+      this.#assertNotDisposed();
       transport.start();
-      this.assertNotDisposed();
-      await connection.initialize();
-      this.assertNotDisposed();
+      this.#assertNotDisposed();
+      const initialized = await connection.initialize();
+      const negotiatedVersion = parseOpencodeNativeVersion(initialized?.agentInfo?.version);
+      if (negotiatedVersion && negotiatedVersion !== this.nativeVersion && negotiatedVersion === 2) {
+        throw new Error('OpenCode changed during launch. Check the CLI path and retry.');
+      }
+      this.nativeVersion = negotiatedVersion ?? this.nativeVersion;
+      assertOpencodeSessionCompatibility(this.options.nativeVersion, this.nativeVersion);
+      this.#assertNotDisposed();
     } catch (error) {
-      await this.disposeNativeResources();
+      await this.#disposeNativeResources();
       throw error;
     }
   }
 
   async openSession(resumeSessionId?: string): Promise<OpencodeNativeSessionInfo> {
-    const connection = this.requireConnection();
+    const connection = this.#requireConnection();
     const cwd = this.options.config.vaultWorkingDirectory;
     if (resumeSessionId) {
       let response;
@@ -293,9 +251,10 @@ export class DefaultOpencodeAcpSessionKernel
       return {
         configOptions: response.configOptions,
         databasePath: this.databasePath,
+        nativeVersion: this.nativeVersion,
         models: response.models,
         modes: response.modes,
-        sessionId: resolveAcpLoadSessionId(response, resumeSessionId),
+        sessionId: resolveACPLoadSessionId(response, resumeSessionId),
       };
     }
 
@@ -303,22 +262,27 @@ export class DefaultOpencodeAcpSessionKernel
     return {
       configOptions: response.configOptions,
       databasePath: this.databasePath,
+      nativeVersion: this.nativeVersion,
       models: response.models,
       modes: response.modes,
       sessionId: response.sessionId,
     };
   }
 
-  setConfigOption(request: Record<string, unknown>): Promise<{
-    configOptions?: AcpSessionConfigOption[] | null;
+  async setConfigOption(request: Record<string, unknown>): Promise<{
+    configOptions?: ACPSessionConfigOption[] | null;
   }> {
-    return this.requireConnection().setConfigOption(
-      request as Parameters<AcpClientConnection['setConfigOption']>[0],
+    const response = await this.#requireConnection().setConfigOption(
+      request as Parameters<ACPClientConnection['setConfigOption']>[0],
     );
+    if (request.configId === 'mode') {
+      this.autoApprove = this.profile === 'managed' && request.value === OPENCODE_YOLO_MODE_ID;
+    }
+    return response;
   }
 
-  prompt(request: AcpPromptRequest): Promise<AcpPromptResponse> {
-    return this.requireConnection().prompt(request);
+  prompt(request: ACPPromptRequest): Promise<ACPPromptResponse> {
+    return this.#requireConnection().prompt(request);
   }
 
   cancel(sessionId: string): void {
@@ -335,17 +299,17 @@ export class DefaultOpencodeAcpSessionKernel
       reject = nextReject;
     });
     this.disposePromise = pending;
-    void this.disposeInternal().then(resolve, reject);
+    void this.#disposeInternal().then(resolve, reject);
     return pending;
   }
 
-  private async disposeInternal(): Promise<void> {
-    await this.disposeNativeResources();
+  async #disposeInternal(): Promise<void> {
+    await this.#disposeNativeResources();
     await this.connectPromise?.catch(() => undefined);
-    await this.disposeNativeResources();
+    await this.#disposeNativeResources();
   }
 
-  private async disposeNativeResources(): Promise<void> {
+  async #disposeNativeResources(): Promise<void> {
     const interactionController = this.interactionController;
     this.interactionController = null;
     const connection = this.connection;
@@ -377,23 +341,23 @@ export class DefaultOpencodeAcpSessionKernel
     }
   }
 
-  private clearConnectPromise(pending: Promise<void>): void {
+  #clearConnectPromise(pending: Promise<void>): void {
     if (this.connectPromise === pending) this.connectPromise = null;
   }
 
-  private assertNotDisposed(): void {
+  #assertNotDisposed(): void {
     if (this.disposed) throw new Error('OpenCode ACP kernel is disposed');
   }
 
-  private createFileSystemDelegate(): {
-    readTextFile?: (request: AcpReadTextFileRequest) => Promise<{ content: string }>;
+  #createFileSystemDelegate(): {
+    readTextFile?: (request: ACPReadTextFileRequest) => Promise<{ content: string }>;
     writeTextFile?: (
-      request: AcpWriteTextFileRequest,
+      request: ACPWriteTextFileRequest,
     ) => Promise<Record<string, never>>;
   } | undefined {
     if (this.profile === 'passive') return undefined;
     const readTextFile = async (
-      request: AcpReadTextFileRequest,
+      request: ACPReadTextFileRequest,
     ): Promise<{ content: string }> => {
       const resolvedPath = this.profile === 'readonly'
         ? resolveOpencodeReadPath(
@@ -431,17 +395,22 @@ export class DefaultOpencodeAcpSessionKernel
     };
   }
 
-  private handlePermissionRequest(
-    request: AcpRequestPermissionRequest,
-  ): Promise<AcpRequestPermissionResponse> {
-    if (this.profile !== 'managed') {
+  #handlePermissionRequest(
+    request: ACPRequestPermissionRequest,
+  ): Promise<ACPRequestPermissionResponse> {
+    if (this.disposed || this.profile !== 'managed') {
       return Promise.resolve(selectDeniedPermission(request));
+    }
+    if (this.autoApprove) {
+      return Promise.resolve(normalizePermissionId(request.toolCall.title) === 'plan_enter'
+        ? selectDeniedPermission(request)
+        : mapACPApprovalDecision('allow', request.options));
     }
     return this.interactionController?.requestPermission(request)
       ?? Promise.resolve({ outcome: { outcome: 'cancelled' } });
   }
 
-  private requireConnection(): AcpClientConnection {
+  #requireConnection(): ACPClientConnection {
     if (!this.connection) throw new Error('OpenCode ACP kernel is not connected');
     return this.connection;
   }
@@ -466,13 +435,16 @@ export function resolveOpencodeReadPath(
 }
 
 export function presentOpencodePermission(
-  request: AcpRequestPermissionRequest,
+  request: ACPRequestPermissionRequest,
   input: Readonly<Record<string, unknown>>,
-): AcpPermissionPresentation {
-  const permissionId = normalizePermissionId(request.toolCall.title);
+): ACPPermissionPresentation {
+  const permissionId = request.toolCall.kind === 'execute' && typeof input.command === 'string'
+    ? 'bash'
+    : normalizePermissionId(request.toolCall.title);
   const blockedPath = extractPermissionPath(input, request.toolCall.locations);
 
   switch (permissionId) {
+    case 'shell':
     case 'bash':
       return {
         decisionReason: 'Command execution permission required',
@@ -721,44 +693,9 @@ function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
     && error.code === 'ENOENT';
 }
 
-function buildAgentConfig(
-  profile: Exclude<OpencodeExecutionProfile, 'managed'>,
-): OpencodeManagedAgentConfig {
-  return profile === 'readonly'
-    ? {
-      definition: {
-        description: 'Claudian read-only execution agent.',
-        mode: 'primary',
-        permission: {
-          '*': 'deny',
-          codesearch: 'allow',
-          external_directory: 'deny',
-          glob: 'allow',
-          grep: 'allow',
-          lsp: 'allow',
-          read: READ_PERMISSION,
-          webfetch: 'allow',
-          websearch: 'allow',
-        },
-      },
-      id: AUX_AGENT_IDS.readonly,
-    }
-    : {
-      definition: {
-        description: 'Claudian passive execution agent.',
-        mode: 'primary',
-        permission: {
-          '*': 'deny',
-          external_directory: 'deny',
-        },
-      },
-      id: AUX_AGENT_IDS.passive,
-    };
-}
-
 function selectDeniedPermission(
-  request: AcpRequestPermissionRequest,
-): AcpRequestPermissionResponse {
+  request: ACPRequestPermissionRequest,
+): ACPRequestPermissionResponse {
   const rejected = request.options.find(({ kind }) => kind === 'reject_once')
     ?? request.options.find(({ kind }) => kind === 'reject_always');
   return rejected
@@ -769,16 +706,4 @@ function selectDeniedPermission(
       },
     }
     : { outcome: { outcome: 'cancelled' } };
-}
-
-function getSystemPromptSettings(
-  plugin: ProviderHost,
-  vaultPath: string,
-): SystemPromptSettings {
-  return {
-    customPrompt: plugin.settings.systemPrompt,
-    mediaFolder: plugin.settings.mediaFolder,
-    userName: plugin.settings.userName,
-    vaultPath,
-  };
 }

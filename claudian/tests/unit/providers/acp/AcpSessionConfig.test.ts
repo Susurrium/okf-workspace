@@ -1,44 +1,21 @@
 import {
-  extractAcpSessionModelState,
-  extractAcpSessionModeState,
-  extractAcpSessionThoughtLevelState,
-  flattenAcpSessionConfigSelectOptions,
-  resolveAcpLoadSessionId,
+  extractACPSessionModelState,
+  extractACPSessionModeState,
+  extractACPSessionThoughtLevelState,
+  resolveACPLoadSessionId,
 } from '../../../../src/providers/acp';
 
 describe('AcpSessionConfig', () => {
   it('uses the requested id when session/load omits its compatibility id', () => {
-    expect(resolveAcpLoadSessionId({}, 'saved-session')).toBe('saved-session');
-    expect(resolveAcpLoadSessionId({ sessionId: 'saved-session' }, 'saved-session'))
+    expect(resolveACPLoadSessionId({}, 'saved-session')).toBe('saved-session');
+    expect(resolveACPLoadSessionId({ sessionId: 'saved-session' }, 'saved-session'))
       .toBe('saved-session');
-    expect(() => resolveAcpLoadSessionId({ sessionId: 'different-session' }, 'saved-session'))
+    expect(() => resolveACPLoadSessionId({ sessionId: 'different-session' }, 'saved-session'))
       .toThrow(/different session id/i);
   });
 
-  it('flattens grouped select options', () => {
-    expect(flattenAcpSessionConfigSelectOptions([
-      {
-        group: 'Anthropic',
-        name: 'Anthropic',
-        options: [
-          { name: 'Claude Sonnet 4', value: 'anthropic/claude-sonnet-4' },
-        ],
-      },
-      {
-        group: 'OpenAI',
-        name: 'OpenAI',
-        options: [
-          { name: 'GPT-5', value: 'openai/gpt-5' },
-        ],
-      },
-    ])).toEqual([
-      { name: 'Claude Sonnet 4', value: 'anthropic/claude-sonnet-4' },
-      { name: 'GPT-5', value: 'openai/gpt-5' },
-    ]);
-  });
-
-  it('prefers ACP config model options over session model metadata', () => {
-    expect(extractAcpSessionModelState({
+  it('prefers grouped ACP config model options in order over session model metadata', () => {
+    expect(extractACPSessionModelState({
       configOptions: [
         {
           category: 'model',
@@ -46,8 +23,19 @@ describe('AcpSessionConfig', () => {
           id: 'selected_model',
           name: 'Model',
           options: [
-            { name: 'Anthropic/Claude Sonnet 4', value: 'anthropic/claude-sonnet-4' },
-            { name: 'Anthropic/Claude Sonnet 4 (high)', value: 'anthropic/claude-sonnet-4/high' },
+            {
+              group: 'Anthropic',
+              name: 'Anthropic',
+              options: [
+                { name: 'Anthropic/Claude Sonnet 4', value: 'anthropic/claude-sonnet-4' },
+                { name: 'Anthropic/Claude Sonnet 4 (high)', value: 'anthropic/claude-sonnet-4/high' },
+              ],
+            },
+            {
+              group: 'OpenAI',
+              name: 'OpenAI',
+              options: [{ name: 'OpenAI/GPT-5', value: 'openai/gpt-5' }],
+            },
           ],
           type: 'select',
         },
@@ -62,34 +50,18 @@ describe('AcpSessionConfig', () => {
       availableModels: [
         { id: 'anthropic/claude-sonnet-4', name: 'Anthropic/Claude Sonnet 4' },
         { id: 'anthropic/claude-sonnet-4/high', name: 'Anthropic/Claude Sonnet 4 (high)' },
+        { id: 'openai/gpt-5', name: 'OpenAI/GPT-5' },
       ],
       currentModelId: 'anthropic/claude-sonnet-4/high',
     });
   });
 
-  it('falls back to the legacy model id when category is unavailable', () => {
-    expect(extractAcpSessionModelState({
-      configOptions: [
-        {
-          currentValue: 'openai/gpt-5',
-          id: 'model',
-          name: 'Model',
-          options: [
-            { name: 'OpenAI/GPT-5', value: 'openai/gpt-5' },
-          ],
-          type: 'select',
-        },
-      ],
-    })).toEqual({
-      availableModels: [
-        { id: 'openai/gpt-5', name: 'OpenAI/GPT-5' },
-      ],
-      currentModelId: 'openai/gpt-5',
-    });
+  it('ignores uncategorized model selectors', () => {
+    expect(extractACPSessionModelState({ configOptions: [{ currentValue: 'model-1', id: 'model', name: 'Model', options: [{ name: 'Model', value: 'model-1' }], type: 'select' }] })).toEqual({ availableModels: [], currentModelId: null });
   });
 
   it('falls back to ACP session model metadata when config options are unavailable', () => {
-    expect(extractAcpSessionModelState({
+    expect(extractACPSessionModelState({
       models: {
         availableModels: [
           { description: 'Fast', id: 'openai/gpt-5-mini', name: 'OpenAI/GPT-5 Mini' },
@@ -105,7 +77,7 @@ describe('AcpSessionConfig', () => {
   });
 
   it('normalizes standard modelId entries and preserves opaque model metadata', () => {
-    expect(extractAcpSessionModelState({
+    expect(extractACPSessionModelState({
       models: {
         _meta: { 'vendor.example/catalog': { revision: 7 } },
         availableModels: [
@@ -139,7 +111,7 @@ describe('AcpSessionConfig', () => {
   });
 
   it('keeps legacy id model entries compatible while preserving metadata', () => {
-    expect(extractAcpSessionModelState({
+    expect(extractACPSessionModelState({
       models: {
         availableModels: [
           {
@@ -163,7 +135,7 @@ describe('AcpSessionConfig', () => {
   });
 
   it('keeps config-option precedence while preserving session model-state metadata', () => {
-    expect(extractAcpSessionModelState({
+    expect(extractACPSessionModelState({
       configOptions: [
         {
           category: 'model',
@@ -187,7 +159,7 @@ describe('AcpSessionConfig', () => {
   });
 
   it('falls back to ACP session model metadata when the config option has no discovered entries', () => {
-    expect(extractAcpSessionModelState({
+    expect(extractACPSessionModelState({
       configOptions: [
         {
           category: 'model',
@@ -213,7 +185,7 @@ describe('AcpSessionConfig', () => {
   });
 
   it('prefers ACP config mode options over session mode metadata', () => {
-    expect(extractAcpSessionModeState({
+    expect(extractACPSessionModeState({
       configOptions: [
         {
           category: 'mode',
@@ -242,29 +214,12 @@ describe('AcpSessionConfig', () => {
     });
   });
 
-  it('falls back to the legacy mode id when category is unavailable', () => {
-    expect(extractAcpSessionModeState({
-      configOptions: [
-        {
-          currentValue: 'build',
-          id: 'mode',
-          name: 'Mode',
-          options: [
-            { description: 'Default editing agent', name: 'Build', value: 'build' },
-          ],
-          type: 'select',
-        },
-      ],
-    })).toEqual({
-      availableModes: [
-        { description: 'Default editing agent', id: 'build', name: 'Build' },
-      ],
-      currentModeId: 'build',
-    });
+  it('ignores uncategorized mode selectors', () => {
+    expect(extractACPSessionModeState({ configOptions: [{ currentValue: 'plan', id: 'mode', name: 'Mode', options: [{ name: 'Plan', value: 'plan' }], type: 'select' }] })).toEqual({ availableModes: [], currentModeId: null });
   });
 
   it('falls back to ACP session mode metadata when config options are unavailable', () => {
-    expect(extractAcpSessionModeState({
+    expect(extractACPSessionModeState({
       modes: {
         availableModes: [
           { id: 'build', name: 'Build' },
@@ -282,7 +237,7 @@ describe('AcpSessionConfig', () => {
   });
 
   it('falls back to ACP session mode metadata when the config option has no discovered entries', () => {
-    expect(extractAcpSessionModeState({
+    expect(extractACPSessionModeState({
       configOptions: [
         {
           category: 'mode',
@@ -310,7 +265,7 @@ describe('AcpSessionConfig', () => {
   });
 
   it('extracts detached thought-level options from ACP config options', () => {
-    expect(extractAcpSessionThoughtLevelState({
+    expect(extractACPSessionThoughtLevelState({
       configOptions: [
         {
           category: 'thought_level',

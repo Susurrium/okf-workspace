@@ -13,7 +13,7 @@ interface TestProviderConfig {
   variantFallback?: string;
 }
 
-function createUiConfig(config: TestProviderConfig): ProviderChatUIConfig {
+function createUIConfig(config: TestProviderConfig): ProviderChatUIConfig {
   return {
     getModelOptions: () => config.options.map(value => ({ label: value, value })),
     getCustomModelIds: () => new Set(),
@@ -22,7 +22,6 @@ function createUiConfig(config: TestProviderConfig): ProviderChatUIConfig {
     isAdaptiveReasoningModel: () => false,
     getReasoningOptions: () => [],
     getDefaultReasoningValue: () => 'off',
-    getContextWindowSize: () => 200_000,
     isDefaultModel: () => false,
     applyModelDefaults: () => undefined,
     normalizeAvailableModelSelection: model => config.normalizations?.[model] ?? model,
@@ -46,8 +45,8 @@ describe('conversation model resolution', () => {
     providers.empty = { defaultModel: null, options: [] };
     jest.spyOn(ProviderRegistry, 'getRegisteredProviderIds')
       .mockReturnValue(Object.keys(providers));
-    jest.spyOn(ProviderRegistry, 'getChatUIConfig')
-      .mockImplementation(providerId => createUiConfig(providers[providerId ?? 'claude']!));
+    jest.spyOn(ProviderRegistry, 'getModelPolicy')
+      .mockImplementation(providerId => createUIConfig(providers[providerId ?? 'claude']!));
     jest.spyOn(ProviderRegistry, 'isEnabled')
       .mockImplementation((providerId, settings) => (
         ((settings.enabledProviders as string[] | undefined) ?? []).includes(providerId)
@@ -57,6 +56,13 @@ describe('conversation model resolution', () => {
         ((settings.displayOrder as string[] | undefined) ?? [])
           .filter(providerId => ProviderRegistry.isEnabled(providerId, settings))
       ));
+  });
+
+  it('preserves an unavailable last-selected model', () => {
+    expect(resolveNewConversationModel({
+      enabledProviders: ['claude', 'codex'], displayOrder: ['claude', 'codex'],
+      lastSelectedChatModel: { providerId: 'claude', model: 'retired' },
+    })).toEqual({ providerId: 'claude', model: 'retired', source: 'last-selected' });
   });
 
   afterEach(() => {
@@ -98,7 +104,7 @@ describe('conversation model resolution', () => {
       providers.claude.normalizations = undefined;
     });
 
-    it('falls back to the same provider default when the global model is unavailable', () => {
+    it('preserves the unavailable last selected model', () => {
       const result = resolveNewConversationModel({
         displayOrder: ['claude', 'codex'],
         enabledProviders: ['claude', 'codex'],
@@ -106,13 +112,13 @@ describe('conversation model resolution', () => {
       });
 
       expect(result).toEqual({
-        model: 'codex/gpt-5',
+        model: 'codex/retired',
         providerId: 'codex',
-        source: 'provider-default',
+        source: 'last-selected',
       });
     });
 
-    it('does not let provider variant fallback bypass the explicit ordered default', () => {
+    it('preserves the unavailable last selected model over variant defaults', () => {
       providers.codex.defaultModel = 'codex/gpt-ordered';
       providers.codex.options = ['codex/gpt-ordered', 'codex/gpt-native'];
       providers.codex.variantFallback = 'codex/gpt-native';
@@ -122,9 +128,9 @@ describe('conversation model resolution', () => {
         enabledProviders: ['codex'],
         lastSelectedChatModel: { providerId: 'codex', model: 'codex/retired' },
       })).toEqual({
-        model: 'codex/gpt-ordered',
+        model: 'codex/retired',
         providerId: 'codex',
-        source: 'provider-default',
+        source: 'last-selected',
       });
     });
 
@@ -142,7 +148,7 @@ describe('conversation model resolution', () => {
       });
     });
 
-    it('skips enabled providers with no available options', () => {
+    it('preserves selection from an enabled provider with no available options', () => {
       const result = resolveNewConversationModel({
         displayOrder: ['empty', 'codex'],
         enabledProviders: ['empty', 'codex'],
@@ -150,9 +156,9 @@ describe('conversation model resolution', () => {
       });
 
       expect(result).toEqual({
-        model: 'codex/gpt-5',
-        providerId: 'codex',
-        source: 'provider-fallback',
+        model: 'empty/model',
+        providerId: 'empty',
+        source: 'last-selected',
       });
     });
 
@@ -224,20 +230,19 @@ describe('conversation model resolution', () => {
       });
     });
 
-    it('keeps an unavailable stored model readable until its provider default is durable', () => {
+    it('preserves an unavailable stored model without scheduling a fallback write', () => {
       expect(resolveConversationModel(
         {},
         'claude',
         { selectedModel: 'retired-claude-model' } as any,
       )).toEqual({
         model: 'retired-claude-model',
-        modelToPersist: 'opus',
-        shouldPersist: true,
+        shouldPersist: false,
         source: 'selected',
       });
     });
 
-    it('uses the explicit ordered default instead of a provider variant fallback', () => {
+    it('preserves the stored model over ordered defaults and variant fallbacks', () => {
       providers.codex.defaultModel = 'codex/gpt-ordered';
       providers.codex.options = ['codex/gpt-ordered', 'codex/gpt-native'];
       providers.codex.variantFallback = 'codex/gpt-native';
@@ -248,8 +253,7 @@ describe('conversation model resolution', () => {
         { selectedModel: 'codex/retired' } as any,
       )).toEqual({
         model: 'codex/retired',
-        modelToPersist: 'codex/gpt-ordered',
-        shouldPersist: true,
+        shouldPersist: false,
         source: 'selected',
       });
     });
@@ -266,7 +270,7 @@ describe('conversation model resolution', () => {
       });
     });
 
-    it('uses the first available option when a provider default is invalid', () => {
+    it('preserves the stored model when the provider default is invalid', () => {
       providers.claude.defaultModel = 'retired-default';
 
       expect(resolveConversationModel(
@@ -275,8 +279,7 @@ describe('conversation model resolution', () => {
         { selectedModel: 'retired-claude-model' } as any,
       )).toEqual({
         model: 'retired-claude-model',
-        modelToPersist: 'haiku',
-        shouldPersist: true,
+        shouldPersist: false,
         source: 'selected',
       });
 

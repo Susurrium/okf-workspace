@@ -1,9 +1,9 @@
-import { CachedProviderCliResolver } from '../../../core/providers/cli/CachedProviderCliResolver';
+import { CachedProviderCLIResolver } from '../../../core/providers/cli/CachedProviderCLIResolver';
 import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
 import { getPiProviderSettings } from '../settings';
 
-export class PiCliResolver {
-  private readonly resolver = new CachedProviderCliResolver({
+export class PiCLIResolver {
+  private readonly resolver = new CachedProviderCLIResolver({
     binaryName: 'pi',
     getSettingsProjection: (settings) => {
       const providerSettings = getPiProviderSettings(settings);
@@ -18,18 +18,6 @@ export class PiCliResolver {
 
   resolveFromSettings(settings: Record<string, unknown>): string | null {
     return this.resolver.resolveFromSettings(settings);
-  }
-
-  resolve(
-    hostnamePaths: Record<string, string> | undefined,
-    legacyPath: string,
-    envText = '',
-  ): string | null {
-    return this.resolver.resolve({
-      cliPathsByHost: hostnamePaths,
-      environmentText: envText,
-      legacyCliPath: legacyPath,
-    });
   }
 
   reset(): void {

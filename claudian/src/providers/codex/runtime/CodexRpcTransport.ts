@@ -1,11 +1,11 @@
 import {
-  JsonRpcErrorResponse,
-  type JsonRpcRequestId,
-  JsonRpcTransport,
-} from '@/core/rpc/JsonRpcTransport';
+  JSONRPCErrorResponse,
+  type JSONRPCRequestId,
+  JSONRPCTransport,
+} from '@/core/rpc/JSONRPCTransport';
 
 import type { CodexAppServerProcess } from './CodexAppServerProcess';
-import type { JsonRpcError } from './codexAppServerTypes';
+import type { JSONRPCError } from './codexAppServerTypes';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const PROCESS_CLOSE_GRACE_MS = 3_000;
@@ -13,11 +13,11 @@ const PROCESS_CLOSE_GRACE_MS = 3_000;
 type NotificationHandler = (params: unknown) => void;
 type ServerRequestHandler = (requestId: string | number, params: unknown) => Promise<unknown>;
 
-export class CodexRpcResponseError extends Error {
+export class CodexRPCResponseError extends Error {
   readonly code: number;
   readonly data: unknown;
 
-  constructor(error: JsonRpcError) {
+  constructor(error: JSONRPCError) {
     super(error.message);
     this.name = 'CodexRpcResponseError';
     this.code = error.code;
@@ -25,24 +25,24 @@ export class CodexRpcResponseError extends Error {
   }
 }
 
-export class CodexRpcTransport {
+export class CodexRPCTransport {
   private disposed = false;
   private readonly notificationHandlers = new Map<string, NotificationHandler>();
   private readonly notificationUnsubscribers = new Map<string, () => void>();
   private readonly serverRequestHandlers = new Map<string, ServerRequestHandler>();
   private readonly serverRequestUnsubscribers = new Map<string, () => void>();
-  private transport: JsonRpcTransport | null = null;
+  private transport: JSONRPCTransport | null = null;
 
   constructor(private readonly proc: CodexAppServerProcess) {}
 
   start(): void {
     if (this.transport || this.disposed) return;
 
-    const transport = new JsonRpcTransport({
+    const transport = new JSONRPCTransport({
       input: this.proc.stdout,
       onClose: (listener) => {
         const exitHandler = (): void => {
-          listener(new Error(this.buildProcessExitMessage()));
+          listener(new Error(this.#buildProcessExitMessage()));
         };
         this.proc.onExit(exitHandler);
         return () => this.proc.offExit(exitHandler);
@@ -52,10 +52,10 @@ export class CodexRpcTransport {
     this.transport = transport;
 
     for (const [method, handler] of this.notificationHandlers) {
-      this.registerNotificationHandler(transport, method, handler);
+      this.#registerNotificationHandler(transport, method, handler);
     }
     for (const [method, handler] of this.serverRequestHandlers) {
-      this.registerServerRequestHandler(transport, method, handler);
+      this.#registerServerRequestHandler(transport, method, handler);
     }
     transport.start();
   }
@@ -71,8 +71,8 @@ export class CodexRpcTransport {
     try {
       return await this.transport!.request<T>(method, params, { timeoutMs });
     } catch (error) {
-      if (error instanceof JsonRpcErrorResponse) {
-        throw new CodexRpcResponseError({
+      if (error instanceof JSONRPCErrorResponse) {
+        throw new CodexRPCResponseError({
           code: error.code,
           data: error.data,
           message: error.message,
@@ -91,30 +91,30 @@ export class CodexRpcTransport {
   onNotification(method: string, handler: NotificationHandler): void {
     this.notificationHandlers.set(method, handler);
     if (this.transport) {
-      this.registerNotificationHandler(this.transport, method, handler);
+      this.#registerNotificationHandler(this.transport, method, handler);
     }
   }
 
   onServerRequest(method: string, handler: ServerRequestHandler): void {
     this.serverRequestHandlers.set(method, handler);
     if (this.transport) {
-      this.registerServerRequestHandler(this.transport, method, handler);
+      this.#registerServerRequestHandler(this.transport, method, handler);
     }
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.clearUnsubscribers(this.notificationUnsubscribers);
-    this.clearUnsubscribers(this.serverRequestUnsubscribers);
+    this.#clearUnsubscribers(this.notificationUnsubscribers);
+    this.#clearUnsubscribers(this.serverRequestUnsubscribers);
     this.transport?.dispose(new Error('Transport disposed'));
     this.transport = null;
     this.notificationHandlers.clear();
     this.serverRequestHandlers.clear();
   }
 
-  private registerNotificationHandler(
-    transport: JsonRpcTransport,
+  #registerNotificationHandler(
+    transport: JSONRPCTransport,
     method: string,
     handler: NotificationHandler,
   ): void {
@@ -122,24 +122,24 @@ export class CodexRpcTransport {
     this.notificationUnsubscribers.set(method, transport.onNotification(method, handler));
   }
 
-  private registerServerRequestHandler(
-    transport: JsonRpcTransport,
+  #registerServerRequestHandler(
+    transport: JSONRPCTransport,
     method: string,
     handler: ServerRequestHandler,
   ): void {
     this.serverRequestUnsubscribers.get(method)?.();
     this.serverRequestUnsubscribers.set(method, transport.onRequest(
       method,
-      (params, context) => handler(context.requestId as Exclude<JsonRpcRequestId, null>, params),
+      (params, context) => handler(context.requestId as Exclude<JSONRPCRequestId, null>, params),
     ));
   }
 
-  private clearUnsubscribers(unsubscribers: Map<string, () => void>): void {
+  #clearUnsubscribers(unsubscribers: Map<string, () => void>): void {
     for (const unsubscribe of unsubscribers.values()) unsubscribe();
     unsubscribers.clear();
   }
 
-  private buildProcessExitMessage(): string {
+  #buildProcessExitMessage(): string {
     const stderr = this.proc.getStderrSnapshot();
     return stderr ? `App-server process exited\n\n${stderr}` : 'App-server process exited';
   }

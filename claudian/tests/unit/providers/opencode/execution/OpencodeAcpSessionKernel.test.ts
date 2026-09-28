@@ -10,21 +10,21 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 
 import {
-  type AcpRequestPermissionRequest,
-  JsonRpcErrorResponse,
+  type ACPRequestPermissionRequest,
+  JSONRPCErrorResponse,
 } from '@/providers/acp';
 import {
   classifyOpencodeSessionLoadError,
   OpencodeSessionMissingError,
   presentOpencodePermission,
   resolveOpencodeReadPath,
-} from '@/providers/opencode/execution/OpencodeAcpSessionKernel';
+} from '@/providers/opencode/execution/OpencodeACPSessionKernel';
 
 function permissionRequest(
   title: string,
   rawInput: Record<string, unknown>,
   locations?: Array<{ path: string }>,
-): AcpRequestPermissionRequest {
+): ACPRequestPermissionRequest {
   return {
     options: [],
     sessionId: 'native-session',
@@ -37,10 +37,10 @@ function permissionRequest(
   };
 }
 
-describe('OpencodeAcpSessionKernel read policy', () => {
+describe('OpencodeACPSessionKernel read policy', () => {
   it('bounds read-only callbacks to the active workspace', () => {
     expect(resolveOpencodeReadPath('/vault', 'notes/file.md')).toBe(
-      path.resolve('/vault', 'notes/file.md'),
+      path.resolve('/vault', 'notes', 'file.md'),
     );
     expect(() => resolveOpencodeReadPath('/vault', '../secret')).toThrow(
       'OpenCode read access is limited to the current workspace',
@@ -58,14 +58,12 @@ describe('OpencodeAcpSessionKernel read policy', () => {
     mkdirSync(outsideRoot);
     const outsideFile = path.join(outsideRoot, 'secret.md');
     writeFileSync(outsideFile, 'secret', 'utf8');
-    const linkedPath = process.platform === 'win32' ? path.join(workspaceRoot, 'linked-outside') : path.join(workspaceRoot, 'linked-secret.md');
-    symlinkSync(process.platform === 'win32' ? outsideRoot : outsideFile, linkedPath,
-      process.platform === 'win32' ? 'junction' : 'file');
+    symlinkSync(outsideRoot, path.join(workspaceRoot, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
 
     try {
       expect(() => resolveOpencodeReadPath(
         workspaceRoot,
-        process.platform === 'win32' ? 'linked-outside/secret.md' : 'linked-secret.md',
+        'linked/secret.md',
       )).toThrow('OpenCode read access is limited to the current workspace');
     } finally {
       rmSync(testRoot, { force: true, recursive: true });
@@ -75,16 +73,15 @@ describe('OpencodeAcpSessionKernel read policy', () => {
   it('rejects a dangling in-workspace symlink targeting an outside path', () => {
     const testRoot = mkdtempSync(path.join(tmpdir(), 'claudian-opencode-read-'));
     const workspaceRoot = path.join(testRoot, 'vault');
-    const outsideTarget = path.join(testRoot, 'outside', 'missing.md');
+    const outsideRoot = path.join(testRoot, 'outside');
     mkdirSync(workspaceRoot);
-    const linkedPath = process.platform === 'win32' ? path.join(workspaceRoot, 'linked-missing-dir') : path.join(workspaceRoot, 'linked-missing.md');
-    symlinkSync(process.platform === 'win32' ? path.dirname(outsideTarget) : outsideTarget,
-      linkedPath, process.platform === 'win32' ? 'junction' : 'file');
+    mkdirSync(outsideRoot);
+    symlinkSync(outsideRoot, path.join(workspaceRoot, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
 
     try {
       expect(() => resolveOpencodeReadPath(
         workspaceRoot,
-        process.platform === 'win32' ? 'linked-missing-dir/missing.md' : 'linked-missing.md',
+        'linked/missing.md',
       )).toThrow('OpenCode read access is limited to the current workspace');
     } finally {
       rmSync(testRoot, { force: true, recursive: true });
@@ -98,8 +95,7 @@ describe('OpencodeAcpSessionKernel read policy', () => {
     mkdirSync(notesRoot, { recursive: true });
     const notePath = path.join(notesRoot, 'note.md');
     writeFileSync(notePath, 'note', 'utf8');
-    symlinkSync(notesRoot, path.join(workspaceRoot, 'linked-notes'),
-      process.platform === 'win32' ? 'junction' : 'dir');
+    symlinkSync(notesRoot, path.join(workspaceRoot, 'linked-notes'), process.platform === 'win32' ? 'junction' : 'dir');
 
     try {
       expect(resolveOpencodeReadPath(
@@ -116,7 +112,7 @@ describe('OpencodeAcpSessionKernel read policy', () => {
   });
 });
 
-describe('OpencodeAcpSessionKernel permission presentation', () => {
+describe('OpencodeACPSessionKernel permission presentation', () => {
   it('preserves an external-directory path from ACP locations', () => {
     const request = permissionRequest(
       'external_directory',
@@ -151,7 +147,7 @@ describe('OpencodeAcpSessionKernel permission presentation', () => {
 describe('OpenCode session/load errors', () => {
   it('wraps explicit missing-session protocol evidence with the attempted ID', () => {
     const classified = classifyOpencodeSessionLoadError(
-      new JsonRpcErrorResponse(
+      new JSONRPCErrorResponse(
         'session/load',
         -32000,
         'Session not found',
@@ -166,10 +162,19 @@ describe('OpenCode session/load errors', () => {
 
   it.each([
     new Error('Session not found'),
-    new JsonRpcErrorResponse('session/load', -32000, 'Authentication required'),
-    new JsonRpcErrorResponse('session/load', -32000, 'Invalid configuration'),
-    new JsonRpcErrorResponse('session/prompt', -32000, 'Session not found'),
+    new JSONRPCErrorResponse('session/load', -32000, 'Authentication required'),
+    new JSONRPCErrorResponse('session/load', -32000, 'Invalid configuration'),
+    new JSONRPCErrorResponse('session/prompt', -32000, 'Session not found'),
   ])('preserves non-missing or uncorrelated failures: %p', (error) => {
     expect(classifyOpencodeSessionLoadError(error, 'valid-session')).toBe(error);
+  });
+});
+
+
+it('presents a v2 command-title approval as shell execution', () => {
+  const request = permissionRequest('pwd', { command: 'pwd' });
+  request.toolCall.kind = 'execute';
+  expect(presentOpencodePermission(request, { command: 'pwd' })).toMatchObject({
+    decisionReason: 'Command execution permission required', toolName: 'bash',
   });
 });

@@ -1,8 +1,7 @@
 import type { App, EventRef } from 'obsidian';
 import { Notice, TFile } from 'obsidian';
 
-import { t } from '../../i18n/i18n';
-import { formatVaultFileMention } from '../../shared/mention/formatMention';
+import { formatComposerWikilink } from './composer/composerWikilinks';
 
 interface FileMenuViewHost {
   appendToActiveInput(text: string): boolean;
@@ -18,13 +17,13 @@ export interface FileMenuHost {
 export async function addFileToClaudian(host: FileMenuHost, file: TFile): Promise<boolean> {
   try {
     await host.activateView();
-    const appended = host.getView()?.appendToActiveInput(formatVaultFileMention(file.path)) ?? false;
+    const appended = host.getView()?.appendToActiveInput(formatComposerWikilink(file.path)) ?? false;
     if (!appended) {
-      new Notice(t('chatUi.claudianChatIsNotReady'));
+      new Notice('Claudian chat is not ready.');
     }
     return appended;
   } catch {
-    new Notice(t('chatUi.failedToAddFileToClaudian'));
+    new Notice('Failed to add file to Claudian.');
     return false;
   }
 }
@@ -35,7 +34,7 @@ export function registerFileMenu(host: FileMenuHost): void {
       if (!(file instanceof TFile)) return;
 
       menu.addItem((item) => item
-        .setTitle(t('chatUi.addToClaudian'))
+        .setTitle('Add to Claudian')
         .setIcon('message-square-plus')
         .onClick(() => addFileToClaudian(host, file)));
     }),

@@ -1,14 +1,14 @@
 export type {
-  JsonRpcMessageStreams,
-  JsonRpcNotificationHandler,
-  JsonRpcRequestHandler,
-  JsonRpcRequestHandlerContext,
-  JsonRpcRequestId,
-  JsonRpcRequestOptions,
-  JsonRpcTransportOptions,
-} from '@/core/rpc/JsonRpcTransport';
+  JSONRPCMessageStreams,
+  JSONRPCNotificationHandler,
+  JSONRPCRequestHandler,
+  JSONRPCRequestHandlerContext,
+  JSONRPCRequestId,
+  JSONRPCRequestOptions,
+  JSONRPCTransportOptions,
+} from '@/core/rpc/JSONRPCTransport';
 export {
-  JsonRpcTransport as AcpJsonRpcTransport,
-  JsonRpcErrorResponse,
-  JsonRpcTransportClosedError,
-} from '@/core/rpc/JsonRpcTransport';
+  JSONRPCTransport as ACPJSONRPCTransport,
+  JSONRPCErrorResponse,
+  JSONRPCTransportClosedError,
+} from '@/core/rpc/JSONRPCTransport';

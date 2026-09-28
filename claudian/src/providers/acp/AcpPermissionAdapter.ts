@@ -1,19 +1,19 @@
 import type { ProviderApprovalDecisionOption } from '../../core/execution';
 import type { ApprovalDecision } from '../../core/types';
 import type {
-  AcpPermissionOption,
-  AcpPermissionOptionKind,
-  AcpRequestPermissionResponse,
+  ACPPermissionOption,
+  ACPPermissionOptionKind,
+  ACPRequestPermissionResponse,
 } from './types';
 
-const CANCELLED_RESPONSE: AcpRequestPermissionResponse = {
+const CANCELLED_RESPONSE: ACPRequestPermissionResponse = {
   outcome: { outcome: 'cancelled' },
 };
 
-export function mapAcpApprovalDecision(
+export function mapACPApprovalDecision(
   decision: ApprovalDecision,
-  options: readonly AcpPermissionOption[],
-): AcpRequestPermissionResponse {
+  options: readonly ACPPermissionOption[],
+): ACPRequestPermissionResponse {
   if (decision === 'allow') {
     return selectPermissionOption(options, ['allow_once', 'allow_always']);
   }
@@ -34,8 +34,8 @@ export function mapAcpApprovalDecision(
   return CANCELLED_RESPONSE;
 }
 
-export function buildAcpApprovalDecisionOptions(
-  options: readonly AcpPermissionOption[],
+export function buildACPApprovalDecisionOptions(
+  options: readonly ACPPermissionOption[],
 ): ProviderApprovalDecisionOption[] {
   return options.map((option) => ({
     ...(option.kind === 'allow_once'
@@ -49,9 +49,9 @@ export function buildAcpApprovalDecisionOptions(
 }
 
 function selectPermissionOption(
-  options: readonly AcpPermissionOption[],
-  preferredKinds: readonly AcpPermissionOptionKind[],
-): AcpRequestPermissionResponse {
+  options: readonly ACPPermissionOption[],
+  preferredKinds: readonly ACPPermissionOptionKind[],
+): ACPRequestPermissionResponse {
   for (const kind of preferredKinds) {
     const option = options.find((entry) => entry.kind === kind);
     if (option) {
@@ -62,7 +62,7 @@ function selectPermissionOption(
   return CANCELLED_RESPONSE;
 }
 
-function selectedResponse(option: AcpPermissionOption): AcpRequestPermissionResponse {
+function selectedResponse(option: ACPPermissionOption): ACPRequestPermissionResponse {
   return {
     outcome: {
       optionId: option.optionId,

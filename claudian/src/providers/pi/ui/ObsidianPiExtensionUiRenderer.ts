@@ -1,57 +1,57 @@
 import { type App, Modal, Notice } from 'obsidian';
 
 import type {
-  PiExtensionUiConfirmRequest,
-  PiExtensionUiEditorRequest,
-  PiExtensionUiInputRequest,
-  PiExtensionUiNotifyRequest,
-  PiExtensionUiRenderer,
-  PiExtensionUiSelectRequest,
-  PiExtensionUiSetEditorTextRequest,
-  PiExtensionUiSetStatusRequest,
-  PiExtensionUiSetTitleRequest,
-  PiExtensionUiSetWidgetRequest,
-} from './PiExtensionUiRenderer';
+  PiExtensionUIConfirmRequest,
+  PiExtensionUIEditorRequest,
+  PiExtensionUIInputRequest,
+  PiExtensionUINotifyRequest,
+  PiExtensionUIRenderer,
+  PiExtensionUISelectRequest,
+  PiExtensionUISetEditorTextRequest,
+  PiExtensionUISetStatusRequest,
+  PiExtensionUISetTitleRequest,
+  PiExtensionUISetWidgetRequest,
+} from './PiExtensionUIRenderer';
 
-export class ObsidianPiExtensionUiRenderer implements PiExtensionUiRenderer {
+export class ObsidianPiExtensionUIRenderer implements PiExtensionUIRenderer {
   constructor(private readonly app: App) {}
 
   async select(
-    request: PiExtensionUiSelectRequest,
+    request: PiExtensionUISelectRequest,
     signal: AbortSignal,
   ): Promise<{ cancelled?: boolean; value?: string }> {
     return new PiSelectModal(this.app, request, signal).openAndWait();
   }
 
   async confirm(
-    request: PiExtensionUiConfirmRequest,
+    request: PiExtensionUIConfirmRequest,
     signal: AbortSignal,
   ): Promise<{ cancelled?: boolean; confirmed?: boolean }> {
     return new PiConfirmModal(this.app, request, signal).openAndWait();
   }
 
   async input(
-    request: PiExtensionUiInputRequest,
+    request: PiExtensionUIInputRequest,
     signal: AbortSignal,
   ): Promise<{ cancelled?: boolean; value?: string }> {
     return new PiTextModal(this.app, request, signal, false).openAndWait();
   }
 
   async editor(
-    request: PiExtensionUiEditorRequest,
+    request: PiExtensionUIEditorRequest,
     signal: AbortSignal,
   ): Promise<{ cancelled?: boolean; value?: string }> {
     return new PiTextModal(this.app, request, signal, true).openAndWait();
   }
 
-  notify(request: PiExtensionUiNotifyRequest): void {
+  notify(request: PiExtensionUINotifyRequest): void {
     new Notice(getDisplayText(request));
   }
 
-  setStatus(_request: PiExtensionUiSetStatusRequest): void {}
-  setWidget(_request: PiExtensionUiSetWidgetRequest): void {}
-  setTitle(_request: PiExtensionUiSetTitleRequest): void {}
-  setEditorText(_request: PiExtensionUiSetEditorTextRequest): void {}
+  setStatus(_request: PiExtensionUISetStatusRequest): void {}
+  setWidget(_request: PiExtensionUISetWidgetRequest): void {}
+  setTitle(_request: PiExtensionUISetTitleRequest): void {}
+  setEditorText(_request: PiExtensionUISetEditorTextRequest): void {}
 }
 
 function getDisplayText(request: Record<string, unknown>): string {
@@ -167,7 +167,7 @@ class PiSelectModal extends PiExtensionModal<{ cancelled?: boolean; value?: stri
     const options = getSelectOptions(this.request);
     const listEl = this.contentEl.createDiv({ cls: 'claudian-pi-extension-options' });
     for (const option of options) {
-      const button = listEl.createEl('button', { text: option.label });
+      const button = listEl.createEl('button', { text: option.label, attr: { type: 'button' } });
       button.addEventListener('click', () => {
         this.finish({ value: option.value });
         this.close();
@@ -177,7 +177,7 @@ class PiSelectModal extends PiExtensionModal<{ cancelled?: boolean; value?: stri
   }
 
   private renderCancelButton(): void {
-    const cancelButton = this.contentEl.createEl('button', { text: 'Cancel' });
+    const cancelButton = this.contentEl.createEl('button', { text: 'Cancel', attr: { type: 'button' } });
     cancelButton.addEventListener('click', () => {
       this.finish({ cancelled: true });
       this.close();
@@ -193,12 +193,12 @@ class PiConfirmModal extends PiExtensionModal<{ cancelled?: boolean; confirmed?:
   protected render(): void {
     this.renderHeader('Pi extension');
     const actionsEl = this.contentEl.createDiv({ cls: 'claudian-pi-extension-actions' });
-    const confirmButton = actionsEl.createEl('button', { text: 'Confirm' });
+    const confirmButton = actionsEl.createEl('button', { text: 'Confirm', attr: { type: 'button' } });
     confirmButton.addEventListener('click', () => {
       this.finish({ confirmed: true });
       this.close();
     });
-    const cancelButton = actionsEl.createEl('button', { text: 'Cancel' });
+    const cancelButton = actionsEl.createEl('button', { text: 'Cancel', attr: { type: 'button' } });
     cancelButton.addEventListener('click', () => {
       this.finish({ confirmed: false });
       this.close();
@@ -230,18 +230,19 @@ class PiTextModal extends PiExtensionModal<{ cancelled?: boolean; value?: string
     const input = this.multiline
       ? this.contentEl.createEl('textarea')
       : this.contentEl.createEl('input', { type: 'text' });
+    input.setAttribute('aria-label', getTitle(this.request, 'Pi extension'));
     input.value = initialValue;
     if (this.multiline) {
       (input as HTMLTextAreaElement).rows = 8;
     }
 
     const actionsEl = this.contentEl.createDiv({ cls: 'claudian-pi-extension-actions' });
-    const submitButton = actionsEl.createEl('button', { text: 'Submit' });
+    const submitButton = actionsEl.createEl('button', { text: 'Submit', attr: { type: 'button' } });
     submitButton.addEventListener('click', () => {
       this.finish({ value: input.value });
       this.close();
     });
-    const cancelButton = actionsEl.createEl('button', { text: 'Cancel' });
+    const cancelButton = actionsEl.createEl('button', { text: 'Cancel', attr: { type: 'button' } });
     cancelButton.addEventListener('click', () => {
       this.finish({ cancelled: true });
       this.close();

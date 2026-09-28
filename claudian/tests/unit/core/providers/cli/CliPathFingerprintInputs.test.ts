@@ -1,11 +1,11 @@
 import {
-  createCliPathFingerprintInputs,
-  hasCliPathFingerprintInputs,
-} from '@/core/providers/cli/CliPathFingerprintInputs';
+  createCLIPathFingerprintInputs,
+  hasCLIPathFingerprintInputs,
+} from '@/core/providers/cli/CLIPathFingerprintInputs';
 
 describe('CLI path fingerprint inputs', () => {
   it('normalizes and preserves hostname and legacy candidates independently', () => {
-    const inputs = createCliPathFingerprintInputs(
+    const inputs = createCLIPathFingerprintInputs(
       ' /configured/hostname-cli ',
       ' /configured/legacy-cli ',
     );
@@ -14,16 +14,16 @@ describe('CLI path fingerprint inputs', () => {
       hostnameCliPath: '/configured/hostname-cli',
       legacyCliPath: '/configured/legacy-cli',
     });
-    expect(hasCliPathFingerprintInputs(inputs)).toBe(true);
+    expect(hasCLIPathFingerprintInputs(inputs)).toBe(true);
   });
 
   it('represents missing candidates explicitly without treating them as configured', () => {
-    const inputs = createCliPathFingerprintInputs(undefined, '  ');
+    const inputs = createCLIPathFingerprintInputs(undefined, '  ');
 
     expect(inputs).toEqual({
       hostnameCliPath: '',
       legacyCliPath: '',
     });
-    expect(hasCliPathFingerprintInputs(inputs)).toBe(false);
+    expect(hasCLIPathFingerprintInputs(inputs)).toBe(false);
   });
 });

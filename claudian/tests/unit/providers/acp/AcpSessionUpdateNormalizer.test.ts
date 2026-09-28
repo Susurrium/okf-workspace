@@ -1,11 +1,11 @@
 import {
-  AcpSessionUpdateNormalizer,
-  renderAcpContentBlock,
+  ACPSessionUpdateNormalizer,
+  renderACPContentBlock,
 } from '../../../../src/providers/acp';
 
-describe('AcpSessionUpdateNormalizer', () => {
+describe('ACPSessionUpdateNormalizer', () => {
   it('emits assistant message boundaries once per message id', () => {
-    const normalizer = new AcpSessionUpdateNormalizer();
+    const normalizer = new ACPSessionUpdateNormalizer();
 
     const first = normalizer.normalize({
       content: { text: 'Hello', type: 'text' },
@@ -36,7 +36,7 @@ describe('AcpSessionUpdateNormalizer', () => {
   });
 
   it('converts tool call state into stream chunks', () => {
-    const normalizer = new AcpSessionUpdateNormalizer();
+    const normalizer = new ACPSessionUpdateNormalizer();
 
     const start = normalizer.normalize({
       rawInput: { path: 'src/index.ts' },
@@ -92,7 +92,7 @@ describe('AcpSessionUpdateNormalizer', () => {
   });
 
   it('preserves native diff content through a status-only completion', () => {
-    const normalizer = new AcpSessionUpdateNormalizer();
+    const normalizer = new ACPSessionUpdateNormalizer();
 
     normalizer.normalize({
       rawInput: { content: 'new text', file_path: 'src/write.ts' },
@@ -137,7 +137,7 @@ describe('AcpSessionUpdateNormalizer', () => {
   });
 
   it('retains raw tool payloads while preferring concise rendered content', () => {
-    const normalizer = new AcpSessionUpdateNormalizer();
+    const normalizer = new ACPSessionUpdateNormalizer();
     const rawInput = ['opaque', { nested: true }];
     const rawOutput = { future: { bytes: [1, 2, 3] } };
 
@@ -187,7 +187,7 @@ describe('AcpSessionUpdateNormalizer', () => {
   });
 
   it('maps ACP commands into slash commands', () => {
-    const normalizer = new AcpSessionUpdateNormalizer();
+    const normalizer = new ACPSessionUpdateNormalizer();
 
     const commands = normalizer.normalize({
       availableCommands: [{
@@ -212,7 +212,7 @@ describe('AcpSessionUpdateNormalizer', () => {
   });
 
   it('parses session info timestamps and renders non-text content blocks', () => {
-    const normalizer = new AcpSessionUpdateNormalizer();
+    const normalizer = new ACPSessionUpdateNormalizer();
     const updatedAt = '2026-04-19T00:00:00.000Z';
 
     const info = normalizer.normalize({
@@ -231,7 +231,7 @@ describe('AcpSessionUpdateNormalizer', () => {
       type: 'session_info',
     });
 
-    expect(renderAcpContentBlock({
+    expect(renderACPContentBlock({
       name: 'README.md',
       type: 'resource_link',
       uri: 'file:///tmp/project/README.md',

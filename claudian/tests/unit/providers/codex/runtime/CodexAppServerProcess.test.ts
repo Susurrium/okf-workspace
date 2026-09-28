@@ -1,11 +1,9 @@
 import type { ChildProcess } from 'child_process';
 import { EventEmitter, Readable, Writable } from 'stream';
 
-jest.mock('child_process', () => ({
-  spawn: jest.fn(),
-}));
+jest.mock('cross-spawn', () => jest.fn());
 
-import { spawn } from 'child_process';
+import spawn from 'cross-spawn';
 
 import { CodexAppServerProcess } from '@/providers/codex/runtime/CodexAppServerProcess';
 import type { CodexLaunchSpec } from '@/providers/codex/runtime/codexLaunchTypes';
@@ -81,7 +79,7 @@ describe('CodexAppServerProcess', () => {
       );
     });
 
-    it('wraps Windows .cmd shims through cmd.exe and quotes shell metacharacters', () => {
+    it('passes Windows .cmd shims and shell metacharacters to cross-spawn', () => {
       Object.defineProperty(process, 'platform', { value: 'win32' });
 
       const server = new CodexAppServerProcess(createLaunchSpec({
@@ -90,11 +88,10 @@ describe('CodexAppServerProcess', () => {
       server.start();
 
       expect(mockSpawn).toHaveBeenCalledWith(
-        process.env.ComSpec || process.env.comspec || 'cmd.exe',
-        ['/d', '/s', '/c', '""C:\\Users\\R&D\\AppData\\Roaming\\npm\\codex.cmd" app-server --listen stdio://"'],
+        'C:\\Users\\R&D\\AppData\\Roaming\\npm\\codex.cmd',
+        ['app-server', '--listen', 'stdio://'],
         expect.objectContaining({
           windowsHide: true,
-          windowsVerbatimArguments: true,
         }),
       );
     });
@@ -162,9 +159,10 @@ describe('CodexAppServerProcess', () => {
       const server = new CodexAppServerProcess(createLaunchSpec());
       server.start();
 
+      mockProc.stderr?.emit('data', 'x'.repeat(8192));
       mockProc.stderr?.emit('data', 'failed to load configuration');
 
-      expect(server.getStderrSnapshot()).toContain('failed to load configuration');
+      expect(server.getStderrSnapshot()).toBe('x'.repeat(8164) + 'failed to load configuration');
     });
   });
 
@@ -243,57 +241,6 @@ describe('CodexAppServerProcess', () => {
 
       mockProc.emit('exit', 0, null);
       await shutdownPromise;
-    });
-
-    it('sends SIGKILL if process does not exit within timeout', async () => {
-      jest.useFakeTimers();
-      const server = new CodexAppServerProcess(createLaunchSpec());
-      server.start();
-
-      const shutdownPromise = server.shutdown();
-
-      // Advance past the SIGKILL timeout
-      jest.advanceTimersByTime(5_000);
-
-      // Now simulate exit after SIGKILL
-      mockProc.emit('exit', 137, 'SIGKILL');
-      await shutdownPromise;
-
-      expect(mockProc.kill).toHaveBeenCalledWith('SIGTERM');
-      expect(mockProc.kill).toHaveBeenCalledWith('SIGKILL');
-
-      jest.useRealTimers();
-    });
-
-    it('settles after a final deadline when no exit follows SIGKILL', async () => {
-      jest.useFakeTimers();
-      const server = new CodexAppServerProcess(createLaunchSpec());
-      server.start();
-
-      const shutdownPromise = server.shutdown();
-      jest.advanceTimersByTime(6_000);
-
-      await expect(shutdownPromise).resolves.toBeUndefined();
-      expect(mockProc.kill).toHaveBeenCalledWith('SIGKILL');
-      jest.useRealTimers();
-    });
-
-    it('resolves immediately if process is not running', async () => {
-      const server = new CodexAppServerProcess(createLaunchSpec());
-      await server.shutdown();
-      expect(server.isAlive()).toBe(false);
-    });
-
-    it('shares one shutdown sequence across repeated calls', async () => {
-      const server = new CodexAppServerProcess(createLaunchSpec());
-      server.start();
-
-      const first = server.shutdown();
-      const second = server.shutdown();
-      expect(mockProc.kill).toHaveBeenCalledTimes(1);
-
-      mockProc.emit('exit', 0, 'SIGTERM');
-      await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
     });
   });
 

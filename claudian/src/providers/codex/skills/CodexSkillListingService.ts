@@ -10,7 +10,7 @@ import type {
   SkillScope,
   SkillsListResult,
 } from '../runtime/codexAppServerTypes';
-import { CodexRpcTransport } from '../runtime/CodexRpcTransport';
+import { CodexRPCTransport } from '../runtime/CodexRPCTransport';
 import { createCodexRuntimeContext } from '../runtime/CodexRuntimeContext';
 
 export interface CodexSkillListProvider {
@@ -59,29 +59,6 @@ export function compareCodexSkillPriority(
   return left.path.localeCompare(right.path);
 }
 
-export function extractExplicitCodexSkillNames(text: string): string[] {
-  const matches = text.matchAll(/(^|\s)\$([A-Za-z0-9_-]+)/g);
-  const names: string[] = [];
-  const seen = new Set<string>();
-
-  for (const match of matches) {
-    const name = match[2];
-    if (!name) {
-      continue;
-    }
-
-    const normalized = name.toLowerCase();
-    if (seen.has(normalized)) {
-      continue;
-    }
-
-    seen.add(normalized);
-    names.push(name);
-  }
-
-  return names;
-}
-
 export function getCodexSkillDescription(
   skill: Pick<SkillMetadata, 'description' | 'shortDescription' | 'interface'>,
 ): string | undefined {
@@ -89,18 +66,6 @@ export function getCodexSkillDescription(
     ?? skill.shortDescription
     ?? skill.description
     ?? undefined;
-}
-
-export function findPreferredCodexSkillByName(
-  skills: SkillMetadata[],
-  name: string,
-): SkillMetadata | null {
-  const normalized = name.toLowerCase();
-  const candidates = skills
-    .filter(skill => skill.enabled && skill.name.toLowerCase() === normalized)
-    .sort(compareCodexSkillPriority);
-
-  return candidates[0] ?? null;
 }
 
 export class CodexSkillListingService implements CodexSkillListProvider {
@@ -138,7 +103,7 @@ export class CodexSkillListingService implements CodexSkillListProvider {
     options?.signal?.throwIfAborted();
     if (options?.forceReload) {
       const generation = ++this.generation;
-      return this.startFetch(true, generation, options.signal);
+      return this.#startFetch(true, generation, options.signal);
     }
 
     if (options?.signal) {
@@ -147,7 +112,7 @@ export class CodexSkillListingService implements CodexSkillListProvider {
       }
       // A request-scoped signal owns its process lifetime. Do not coalesce it
       // behind work that another consumer may invalidate independently.
-      return this.startFetch(false, this.generation, options.signal);
+      return this.#startFetch(false, this.generation, options.signal);
     }
 
     if (this.pending?.generation === this.generation) {
@@ -158,10 +123,10 @@ export class CodexSkillListingService implements CodexSkillListProvider {
       return this.cache;
     }
 
-    return this.startFetch(false, this.generation);
+    return this.#startFetch(false, this.generation);
   }
 
-  private startFetch(
+  #startFetch(
     forceReload: boolean,
     generation: number,
     signal?: AbortSignal,
@@ -183,7 +148,7 @@ export class CodexSkillListingService implements CodexSkillListProvider {
     const promise = fetch
       .then((skills) => {
         if (generation === this.generation) {
-          this.storeCache(skills);
+          this.#storeCache(skills);
         }
         return skills;
       })
@@ -241,7 +206,7 @@ export class CodexSkillListingService implements CodexSkillListProvider {
     const process = new CodexAppServerProcess(launchSpec);
     process.start();
 
-    const transport = new CodexRpcTransport(process);
+    const transport = new CodexRPCTransport(process);
     transport.start();
     const onAbort = (): void => transport.dispose();
     signal?.addEventListener('abort', onAbort, { once: true });
@@ -267,7 +232,7 @@ export class CodexSkillListingService implements CodexSkillListProvider {
     }
   }
 
-  private storeCache(skills: SkillMetadata[]): void {
+  #storeCache(skills: SkillMetadata[]): void {
     this.cache = skills;
     this.cacheExpiresAt = this.now() + this.ttlMs;
   }

@@ -1,118 +1,101 @@
-import type { AcpJsonRpcTransport, JsonRpcRequestOptions } from './AcpJsonRpcTransport';
-import { JsonRpcErrorResponse } from './AcpJsonRpcTransport';
+import type { ACPJSONRPCTransport, JSONRPCRequestOptions } from './ACPJSONRPCTransport';
 import {
-  ACP_SERVER_NOTIFICATION_ALIASES,
-  ACP_SERVER_REQUEST_ALIASES,
-  type AcpLogicalMethod,
-  type AcpMethodOverrides,
-  getAcpMethodCandidates,
+  ACP_METHOD_NAMES,
+  ACP_SERVER_NOTIFICATION_METHODS,
+  ACP_SERVER_REQUEST_METHODS,
+  type ACPLogicalMethod,
 } from './methodNames';
 import type {
-  AcpAuthenticateRequest,
-  AcpAuthenticateResponse,
-  AcpCancelNotification,
-  AcpClientCapabilities,
-  AcpCreateTerminalRequest,
-  AcpCreateTerminalResponse,
-  AcpImplementation,
-  AcpInitializeRequest,
-  AcpInitializeResponse,
-  AcpKillTerminalRequest,
-  AcpKillTerminalResponse,
-  AcpListSessionsRequest,
-  AcpListSessionsResponse,
-  AcpLoadSessionRequest,
-  AcpLoadSessionResponse,
-  AcpNewSessionRequest,
-  AcpNewSessionResponse,
-  AcpPromptRequest,
-  AcpPromptResponse,
-  AcpReadTextFileRequest,
-  AcpReadTextFileResponse,
-  AcpReleaseTerminalRequest,
-  AcpReleaseTerminalResponse,
-  AcpRequestPermissionRequest,
-  AcpRequestPermissionResponse,
-  AcpSessionNotification,
-  AcpSetSessionConfigOptionRequest,
-  AcpSetSessionConfigOptionResponse,
-  AcpSetSessionModelRequest,
-  AcpSetSessionModelResponse,
-  AcpSetSessionModeRequest,
-  AcpSetSessionModeResponse,
-  AcpTerminalOutputRequest,
-  AcpTerminalOutputResponse,
-  AcpWaitForTerminalExitRequest,
-  AcpWaitForTerminalExitResponse,
-  AcpWriteTextFileRequest,
-  AcpWriteTextFileResponse,
+  ACPAuthenticateRequest,
+  ACPAuthenticateResponse,
+  ACPCancelNotification,
+  ACPClientCapabilities,
+  ACPCreateTerminalRequest,
+  ACPCreateTerminalResponse,
+  ACPForkSessionRequest,
+  ACPForkSessionResponse,
+  ACPImplementation,
+  ACPInitializeRequest,
+  ACPInitializeResponse,
+  ACPKillTerminalRequest,
+  ACPKillTerminalResponse,
+  ACPListSessionsRequest,
+  ACPListSessionsResponse,
+  ACPLoadSessionRequest,
+  ACPLoadSessionResponse,
+  ACPNewSessionRequest,
+  ACPNewSessionResponse,
+  ACPPromptRequest,
+  ACPPromptResponse,
+  ACPReadTextFileRequest,
+  ACPReadTextFileResponse,
+  ACPReleaseTerminalRequest,
+  ACPReleaseTerminalResponse,
+  ACPRequestPermissionRequest,
+  ACPRequestPermissionResponse,
+  ACPSessionNotification,
+  ACPSetSessionConfigOptionRequest,
+  ACPSetSessionConfigOptionResponse,
+  ACPSetSessionModelRequest,
+  ACPSetSessionModelResponse,
+  ACPSetSessionModeRequest,
+  ACPSetSessionModeResponse,
+  ACPTerminalOutputRequest,
+  ACPTerminalOutputResponse,
+  ACPWaitForTerminalExitRequest,
+  ACPWaitForTerminalExitResponse,
+  ACPWriteTextFileRequest,
+  ACPWriteTextFileResponse,
 } from './types';
 
 type SessionNotificationListener = (
-  notification: AcpSessionNotification,
+  notification: ACPSessionNotification,
 ) => void | Promise<void>;
 
 // ACP prompt turns are long-running RPCs; session/update notifications stream progress until the final response.
 const ACP_PROMPT_TURN_TIMEOUT_MS = 0;
 
-export interface AcpFileSystemDelegate {
-  readTextFile?: (request: AcpReadTextFileRequest) => Promise<AcpReadTextFileResponse>;
-  writeTextFile?: (request: AcpWriteTextFileRequest) => Promise<AcpWriteTextFileResponse>;
+export interface ACPFileSystemDelegate {
+  readTextFile?: (request: ACPReadTextFileRequest) => Promise<ACPReadTextFileResponse>;
+  writeTextFile?: (request: ACPWriteTextFileRequest) => Promise<ACPWriteTextFileResponse>;
 }
 
-export interface AcpTerminalDelegate {
-  createTerminal: (request: AcpCreateTerminalRequest) => Promise<AcpCreateTerminalResponse>;
-  killTerminal: (request: AcpKillTerminalRequest) => Promise<AcpKillTerminalResponse>;
-  releaseTerminal: (request: AcpReleaseTerminalRequest) => Promise<AcpReleaseTerminalResponse>;
-  terminalOutput: (request: AcpTerminalOutputRequest) => Promise<AcpTerminalOutputResponse>;
+export interface ACPTerminalDelegate {
+  createTerminal: (request: ACPCreateTerminalRequest) => Promise<ACPCreateTerminalResponse>;
+  killTerminal: (request: ACPKillTerminalRequest) => Promise<ACPKillTerminalResponse>;
+  releaseTerminal: (request: ACPReleaseTerminalRequest) => Promise<ACPReleaseTerminalResponse>;
+  terminalOutput: (request: ACPTerminalOutputRequest) => Promise<ACPTerminalOutputResponse>;
   waitForTerminalExit: (
-    request: AcpWaitForTerminalExitRequest,
-  ) => Promise<AcpWaitForTerminalExitResponse>;
+    request: ACPWaitForTerminalExitRequest,
+  ) => Promise<ACPWaitForTerminalExitResponse>;
 }
 
-export interface AcpClientConnectionDelegate {
-  fileSystem?: AcpFileSystemDelegate;
+export interface ACPClientConnectionDelegate {
+  fileSystem?: ACPFileSystemDelegate;
   onSessionNotification?: SessionNotificationListener;
   requestPermission?: (
-    request: AcpRequestPermissionRequest,
-  ) => Promise<AcpRequestPermissionResponse>;
-  terminal?: AcpTerminalDelegate;
+    request: ACPRequestPermissionRequest,
+  ) => Promise<ACPRequestPermissionResponse>;
+  terminal?: ACPTerminalDelegate;
 }
 
-export interface AcpClientConnectionOptions {
-  clientCapabilities?: Partial<AcpClientCapabilities>;
-  clientInfo?: AcpImplementation | null;
-  delegate?: AcpClientConnectionDelegate;
-  methodOverrides?: AcpMethodOverrides;
-  transport: AcpJsonRpcTransport;
+export interface ACPClientConnectionOptions {
+  clientCapabilities?: Partial<ACPClientCapabilities>;
+  clientInfo?: ACPImplementation | null;
+  delegate?: ACPClientConnectionDelegate;
+  transport: ACPJSONRPCTransport;
 }
 
-export class AcpClientConnection {
-  private agentInfo: AcpInitializeResponse['agentInfo'] | null = null;
-  private agentCapabilities: AcpInitializeResponse['agentCapabilities'] | null = null;
-  private authMethods: AcpInitializeResponse['authMethods'] | null = null;
-  private readonly methodCache = new Map<AcpLogicalMethod, string>();
+export class ACPClientConnection {
   private readonly sessionNotificationListeners = new Set<SessionNotificationListener>();
   private readonly unsubscribeHandlers: Array<() => void> = [];
 
-  constructor(private readonly options: AcpClientConnectionOptions) {
-    this.registerServerHandlers();
+  constructor(private readonly options: ACPClientConnectionOptions) {
+    this.#registerServerHandlers();
   }
 
   get signal(): AbortSignal {
     return this.options.transport.signal;
-  }
-
-  get negotiatedAgentInfo(): AcpInitializeResponse['agentInfo'] | null {
-    return this.agentInfo;
-  }
-
-  get negotiatedAgentCapabilities(): AcpInitializeResponse['agentCapabilities'] | null {
-    return this.agentCapabilities;
-  }
-
-  get negotiatedAuthMethods(): AcpInitializeResponse['authMethods'] | null {
-    return this.authMethods;
   }
 
   onSessionNotification(listener: SessionNotificationListener): () => void {
@@ -130,67 +113,67 @@ export class AcpClientConnection {
   }
 
   async initialize(
-    partialRequest: Partial<AcpInitializeRequest> = {},
-  ): Promise<AcpInitializeResponse> {
-    const request: AcpInitializeRequest = {
+    partialRequest: Partial<ACPInitializeRequest> = {},
+  ): Promise<ACPInitializeResponse> {
+    const request: ACPInitializeRequest = {
       ...('_meta' in partialRequest ? { _meta: partialRequest._meta } : {}),
       clientCapabilities: mergeCapabilities(
-        this.buildClientCapabilities(),
+        this.#buildClientCapabilities(),
         partialRequest.clientCapabilities,
       ),
       clientInfo: partialRequest.clientInfo ?? this.options.clientInfo ?? null,
       protocolVersion: partialRequest.protocolVersion ?? 1,
     };
 
-    const response = await this.requestWithFallback<AcpInitializeResponse>('initialize', request);
-    this.agentInfo = response.agentInfo ?? null;
-    this.agentCapabilities = response.agentCapabilities ?? null;
-    this.authMethods = response.authMethods ?? null;
-    return response;
+    return this.#request<ACPInitializeResponse>('initialize', request);
   }
 
-  authenticate(request: AcpAuthenticateRequest): Promise<AcpAuthenticateResponse> {
-    return this.requestWithFallback<AcpAuthenticateResponse>('authenticate', request);
+  authenticate(request: ACPAuthenticateRequest): Promise<ACPAuthenticateResponse> {
+    return this.#request<ACPAuthenticateResponse>('authenticate', request);
   }
 
-  newSession(request: AcpNewSessionRequest): Promise<AcpNewSessionResponse> {
-    return this.requestWithFallback<AcpNewSessionResponse>('newSession', request);
+  newSession(request: ACPNewSessionRequest): Promise<ACPNewSessionResponse> {
+    return this.#request<ACPNewSessionResponse>('newSession', request);
   }
 
-  loadSession(request: AcpLoadSessionRequest): Promise<AcpLoadSessionResponse> {
-    return this.requestWithFallback<AcpLoadSessionResponse>('loadSession', request);
+  forkSession(request: ACPForkSessionRequest): Promise<ACPForkSessionResponse> {
+    return this.#request<ACPForkSessionResponse>('forkSession', request);
   }
 
-  listSessions(request: AcpListSessionsRequest = {}): Promise<AcpListSessionsResponse> {
-    return this.requestWithFallback<AcpListSessionsResponse>('listSessions', request);
+  loadSession(request: ACPLoadSessionRequest): Promise<ACPLoadSessionResponse> {
+    return this.#request<ACPLoadSessionResponse>('loadSession', request);
   }
 
-  prompt(request: AcpPromptRequest): Promise<AcpPromptResponse> {
-    return this.requestWithFallback<AcpPromptResponse>('prompt', request, {
+  listSessions(request: ACPListSessionsRequest = {}): Promise<ACPListSessionsResponse> {
+    return this.#request<ACPListSessionsResponse>('listSessions', request);
+  }
+
+  prompt(request: ACPPromptRequest): Promise<ACPPromptResponse> {
+    return this.#request<ACPPromptResponse>('prompt', request, {
       timeoutMs: ACP_PROMPT_TURN_TIMEOUT_MS,
     });
   }
 
-  cancel(notification: AcpCancelNotification): void {
-    this.notifyLogicalMethod('cancel', notification, { sendAllCandidatesIfUncached: true });
+  cancel(notification: ACPCancelNotification): void {
+    this.options.transport.notify(ACP_METHOD_NAMES.cancel, notification);
   }
 
-  setMode(request: AcpSetSessionModeRequest): Promise<AcpSetSessionModeResponse> {
-    return this.requestWithFallback<AcpSetSessionModeResponse>('setMode', request);
+  setMode(request: ACPSetSessionModeRequest): Promise<ACPSetSessionModeResponse> {
+    return this.#request<ACPSetSessionModeResponse>('setMode', request);
   }
 
-  setModel(request: AcpSetSessionModelRequest): Promise<AcpSetSessionModelResponse> {
-    return this.requestWithFallback<AcpSetSessionModelResponse>('setModel', request);
+  setModel(request: ACPSetSessionModelRequest): Promise<ACPSetSessionModelResponse> {
+    return this.#request<ACPSetSessionModelResponse>('setModel', request);
   }
 
   setConfigOption(
-    request: AcpSetSessionConfigOptionRequest,
-  ): Promise<AcpSetSessionConfigOptionResponse> {
-    return this.requestWithFallback<AcpSetSessionConfigOptionResponse>('setConfigOption', request);
+    request: ACPSetSessionConfigOptionRequest,
+  ): Promise<ACPSetSessionConfigOptionResponse> {
+    return this.#request<ACPSetSessionConfigOptionResponse>('setConfigOption', request);
   }
 
-  private buildClientCapabilities(): AcpClientCapabilities | undefined {
-    const capabilities: AcpClientCapabilities = { ...this.options.clientCapabilities };
+  #buildClientCapabilities(): ACPClientCapabilities | undefined {
+    const capabilities: ACPClientCapabilities = { ...this.options.clientCapabilities };
     const fileSystem = this.options.delegate?.fileSystem;
     const terminal = this.options.delegate?.terminal;
 
@@ -209,31 +192,27 @@ export class AcpClientConnection {
     return Object.keys(capabilities).length === 0 ? undefined : capabilities;
   }
 
-  private registerServerHandlers(): void {
+  #registerServerHandlers(): void {
     const transport = this.options.transport;
     const delegate = this.options.delegate;
 
-    const subscribeNotification = (aliases: readonly string[], handler: (params: unknown) => Promise<void>): void => {
-      for (const alias of aliases) {
-        this.unsubscribeHandlers.push(transport.onNotification(alias, handler));
-      }
+    const subscribeNotification = (method: string, handler: (params: unknown) => Promise<void>): void => {
+      this.unsubscribeHandlers.push(transport.onNotification(method, handler));
     };
-    const subscribeRequest = (aliases: readonly string[], handler: (params: unknown) => Promise<unknown>): void => {
-      for (const alias of aliases) {
-        this.unsubscribeHandlers.push(transport.onRequest(alias, handler));
-      }
+    const subscribeRequest = (method: string, handler: (params: unknown) => Promise<unknown>): void => {
+      this.unsubscribeHandlers.push(transport.onRequest(method, handler));
     };
 
     subscribeNotification(
-      ACP_SERVER_NOTIFICATION_ALIASES.sessionUpdate,
-      async (params) => this.dispatchSessionNotification(params as AcpSessionNotification),
+      ACP_SERVER_NOTIFICATION_METHODS.sessionUpdate,
+      async (params) => this.#dispatchSessionNotification(params as ACPSessionNotification),
     );
 
     if (delegate?.requestPermission) {
       const requestPermission = delegate.requestPermission;
       subscribeRequest(
-        ACP_SERVER_REQUEST_ALIASES.requestPermission,
-        (params) => requestPermission(params as AcpRequestPermissionRequest),
+        ACP_SERVER_REQUEST_METHODS.requestPermission,
+        (params) => requestPermission(params as ACPRequestPermissionRequest),
       );
     }
 
@@ -241,44 +220,44 @@ export class AcpClientConnection {
     if (fileSystem?.readTextFile) {
       const readTextFile = fileSystem.readTextFile;
       subscribeRequest(
-        ACP_SERVER_REQUEST_ALIASES.readTextFile,
-        (params) => readTextFile(params as AcpReadTextFileRequest),
+        ACP_SERVER_REQUEST_METHODS.readTextFile,
+        (params) => readTextFile(params as ACPReadTextFileRequest),
       );
     }
     if (fileSystem?.writeTextFile) {
       const writeTextFile = fileSystem.writeTextFile;
       subscribeRequest(
-        ACP_SERVER_REQUEST_ALIASES.writeTextFile,
-        (params) => writeTextFile(params as AcpWriteTextFileRequest),
+        ACP_SERVER_REQUEST_METHODS.writeTextFile,
+        (params) => writeTextFile(params as ACPWriteTextFileRequest),
       );
     }
 
     const terminal = delegate?.terminal;
     if (terminal) {
       subscribeRequest(
-        ACP_SERVER_REQUEST_ALIASES.createTerminal,
-        (params) => terminal.createTerminal(params as AcpCreateTerminalRequest),
+        ACP_SERVER_REQUEST_METHODS.createTerminal,
+        (params) => terminal.createTerminal(params as ACPCreateTerminalRequest),
       );
       subscribeRequest(
-        ACP_SERVER_REQUEST_ALIASES.terminalOutput,
-        (params) => terminal.terminalOutput(params as AcpTerminalOutputRequest),
+        ACP_SERVER_REQUEST_METHODS.terminalOutput,
+        (params) => terminal.terminalOutput(params as ACPTerminalOutputRequest),
       );
       subscribeRequest(
-        ACP_SERVER_REQUEST_ALIASES.waitForTerminalExit,
-        (params) => terminal.waitForTerminalExit(params as AcpWaitForTerminalExitRequest),
+        ACP_SERVER_REQUEST_METHODS.waitForTerminalExit,
+        (params) => terminal.waitForTerminalExit(params as ACPWaitForTerminalExitRequest),
       );
       subscribeRequest(
-        ACP_SERVER_REQUEST_ALIASES.killTerminal,
-        (params) => terminal.killTerminal(params as AcpKillTerminalRequest),
+        ACP_SERVER_REQUEST_METHODS.killTerminal,
+        (params) => terminal.killTerminal(params as ACPKillTerminalRequest),
       );
       subscribeRequest(
-        ACP_SERVER_REQUEST_ALIASES.releaseTerminal,
-        (params) => terminal.releaseTerminal(params as AcpReleaseTerminalRequest),
+        ACP_SERVER_REQUEST_METHODS.releaseTerminal,
+        (params) => terminal.releaseTerminal(params as ACPReleaseTerminalRequest),
       );
     }
   }
 
-  private async dispatchSessionNotification(notification: AcpSessionNotification): Promise<void> {
+  async #dispatchSessionNotification(notification: ACPSessionNotification): Promise<void> {
     if (this.options.delegate?.onSessionNotification) {
       await this.options.delegate.onSessionNotification(notification);
     }
@@ -288,74 +267,24 @@ export class AcpClientConnection {
     }
   }
 
-  // -32601 (Method not found) is the only error we absorb; agents that advertise legacy
-  // method names only reject unknown candidates with it, so every other code is real.
-  private async requestWithFallback<T>(
-    logicalMethod: AcpLogicalMethod,
+  #request<T>(
+    logicalMethod: ACPLogicalMethod,
     params?: unknown,
-    requestOptions?: JsonRpcRequestOptions,
+    requestOptions?: JSONRPCRequestOptions,
   ): Promise<T> {
-    const cachedMethod = this.methodCache.get(logicalMethod);
-    if (cachedMethod) {
-      return this.options.transport.request<T>(cachedMethod, params, requestOptions);
-    }
-
-    const candidates = getAcpMethodCandidates(logicalMethod, this.options.methodOverrides);
-    let lastError: Error | null = null;
-
-    for (const methodName of candidates) {
-      try {
-        const result = await this.options.transport.request<T>(methodName, params, requestOptions);
-        this.methodCache.set(logicalMethod, methodName);
-        return result;
-      } catch (error) {
-        if (!(error instanceof JsonRpcErrorResponse) || error.code !== -32601) {
-          throw error;
-        }
-        lastError = error;
-      }
-    }
-
-    if (lastError) {
-      throw lastError;
-    }
-
-    throw new Error(`No ACP method candidates configured for ${logicalMethod}`);
-  }
-
-  private notifyLogicalMethod(
-    logicalMethod: AcpLogicalMethod,
-    params?: unknown,
-    options: { sendAllCandidatesIfUncached?: boolean } = {},
-  ): void {
-    const cachedMethod = this.methodCache.get(logicalMethod);
-    if (cachedMethod) {
-      this.options.transport.notify(cachedMethod, params);
-      return;
-    }
-
-    // Notifications get no response, so we cannot probe. Fan out to every candidate
-    // when the caller explicitly opts in (e.g. cancel, which must reach the agent).
-    const candidates = getAcpMethodCandidates(logicalMethod, this.options.methodOverrides);
-    const methodNames = options.sendAllCandidatesIfUncached
-      ? Array.from(new Set(candidates))
-      : candidates.slice(0, 1);
-
-    for (const methodName of methodNames) {
-      this.options.transport.notify(methodName, params);
-    }
+    return this.options.transport.request<T>(ACP_METHOD_NAMES[logicalMethod], params, requestOptions);
   }
 }
 
 function mergeCapabilities(
-  base: AcpClientCapabilities | undefined,
-  override: AcpClientCapabilities | undefined,
-): AcpClientCapabilities | undefined {
+  base: ACPClientCapabilities | undefined,
+  override: ACPClientCapabilities | undefined,
+): ACPClientCapabilities | undefined {
   if (!base && !override) {
     return undefined;
   }
 
-  const merged: AcpClientCapabilities = { ...base, ...override };
+  const merged: ACPClientCapabilities = { ...base, ...override };
 
   if (base?.auth || override?.auth) {
     merged.auth = { ...base?.auth, ...override?.auth };

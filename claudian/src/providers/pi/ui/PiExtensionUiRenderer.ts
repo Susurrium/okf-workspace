@@ -1,12 +1,12 @@
 export type {
-  PiExtensionUiConfirmRequest,
-  PiExtensionUiEditorRequest,
-  PiExtensionUiInputRequest,
-  PiExtensionUiNotifyRequest,
-  PiExtensionUiRenderer,
-  PiExtensionUiSelectRequest,
-  PiExtensionUiSetEditorTextRequest,
-  PiExtensionUiSetStatusRequest,
-  PiExtensionUiSetTitleRequest,
-  PiExtensionUiSetWidgetRequest,
-} from '../runtime/PiExtensionUiBridge';
+  PiExtensionUIConfirmRequest,
+  PiExtensionUIEditorRequest,
+  PiExtensionUIInputRequest,
+  PiExtensionUINotifyRequest,
+  PiExtensionUIRenderer,
+  PiExtensionUISelectRequest,
+  PiExtensionUISetEditorTextRequest,
+  PiExtensionUISetStatusRequest,
+  PiExtensionUISetTitleRequest,
+  PiExtensionUISetWidgetRequest,
+} from '../runtime/PiExtensionUIBridge';

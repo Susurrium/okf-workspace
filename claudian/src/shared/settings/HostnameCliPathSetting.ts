@@ -1,6 +1,6 @@
 import { Setting, type TextComponent } from 'obsidian';
 
-export interface HostnameCliPathSettingOptions {
+export interface HostnameCLIPathSettingOptions {
   container: HTMLElement;
   description: string;
   disabled?: boolean;
@@ -11,7 +11,7 @@ export interface HostnameCliPathSettingOptions {
   validate?: (value: string) => string | null;
 }
 
-export interface HostnameCliPathSettingControl {
+export interface HostnameCLIPathSettingControl {
   revalidate: () => boolean;
   setDescription: (description: string) => void;
   setDisabled: (disabled: boolean) => void;
@@ -21,9 +21,9 @@ export interface HostnameCliPathSettingControl {
   validationEl: HTMLElement;
 }
 
-export function renderHostnameCliPathSetting(
-  options: HostnameCliPathSettingOptions,
-): HostnameCliPathSettingControl {
+export function renderHostnameCLIPathSetting(
+  options: HostnameCLIPathSettingOptions,
+): HostnameCLIPathSettingControl {
   let currentValue = options.getValue().trim();
   let disabled = options.disabled ?? false;
   let text!: TextComponent;
@@ -39,6 +39,7 @@ export function renderHostnameCliPathSetting(
     setElementText(validationEl, error ?? '');
     toggleElementClass(validationEl, 'claudian-hidden', !error);
     toggleElementClass(text.inputEl, 'claudian-input-error', Boolean(error));
+    text.inputEl.setAttribute?.('aria-invalid', String(Boolean(error)));
     return !error;
   };
 

@@ -14,23 +14,26 @@ import type {
   ProviderUserMessageStartedEvent,
   ToolExecutionScope,
 } from '../../../core/execution';
-import type { StreamChunk, UsageInfo } from '../../../core/types';
+import type { StreamChunk, TurnStats, UsageInfo } from '../../../core/types';
+import { createTurnStats } from '../../../core/types';
 import { ClaudeTaskToolNormalizer } from '../normalization/ClaudeTaskToolNormalizer';
 import {
   isAsyncSubagentCompletion,
   isContextWindowEvent,
   isSessionInitEvent,
   isStreamChunk,
+  isSubagentProgress,
 } from '../sdk/typeGuards';
 import type {
   ClaudeAsyncSubagentCompletionEvent,
+  ClaudeSubagentProgressEvent,
   SessionInitEvent,
 } from '../sdk/types';
 import {
   createTransformStreamState,
   createTransformUsageState,
-  recalculateClaudeUsageContextWindow,
   transformSDKMessage,
+  withReportedContextWindow,
 } from '../stream/transformClaudeMessage';
 
 type WithoutScope<T> = T extends unknown ? Omit<T, 'scope'> : never;
@@ -59,15 +62,12 @@ export type ClaudeNormalizedExecutionEvent =
     readonly event: ClaudeAsyncSubagentCompletionEvent;
   }
   | {
+    readonly type: 'subagent_progress';
+    readonly event: ClaudeSubagentProgressEvent;
+  }
+  | {
     readonly type: 'output';
     readonly event: ClaudeNormalizedOutputEvent;
-  }
-  | {
-    readonly type: 'mode_entered';
-    readonly mode: 'plan';
-  }
-  | {
-    readonly type: 'plan_exited';
   }
   | {
     readonly type: 'assistant_checkpoint';
@@ -86,6 +86,7 @@ export type ClaudeNormalizedExecutionEvent =
   }
   | {
     readonly type: 'result';
+    readonly turnStats?: TurnStats;
   };
 
 export type ClaudeExecutionEventChannel = 'requested' | 'background';
@@ -121,8 +122,7 @@ export class ClaudeExecutionEventNormalizer {
     channel: ClaudeExecutionEventChannel,
     options: {
       readonly intendedModel?: string;
-      readonly customContextLimits?: Record<string, number>;
-      readonly authoritativeContextWindow?: number;
+      readonly reportedContextWindow?: number;
     } = {},
   ): ClaudeNormalizedExecutionEvent[] {
     const state = this.states[channel];
@@ -146,14 +146,18 @@ export class ClaudeExecutionEventNormalizer {
         });
         continue;
       }
+      if (isSubagentProgress(event)) {
+        normalized.push({ type: 'subagent_progress', event });
+        continue;
+      }
       if (isContextWindowEvent(event)) {
         const model = options.intendedModel ?? state.lastUsage?.model ?? 'sonnet';
-        const authoritativeContextWindow = isFinitePositiveNumber(
-          options.authoritativeContextWindow,
+        const reportedContextWindow = isFinitePositiveNumber(
+          options.reportedContextWindow,
         )
-          ? options.authoritativeContextWindow
+          ? options.reportedContextWindow
           : undefined;
-        if (authoritativeContextWindow === undefined) {
+        if (reportedContextWindow === undefined) {
           normalized.push({
             type: 'context_window',
             model,
@@ -163,8 +167,7 @@ export class ClaudeExecutionEventNormalizer {
         const correctedUsage = this.updateContextWindow(
           channel,
           model,
-          options.customContextLimits,
-          authoritativeContextWindow ?? event.contextWindow,
+          reportedContextWindow ?? event.contextWindow,
         );
         if (correctedUsage) {
           normalized.push({
@@ -179,19 +182,20 @@ export class ClaudeExecutionEventNormalizer {
       }
       if (isStreamChunk(event)) {
         for (const chunk of normalizeTaskToolChunk(event, state.taskToolNormalizer)) {
-          this.normalizeStreamChunk(message, chunk, state, normalized);
+          this.#normalizeStreamChunk(message, chunk, state, normalized);
         }
       }
     }
 
-    if (message.type === 'assistant' && message.uuid) {
+    if (message.type === 'assistant' && message.uuid && message.parent_tool_use_id == null) {
       normalized.push({
         type: 'assistant_checkpoint',
         nativeAssistantId: message.uuid,
       });
     }
     if (message.type === 'result') {
-      normalized.push({ type: 'result' });
+      normalized.push({ type: 'result', turnStats: message.subtype === 'success' && !message.is_error
+        ? createTurnStats(message.usage?.output_tokens, message.duration_ms) : undefined });
     }
     return normalized;
   }
@@ -199,17 +203,16 @@ export class ClaudeExecutionEventNormalizer {
   updateContextWindow(
     channel: ClaudeExecutionEventChannel,
     model: string,
-    customContextLimits: Record<string, number> | undefined,
-    runtimeContextWindow: number,
+    reportedContextWindow: number,
   ): UsageInfo | null {
     const state = this.states[channel];
-    if (!state.lastUsage || state.lastUsage.model !== model) {
+    if (!state.lastUsage || state.lastUsage.model !== model
+      || !isFinitePositiveNumber(reportedContextWindow)) {
       return null;
     }
-    const correctedUsage = recalculateClaudeUsageContextWindow(
+    const correctedUsage = withReportedContextWindow(
       state.lastUsage,
-      customContextLimits,
-      runtimeContextWindow,
+      reportedContextWindow,
     );
     if (sameUsageWindow(state.lastUsage, correctedUsage)) {
       return null;
@@ -225,6 +228,11 @@ export class ClaudeExecutionEventNormalizer {
     this.states[channel].blockedToolIds.add(toolUseId);
   }
 
+  /** A steer entering the run opens a new assistant response boundary. */
+  beginUserBoundary(channel: ClaudeExecutionEventChannel): void {
+    this.states[channel].assistantStarted = false;
+  }
+
   reset(channel: ClaudeExecutionEventChannel): void {
     const state = this.states[channel];
     state.streamState.clearAll();
@@ -238,7 +246,7 @@ export class ClaudeExecutionEventNormalizer {
     state.sawStreamThinking = false;
   }
 
-  private normalizeStreamChunk(
+  #normalizeStreamChunk(
     message: SDKMessage,
     chunk: StreamChunk,
     state: NormalizationState,
@@ -248,12 +256,16 @@ export class ClaudeExecutionEventNormalizer {
     if (chunk.type === 'error') {
       target.push({
         type: 'native_error',
-        message: chunk.content,
+        message: (isSyntheticApiErrorMessage(message) ? extractApiErrorText(message) : null)
+          ?? chunk.content,
         code: chunk.code,
         providerSessionId: chunk.providerSessionId,
       });
       return;
     }
+
+    // The native_error above already carries this text; rendering it again would duplicate it.
+    if (chunk.type === 'text' && isSyntheticApiErrorMessage(message)) return;
 
     if (
       (chunk.type === 'text' || chunk.type === 'thinking')
@@ -291,21 +303,6 @@ export class ClaudeExecutionEventNormalizer {
         type: 'output',
         event,
       });
-    }
-    if (
-      (chunk.type === 'tool_use' || chunk.type === 'subagent_tool_use')
-      && chunk.name === 'EnterPlanMode'
-    ) {
-      target.push({
-        type: 'mode_entered',
-        mode: 'plan',
-      });
-    }
-    if (
-      (chunk.type === 'tool_use' || chunk.type === 'subagent_tool_use')
-      && chunk.name === 'ExitPlanMode'
-    ) {
-      target.push({ type: 'plan_exited' });
     }
   }
 }
@@ -402,6 +399,8 @@ function toOutputEvent(
     case 'tool_result':
     case 'subagent_tool_result':
       return normalizeToolCompleted(chunk, state);
+    case 'subagent_tool_output':
+      return { type: 'tool_output', toolCallId: chunk.id, toolScope: { kind: 'subagent', subagentId: chunk.subagentId }, content: chunk.content };
     case 'tool_output': {
       const identity = state.toolScopes.get(chunk.id)
         ?? { toolScope: { kind: 'main' as const } };
@@ -422,6 +421,8 @@ function toOutputEvent(
       return {
         type: 'context_compacted',
       };
+    case 'task_notification':
+      return null;
     case 'notice':
       return {
         type: 'notice',
@@ -433,7 +434,6 @@ function toOutputEvent(
 
 function sameUsageWindow(current: UsageInfo, next: UsageInfo): boolean {
   return current.contextWindow === next.contextWindow
-    && current.contextWindowIsAuthoritative === next.contextWindowIsAuthoritative
     && current.percentage === next.percentage;
 }
 
@@ -499,7 +499,46 @@ function normalizeToolCompleted(
     isError: chunk.isError,
     isBlocked: state.blockedToolIds.has(chunk.id),
     toolUseResult: chunk.toolUseResult,
+    ...(chunk.providerPayload ? { providerPayload: chunk.providerPayload } : {}),
   };
+}
+
+// Claude reports quota and other API failures as a synthetic assistant message whose only
+// payload is human-readable text (e.g. the session-limit reset time). `error` alone is not
+// enough to detect it: errors such as `max_output_tokens` ride on real assistant messages
+// carrying real partial prose, which must not be mistaken for error copy. `isApiErrorMessage`
+// and `apiErrorStatus` are wire-only fields the SDK does not declare, so they are treated as
+// optional hints alongside the typed `<synthetic>` model marker.
+function isSyntheticApiErrorMessage(message: SDKMessage): boolean {
+  if (message.type !== 'assistant') return false;
+  if (typeof message.error !== 'string' || message.error.trim() === '') return false;
+  const wireOnly = message as unknown as {
+    isApiErrorMessage?: unknown;
+    apiErrorStatus?: unknown;
+  };
+  return (
+    wireOnly.isApiErrorMessage === true
+    || typeof wireOnly.apiErrorStatus === 'number'
+    || (message.message as { model?: unknown } | undefined)?.model === '<synthetic>'
+  );
+}
+
+function extractApiErrorText(message: SDKMessage): string | null {
+  if (message.type !== 'assistant') return null;
+  const content = (message.message as { content?: unknown } | undefined)?.content;
+  if (!Array.isArray(content)) return null;
+  const text = content
+    .filter((block): block is { type: 'text'; text: string } => (
+      typeof block === 'object'
+      && block !== null
+      && (block as { type?: unknown }).type === 'text'
+      && typeof (block as { text?: unknown }).text === 'string'
+      && (block as { text: string }).text.trim() !== '(no content)'
+    ))
+    .map(block => block.text)
+    .join('\n')
+    .trim();
+  return text === '' ? null : text;
 }
 
 function isAssistantOutputChunk(chunk: StreamChunk): boolean {

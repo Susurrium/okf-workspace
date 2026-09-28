@@ -2,61 +2,61 @@ import { createInterface, type Interface } from 'node:readline';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-export type JsonRpcRequestId = number | string | null;
+export type JSONRPCRequestId = number | string | null;
 
-interface JsonRpcRequestMessage {
-  id: JsonRpcRequestId;
+interface JSONRPCRequestMessage {
+  id: JSONRPCRequestId;
   jsonrpc: '2.0';
   method: string;
   params?: unknown;
 }
 
-interface JsonRpcNotificationMessage {
+interface JSONRPCNotificationMessage {
   jsonrpc: '2.0';
   method: string;
   params?: unknown;
 }
 
-interface JsonRpcResponseMessage {
+interface JSONRPCResponseMessage {
   error?: {
     code: number;
     data?: unknown;
     message: string;
   };
-  id: JsonRpcRequestId;
+  id: JSONRPCRequestId;
   jsonrpc: '2.0';
   result?: unknown;
 }
 
-type JsonRpcMessage =
-  | JsonRpcRequestMessage
-  | JsonRpcNotificationMessage
-  | JsonRpcResponseMessage;
+type JSONRPCMessage =
+  | JSONRPCRequestMessage
+  | JSONRPCNotificationMessage
+  | JSONRPCResponseMessage;
 
-export interface JsonRpcMessageStreams {
+export interface JSONRPCMessageStreams {
   input: NodeJS.ReadableStream;
   onClose?: (listener: (error?: Error) => void) => () => void;
   output: NodeJS.WritableStream;
 }
 
-export interface JsonRpcRequestOptions {
+export interface JSONRPCRequestOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
 }
 
-export interface JsonRpcTransportOptions {
+export interface JSONRPCTransportOptions {
   streamCloseGraceMs?: number;
 }
 
-export interface JsonRpcRequestHandlerContext {
+export interface JSONRPCRequestHandlerContext {
   method: string;
-  requestId: JsonRpcRequestId;
+  requestId: JSONRPCRequestId;
 }
 
-export type JsonRpcNotificationHandler = (params: unknown) => void | Promise<void>;
-export type JsonRpcRequestHandler = (
+export type JSONRPCNotificationHandler = (params: unknown) => void | Promise<void>;
+export type JSONRPCRequestHandler = (
   params: unknown,
-  context: JsonRpcRequestHandlerContext,
+  context: JSONRPCRequestHandlerContext,
 ) => unknown;
 
 interface PendingRequest {
@@ -66,14 +66,14 @@ interface PendingRequest {
   resolve: (result: unknown) => void;
 }
 
-export class JsonRpcTransportClosedError extends Error {
+export class JSONRPCTransportClosedError extends Error {
   constructor(message = 'JSON-RPC transport closed') {
     super(message);
     this.name = 'JsonRpcTransportClosedError';
   }
 }
 
-export class JsonRpcErrorResponse extends Error {
+export class JSONRPCErrorResponse extends Error {
   constructor(
     readonly method: string,
     readonly code: number,
@@ -85,23 +85,23 @@ export class JsonRpcErrorResponse extends Error {
   }
 }
 
-export class JsonRpcTransport {
+export class JSONRPCTransport {
   private readonly abortController = new AbortController();
   private readonly closeListeners = new Set<(error?: Error) => void>();
   private disposed = false;
   private nextId = 1;
-  private readonly notificationHandlers = new Map<string, Set<JsonRpcNotificationHandler>>();
+  private readonly notificationHandlers = new Map<string, Set<JSONRPCNotificationHandler>>();
   private readonly pending = new Map<number, PendingRequest>();
   private readline: Interface | null = null;
-  private readonly requestHandlers = new Map<string, JsonRpcRequestHandler>();
+  private readonly requestHandlers = new Map<string, JSONRPCRequestHandler>();
   private streamCloseTimer: number | null = null;
   private readonly streamUnsubscribers: Array<() => void> = [];
   private unregisterClose?: () => void;
 
   constructor(
-    private readonly streams: JsonRpcMessageStreams,
+    private readonly streams: JSONRPCMessageStreams,
     private readonly defaultTimeoutMs = DEFAULT_TIMEOUT_MS,
-    private readonly options: JsonRpcTransportOptions = {},
+    private readonly options: JSONRPCTransportOptions = {},
   ) {}
 
   get signal(): AbortSignal {
@@ -119,35 +119,35 @@ export class JsonRpcTransport {
       crlfDelay: Infinity,
       input: this.streams.input,
     });
-    this.readline.on('line', line => this.handleLine(line));
+    this.readline.on('line', line => this.#handleLine(line));
     this.readline.on('error', (error: Error) => {
-      this.closeFromUnknown(error, 'JSON-RPC input error');
+      this.#closeFromUnknown(error, 'JSON-RPC input error');
     });
     this.readline.on('close', () => {
-      this.closeFromStream('JSON-RPC input closed');
+      this.#closeFromStream('JSON-RPC input closed');
     });
 
     this.streamUnsubscribers.push(
       subscribeStreamEvent(this.streams.input, 'error', (error?: unknown) => {
-        this.closeFromUnknown(error, 'JSON-RPC input error');
+        this.#closeFromUnknown(error, 'JSON-RPC input error');
       }),
       subscribeStreamEvent(this.streams.input, 'end', () => {
-        this.closeFromStream('JSON-RPC input closed');
+        this.#closeFromStream('JSON-RPC input closed');
       }),
       subscribeStreamEvent(this.streams.input, 'close', () => {
-        this.closeFromStream('JSON-RPC input closed');
+        this.#closeFromStream('JSON-RPC input closed');
       }),
       subscribeStreamEvent(this.streams.output, 'error', (error?: unknown) => {
-        this.closeFromUnknown(error, 'JSON-RPC output error');
+        this.#closeFromUnknown(error, 'JSON-RPC output error');
       }),
       subscribeStreamEvent(this.streams.output, 'close', () => {
-        this.closeFromStream('JSON-RPC output closed');
+        this.#closeFromStream('JSON-RPC output closed');
       }),
     );
 
     this.unregisterClose = this.streams.onClose?.((error) => {
       if (!this.disposed) {
-        this.dispose(error ?? new JsonRpcTransportClosedError());
+        this.dispose(error ?? new JSONRPCTransportClosedError());
       }
     });
   }
@@ -160,7 +160,7 @@ export class JsonRpcTransport {
     };
   }
 
-  onNotification(method: string, handler: JsonRpcNotificationHandler): () => void {
+  onNotification(method: string, handler: JSONRPCNotificationHandler): () => void {
     if (this.disposed) return () => {};
     let handlers = this.notificationHandlers.get(method);
     if (!handlers) {
@@ -177,7 +177,7 @@ export class JsonRpcTransport {
     };
   }
 
-  onRequest(method: string, handler: JsonRpcRequestHandler): () => void {
+  onRequest(method: string, handler: JSONRPCRequestHandler): () => void {
     if (this.disposed) return () => {};
     this.requestHandlers.set(method, handler);
     return () => {
@@ -190,10 +190,10 @@ export class JsonRpcTransport {
   async request<T = unknown>(
     method: string,
     params?: unknown,
-    options: JsonRpcRequestOptions = {},
+    options: JSONRPCRequestOptions = {},
   ): Promise<T> {
     this.start();
-    if (this.disposed) throw new JsonRpcTransportClosedError();
+    if (this.disposed) throw new JSONRPCTransportClosedError();
 
     const id = this.nextId++;
     const timeoutMs = options.timeoutMs ?? this.defaultTimeoutMs;
@@ -239,7 +239,7 @@ export class JsonRpcTransport {
       });
 
       try {
-        this.sendRaw({ id, jsonrpc: '2.0', method, params });
+        this.#sendRaw({ id, jsonrpc: '2.0', method, params });
       } catch (error) {
         this.pending.delete(id);
         cleanup();
@@ -253,7 +253,7 @@ export class JsonRpcTransport {
   notify(method: string, params?: unknown): void {
     this.start();
     if (this.disposed) return;
-    this.trySendRaw({ jsonrpc: '2.0', method, params });
+    this.#trySendRaw({ jsonrpc: '2.0', method, params });
   }
 
   flush(): Promise<void> {
@@ -270,7 +270,7 @@ export class JsonRpcTransport {
     });
   }
 
-  dispose(error: Error = new JsonRpcTransportClosedError('JSON-RPC transport disposed')): void {
+  dispose(error: Error = new JSONRPCTransportClosedError('JSON-RPC transport disposed')): void {
     if (this.disposed) return;
     this.disposed = true;
     this.abortController.abort();
@@ -311,18 +311,18 @@ export class JsonRpcTransport {
     this.requestHandlers.clear();
   }
 
-  private closeFromUnknown(error: unknown, fallbackMessage: string): void {
+  #closeFromUnknown(error: unknown, fallbackMessage: string): void {
     if (this.disposed) return;
     this.dispose(error instanceof Error
       ? error
-      : new JsonRpcTransportClosedError(fallbackMessage));
+      : new JSONRPCTransportClosedError(fallbackMessage));
   }
 
-  private closeFromStream(message: string): void {
+  #closeFromStream(message: string): void {
     if (this.disposed || this.streamCloseTimer !== null) return;
 
     const graceMs = this.options.streamCloseGraceMs ?? 0;
-    const error = new JsonRpcTransportClosedError(message);
+    const error = new JSONRPCTransportClosedError(message);
     if (!this.streams.onClose || graceMs <= 0) {
       this.dispose(error);
       return;
@@ -334,7 +334,7 @@ export class JsonRpcTransport {
     }, graceMs);
   }
 
-  private handleLine(line: string): void {
+  #handleLine(line: string): void {
     if (!line.trim()) return;
 
     let parsed: unknown;
@@ -344,10 +344,10 @@ export class JsonRpcTransport {
       return;
     }
     if (!isRecord(parsed)) return;
-    const message = parsed as unknown as JsonRpcMessage;
+    const message = parsed as unknown as JSONRPCMessage;
 
     if ('id' in message && !('method' in message)) {
-      this.handleResponse(message);
+      this.#handleResponse(message);
       return;
     }
     if ('method' in message && 'id' in message) {
@@ -357,7 +357,7 @@ export class JsonRpcTransport {
     if ('method' in message) this.handleNotification(message);
   }
 
-  private handleResponse(message: JsonRpcResponseMessage): void {
+  #handleResponse(message: JSONRPCResponseMessage): void {
     if (typeof message.id !== 'number') return;
     const pending = this.pending.get(message.id);
     if (!pending) return;
@@ -365,7 +365,7 @@ export class JsonRpcTransport {
     this.pending.delete(message.id);
     pending.cleanup();
     if (message.error) {
-      pending.reject(new JsonRpcErrorResponse(
+      pending.reject(new JSONRPCErrorResponse(
         pending.method,
         message.error.code,
         message.error.message,
@@ -376,7 +376,7 @@ export class JsonRpcTransport {
     pending.resolve(message.result);
   }
 
-  private handleNotification(message: JsonRpcNotificationMessage): void {
+  private handleNotification(message: JSONRPCNotificationMessage): void {
     const handlers = this.notificationHandlers.get(message.method);
     if (!handlers) return;
     for (const handler of [...handlers]) {
@@ -386,10 +386,10 @@ export class JsonRpcTransport {
     }
   }
 
-  private handleRequest(message: JsonRpcRequestMessage): void {
+  private handleRequest(message: JSONRPCRequestMessage): void {
     const handler = this.requestHandlers.get(message.method);
     if (!handler) {
-      this.trySendRaw({
+      this.#trySendRaw({
         error: {
           code: -32601,
           message: `Unhandled server request: ${message.method}`,
@@ -400,13 +400,13 @@ export class JsonRpcTransport {
       return;
     }
 
-    const context: JsonRpcRequestHandlerContext = {
+    const context: JSONRPCRequestHandlerContext = {
       method: message.method,
       requestId: message.id,
     };
     void Promise.resolve().then(() => handler(message.params, context)).then(
-      result => this.trySendRaw({ id: message.id, jsonrpc: '2.0', result }),
-      error => this.trySendRaw({
+      result => this.#trySendRaw({ id: message.id, jsonrpc: '2.0', result }),
+      error => this.#trySendRaw({
         error: {
           code: -32603,
           message: error instanceof Error ? error.message : 'Internal error',
@@ -417,14 +417,14 @@ export class JsonRpcTransport {
     );
   }
 
-  private sendRaw(message: JsonRpcMessage): void {
-    if (this.disposed) throw new JsonRpcTransportClosedError();
+  #sendRaw(message: JSONRPCMessage): void {
+    if (this.disposed) throw new JSONRPCTransportClosedError();
     this.streams.output.write(`${JSON.stringify(message)}\n`);
   }
 
-  private trySendRaw(message: JsonRpcMessage): void {
+  #trySendRaw(message: JSONRPCMessage): void {
     try {
-      this.sendRaw(message);
+      this.#sendRaw(message);
     } catch (error) {
       this.dispose(toError(error));
     }

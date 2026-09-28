@@ -1,30 +1,48 @@
-export interface ActiveTurnOwner {
-  activeTurn: Promise<void> | null;
-}
-
-/** Owns the lifetime of the existing turn orchestration without changing its phases. */
-export class TurnCoordinator<TRequest> {
+/** Owns one admitted response or navigation through final rendering and persistence. */
+export class TurnCoordinator {
   private activeTurn: Promise<void> | null = null;
+  private controller: AbortController | null = null;
+  private activeKind: 'response' | 'navigation' | null = null;
 
-  constructor(
-    private readonly executeTurn: (request?: TRequest) => Promise<void>,
-    private readonly owner?: ActiveTurnOwner,
-  ) {}
+  constructor(private readonly onWorkChanged?: () => void, private readonly canAdmit: () => boolean = () => true) {}
 
-  get current(): Promise<void> | null {
-    return this.activeTurn;
+  get isActive(): boolean {
+    return this.activeTurn !== null;
   }
 
-  async run(request?: TRequest): Promise<void> {
-    const execution = this.executeTurn(request);
-    this.activeTurn = execution;
-    if (this.owner) this.owner.activeTurn = execution;
+  get isResponseActive(): boolean {
+    return this.activeKind === 'response';
+  }
 
+  drain(): Promise<void> {
+    return this.activeTurn ?? Promise.resolve();
+  }
+
+  cancel(reason: 'user' | 'shutdown' = 'user'): void {
+    this.controller?.abort(reason);
+  }
+
+  async run(execute: (signal: AbortSignal) => Promise<void>, kind: 'response' | 'navigation' = 'response'): Promise<void> {
+    if (this.activeTurn) throw new Error('A main turn is already active');
+    if (!this.canAdmit()) throw new Error('Conversation operation admission is closed.');
+    let settle!: () => void;
+    this.activeTurn = new Promise<void>(resolve => { settle = resolve; });
+    this.activeKind = kind;
+    this.controller = new AbortController();
     try {
-      await execution;
+      const execution = execute(this.controller.signal);
+      try {
+        this.onWorkChanged?.();
+      } finally {
+        // An observer failure must not release ownership of running work.
+        await execution;
+      }
     } finally {
-      if (this.activeTurn === execution) this.activeTurn = null;
-      if (this.owner?.activeTurn === execution) this.owner.activeTurn = null;
+      this.controller = null;
+      this.activeTurn = null;
+      this.activeKind = null;
+      settle();
+      this.onWorkChanged?.();
     }
   }
 }

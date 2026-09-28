@@ -71,6 +71,33 @@ npm run typecheck
 npm run lint
 npm run test
 npm run build
+npm run check:performance
 ```
+
+For local iteration, `npm run test:affected -- --base origin/main` selects tests from
+committed, staged, unstaged and untracked changes using the CI dependency graph.
+It prints the selection and runs the selected Jest and script checks.
+Use `--list` to inspect without running, `--full` for all tests, and `-- --runInBand` to forward Jest
+options. Unknown inputs or an unavailable base retain full coverage. This does not
+replace typecheck, lint, build/performance checks or native checks on other platforms.
+
+Full Linux CI verification uses two Jest shards, with script checks on the first
+shard. Affected selections use one job. Each Linux test job uses three workers.
+Both shards must pass the aggregate test gate, and each uploads its own timing artifact. Sharding uses more runner capacity
+to reduce elapsed time; compare runner minutes as well as wall time.
+
+JSON Jest runs also produce suite timings and execution metadata. CI uploads these
+for Linux, native smoke and scheduled suites. To compare native worker counts locally:
+
+```bash
+npm run test:cross-platform -- --maxWorkers=2 --json --outputFile=.context/native.json
+node scripts/summarize-jest-results.mjs .context/native.json .context/native-timings
+```
+
+CI runs native smoke with three workers on both macOS and Windows. The local wrapper
+remains serial unless a worker count is supplied. Compare the same selection and
+commit, including fixture setup/teardown, and report elapsed time separately from
+summed suite durations. Recheck timings on the actual CI runners before increasing
+concurrency further.
 
 The project architecture and area-specific development rules are documented in `AGENTS.md` and the scoped `AGENTS.md` files under `src/`.

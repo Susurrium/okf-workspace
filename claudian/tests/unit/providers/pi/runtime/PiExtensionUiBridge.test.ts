@@ -1,15 +1,23 @@
-import { PiExtensionUiBridge, type PiExtensionUiRenderer } from '@/providers/pi/runtime/PiExtensionUiBridge';
-import type { PiRpcTransport } from '@/providers/pi/runtime/PiRpcTransport';
+import { PiExtensionUIBridge, type PiExtensionUIRenderer } from '@/providers/pi/runtime/PiExtensionUIBridge';
+import type { PiRPCTransport } from '@/providers/pi/runtime/PiRPCTransport';
 
-function createBridge(renderer: Partial<PiExtensionUiRenderer>) {
+function createBridge(
+  renderer: Partial<PiExtensionUIRenderer>,
+  admitDialog: () => boolean = () => true,
+) {
   const transport = {
     send: jest.fn(),
-  } as unknown as PiRpcTransport;
-  const bridge = new PiExtensionUiBridge(transport, renderer as PiExtensionUiRenderer);
+  } as unknown as PiRPCTransport;
+  const bridge = new PiExtensionUIBridge(
+    transport,
+    renderer as PiExtensionUIRenderer,
+    undefined,
+    admitDialog,
+  );
   return { bridge, transport };
 }
 
-describe('PiExtensionUiBridge', () => {
+describe('PiExtensionUIBridge', () => {
   it('sends dialog responses through the transport', async () => {
     const renderer = {
       select: jest.fn().mockResolvedValue({ value: 'choice-a' }),
@@ -30,11 +38,27 @@ describe('PiExtensionUiBridge', () => {
   it('cancels dialog requests when no renderer is available', () => {
     const transport = {
       send: jest.fn(),
-    } as unknown as PiRpcTransport;
-    const bridge = new PiExtensionUiBridge(transport, null);
+    } as unknown as PiRPCTransport;
+    const bridge = new PiExtensionUIBridge(transport, null);
 
     bridge.handleRequest({ id: 'ui-1', method: 'confirm', type: 'extension_ui_request' });
 
+    expect(transport.send).toHaveBeenCalledWith({
+      cancelled: true,
+      id: 'ui-1',
+      type: 'extension_ui_response',
+    });
+  });
+
+  it('cancels a denied dialog before invoking the renderer', () => {
+    const renderer = {
+      input: jest.fn().mockResolvedValue({ value: 'must-not-be-sent' }),
+    };
+    const { bridge, transport } = createBridge(renderer, () => false);
+
+    bridge.handleRequest({ id: 'ui-1', method: 'input', type: 'extension_ui_request' });
+
+    expect(renderer.input).not.toHaveBeenCalled();
     expect(transport.send).toHaveBeenCalledWith({
       cancelled: true,
       id: 'ui-1',

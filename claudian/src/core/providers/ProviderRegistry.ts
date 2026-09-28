@@ -1,23 +1,27 @@
 import { getVaultPath } from '../../utils/path';
+import type { AuxiliaryExecutionContext } from '../auxiliary/AuxiliaryExecutionContext';
 import { InlineEditService as SharedInlineEditService } from '../auxiliary/InlineEditService';
-import { InstructionRefineService as SharedInstructionRefineService } from '../auxiliary/InstructionRefineService';
+import { RoutedTitleGenerationService } from '../auxiliary/RoutedTitleGenerationService';
 import { TitleGenerationService as SharedTitleGenerationService } from '../auxiliary/TitleGenerationService';
 import type {
   ProviderExecutionBackend,
   ProviderInteractionPort,
 } from '../execution';
 import { resolveTitleGenerationLocale } from '../prompt/titleGeneration';
+import type { AskUserAnswers, ToolCallInfo } from '../types';
+import { findAvailableModelOption } from './models/modelOptions';
+import { ProviderModelUnavailableError } from './models/ProviderModelUnavailableError';
 import { decodeProviderModelSelectionId } from './modelSelection';
 import type { ProviderHost } from './ProviderHost';
 import { ProviderWorkspaceRegistry } from './ProviderWorkspaceRegistry';
 import {
   DEFAULT_CHAT_PROVIDER_ID,
   type InlineEditService,
-  type InstructionRefineService,
   type ProviderCapabilities,
   type ProviderChatUIConfig,
   type ProviderConversationHistoryService,
   type ProviderId,
+  type ProviderModelPolicy,
   type ProviderRegistration,
   type ProviderSettingsReconciler,
   type ProviderSettingsStorageAdapter,
@@ -25,7 +29,6 @@ import {
   type ProviderSubagentHistoryService,
   type ProviderTaskResultInterpreter,
   type ProviderUIOption,
-  type TitleGenerationCallback,
   type TitleGenerationService,
 } from './types';
 
@@ -71,39 +74,40 @@ export class ProviderRegistry {
 
   static createTitleGenerationService(plugin: ProviderHost, providerId?: ProviderId): TitleGenerationService {
     if (!providerId) {
-      return new RoutedTitleGenerationService(plugin);
+      return new RoutedTitleGenerationService({
+        resolveProviderId: () => this.resolveTitleGenerationSelection(plugin.settings)?.providerId ?? null,
+        initializeProvider: provider => ProviderWorkspaceRegistry.ensureInitialized(
+          plugin, provider, 'title-generation',
+        ),
+        createService: provider => this.createTitleGenerationService(plugin, provider),
+      });
     }
     const registration = this.getProviderRegistration(providerId);
     return new SharedTitleGenerationService({
       ...this.createAuxiliaryExecutionContext(plugin, providerId),
       resolveLocale: () => resolveTitleGenerationLocale(plugin.settings),
-      resolveModel: registration.resolveTitleGenerationModel
-        ? () => registration.resolveTitleGenerationModel?.(plugin)
-        : undefined,
+      resolveModel: () => {
+        const selection = this.resolveTitleGenerationSelection(plugin.settings);
+        if (!selection || selection.providerId !== providerId) {
+          throw new ProviderModelUnavailableError(registration.displayName);
+        }
+        return selection.model;
+      },
     });
   }
 
-  static resolveTitleGenerationProviderId(settings: Record<string, unknown>): ProviderId {
+  static resolveTitleGenerationSelection(settings: Record<string, unknown>): { providerId: ProviderId; model: string } | null {
     const titleModel = typeof settings.titleGenerationModel === 'string'
       ? settings.titleGenerationModel.trim()
       : '';
+    if (!titleModel) return null;
 
-    if (!titleModel) {
-      return this.isEnabled(DEFAULT_CHAT_PROVIDER_ID, settings)
-        ? DEFAULT_CHAT_PROVIDER_ID
-        : this.resolveSettingsProviderId(settings);
-    }
-
-    return this.resolveProviderForModel(titleModel, settings, {
-      fallbackProviderId: DEFAULT_CHAT_PROVIDER_ID,
-      onlyEnabledProviders: true,
+    const candidates = this.getRegisteredProviderIds().flatMap(providerId => {
+      if (!this.isEnabled(providerId, settings)) return [];
+      const model = findAvailableModelOption(providerId, this.getModelPolicy(providerId), titleModel, settings);
+      return model ? [{ providerId, model }] : [];
     });
-  }
-
-  static createInstructionRefineService(plugin: ProviderHost, providerId: ProviderId = DEFAULT_CHAT_PROVIDER_ID): InstructionRefineService {
-    return new SharedInstructionRefineService(
-      this.createAuxiliaryExecutionContext(plugin, providerId),
-    );
+    return candidates.length === 1 ? candidates[0] : null;
   }
 
   static createInlineEditService(plugin: ProviderHost, providerId: ProviderId = DEFAULT_CHAT_PROVIDER_ID): InlineEditService {
@@ -115,8 +119,11 @@ export class ProviderRegistry {
   private static createAuxiliaryExecutionContext(
     plugin: ProviderHost,
     providerId: ProviderId,
-  ) {
+  ): AuxiliaryExecutionContext {
     return {
+      nativePersistence: this.getCapabilities(providerId).supportsEphemeralSessions
+        ? 'disabled-if-supported'
+        : 'provider-default',
       backend: this.createExecutionBackend(plugin, providerId),
       interactionPort: PASSIVE_AUXILIARY_INTERACTION_PORT,
       lifecycleRegistry: plugin.executionLifecycleRegistry,
@@ -142,12 +149,20 @@ export class ProviderRegistry {
     return this.getProviderRegistration(providerId).subagentAdapter ?? null;
   }
 
+  static formatQuestionReply(providerId: ProviderId, tool: ToolCallInfo, answers: AskUserAnswers) {
+    return this.getProviderRegistration(providerId).formatQuestionReply?.(tool, answers) ?? null;
+  }
+
   static getCapabilities(providerId: ProviderId = DEFAULT_CHAT_PROVIDER_ID): ProviderCapabilities {
     return this.getProviderRegistration(providerId).capabilities;
   }
 
   static getEnvironmentKeyPatterns(providerId: ProviderId): RegExp[] {
     return this.getProviderRegistration(providerId).environmentKeyPatterns ?? [];
+  }
+
+  static getModelPolicy(providerId: ProviderId = DEFAULT_CHAT_PROVIDER_ID): ProviderModelPolicy {
+    return this.getProviderRegistration(providerId).modelPolicy;
   }
 
   static getChatUIConfig(providerId: ProviderId = DEFAULT_CHAT_PROVIDER_ID): ProviderChatUIConfig {
@@ -165,7 +180,7 @@ export class ProviderRegistry {
         continue;
       }
 
-      for (const option of this.getChatUIConfig(providerId).getModelOptions(settings)) {
+      for (const option of this.getModelPolicy(providerId).getModelOptions(settings)) {
         if (seenValues.has(option.value)) {
           continue;
         }
@@ -257,20 +272,11 @@ export class ProviderRegistry {
     settings: Record<string, unknown> = {},
     options: {
       onlyEnabledProviders?: boolean;
-      fallbackProviderId?: ProviderId;
     } = {},
-  ): ProviderId {
+  ): ProviderId | null {
     const providerIds = options.onlyEnabledProviders
       ? this.getEnabledProviderIds(settings)
       : this.getRegisteredProviderIds();
-    const fallbackProviderId = (
-      options.fallbackProviderId
-      && (!options.onlyEnabledProviders || this.isEnabled(options.fallbackProviderId, settings))
-    )
-      ? options.fallbackProviderId
-      : (options.onlyEnabledProviders
-        ? this.resolveSettingsProviderId(settings)
-        : DEFAULT_CHAT_PROVIDER_ID);
     const decodedSelection = decodeProviderModelSelectionId(model);
 
     if (
@@ -281,23 +287,15 @@ export class ProviderRegistry {
       return decodedSelection.providerId;
     }
 
-    for (const providerId of providerIds) {
-      if (providerId === fallbackProviderId) {
-        continue;
-      }
-
-      if (this.getChatUIConfig(providerId).ownsModel(model, settings)) {
-        return providerId;
-      }
-    }
-
-    return fallbackProviderId;
+    if (decodedSelection) return null;
+    const owners = providerIds.filter(providerId => this.getModelPolicy(providerId).ownsModel(model, settings));
+    return owners.length === 1 ? owners[0] : null;
   }
 
   static getCustomModelIds(envVars: Record<string, string>): Set<string> {
     const ids = new Set<string>();
     for (const providerId of this.getRegisteredProviderIds()) {
-      for (const modelId of this.getChatUIConfig(providerId).getCustomModelIds(envVars)) {
+      for (const modelId of this.getModelPolicy(providerId).getCustomModelIds(envVars)) {
         ids.add(modelId);
       }
     }
@@ -314,63 +312,5 @@ const PASSIVE_AUXILIARY_INTERACTION_PORT: ProviderInteractionPort = {
     answers: null,
     interactionId: request.interactionId,
   }),
-  requestPlanDecision: async request => ({
-    decision: null,
-    interactionId: request.interactionId,
-  }),
   dismissInteraction: () => undefined,
 };
-
-interface ActiveTitleGeneration {
-  service: TitleGenerationService;
-}
-
-class RoutedTitleGenerationService implements TitleGenerationService {
-  private readonly activeGenerations = new Map<string, ActiveTitleGeneration>();
-
-  constructor(private readonly plugin: ProviderHost) {}
-
-  async generateTitle(
-    conversationId: string,
-    userMessage: string,
-    callback: TitleGenerationCallback,
-  ): Promise<void> {
-    const providerId = ProviderRegistry.resolveTitleGenerationProviderId(
-      this.plugin.settings,
-    );
-    await ProviderWorkspaceRegistry.ensureInitialized(
-      this.plugin,
-      providerId,
-      'title-generation',
-    );
-    const service = ProviderRegistry.createTitleGenerationService(this.plugin, providerId);
-    const generation = { service };
-    const previous = this.activeGenerations.get(conversationId);
-
-    this.activeGenerations.set(conversationId, generation);
-    previous?.service.cancel();
-
-    try {
-      await service.generateTitle(conversationId, userMessage, async (convId, result) => {
-        if (this.activeGenerations.get(conversationId) !== generation) {
-          return;
-        }
-        await callback(convId, result);
-      });
-    } finally {
-      if (this.activeGenerations.get(conversationId) === generation) {
-        this.activeGenerations.delete(conversationId);
-      }
-    }
-  }
-
-  cancel(): void {
-    const services = new Set<TitleGenerationService>(
-      [...this.activeGenerations.values()].map(generation => generation.service),
-    );
-    this.activeGenerations.clear();
-    for (const service of services) {
-      service.cancel();
-    }
-  }
-}

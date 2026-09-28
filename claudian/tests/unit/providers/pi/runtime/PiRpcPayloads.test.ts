@@ -1,4 +1,4 @@
-import { buildPiSetModelPayload } from '@/providers/pi/runtime/PiRpcPayloads';
+import { buildPiSetModelPayload } from '@/providers/pi/runtime/PiRPCPayloads';
 
 describe('Pi RPC payload builders', () => {
   it('uses Pi RPC modelId field for set_model payloads', () => {

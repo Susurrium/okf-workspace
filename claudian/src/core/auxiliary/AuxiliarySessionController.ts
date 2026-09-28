@@ -2,7 +2,6 @@ import type {
   ProviderExecutionRequest,
   ProviderExecutionRun,
   ProviderExecutionSessionLease,
-  ProviderNativePersistence,
   ProviderToolPolicy,
 } from '../execution';
 import type { AuxiliaryExecutionContext } from './AuxiliaryExecutionContext';
@@ -10,21 +9,12 @@ import { TextResponseCollector } from './TextResponseCollector';
 
 export interface AuxiliaryRequest {
   readonly model?: string;
-  readonly onProgress?: (text: string) => void;
+  readonly reasoning?: string | null;
   readonly prompt: string;
   readonly systemPrompt: string;
 }
 
-type AuxiliaryExecutionOwner = 'title' | 'instruction' | 'inline-edit';
-
-const NATIVE_PERSISTENCE_BY_OWNER = {
-  title: 'disabled-if-supported',
-  instruction: 'provider-default',
-  'inline-edit': 'provider-default',
-} as const satisfies Record<
-  AuxiliaryExecutionOwner,
-  ProviderNativePersistence
->;
+type AuxiliaryExecutionOwner = 'title' | 'inline-edit';
 
 export class AuxiliarySessionController {
   private abortController: AbortController | null = null;
@@ -54,7 +44,7 @@ export class AuxiliarySessionController {
   async startRoot(): Promise<void> {
     const generation = ++this.generation;
     this.cancelled = false;
-    await this.releaseCurrent();
+    await this.#releaseCurrent();
     if (generation !== this.generation) {
       throw new Error('Cancelled');
     }
@@ -64,7 +54,7 @@ export class AuxiliarySessionController {
       {
         interactionPort: this.context.interactionPort,
         lifecycle: 'ephemeral',
-        nativePersistence: NATIVE_PERSISTENCE_BY_OWNER[this.owner],
+        nativePersistence: this.context.nativePersistence,
         vaultWorkingDirectory: this.context.vaultWorkingDirectory,
       },
       this.owner,
@@ -96,6 +86,7 @@ export class AuxiliarySessionController {
     const abortController = new AbortController();
     const executionRequest: ProviderExecutionRequest = {
       configuration: {
+        ...(request.reasoning !== undefined ? { reasoning: request.reasoning } : {}),
         ...(request.model ? { model: request.model } : {}),
         systemInstructions: {
           instructions: request.systemPrompt,
@@ -110,7 +101,7 @@ export class AuxiliarySessionController {
     const run = lease.session.execute(executionRequest);
     this.activeRun = run;
     try {
-      return await this.collector.collect(run, request.onProgress);
+      return await this.collector.collect(run);
     } finally {
       if (this.activeRun === run) {
         this.activeRun = null;
@@ -126,7 +117,7 @@ export class AuxiliarySessionController {
     this.activeRun?.cancel();
     this.abortController = null;
     this.activeRun = null;
-    const release = this.releaseCurrent();
+    const release = this.#releaseCurrent();
     // Observe fire-and-forget cleanup without replacing the promise awaited by
     // startRoot() or dispose(), which must still surface lifecycle failures.
     void release.catch(() => undefined);
@@ -144,10 +135,10 @@ export class AuxiliarySessionController {
     this.activeRun?.cancel();
     this.abortController = null;
     this.activeRun = null;
-    await this.releaseCurrent();
+    await this.#releaseCurrent();
   }
 
-  private releaseCurrent(): Promise<void> {
+  #releaseCurrent(): Promise<void> {
     if (this.releasePromise) return this.releasePromise;
     const lease = this.lease;
     this.lease = null;

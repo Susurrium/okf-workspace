@@ -1,89 +1,48 @@
-import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
-import type { ProviderCliResolutionContext } from '../../../core/providers/types';
-import type { HostnameCliPaths } from '../../../core/types/settings';
-import { getHostnameKey } from '../../../utils/env';
-import type { CodexInstallationMethod } from '../settings';
+import { CachedProviderCLIResolver } from '@/core/providers/cli/CachedProviderCLIResolver';
+import { getRuntimeEnvironmentText } from '@/core/providers/providerEnvironment';
+import type { ProviderCLIResolutionContext } from '@/core/providers/types';
+
 import { getCodexProviderSettings } from '../settings';
-import { resolveCodexCliPath } from './CodexBinaryLocator';
+import { findCodexBinaryPath, resolveCodexWSLCLIPath } from './CodexBinaryLocator';
 import { resolveCodexExecutionTargetAsync } from './CodexExecutionTargetResolver';
 import type { CodexExecutionTarget } from './codexLaunchTypes';
 
-export class CodexCliResolver {
-  private resolvedPath: string | null = null;
-  private lastHostnamePath = '';
-  private lastLegacyPath = '';
-  private lastEnvText = '';
-  private lastExecutionTargetKey = '';
-  private readonly cachedHostname = getHostnameKey();
+export class CodexCLIResolver {
+  private readonly resolver = new CachedProviderCLIResolver({
+    binaryName: 'codex',
+    findBinaryPath: findCodexBinaryPath,
+    getSettingsProjection: (settings) => {
+      const providerSettings = getCodexProviderSettings(settings);
+      return {
+        cliPathsByHost: providerSettings.cliPathsByHost,
+        environmentText: getRuntimeEnvironmentText(settings, 'codex'),
+        legacyCliPath: providerSettings.cliPath,
+      };
+    },
+    providerId: 'codex',
+    resolve: (context, resolveDefault) => context.resolutionInputs?.method === 'wsl'
+      ? resolveCodexWSLCLIPath(context.hostnamePath, context.legacyCliPath)
+      : resolveDefault(),
+    // Native Windows runtimes can move without a settings change; retry missing installs too.
+    shouldCache: (result, context) => result !== null && context.resolutionInputs?.method !== 'native-windows',
+  });
 
   resolveFromSettings(
     settings: Record<string, unknown>,
-    context: ProviderCliResolutionContext = {},
+    context: ProviderCLIResolutionContext = {},
   ): string | null | Promise<string | null> {
-    const codexSettings = getCodexProviderSettings(settings);
-    const hostnamePath = (codexSettings.cliPathsByHost[this.cachedHostname] ?? '').trim();
-    const legacyPath = codexSettings.cliPath.trim();
-    const envText = getRuntimeEnvironmentText(settings, 'codex');
     const executionTarget = getCodexExecutionTargetFromContext(context);
     if (executionTarget) {
-      return this.resolveAndCache(hostnamePath, legacyPath, envText, executionTarget);
+      return this.resolver.resolveFromSettings(settings, { ...executionTarget });
     }
 
     return resolveCodexExecutionTargetAsync({ settings }).then((resolvedTarget) => (
-      this.resolveAndCache(hostnamePath, legacyPath, envText, resolvedTarget)
+      this.resolver.resolveFromSettings(settings, { ...resolvedTarget })
     ));
   }
 
-  resolve(
-    hostnamePaths: HostnameCliPaths | undefined,
-    legacyPath: string | undefined,
-    envText: string,
-    options: {
-      installationMethod?: CodexInstallationMethod;
-      executionTarget?: CodexExecutionTarget;
-      hostPlatform?: NodeJS.Platform;
-    } = {},
-  ): string | null {
-    const hostnamePath = (hostnamePaths?.[this.cachedHostname] ?? '').trim();
-    const normalizedLegacyPath = (legacyPath ?? '').trim();
-    return resolveCodexCliPath(hostnamePath, normalizedLegacyPath, envText, options);
-  }
-
   reset(): void {
-    this.resolvedPath = null;
-    this.lastHostnamePath = '';
-    this.lastLegacyPath = '';
-    this.lastEnvText = '';
-    this.lastExecutionTargetKey = '';
-  }
-
-  private resolveAndCache(
-    hostnamePath: string,
-    legacyPath: string,
-    envText: string,
-    executionTarget: CodexExecutionTarget,
-  ): string | null {
-    const executionTargetKey = getCodexExecutionTargetCacheKey(executionTarget);
-
-    if (
-      this.resolvedPath &&
-      hostnamePath === this.lastHostnamePath &&
-      legacyPath === this.lastLegacyPath &&
-      envText === this.lastEnvText &&
-      executionTargetKey === this.lastExecutionTargetKey
-    ) {
-      return this.resolvedPath;
-    }
-
-    this.lastHostnamePath = hostnamePath;
-    this.lastLegacyPath = legacyPath;
-    this.lastEnvText = envText;
-    this.lastExecutionTargetKey = executionTargetKey;
-
-    this.resolvedPath = resolveCodexCliPath(hostnamePath, legacyPath, envText, {
-      executionTarget,
-    });
-    return this.resolvedPath;
+    this.resolver.reset();
   }
 }
 
@@ -99,18 +58,9 @@ function isCodexExecutionTarget(value: unknown): value is CodexExecutionTarget {
 }
 
 function getCodexExecutionTargetFromContext(
-  context: ProviderCliResolutionContext,
+  context: ProviderCLIResolutionContext,
 ): CodexExecutionTarget | null {
   return isCodexExecutionTarget(context.executionTarget)
     ? context.executionTarget
     : null;
-}
-
-function getCodexExecutionTargetCacheKey(target: CodexExecutionTarget): string {
-  return [
-    target.method,
-    target.platformFamily,
-    target.platformOs,
-    target.distroName ?? '',
-  ].join(':');
 }

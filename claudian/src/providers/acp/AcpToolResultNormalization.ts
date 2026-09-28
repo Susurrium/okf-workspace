@@ -1,6 +1,6 @@
 import type { SDKToolUseResult } from '../../core/types/diff';
 
-export function extractAcpDiffToolUseResult(content: unknown): SDKToolUseResult | undefined {
+export function extractACPDiffToolUseResult(content: unknown): SDKToolUseResult | undefined {
   if (!Array.isArray(content)) return undefined;
 
   for (const entry of content) {

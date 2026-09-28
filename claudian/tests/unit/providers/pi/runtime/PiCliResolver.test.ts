@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { PiCliResolver } from '@/providers/pi/runtime/PiCliResolver';
+import { PiCLIResolver } from '@/providers/pi/runtime/PiCLIResolver';
 
 jest.mock('fs');
 jest.mock('@/utils/env', () => ({
@@ -11,7 +11,7 @@ jest.mock('@/utils/env', () => ({
 
 const mockedStat = fs.statSync as jest.Mock;
 
-describe('PiCliResolver', () => {
+describe('PiCLIResolver', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (fs.existsSync as jest.Mock).mockReturnValue(false);
@@ -25,12 +25,19 @@ describe('PiCliResolver', () => {
       throw new Error(`ENOENT: ${filePath}`);
     });
 
-    const resolver = new PiCliResolver();
+    const resolver = new PiCLIResolver();
 
-    expect(resolver.resolve({
-      'current-host': '/current/pi',
-      'other-host': '/other/pi',
-    }, '/legacy/pi')).toBe('/current/pi');
+    expect(resolver.resolveFromSettings({
+      providerConfigs: {
+        pi: {
+          cliPathsByHost: {
+            'current-host': '/current/pi',
+            'other-host': '/other/pi',
+          },
+          cliPath: '/legacy/pi',
+        },
+      },
+    })).toBe('/current/pi');
   });
 
   it('falls back to cliPath and returns null for invalid paths', () => {
@@ -41,14 +48,22 @@ describe('PiCliResolver', () => {
       throw new Error(`ENOENT: ${filePath}`);
     });
 
-    const resolver = new PiCliResolver();
-    expect(resolver.resolve({ 'other-host': '/other/pi' }, '/legacy/pi')).toBe('/legacy/pi');
+    const resolver = new PiCLIResolver();
+    const settings = {
+      providerConfigs: {
+        pi: {
+          cliPathsByHost: { 'other-host': '/other/pi' },
+          cliPath: '/legacy/pi',
+        },
+      },
+    };
+    expect(resolver.resolveFromSettings(settings)).toBe('/legacy/pi');
 
     mockedStat.mockImplementation(() => {
       throw new Error('ENOENT');
     });
     resolver.reset();
-    expect(resolver.resolve({ 'other-host': '/other/pi' }, '/legacy/pi')).toBeNull();
+    expect(resolver.resolveFromSettings(settings)).toBeNull();
   });
 
   it('falls back to PATH lookup when no Pi CLI path is configured', () => {
@@ -61,9 +76,13 @@ describe('PiCliResolver', () => {
       throw new Error(`ENOENT: ${filePath}`);
     });
 
-    const resolver = new PiCliResolver();
+    const resolver = new PiCLIResolver();
 
-    expect(resolver.resolve({}, '', `PATH=${pathDir}`)).toBe(pathBinary);
+    expect(resolver.resolveFromSettings({
+      providerConfigs: {
+        pi: { environmentVariables: `PATH=${pathDir}` },
+      },
+    })).toBe(pathBinary);
   });
 
   it('invalidates cached resolutions when provider environment changes', () => {
@@ -74,7 +93,7 @@ describe('PiCliResolver', () => {
       throw new Error(`ENOENT: ${filePath}`);
     });
 
-    const resolver = new PiCliResolver();
+    const resolver = new PiCLIResolver();
     const firstSettings = {
       providerConfigs: {
         pi: {
@@ -108,7 +127,7 @@ describe('PiCliResolver', () => {
     mockedStat.mockImplementation(() => {
       throw new Error('ENOENT');
     });
-    const resolver = new PiCliResolver();
+    const resolver = new PiCLIResolver();
     const settings = { providerConfigs: { pi: {} } };
 
     expect(resolver.resolveFromSettings(settings)).toBeNull();

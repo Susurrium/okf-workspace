@@ -1,4 +1,4 @@
-function normalizePromptXmlCharacters(value: string): string {
+function normalizePromptXMLCharacters(value: string): string {
   let normalized = '';
   for (const character of value) {
     const codePoint = character.codePointAt(0)!;
@@ -13,8 +13,8 @@ function normalizePromptXmlCharacters(value: string): string {
   return normalized;
 }
 
-export function escapePromptXmlAttribute(value: string): string {
-  return normalizePromptXmlCharacters(value)
+export function escapePromptXMLAttribute(value: string): string {
+  return normalizePromptXMLCharacters(value)
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
@@ -24,7 +24,7 @@ export function escapePromptXmlAttribute(value: string): string {
     .replace(/\r/g, '&#13;');
 }
 
-export function formatPromptXmlCdata(value: string): string {
-  const normalized = normalizePromptXmlCharacters(value);
+export function formatPromptXMLCdata(value: string): string {
+  const normalized = normalizePromptXMLCharacters(value);
   return `<![CDATA[${normalized.replace(/]]>/g, ']]]]><![CDATA[>')}]]>`;
 }

@@ -1,8 +1,9 @@
 import type { Writable } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
 
-export type PiJsonlLineHandler = (line: string) => void;
+export type PiJSONLLineHandler = (line: string) => void;
 
-interface JsonlReadableStream {
+interface JSONLReadableStream {
   off(eventName: 'data', listener: (chunk: Buffer | string) => void): unknown;
   off(eventName: 'end' | 'close', listener: () => void): unknown;
   off(eventName: 'error', listener: (error: unknown) => void): unknown;
@@ -11,16 +12,17 @@ interface JsonlReadableStream {
   on(eventName: 'error', listener: (error: unknown) => void): unknown;
 }
 
-export function subscribePiJsonlLines(
-  input: JsonlReadableStream,
-  onLine: PiJsonlLineHandler,
+export function subscribePiJSONLLines(
+  input: JSONLReadableStream,
+  onLine: PiJSONLLineHandler,
   onEnd?: () => void,
   onError?: (error: Error) => void,
 ): () => void {
   let buffer = '';
+  const decoder = new StringDecoder('utf8');
 
   const handleData = (chunk: Buffer | string): void => {
-    buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    buffer += decoder.write(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
 
     while (true) {
       const newlineIndex = buffer.indexOf('\n');
@@ -35,6 +37,7 @@ export function subscribePiJsonlLines(
   };
 
   const handleEnd = (): void => {
+    buffer += decoder.end();
     if (buffer.length > 0) {
       onLine(stripTrailingCarriageReturn(buffer));
       buffer = '';
@@ -59,7 +62,7 @@ export function subscribePiJsonlLines(
   };
 }
 
-export function writePiJsonl(
+export function writePiJSONL(
   output: Writable | NodeJS.WritableStream,
   record: unknown,
 ): void {

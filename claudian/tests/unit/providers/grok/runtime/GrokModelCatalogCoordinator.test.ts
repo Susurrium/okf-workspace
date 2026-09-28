@@ -19,10 +19,10 @@ import type {
   GrokModelCatalogServiceLike,
 } from '@/providers/grok/runtime/GrokModelCatalogService';
 import {
-  clearCurrentGrokCatalog,
   DEFAULT_GROK_PROVIDER_SETTINGS,
   getCurrentGrokCatalog,
   getGrokProviderSettings,
+  updateGrokProviderSettings,
 } from '@/providers/grok/settings';
 
 function makeModel(rawId: string, displayName = rawId): GrokDiscoveredModel {
@@ -82,11 +82,9 @@ function makeHost(options: {
 
 function makeService(
   result: GrokModelCatalogDiscoveryResult,
-  currentFingerprint = 'fingerprint-current',
 ): GrokModelCatalogServiceLike {
   return {
     discoverCatalog: jest.fn(async () => result),
-    getCatalogFingerprint: jest.fn(async () => currentFingerprint),
   };
 }
 
@@ -177,58 +175,6 @@ describe('GrokModelCatalogCoordinator', () => {
     mockGetHostnameKey.mockReturnValue('device:current');
   });
 
-  it('returns the current-host cached catalog immediately when fresh', async () => {
-    const cached = makeCatalog();
-    const host = makeHost({ catalog: cached });
-    const service = makeService(completedResult());
-    const coordinator = new GrokModelCatalogCoordinator(host, service);
-
-    await expect(coordinator.ensureFresh('layout-ready')).resolves.toMatchObject({
-      catalog: cached,
-      changed: false,
-      kind: 'completed',
-      persistedSettingsChanged: false,
-    });
-    expect(service.discoverCatalog).not.toHaveBeenCalled();
-  });
-
-  it('returns stale cache and starts a background refresh', async () => {
-    const cached = makeCatalog({ refreshedAt: 1 });
-    const host = makeHost({ catalog: cached });
-    const service = makeService(completedResult({
-      models: [makeModel('glm-coding', 'GLM')],
-    }));
-    const coordinator = new GrokModelCatalogCoordinator(host, service);
-
-    const result = await coordinator.ensureFresh('layout-ready');
-
-    expect(result).toMatchObject({ catalog: cached, changed: false });
-    expect(result.backgroundRefresh).toBeDefined();
-    await result.backgroundRefresh;
-    expect(service.discoverCatalog).toHaveBeenCalledTimes(1);
-  });
-
-  it('runs a blocking refresh for a missing catalog and a forced refresh for a fresh one', async () => {
-    const discovered = completedResult();
-    const missingHost = makeHost();
-    const missingService = makeService(discovered);
-    const missingCoordinator = new GrokModelCatalogCoordinator(missingHost, missingService);
-
-    await expect(missingCoordinator.ensureFresh('settings')).resolves.toMatchObject({
-      changed: true,
-      kind: 'completed',
-      persistedSettingsChanged: true,
-    });
-
-    const freshHost = makeHost({ catalog: makeCatalog() });
-    const freshService = makeService(discovered);
-    const freshCoordinator = new GrokModelCatalogCoordinator(freshHost, freshService);
-    const forced = await freshCoordinator.ensureFresh('settings', { force: true });
-
-    expect(forced.backgroundRefresh).toBeUndefined();
-    expect(freshService.discoverCatalog).toHaveBeenCalledTimes(1);
-  });
-
   it('deduplicates concurrent refreshes', async () => {
     let resolveDiscovery!: (result: GrokModelCatalogDiscoveryResult) => void;
     const pending = new Promise<GrokModelCatalogDiscoveryResult>((resolve) => {
@@ -236,7 +182,6 @@ describe('GrokModelCatalogCoordinator', () => {
     });
     const service: GrokModelCatalogServiceLike = {
       discoverCatalog: jest.fn(async () => pending),
-      getCatalogFingerprint: jest.fn(async () => 'fingerprint-current'),
     };
     const coordinator = new GrokModelCatalogCoordinator(makeHost(), service);
 
@@ -259,7 +204,6 @@ describe('GrokModelCatalogCoordinator', () => {
         discoverySignal = signal;
         return pending;
       }),
-      getCatalogFingerprint: jest.fn(async () => 'fingerprint-current'),
     };
     const coordinator = new GrokModelCatalogCoordinator(makeHost(), service);
     const refresh = coordinator.refresh();
@@ -275,7 +219,7 @@ describe('GrokModelCatalogCoordinator', () => {
     expect(quiesced).toBe(false);
     resolveDiscovery(completedResult());
     await Promise.all([refresh, transition]);
-    expect(coordinator.getState()).toBe('idle');
+    expect(quiesced).toBe(true);
   });
 
   it('admits only transition-owner refreshes while fenced and releases waiters on disposal', async () => {
@@ -302,37 +246,6 @@ describe('GrokModelCatalogCoordinator', () => {
     await expect(fencedMerge).resolves.toEqual({ changed: false });
   });
 
-  it('normalizes a synchronous non-Error metadata operation failure', async () => {
-    const coordinator = new GrokModelCatalogCoordinator(
-      makeHost(),
-      makeService(completedResult()),
-    );
-    const failure = { code: 'metadata-failed' };
-    const runMetadataOperation = (
-      coordinator as unknown as {
-        runMetadataOperation<T>(
-          operation: () => Promise<T>,
-          transitionOwner: boolean,
-          disposedResult: () => T,
-        ): Promise<T>;
-      }
-    ).runMetadataOperation.bind(coordinator);
-
-    const operation = runMetadataOperation(
-      () => {
-        throw failure;
-      },
-      false,
-      () => undefined,
-    );
-
-    await expect(operation).rejects.toMatchObject({
-      cause: failure,
-      message: 'Grok metadata operation failed',
-    });
-    coordinator.dispose();
-  });
-
   it('ignores an abort-insensitive non-owner discovery completing after its owner replacement', async () => {
     let resolveOld!: (result: GrokModelCatalogDiscoveryResult) => void;
     let resolveOwner!: (result: GrokModelCatalogDiscoveryResult) => void;
@@ -346,7 +259,6 @@ describe('GrokModelCatalogCoordinator', () => {
       discoverCatalog: jest.fn()
         .mockImplementationOnce(() => oldDiscovery)
         .mockImplementationOnce(() => ownerDiscovery),
-      getCatalogFingerprint: jest.fn(async () => 'fingerprint-current'),
     };
     const host = makeHost();
     const coordinator = new GrokModelCatalogCoordinator(host, service);
@@ -373,7 +285,6 @@ describe('GrokModelCatalogCoordinator', () => {
       fingerprint: 'owner-fingerprint',
       models: [expect.objectContaining({ rawId: 'owner-model' })],
     });
-    expect(coordinator.getState()).toBe('ready');
   });
 
   it('rejects an already queued non-owner write after the owner refresh persists', async () => {
@@ -389,7 +300,6 @@ describe('GrokModelCatalogCoordinator', () => {
       discoverCatalog: jest.fn()
         .mockImplementationOnce(() => oldDiscovery)
         .mockImplementationOnce(() => ownerDiscovery),
-      getCatalogFingerprint: jest.fn(async () => 'fingerprint-current'),
     };
     const host = makeHost();
     const mutations = deferConditionalMutations(host, 2);
@@ -455,7 +365,7 @@ describe('GrokModelCatalogCoordinator', () => {
     ]);
   });
 
-  it('persists live ACP reasoning metadata only for enabled models', async () => {
+  it('retains live ACP reasoning metadata for models available for selection', async () => {
     const host = makeHost({
       catalog: makeCatalog({
         models: [makeModel('kimi-coding', 'Kimi'), {
@@ -491,8 +401,9 @@ describe('GrokModelCatalogCoordinator', () => {
       }),
       expect.objectContaining({
         rawId: 'glm-coding',
-        reasoningEfforts: [],
-        supportsReasoning: false,
+        reasoningEfforts: [{ label: 'High', value: 'high' }],
+        reasoningMetadataResolved: true,
+        supportsReasoning: true,
       }),
     ]);
   });
@@ -582,7 +493,6 @@ describe('GrokModelCatalogCoordinator', () => {
     });
     const service: GrokModelCatalogServiceLike = {
       discoverCatalog: jest.fn(async () => discovery),
-      getCatalogFingerprint: jest.fn(async () => 'fingerprint-next'),
     };
     const host = makeHost({
       catalog: makeCatalog({ defaultModelId: 'old-default', models: [makeModel('shared')] }),
@@ -721,7 +631,9 @@ describe('GrokModelCatalogCoordinator', () => {
     );
     const config = (host.settings as any).providerConfigs.grok;
     config.environmentVariables = 'GROK_PROFILE=new-context';
-    clearCurrentGrokCatalog(host.settings);
+    const catalogsByHost = { ...getGrokProviderSettings(host.settings).catalogsByHost };
+    delete catalogsByHost['device:current'];
+    updateGrokProviderSettings(host.settings, { catalogsByHost });
 
     await expect(coordinator.mergeLiveModels(
       [makeModel('late-old-live')],
@@ -736,7 +648,7 @@ describe('GrokModelCatalogCoordinator', () => {
     });
   });
 
-  it('does not persist a live merge after a queued environment reconciliation clears it', async () => {
+  it('does not persist a live merge after a queued environment reconciliation supersedes it', async () => {
     const host = makeHost({ catalog: makeCatalog() });
     const coordinator = new GrokModelCatalogCoordinator(host, makeService(completedResult()));
     const deferred = deferNextConditionalMutation(host);
@@ -744,12 +656,12 @@ describe('GrokModelCatalogCoordinator', () => {
     const merge = coordinator.mergeLiveModels([makeModel('stale-live')], 'stale-default');
     await deferred.queued;
     reconcileNewEnvironment(host);
-    expect(getCurrentGrokCatalog(host.settings)).toBeNull();
+    expect(getCurrentGrokCatalog(host.settings)?.models[0].rawId).toBe('kimi-coding');
 
     await deferred.execute();
 
     await expect(merge).resolves.toEqual({ changed: false, persistedSettingsChanged: false });
-    expect(getCurrentGrokCatalog(host.settings)).toBeNull();
+    expect(getCurrentGrokCatalog(host.settings)?.models[0].rawId).toBe('kimi-coding');
   });
 
   it('does not persist a completed CLI refresh after a queued environment reconciliation clears it', async () => {
@@ -764,7 +676,7 @@ describe('GrokModelCatalogCoordinator', () => {
     const refresh = coordinator.refresh();
     await deferred.queued;
     reconcileNewEnvironment(host);
-    expect(getCurrentGrokCatalog(host.settings)).toBeNull();
+    expect(getCurrentGrokCatalog(host.settings)?.models[0].rawId).toBe('kimi-coding');
 
     await deferred.execute();
 
@@ -772,7 +684,7 @@ describe('GrokModelCatalogCoordinator', () => {
       changed: false,
       persistedSettingsChanged: false,
     });
-    expect(getCurrentGrokCatalog(host.settings)).toBeNull();
+    expect(getCurrentGrokCatalog(host.settings)?.models[0].rawId).toBe('kimi-coding');
   });
 
   it('retains live ACP metadata for surviving ids across a later CLI refresh', async () => {
@@ -860,7 +772,7 @@ describe('GrokModelCatalogCoordinator', () => {
     }));
     const coordinator = new GrokModelCatalogCoordinator(host, service);
 
-    await expect(coordinator.refreshModelCatalog()).resolves.toEqual({
+    await expect(coordinator.refresh()).resolves.toMatchObject({
       changed: false,
       persistedSettingsChanged: true,
     });
@@ -870,7 +782,7 @@ describe('GrokModelCatalogCoordinator', () => {
     const disabledHost = makeHost({ enabled: false });
     const disabledService = makeService(completedResult());
     const disabled = new GrokModelCatalogCoordinator(disabledHost, disabledService);
-    await expect(disabled.ensureFresh('layout-ready')).resolves.toMatchObject({
+    await expect(disabled.refresh()).resolves.toMatchObject({
       changed: false,
       kind: 'skipped',
     });
@@ -885,4 +797,29 @@ describe('GrokModelCatalogCoordinator', () => {
     });
     expect(service.discoverCatalog).not.toHaveBeenCalled();
   });
+});
+
+it('does not reuse canceled discovery for a transition owner or publish its delayed result', async () => {
+  const host = makeHost();
+  let finishOld!: (result: GrokModelCatalogDiscoveryResult) => void;
+  const fresh = { kind: 'completed' as const, models: [makeModel('fresh-model')], defaultModelId: null, fingerprint: 'fingerprint-current' };
+  const service = makeService(fresh);
+  jest.mocked(service.discoverCatalog).mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+  const catalog = new GrokModelCatalogCoordinator(host, service);
+  const owner = { providerTransitionOwner: true as const };
+  const old = catalog.refresh(owner);
+  catalog.cancel();
+  const replacement = catalog.refresh(owner);
+  expect(service.discoverCatalog).toHaveBeenCalledTimes(2);
+  await replacement;
+  expect(getCurrentGrokCatalog(host.settings)?.models.map(model => model.rawId)).toEqual(['fresh-model']);
+  let drained = false;
+  catalog.dispose();
+  const cleanup = catalog.quiesceForEnvironmentChange().then(() => { drained = true; });
+  await Promise.resolve();
+  expect(drained).toBe(false);
+  finishOld({ ...fresh, models: [makeModel('obsolete-model')] });
+  await Promise.all([old, cleanup]);
+  expect(getCurrentGrokCatalog(host.settings)?.models.map(model => model.rawId)).toEqual(['fresh-model']);
+  expect(host.notifyProviderChatOptionsChanged).toHaveBeenCalledTimes(1);
 });

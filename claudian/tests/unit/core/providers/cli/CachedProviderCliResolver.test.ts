@@ -1,29 +1,29 @@
 import {
-  CachedProviderCliResolver,
-  type ProviderCliSettingsProjection,
-} from '@/core/providers/cli/CachedProviderCliResolver';
+  CachedProviderCLIResolver,
+  type ProviderCLISettingsProjection,
+} from '@/core/providers/cli/CachedProviderCLIResolver';
 import {
-  findCliBinaryPath,
-  resolveConfiguredCliPath,
+  findCLIBinaryPath,
+  resolveConfiguredCLIPath,
 } from '@/utils/cliBinaryLocator';
 
 jest.mock('@/utils/cliBinaryLocator', () => ({
-  findCliBinaryPath: jest.fn(),
-  resolveConfiguredCliPath: jest.fn(),
+  findCLIBinaryPath: jest.fn(),
+  resolveConfiguredCLIPath: jest.fn(),
 }));
 
-const mockedFindCliBinaryPath = jest.mocked(findCliBinaryPath);
-const mockedResolveConfiguredCliPath = jest.mocked(resolveConfiguredCliPath);
+const mockedFindCLIBinaryPath = jest.mocked(findCLIBinaryPath);
+const mockedResolveConfiguredCLIPath = jest.mocked(resolveConfiguredCLIPath);
 
-describe('CachedProviderCliResolver', () => {
+describe('CachedProviderCLIResolver', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockedResolveConfiguredCliPath.mockReturnValue(null);
-    mockedFindCliBinaryPath.mockReturnValue(null);
+    mockedResolveConfiguredCLIPath.mockReturnValue(null);
+    mockedFindCLIBinaryPath.mockReturnValue(null);
   });
 
   it('preserves current-host, legacy, then runtime PATH lookup order', () => {
-    mockedResolveConfiguredCliPath.mockImplementation((candidate) => (
+    mockedResolveConfiguredCLIPath.mockImplementation((candidate) => (
       candidate === '/current/provider' ? '/resolved/current' : null
     ));
     const resolver = createResolver();
@@ -33,13 +33,13 @@ describe('CachedProviderCliResolver', () => {
       environmentText: 'PATH=/provider/bin',
       legacyCliPath: '/legacy/provider',
     })).toBe('/resolved/current');
-    expect(mockedResolveConfiguredCliPath.mock.calls).toEqual([
+    expect(mockedResolveConfiguredCLIPath.mock.calls).toEqual([
       ['/current/provider'],
     ]);
-    expect(mockedFindCliBinaryPath).not.toHaveBeenCalled();
+    expect(mockedFindCLIBinaryPath).not.toHaveBeenCalled();
 
     resolver.reset();
-    mockedResolveConfiguredCliPath.mockImplementation((candidate) => (
+    mockedResolveConfiguredCLIPath.mockImplementation((candidate) => (
       candidate === '/legacy/provider' ? '/resolved/legacy' : null
     ));
     expect(resolver.resolve({
@@ -49,14 +49,14 @@ describe('CachedProviderCliResolver', () => {
     })).toBe('/resolved/legacy');
 
     resolver.reset();
-    mockedResolveConfiguredCliPath.mockReturnValue(null);
-    mockedFindCliBinaryPath.mockReturnValue('/provider/bin/provider');
+    mockedResolveConfiguredCLIPath.mockReturnValue(null);
+    mockedFindCLIBinaryPath.mockReturnValue('/provider/bin/provider');
     expect(resolver.resolve({
       cliPathsByHost: {},
       environmentText: 'PATH=/provider/bin',
       legacyCliPath: '',
     })).toBe('/provider/bin/provider');
-    expect(mockedFindCliBinaryPath).toHaveBeenCalledWith('provider', '/provider/bin');
+    expect(mockedFindCLIBinaryPath).toHaveBeenCalledWith('provider', '/provider/bin');
   });
 
   it('caches successful and null resolutions until reset', () => {
@@ -101,11 +101,54 @@ describe('CachedProviderCliResolver', () => {
     expect(resolution).toHaveBeenCalledTimes(5);
   });
 
+  it('uses provider discovery only after configured paths fail', () => {
+    const findBinaryPath = jest.fn(() => '/native/provider');
+    const resolver = new CachedProviderCLIResolver({
+      binaryName: 'provider',
+      getSettingsProjection: () => createProjection(),
+      hostnameKey: 'current',
+      providerId: 'test-provider',
+      findBinaryPath,
+    });
+    mockedResolveConfiguredCLIPath.mockReturnValue('/configured/provider');
+    expect(resolver.resolveFromSettings({})).toBe('/configured/provider');
+    expect(findBinaryPath).not.toHaveBeenCalled();
+
+    resolver.reset();
+    mockedResolveConfiguredCLIPath.mockReturnValue(null);
+    expect(resolver.resolveFromSettings({})).toBe('/native/provider');
+    expect(findBinaryPath).toHaveBeenCalledWith('/provider/bin');
+    expect(mockedFindCLIBinaryPath).not.toHaveBeenCalled();
+  });
+
+  it('retries uncached misses and refreshes provider targets that disable caching', () => {
+    const resolution = jest.fn<string | null, []>(() => null);
+    const resolver = new CachedProviderCLIResolver({
+      binaryName: 'provider',
+      getSettingsProjection: () => createProjection(),
+      hostnameKey: 'current',
+      providerId: 'test-provider',
+      resolve: resolution,
+      shouldCache: (result, context) => result !== null && context.resolutionInputs?.method !== 'dynamic',
+    });
+
+    expect(resolver.resolveFromSettings({})).toBeNull();
+    resolution.mockReturnValue('/installed/provider');
+    expect(resolver.resolveFromSettings({})).toBe('/installed/provider');
+    expect(resolver.resolveFromSettings({})).toBe('/installed/provider');
+    expect(resolution).toHaveBeenCalledTimes(2);
+
+    expect(resolver.resolveFromSettings({}, { method: 'dynamic' })).toBe('/installed/provider');
+    resolution.mockReturnValue('/updated/provider');
+    expect(resolver.resolveFromSettings({}, { method: 'dynamic' })).toBe('/updated/provider');
+    expect(resolution).toHaveBeenCalledTimes(4);
+  });
+
   it('projects settings before resolving and ignores unrelated settings fields', () => {
     const resolution = jest.fn(() => '/resolved/provider');
-    const resolver = new CachedProviderCliResolver({
+    const resolver = new CachedProviderCLIResolver({
       binaryName: 'provider',
-      getSettingsProjection: settings => settings.cli as ProviderCliSettingsProjection,
+      getSettingsProjection: settings => settings.cli as ProviderCLISettingsProjection,
       hostnameKey: 'current',
       providerId: 'test-provider',
       resolve: resolution,
@@ -123,18 +166,18 @@ describe('CachedProviderCliResolver', () => {
 });
 
 function createResolver(
-  resolve?: ConstructorParameters<typeof CachedProviderCliResolver>[0]['resolve'],
-): CachedProviderCliResolver {
-  return new CachedProviderCliResolver({
+  resolve?: ConstructorParameters<typeof CachedProviderCLIResolver>[0]['resolve'],
+): CachedProviderCLIResolver {
+  return new CachedProviderCLIResolver({
     binaryName: 'provider',
-    getSettingsProjection: settings => settings as unknown as ProviderCliSettingsProjection,
+    getSettingsProjection: settings => settings as unknown as ProviderCLISettingsProjection,
     hostnameKey: 'current',
     providerId: 'test-provider',
     resolve,
   });
 }
 
-function createProjection(): ProviderCliSettingsProjection {
+function createProjection(): ProviderCLISettingsProjection {
   return {
     cliPathsByHost: { current: '/current/provider' },
     environmentText: 'PATH=/provider/bin',

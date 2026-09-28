@@ -14,17 +14,17 @@ import type {
 } from '../../core/execution';
 import type { UsageInfo } from '../../core/types';
 import {
-  type AcpNormalizedUpdate,
-  AcpSessionUpdateNormalizer,
-} from './AcpSessionUpdateNormalizer';
-import type { AcpToolStreamAdapter } from './AcpToolStreamAdapter';
+  type ACPNormalizedUpdate,
+  ACPSessionUpdateNormalizer,
+} from './ACPSessionUpdateNormalizer';
+import type { ACPToolStreamAdapter } from './ACPToolStreamAdapter';
 import type {
-  AcpToolCall,
-  AcpToolCallUpdate,
-  AcpUsageUpdate,
+  ACPToolCall,
+  ACPToolCallUpdate,
+  ACPUsageUpdate,
 } from './types';
 
-export type AcpExecutionTurnScopeSeed =
+export type ACPExecutionTurnScopeSeed =
   | Omit<ProviderRequestedEventScope, 'sequence'>
   | {
       readonly kind: 'background';
@@ -32,21 +32,21 @@ export type AcpExecutionTurnScopeSeed =
       readonly turnId: string;
     };
 
-export interface AcpToolScopeContext {
+export interface ACPToolScopeContext {
   readonly toolCallId: string;
-  readonly update: AcpToolCall | AcpToolCallUpdate;
+  readonly update: ACPToolCall | ACPToolCallUpdate;
 }
 
-export interface AcpExecutionEventNormalizerOptions {
-  readonly scope: AcpExecutionTurnScopeSeed;
+export interface ACPExecutionEventNormalizerOptions {
+  readonly scope: ACPExecutionTurnScopeSeed;
   readonly resolveToolScope?: (
-    context: AcpToolScopeContext,
+    context: ACPToolScopeContext,
   ) => ToolExecutionScope;
-  readonly mapUsage?: (usage: AcpUsageUpdate) => UsageInfo | null;
-  readonly toolStreamAdapter?: AcpToolStreamAdapter;
+  readonly mapUsage?: (usage: ACPUsageUpdate) => UsageInfo | null;
+  readonly toolStreamAdapter?: ACPToolStreamAdapter;
 }
 
-export type AcpNormalizedExecutionEvent =
+export type ACPNormalizedExecutionEvent =
   | ProviderAssistantMessageStartedEvent
   | ProviderNoticeEvent
   | ProviderTextDeltaEvent
@@ -57,20 +57,20 @@ export type AcpNormalizedExecutionEvent =
   | ProviderUsageUpdatedEvent
   | ProviderUserMessageStartedEvent;
 
-export interface AcpExecutionNormalizationResult {
-  readonly events: readonly AcpNormalizedExecutionEvent[];
+export interface ACPExecutionNormalizationResult {
+  readonly events: readonly ACPNormalizedExecutionEvent[];
   readonly ignored?: boolean;
-  readonly metadata?: AcpNormalizedUpdate;
+  readonly metadata?: ACPNormalizedUpdate;
 }
 
-export class AcpExecutionEventNormalizer {
+export class ACPExecutionEventNormalizer {
   private disposed = false;
-  private readonly normalizer = new AcpSessionUpdateNormalizer();
+  private readonly normalizer = new ACPSessionUpdateNormalizer();
   private sequence = 0;
 
-  constructor(private readonly options: AcpExecutionEventNormalizerOptions) {}
+  constructor(private readonly options: ACPExecutionEventNormalizerOptions) {}
 
-  normalize(update: unknown): AcpExecutionNormalizationResult {
+  normalize(update: unknown): ACPExecutionNormalizationResult {
     if (this.disposed) {
       return { events: [], ignored: true };
     }
@@ -82,14 +82,14 @@ export class AcpExecutionEventNormalizer {
           level: 'info',
           message: 'ACP emitted an unrecognized session update.',
           providerPayload: normalized.update,
-          scope: this.nextScope(),
+          scope: this.#nextScope(),
           type: 'notice',
         }],
         metadata: normalized,
       };
     }
 
-    const events = this.mapNormalizedUpdate(normalized);
+    const events = this.#mapNormalizedUpdate(normalized);
     return {
       events,
       metadata: normalized,
@@ -110,25 +110,25 @@ export class AcpExecutionEventNormalizer {
     this.options.toolStreamAdapter?.reset();
   }
 
-  private mapNormalizedUpdate(
-    normalized: Exclude<AcpNormalizedUpdate, { type: 'unknown' }>,
-  ): AcpNormalizedExecutionEvent[] {
+  #mapNormalizedUpdate(
+    normalized: Exclude<ACPNormalizedUpdate, { type: 'unknown' }>,
+  ): ACPNormalizedExecutionEvent[] {
     switch (normalized.type) {
       case 'message_chunk':
         return normalized.streamChunks.flatMap(
-          (chunk): AcpNormalizedExecutionEvent[] => {
+          (chunk): ACPNormalizedExecutionEvent[] => {
           switch (chunk.type) {
             case 'user_message_start':
               return [{
                 ...(chunk.content ? { content: chunk.content } : {}),
                 ...(chunk.itemId ? { nativeUserMessageId: chunk.itemId } : {}),
-                scope: this.nextScope(),
+                scope: this.#nextScope(),
                 type: 'user_message_started' as const,
               }];
             case 'assistant_message_start':
               return [{
                 ...(chunk.itemId ? { nativeAssistantId: chunk.itemId } : {}),
-                scope: this.nextScope(),
+                scope: this.#nextScope(),
                 type: 'assistant_message_started' as const,
               }];
             case 'text':
@@ -137,7 +137,7 @@ export class AcpExecutionEventNormalizer {
                   content: normalized.content,
                   messageId: normalized.messageId,
                 },
-                scope: this.nextScope(),
+                scope: this.#nextScope(),
                 text: chunk.content,
                 type: 'text_delta' as const,
               }];
@@ -147,7 +147,7 @@ export class AcpExecutionEventNormalizer {
                   content: normalized.content,
                   messageId: normalized.messageId,
                 },
-                scope: this.nextScope(),
+                scope: this.#nextScope(),
                 text: chunk.content,
                 type: 'thinking_delta' as const,
               }];
@@ -174,7 +174,7 @@ export class AcpExecutionEventNormalizer {
             normalized.streamChunks,
           ) ?? normalized.streamChunks;
         return streamChunks.flatMap(
-          (chunk): AcpNormalizedExecutionEvent[] => {
+          (chunk): ACPNormalizedExecutionEvent[] => {
           switch (chunk.type) {
             case 'tool_use':
               return [{
@@ -183,7 +183,7 @@ export class AcpExecutionEventNormalizer {
                 ...(chunk.providerPayload
                   ? { providerPayload: chunk.providerPayload }
                   : {}),
-                scope: this.nextScope(),
+                scope: this.#nextScope(),
                 toolCallId: chunk.id,
                 toolScope,
                 type: 'tool_started' as const,
@@ -191,7 +191,7 @@ export class AcpExecutionEventNormalizer {
             case 'tool_output':
               return [{
                 content: chunk.content,
-                scope: this.nextScope(),
+                scope: this.#nextScope(),
                 toolCallId: chunk.id,
                 toolScope,
                 type: 'tool_output' as const,
@@ -201,7 +201,7 @@ export class AcpExecutionEventNormalizer {
                 content: chunk.content,
                 isError: chunk.isError,
                 isBlocked: chunk.isBlocked,
-                scope: this.nextScope(),
+                scope: this.#nextScope(),
                 toolCallId: chunk.id,
                 toolScope,
                 ...(chunk.toolUseResult ? {
@@ -219,7 +219,7 @@ export class AcpExecutionEventNormalizer {
         return usage
           ? [{
             providerPayload: normalized.usage,
-            scope: this.nextScope(),
+            scope: this.#nextScope(),
             type: 'usage_updated',
             usage,
           }]
@@ -230,7 +230,7 @@ export class AcpExecutionEventNormalizer {
     }
   }
 
-  private nextScope(): ProviderTurnEventScope {
+  #nextScope(): ProviderTurnEventScope {
     return {
       ...this.options.scope,
       sequence: ++this.sequence,

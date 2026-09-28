@@ -1,66 +1,77 @@
-import { findCliBinaryPath, resolveConfiguredCliPath } from '../../../utils/cliBinaryLocator';
+import { findCLIBinaryPath, resolveConfiguredCLIPath } from '../../../utils/cliBinaryLocator';
 import { getHostnameKey, parseEnvironmentVariables } from '../../../utils/env';
 import { createRuntimeInputFingerprint } from '../settings/RuntimeInputFingerprint';
-import { createCliPathFingerprintInputs } from './CliPathFingerprintInputs';
+import { createCLIPathFingerprintInputs } from './CLIPathFingerprintInputs';
 
-export interface ProviderCliSettingsProjection {
+export interface ProviderCLISettingsProjection {
   cliPathsByHost?: Readonly<Record<string, string>>;
   environmentText: string;
   legacyCliPath?: string;
   resolutionInputs?: Readonly<Record<string, string | undefined>>;
 }
 
-export interface ProviderCliResolutionContext extends ProviderCliSettingsProjection {
+export interface ProviderCLIResolutionContext extends ProviderCLISettingsProjection {
   environmentVariables: Readonly<Record<string, string>>;
   hostnamePath: string;
   legacyCliPath: string;
 }
 
-type ProviderCliResolution = (
-  context: ProviderCliResolutionContext,
+type ProviderCLIResolution = (
+  context: ProviderCLIResolutionContext,
   resolveDefault: () => string | null,
 ) => string | null;
 
-export interface CachedProviderCliResolverOptions {
+export interface CachedProviderCLIResolverOptions {
   binaryName: string;
-  getSettingsProjection: (settings: Record<string, unknown>) => ProviderCliSettingsProjection;
+  findBinaryPath?: (additionalPath?: string) => string | null;
+  getSettingsProjection: (settings: Record<string, unknown>) => ProviderCLISettingsProjection;
   hostnameKey?: string;
   providerId: string;
-  resolve?: ProviderCliResolution;
+  resolve?: ProviderCLIResolution;
+  shouldCache?: (result: string | null, context: ProviderCLIResolutionContext) => boolean;
 }
 
-export class CachedProviderCliResolver {
+export class CachedProviderCLIResolver {
   private cacheKey = '';
   private cacheValid = false;
   private cachedResolution: string | null = null;
   private readonly hostnameKey: string;
 
-  constructor(private readonly options: CachedProviderCliResolverOptions) {
+  constructor(private readonly options: CachedProviderCLIResolverOptions) {
     this.hostnameKey = options.hostnameKey ?? getHostnameKey();
   }
 
-  resolveFromSettings(settings: Record<string, unknown>): string | null {
-    return this.resolve(this.options.getSettingsProjection(settings));
+  resolveFromSettings(
+    settings: Record<string, unknown>,
+    resolutionInputs?: ProviderCLISettingsProjection['resolutionInputs'],
+  ): string | null {
+    const projection = this.options.getSettingsProjection(settings);
+    return this.resolve({
+      ...projection,
+      resolutionInputs: { ...projection.resolutionInputs, ...resolutionInputs },
+    });
   }
 
-  resolve(projection: ProviderCliSettingsProjection): string | null {
-    const context = this.createResolutionContext(projection);
-    const cacheKey = this.createCacheKey(context);
+  resolve(projection: ProviderCLISettingsProjection): string | null {
+    const context = this.#createResolutionContext(projection);
+    const cacheKey = this.#createCacheKey(context);
     if (this.cacheValid && cacheKey === this.cacheKey) {
       return this.cachedResolution;
     }
 
     const resolveDefault = (): string | null => (
-      resolveConfiguredCliPath(context.hostnamePath)
-      ?? resolveConfiguredCliPath(context.legacyCliPath)
-      ?? findCliBinaryPath(this.options.binaryName, context.environmentVariables.PATH)
+      resolveConfiguredCLIPath(context.hostnamePath)
+      ?? resolveConfiguredCLIPath(context.legacyCliPath)
+      ?? (this.options.findBinaryPath
+        ? this.options.findBinaryPath(context.environmentVariables.PATH)
+        : findCLIBinaryPath(this.options.binaryName, context.environmentVariables.PATH))
     );
 
     this.cachedResolution = this.options.resolve
       ? this.options.resolve(context, resolveDefault)
       : resolveDefault();
     this.cacheKey = cacheKey;
-    this.cacheValid = true;
+    this.cacheValid = this.options.shouldCache?.(this.cachedResolution, context) ?? true;
     return this.cachedResolution;
   }
 
@@ -70,9 +81,9 @@ export class CachedProviderCliResolver {
     this.cachedResolution = null;
   }
 
-  private createResolutionContext(
-    projection: ProviderCliSettingsProjection,
-  ): ProviderCliResolutionContext {
+  #createResolutionContext(
+    projection: ProviderCLISettingsProjection,
+  ): ProviderCLIResolutionContext {
     const environmentText = projection.environmentText || '';
     return {
       ...projection,
@@ -83,11 +94,11 @@ export class CachedProviderCliResolver {
     };
   }
 
-  private createCacheKey(context: ProviderCliResolutionContext): string {
+  #createCacheKey(context: ProviderCLIResolutionContext): string {
     const additionalInputs: Record<string, string | undefined> = {
       binaryName: this.options.binaryName,
       environmentText: context.environmentText,
-      ...createCliPathFingerprintInputs(context.hostnamePath, context.legacyCliPath),
+      ...createCLIPathFingerprintInputs(context.hostnamePath, context.legacyCliPath),
       providerId: this.options.providerId,
     };
     for (const [key, value] of Object.entries(context.resolutionInputs ?? {})) {
