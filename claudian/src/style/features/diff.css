@@ -119,7 +119,6 @@
 }
 
 .claudian-write-edit-loading,
-.claudian-write-edit-binary,
 .claudian-write-edit-error,
 .claudian-write-edit-done-text {
   font-family: var(--font-monospace);

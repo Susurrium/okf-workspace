@@ -4,6 +4,7 @@
     "cancel": "Abbrechen",
     "delete": "Löschen",
     "edit": "Bearbeiten",
+    "preview": "Vorschau",
     "add": "Hinzufügen",
     "remove": "Entfernen",
     "clear": "Löschen",
@@ -22,6 +23,8 @@
     "rewind": "Zurückspulen"
   },
   "chat": {
+    "selectAvailableModel": "Wähle vor dem Senden ein verfügbares Modell aus.",
+    "selectAvailableTitleModel": "Wähle in den Claudian-Einstellungen ein verfügbares Titelmodell aus.",
     "rewind": {
       "confirmMessage": "Zu diesem Punkt zurückspulen? Dateiänderungen nach dieser Nachricht können überschrieben oder entfernt werden. Dies kann nicht rückgängig gemacht werden.",
       "confirmMessageConflicts": "Zu diesem Punkt zurückspulen? {count} außerhalb des Agenten geänderte Datei(en) werden überschrieben:\n{files}",
@@ -57,23 +60,38 @@
       "commandNoMessages": "Verzweigung nicht möglich: keine Nachrichten in der Konversation",
       "commandNoAssistantUuid": "Verzweigung nicht möglich: keine Assistentenantwort mit Kennungen"
     },
-    "bangBash": {
-      "placeholder": "> Einen Bash-Befehl ausführen...",
-      "commandPanel": "Befehlspanel",
-      "copyAriaLabel": "Neueste Befehlsausgabe kopieren",
-      "clearAriaLabel": "Bash-Ausgabe löschen",
-      "commandLabel": "{command}",
-      "statusLabel": "Status des Befehls: {status}",
-      "collapseOutput": "Befehlsausgabe einklappen",
-      "expandOutput": "Befehlsausgabe ausklappen",
-      "running": "Wird ausgeführt...",
-      "copyFailed": "Kopieren in die Zwischenablage fehlgeschlagen"
+    "quote": {
+      "buttonLabel": "Zitieren"
+    },
+    "sideChat": {
+      "title": "Nebenchat",
+      "collapse": "Einklappen",
+      "discard": "Verwerfen",
+      "statusPreparing": "Wird vorbereitet",
+      "statusQueued": "{count} in Warteschlange",
+      "statusWorking": "Arbeitet",
+      "statusError": "Benötigt Aufmerksamkeit",
+      "statusActionRequired": "Eingabe erforderlich",
+      "placeholder": "Im Nebenchat nachfragen",
+      "composerLabel": "Nachricht im Nebenchat",
+      "needsPrompt": "Gib nach /side eine Eingabe an, um einen Nebenchat zu starten.",
+      "unsupportedProvider": "Dieser Anbieter unterstützt keinen Nebenchat.",
+      "unavailableBusy": "Der Nebenchat benötigt eine abgeschlossene Antwort. Warte, bis der aktuelle Zug endet.",
+      "unavailableNoCheckpoint": "Schließe zuerst eine Antwort in dieser Konversation ab.",
+      "unavailableNoSession": "Die Anbietersitzung dieser Konversation konnte nicht aufgelöst werden.",
+      "alreadyExists": "Für diese Konversation existiert bereits ein Nebenchat. Verwirf ihn, um einen neuen zu starten.",
+      "nestedUnavailable": "Ein Nebenchat kann keinen weiteren Nebenchat starten. Klappe zuerst zum Hauptchat ein.",
+      "mainOnlyCommand": "/{command} ist nur im Hauptchat verfügbar.",
+      "startFailed": "Nebenchat konnte nicht gestartet werden: {error}",
+      "queued": "Für den Nebenchat eingereiht.",
+      "busySide": "Der Nebenchat antwortet noch. Warte, bis er fertig ist."
     }
   },
   "settings": {
     "title": "Claudian Einstellungen",
     "tabs": {
       "general": "Allgemein",
+      "providers": "Anbieter",
       "claude": "Claude",
       "codex": "Codex"
     },
@@ -112,7 +130,8 @@
     "titleModel": {
       "name": "Titel-Generierungsmodell",
       "desc": "Modell zur automatischen Generierung von Konversationstiteln.",
-      "auto": "Automatisch (Haiku)"
+      "select": "Modell auswählen",
+      "unavailableWarning": "Automatische Titel sind pausiert. Wählen Sie ein verfügbares Titelmodell."
     },
     "navMappings": {
       "name": "Vim-Style Navigationszuordnungen",
@@ -124,39 +143,19 @@
     },
     "hotkeys": "Tastenkürzel",
     "inlineEditHotkey": {
-      "name": "Inline-Bearbeitung",
-      "descWithKey": "Aktuelles Tastenkürzel: {hotkey}",
-      "descNoKey": "Kein Tastenkürzel festgelegt",
-      "btnChange": "Ändern",
-      "btnSet": "Festlegen"
+      "name": "Inline-Bearbeitung"
     },
     "openChatHotkey": {
-      "name": "Chat öffnen",
-      "descWithKey": "Aktuelles Tastenkürzel: {hotkey}",
-      "descNoKey": "Kein Tastenkürzel festgelegt",
-      "btnChange": "Ändern",
-      "btnSet": "Festlegen"
+      "name": "Chat öffnen"
     },
     "newSessionHotkey": {
-      "name": "Aktuelle Unterhaltung ersetzen",
-      "descWithKey": "Aktuelles Tastenkürzel: {hotkey}",
-      "descNoKey": "Kein Tastenkürzel festgelegt",
-      "btnChange": "Ändern",
-      "btnSet": "Festlegen"
+      "name": "Aktuelle Unterhaltung ersetzen"
     },
     "newTabHotkey": {
-      "name": "Neu",
-      "descWithKey": "Aktuelles Tastenkürzel: {hotkey}",
-      "descNoKey": "Kein Tastenkürzel festgelegt",
-      "btnChange": "Ändern",
-      "btnSet": "Festlegen"
+      "name": "Neu"
     },
     "closeTabHotkey": {
-      "name": "Tab schließen",
-      "descWithKey": "Aktuelles Tastenkürzel: {hotkey}",
-      "descNoKey": "Kein Tastenkürzel festgelegt",
-      "btnChange": "Ändern",
-      "btnSet": "Festlegen"
+      "name": "Tab schließen"
     },
     "slashCommands": {
       "name": "Befehle und Fähigkeiten",
@@ -167,58 +166,10 @@
       "desc": "Bestimmte Befehle und Fähigkeiten aus dem Dropdown ausblenden. Nützlich, um Claude Code-Einträge auszublenden, die für Claudian nicht relevant sind. Gib Namen ohne führenden Schrägstrich ein, einen pro Zeile.",
       "placeholder": "commit\nbuild\ntest"
     },
-    "mcpServers": {
-      "name": "MCP-Server",
-      "descBeforeCommand": "Claude Code verwaltet MCP-Server über seine eigene CLI. Konfiguriere mit ",
-      "descAfterCommand": ", dann sind sie in Claudian verfügbar. ",
-      "learnMore": "Mehr erfahren"
-    },
-    "plugins": {
-      "name": "Claude Code-Plugins",
-      "desc": "Verwalte Claude Code Plugins aus ~/.claude/plugins. Aktivierte Plugins werden pro Vault in .claude/settings.json gespeichert."
-    },
-    "subagents": {
-      "name": "Sub-Agenten",
-      "desc": "Verwalte Vault-Sub-Agenten in .claude/agents/. Jede Markdown-Datei definiert einen benutzerdefinierten Agenten.",
-      "noAgents": "Keine Sub-Agenten konfiguriert. Klicke auf +, um einen zu erstellen.",
-      "deleteConfirm": "Sub-Agent \"{name}\" löschen?",
-      "saveFailed": "Sub-Agent konnte nicht gespeichert werden: {message}",
-      "refreshFailed": "Sub-Agenten konnten nicht aktualisiert werden: {message}",
-      "deleteFailed": "Sub-Agent konnte nicht gelöscht werden: {message}",
-      "renameCleanupFailed": "Warnung: Alte Datei für \"{name}\" konnte nicht entfernt werden",
-      "created": "Sub-Agent \"{name}\" erstellt",
-      "updated": "Sub-Agent \"{name}\" aktualisiert",
-      "deleted": "Sub-Agent \"{name}\" gelöscht",
-      "duplicateName": "Ein Agent mit dem Namen \"{name}\" existiert bereits",
-      "descriptionRequired": "Beschreibung ist erforderlich",
-      "promptRequired": "System-Prompt ist erforderlich",
-      "modal": {
-        "titleEdit": "Sub-Agent bearbeiten",
-        "titleAdd": "Sub-Agent hinzufügen",
-        "name": "Name",
-        "nameDesc": "Nur Kleinbuchstaben, Zahlen und Bindestriche",
-        "namePlaceholder": "code-reviewer",
-        "description": "Beschreibung",
-        "descriptionDesc": "Kurzbeschreibung dieses Agenten",
-        "descriptionPlaceholder": "Prüft Code auf Fehler und Stil",
-        "advancedOptions": "Erweiterte Optionen",
-        "model": "Modell",
-        "modelDesc": "Modellüberschreibung für diesen Agenten",
-        "tools": "Tools",
-        "toolsDesc": "Kommagetrennte Liste zulässiger Tools (leer = alle)",
-        "disallowedTools": "Nicht erlaubte Tools",
-        "disallowedToolsDesc": "Kommagetrennte Liste der zu verbietenden Tools",
-        "skills": "Fähigkeiten",
-        "skillsDesc": "Kommagetrennte Liste von Fähigkeiten",
-        "prompt": "System-Prompt",
-        "promptDesc": "Anweisungen für den Agenten",
-        "promptPlaceholder": "Du bist ein Code-Reviewer. Analysiere den angegebenen Code auf..."
-      }
-    },
     "safety": "Sicherheit",
     "loadUserSettings": {
       "name": "Benutzer-Claude-Einstellungen laden",
-      "desc": "Lädt ~/.claude/settings.json. Wenn aktiviert, können Benutzer-Claude-Code-Berechtigungsregeln den Sicherheitsmodus umgehen."
+      "desc": "Lädt die Claude-Code-Konfiguration auf Benutzerebene aus ~/.claude: settings.json, Skills, Befehle, Agenten und Plugins. Wenn deaktiviert, ist nur die Konfiguration auf Vault-Ebene verfügbar. Wenn aktiviert, können Benutzer-Berechtigungsregeln den Sicherheitsmodus umgehen."
     },
     "claudeSafeMode": {
       "name": "Sicherheitsmodus",
@@ -264,21 +215,9 @@
       "desc": "Legen Sie die Kontextfenstergrößen für Ihre benutzerdefinierten Modelle fest. Leer lassen für den Standardwert (200k Token).",
       "invalid": "Ungültiges Format. Verwenden Sie: 256k, 1m oder exakte Anzahl (1000-10000000)."
     },
-    "customModels": {
-      "name": "Benutzerdefinierte Modelle",
-      "desc": "Füge zusätzliche Claude-Modell-IDs zur Auswahl hinzu, eine pro Zeile. Modellüberschreibungen aus der Umgebung ersetzen die Auswahl weiterhin.",
-      "placeholder": "claude-opus-4-6\nclaude-opus-4-5-20251101"
-    },
     "enableChrome": {
       "name": "Chrome-Erweiterung aktivieren",
       "desc": "Erlaubt Claude die Interaktion mit Chrome über die claude-in-chrome-Erweiterung. Die Erweiterung muss installiert sein. Erfordert Neustart der Sitzung."
-    },
-    "enableBangBash": {
-      "name": "Bash-Modus (!) aktivieren",
-      "desc": "Gib ! in ein leeres Eingabefeld ein, um den Bash-Modus zu starten. Führt Befehle direkt über Node.js child_process aus. Die Ansicht muss neu geöffnet werden.",
-      "validation": {
-        "noNode": "Node.js wurde auf PATH nicht gefunden. Installiere Node.js oder prüfe deine PATH-Konfiguration."
-      }
     },
     "maxWarmAgentProcesses": {
       "name": "Maximale gleichzeitig laufende Sitzungen",
@@ -287,6 +226,10 @@
     "enableDualPane": {
       "name": "Zwei-Spalten-Modus aktivieren",
       "desc": "Den Sitzungsmanager automatisch neben dem Chat anzeigen, wenn die Ansicht mindestens 600 px breit ist."
+    },
+    "restoreTabsOnStartup": {
+      "name": "Tabs beim Start wiederherstellen",
+      "desc": "Im Einzelbereichsmodus alle Tabs, im Zwei-Spalten-Modus nur den zuletzt aktiven Tab erneut öffnen."
     },
     "enableFilePane": {
       "name": "Dateibereich aktivieren",
@@ -302,6 +245,10 @@
       "name": "Automatisches Scrollen während Streaming",
       "desc": "Automatisch nach unten scrollen, während Claude Antworten streamt. Deaktivieren, um oben zu bleiben und von Anfang an zu lesen."
     },
+    "showMessageTimestamps": {
+      "name": "Nachrichtenzeitstempel anzeigen",
+      "desc": "Die lokale Sende- oder Empfangszeit jeder Nachricht im Chatverlauf anzeigen."
+    },
     "deferMathRenderingDuringStreaming": {
       "name": "Mathe-Rendering während Streaming aufschieben",
       "desc": "LaTeX während des Streamings roh anzeigen und Mathematik einmal rendern, wenn der Textblock abgeschlossen ist."
@@ -316,6 +263,17 @@
       "rightSidebar": "Rechte Seitenleiste",
       "leftSidebar": "Linke Seitenleiste",
       "mainTab": "Haupteditor-Tab"
+    },
+    "cliInstallation": {
+      "disclosure": "{name}-Installation",
+      "description": "Optionaler CLI-Pfad für diesen Computer. Für automatische Erkennung leer lassen.",
+      "checking": "CLI wird geprüft…",
+      "versionUnavailable": "Version nicht verfügbar",
+      "notFound": "Nicht gefunden",
+      "custom": "Benutzerdefinierter Pfad",
+      "auto": "Automatisch erkannt",
+      "checkFailed": "CLI konnte nicht geprüft werden",
+      "saveFailed": "Pfad konnte nicht gespeichert werden. Erneut versuchen."
     },
     "cliPath": {
       "name": "Claude CLI-Pfad",
@@ -336,6 +294,14 @@
       "desc": "Aktivierte {provider}-Modelle für neue Unterhaltungen verfügbar machen. Bestehende Sitzungen bleiben beim Deaktivieren erhalten.",
       "lastProviderWarning": "Damit Claudian funktioniert, muss mindestens ein Anbieter aktiviert bleiben.",
       "noModelsWarning": "Keine {provider}-Modelle sind aktiviert. Aktivieren Sie unten unter „Modelle“ mindestens ein Modell."
+    },
+    "claude": {
+      "responseStyle": {
+        "name": "Antwortstil",
+        "desc": "Standard verwendet Claudes üblichen Stil. Knapp beginnt mit Ergebnissen und verzichtet auf Einleitungen. Erfordert Claude Code 2.1.237 oder neuer.",
+        "default": "Standard",
+        "concise": "Knapp"
+      }
     },
     "codex": {
       "installationMethod": {
@@ -361,10 +327,11 @@
         "workspaceWrite": "Workspace schreiben",
         "readOnly": "Nur lesen"
       },
-      "customModels": {
-        "name": "Benutzerdefinierte Modelle",
-        "desc": "Füge zusätzliche Codex-Modell-IDs zur Auswahl hinzu, eine pro Zeile. `OPENAI_MODEL` hat weiterhin Vorrang, wenn gesetzt.",
-        "placeholder": "gpt-5.4\ngpt-5.3-codex-spark"
+      "responseStyle": {
+        "name": "Antwortstil",
+        "desc": "Wähle den Kommunikationsstil von Codex bei unterstützten Modellen. Gilt ab der nächsten Nachricht.",
+        "pragmatic": "Pragmatisch",
+        "friendly": "Freundlich"
       },
       "reasoningSummary": {
         "name": "Reasoning-Zusammenfassung",
@@ -384,15 +351,6 @@
         "hiddenName": "Ausgeblendete Fähigkeiten",
         "hiddenDesc": "Blende bestimmte Codex-Fähigkeiten aus dem Dropdown aus. Gib Fähigkeitsnamen ohne führendes $ ein, einen pro Zeile.",
         "hiddenPlaceholder": "analyze\nexplain\nfix"
-      },
-      "subagents": {
-        "name": "Codex-Sub-Agenten",
-        "desc": "Verwalte Vault-Codex-Sub-Agenten in .codex/agents/. Jede TOML-Datei definiert einen benutzerdefinierten Agenten."
-      },
-      "mcp": {
-        "descBeforeCommand": "Codex verwaltet MCP-Server über seine eigene CLI. Konfiguriere mit ",
-        "descAfterCommand": ", dann sind sie in Claudian verfügbar. ",
-        "learnMore": "Mehr erfahren"
       },
       "environment": {
         "name": "Codex-Umgebung",
@@ -434,124 +392,9 @@
         "description": "The entire skill folder, including scripts, references, and assets, will be moved to trash.",
         "confirm": "Move to trash"
       }
-    },
-    "codexSkills": {
-      "modal": {
-        "titleEdit": "Codex-Fähigkeit bearbeiten",
-        "titleAdd": "Codex-Fähigkeit hinzufügen",
-        "directory": "Verzeichnis",
-        "directoryDesc": "Speicherort der Fähigkeit",
-        "skillName": "Name der Fähigkeit",
-        "skillNameDesc": "Der Name nach $ (z. B. \"analyze\" für $analyze)",
-        "description": "Beschreibung",
-        "descriptionDesc": "Optionale Beschreibung im Dropdown",
-        "instructions": "Anweisungen",
-        "instructionsDesc": "Anweisungen der Fähigkeit (SKILL.md-Inhalt)",
-        "instructionsPlaceholder": "Analyze the code for..."
-      },
-      "instructionsRequired": "Anweisungen sind erforderlich",
-      "saveFailed": "Codex-Fähigkeit konnte nicht gespeichert werden",
-      "header": "Codex-Fähigkeiten",
-      "noSkills": "Keine Codex-Fähigkeiten im Vault. Klicke auf +, um eine zu erstellen.",
-      "skillBadge": "Fähigkeit",
-      "deleted": "Codex-Fähigkeit \"{name}\" gelöscht",
-      "deleteFailed": "Codex-Fähigkeit konnte nicht gelöscht werden",
-      "created": "Codex-Fähigkeit \"{name}\" erstellt",
-      "updated": "Codex-Fähigkeit \"{name}\" aktualisiert"
-    },
-    "codexSubagents": {
-      "modal": {
-        "titleEdit": "Codex-Sub-Agent bearbeiten",
-        "titleAdd": "Codex-Sub-Agent hinzufügen",
-        "nameDesc": "Agentenname, den Codex beim Starten verwendet (Kleinbuchstaben, Bindestriche, Unterstriche)",
-        "descriptionDesc": "Wann Codex diesen Agenten verwenden soll",
-        "modelDesc": "Modellüberschreibung (leer lassen zum Vererben)",
-        "namePlaceholder": "code_reviewer"
-      },
-      "reasoningEffort": {
-        "name": "Reasoning-Aufwand",
-        "desc": "Reasoning-Aufwandsstufe des Modells",
-        "inherit": "Vererben",
-        "low": "Niedrig",
-        "medium": "Mittel",
-        "high": "Hoch",
-        "xhigh": "Sehr hoch"
-      },
-      "sandboxMode": {
-        "name": "Sandbox-Modus",
-        "desc": "Sandbox-Beschränkung für diesen Agenten",
-        "inherit": "Vererben",
-        "readOnly": "Nur lesen",
-        "dangerFullAccess": "Vollzugriff",
-        "workspaceWrite": "Workspace schreiben"
-      },
-      "nicknameCandidates": {
-        "name": "Nickname-Kandidaten",
-        "desc": "Kommagetrennte Anzeige-Nicknames (z. B. atlas, delta, echo)"
-      },
-      "developerInstructions": {
-        "name": "Entwickleranweisungen",
-        "desc": "Kernanweisungen, die das Verhalten des Agenten definieren",
-        "placeholder": "Review code like an owner.\nPrioritize correctness, security, and missing test coverage.",
-        "required": "Entwickleranweisungen sind erforderlich"
-      },
-      "validation": {
-        "nameRequired": "Sub-Agent-Name ist erforderlich",
-        "nameTooLong": "Sub-Agent-Name darf höchstens {count} Zeichen lang sein",
-        "nameInvalid": "Sub-Agent-Name darf nur Kleinbuchstaben, Zahlen, Bindestriche und Unterstriche enthalten",
-        "nicknameInvalid": "Nickname-Kandidaten dürfen nur ASCII-Buchstaben, Zahlen, Leerzeichen, Bindestriche und Unterstriche enthalten",
-        "nicknameDuplicate": "Nickname-Kandidaten müssen eindeutig sein"
-      },
-      "header": "Codex-Sub-Agenten",
-      "noAgents": "Keine Codex-Sub-Agenten im Vault. Klicke auf +, um einen zu erstellen."
     }
   },
   "interface": {
-    "openChat": "Open chat view",
-    "inlineEdit": "Inline edit",
-    "newChat": "New",
-    "replaceChat": "Replace current conversation",
-    "closeTab": "Close current tab",
-    "diagnostics": "Copy startup diagnostics",
-    "diagnosticsCopied": "Startup diagnostics copied to clipboard.",
-    "diagnosticsFailed": "Failed to copy startup diagnostics.",
-    "inserted": "Inserted",
-    "editApplied": "Edit applied",
-    "editUnavailable": "Inline edit unavailable: could not access the active Markdown view.",
-    "planReady": "Plan complete",
-    "implement": "Implement",
-    "planFeedback": "Enter feedback to revise plan...",
-    "cancel": "Cancel",
-    "planPermissions": "Requested permissions:",
-    "approveNew": "Approve (new session)",
-    "approveCurrent": "Approve (current session)",
-    "continuePlan": "Enter feedback to continue planning...",
-    "abandon": "Abandon",
-    "keyHints": "Arrow keys to navigate · Enter to select · Esc to cancel",
-    "abandonHints": "Arrow keys to navigate · Enter to select · Shift+Tab to abandon",
-    "insertInstructions": "Insert instructions...",
-    "editInstructions": "Edit instructions...",
-    "editActions": "Inline edit actions",
-    "accept": "Accept",
-    "reject": "Reject",
-    "acceptKey": "Accept (enter)",
-    "rejectKey": "Reject (esc)",
-    "visibleModels": "Visible models",
-    "browseModels": "Browse models",
-    "discover": "Discover",
-    "modelFilter": "Filter by model, provider, or ID...",
-    "visible": "Visible: ",
-    "loadingModels": "Loading models...",
-    "noModels": "No models discovered yet",
-    "loading": "Loading...",
-    "refresh": "Refresh",
-    "clearAll": "Clear all",
-    "default": "Default",
-    "alias": "Alias (optional)",
-    "aliasHelp": "Custom label shown in the model selector. Leave empty to use the default.",
-    "reorderModels": "Drag or use arrow keys to reorder",
-    "noMatchingModels": "No models match your filter.",
-    "modelHelp": "Choose which models are available in the chat selector. Drag to reorder them; the provider uses the first currently usable model as its default. Select at least one model to use this provider.",
     "promptMode": "Codex prompt mode",
     "promptModeHelp": "Applies when a new Codex conversation starts. Existing conversations keep the mode recorded in their provider state.",
     "nativePrompt": "Workspace native (recommended)",
@@ -559,157 +402,6 @@
     "customPrompt": "Custom replace",
     "replacementInstructions": "Custom replacement instructions",
     "replacementHelp": "Used only by custom replace. This replaces the Claudian prompt instead of being appended to it.",
-    "replacementPlaceholder": "Follow applicable AGENTS.md instructions.",
-    "sharedEnvironment": "Shared environment",
-    "sharedEnvironmentHelp": "Provider-neutral runtime variables shared across all providers. Use this for PATH, proxy, cert, and temp variables.",
-    "restricted": "Restricted",
-    "fullAccess": "Full access",
-    "plan": "Plan",
-    "standard": "Standard",
-    "unknown": "Unknown",
-    "modelFailed": "Failed to change model",
-    "modeFailed": "Failed to change mode",
-    "permissionFailed": "Failed to change permission mode",
-    "externalContext": "Select External Context",
-    "externalContexts": "External contexts",
-    "addFolder": "Click folder icon to add",
-    "duplicateFolder": "This folder is already added as an external context.",
-    "noPath": "No path provided. Usage: /add-dir /absolute/path",
-    "absolutePath": "Path must be absolute. Usage: /add-dir /absolute/path",
-    "permissionRequired": "Permission required",
-    "steering": "⌙ Steering: ",
-    "queued": "⌙ Queued: ",
-    "steeringBusy": "Steering...",
-    "steerNow": "Steer Now",
-    "steerFailed": "Failed to steer the queued message. It is still available.",
-    "externalUnavailable": "External context selector not available.",
-    "forkUnsupported": "Fork is not supported by this provider.",
-    "forkUnavailable": "Fork not available.",
-    "noConversations": "No conversations to resume",
-    "unlinked": "Unlinked",
-    "restrictedHelp": "Uses the access scope configured in settings and requests approval when needed.",
-    "fullAccessHelp": "Full file and command access without approval prompts.",
-    "planHelp": "Prepare a plan before execution. File access is controlled separately.",
-    "modelCount": " of {count} discovered",
-    "providerCount": " | {count} providers",
-    "availableCount": "{count} available",
-    "selectedCount": "Selected ({count})",
-    "allProviders": "All providers ({count})",
-    "clearModels": "Clear all selected {provider} models",
-    "planReadError": "Could not read plan file: {error}. A new conversation will not include the plan details.",
-    "openAssistant": "Open Claudian",
-    "effort": "Effort:",
-    "thinking": "Thinking:",
-    "folderPickerFailed": "Unable to open folder picker.",
-    "persistentFolder": "Persistent (click to make session-only)",
-    "sessionFolder": "Session-only (click to persist)",
-    "removePath": "Remove path",
-    "addContexts": "Add external contexts (click)",
-    "contextUsage": "Context usage",
-    "externalCount": "{count} external folders (click to add more)",
-    "nearContextLimit": " (Approaching limit, run `/compact` to continue)"
-  },
-  "chatUi": {
-    "resizeConversationSessions": "Resize conversation sessions",
-    "sidebarView": "Sidebar view",
-    "sessions": "Sessions",
-    "files": "Files",
-    "newTab": "New tab",
-    "newConversation": "New conversation",
-    "chatHistory": "Chat history",
-    "failedToCreateTab": "Failed to create tab",
-    "failedToCreateConversation": "Failed to create conversation",
-    "failedToStartANewConversation": "Failed to start a new conversation",
-    "failedToStartTheApprovedPlanInANewConversation": "Failed to start the approved plan in a new conversation",
-    "failedToSwitchTab": "Failed to switch tab",
-    "failedToCloseTab": "Failed to close tab",
-    "new": "New",
-    "search": "Search",
-    "runningSessionsCannotBeArchived": "Running sessions cannot be archived",
-    "organizeSessions": "Organize sessions",
-    "inOneList": "In one list",
-    "byLinkedNote": "By linked note",
-    "sortSessionsBy": "Sort sessions by",
-    "lastActivity": "Last activity",
-    "created": "Created",
-    "failedToUpdateSessionOrganization": "Failed to update session organization",
-    "failedToUpdateSessionSorting": "Failed to update session sorting",
-    "failedToCloseTheProvisionalSessionPreview": "Failed to close the provisional session preview",
-    "pinned": "Pinned",
-    "missing": "Missing",
-    "running": "Running...",
-    "archiveAllSessions": "Archive all sessions",
-    "generatingTitle": "Generating title...",
-    "regenerateTitle": "Regenerate title",
-    "openInNewTab": "Open in new tab",
-    "delete": "Delete",
-    "restore": "Restore",
-    "rename": "Rename",
-    "openInBackgroundTab": "Open in background tab",
-    "switchToOpenSession": "Switch to open session",
-    "archive": "Archive",
-    "failedToRenameConversation": "Failed to rename conversation",
-    "failedToInitializeAgentExecutionPleaseTryAgain": "Failed to initialize agent execution. Please try again.",
-    "agentExecutionIsNotAvailablePleaseReloadThePlugin": "Agent execution is not available. Please reload the plugin.",
-    "messageWasNotSentPleaseTryAgain": "Message was not sent. Please try again.",
-    "steerDeliveryCouldNotBeConfirmedTheMessageWasNotRequeuedToAvoidSendingItTwice": "Steer delivery could not be confirmed. The message was not requeued to avoid sending it twice.",
-    "failedToInitializeInstructionRefinementPleaseTryAgain": "Failed to initialize instruction refinement. Please try again.",
-    "instructionAddedToCustomSystemPrompt": "Instruction added to custom system prompt",
-    "noInstructionReceived": "No instruction received",
-    "fastModeIsNotAvailableForThisModel": "Fast mode is not available for this model.",
-    "failedToToggleFastMode": "Failed to toggle fast mode.",
-    "conversationCompacted": "Conversation compacted",
-    "claudianChatIsNotReady": "Claudian chat is not ready.",
-    "failedToAddFileToClaudian": "Failed to add file to Claudian.",
-    "addToClaudian": "Add to Claudian",
-    "memoryUsed": "Memory used",
-    "noChanges": "No changes",
-    "submit": "Submit",
-    "reviewYourAnswers": "Review your answers",
-    "readyToSubmitYourAnswers": "Ready to submit your answers?",
-    "submitAnswers": "Submit answers",
-    "cancel": "Cancel",
-    "interrupted": "Interrupted",
-    "whatShouldClaudianDoInstead": "· What should Claudian do instead?",
-    "copied": "Copied!",
-    "failedToRenderMessageContent": "Failed to render message content.",
-    "copyMessage": "Copy message",
-    "statusRunning": "Status: running",
-    "initializing": "Initializing",
-    "runningInBackground": "Running in background",
-    "orphaned": "Orphaned",
-    "extendedThinkingClickToExpand": "Extended thinking - click to expand",
-    "thinking0s": "Thinking 0s...",
-    "openPage": "Open page",
-    "urlUnavailable": "URL unavailable",
-    "findInPage": "Find in page",
-    "noResult": "No result",
-    "noMatchesFound": "No matches found",
-    "fileDeleted": "File deleted",
-    "noTextualDiffAvailable": "No textual diff available",
-    "tasksUpdated": "Tasks updated",
-    "noOptionsRecorded": "No options recorded",
-    "writing": "Writing...",
-    "statusError": "Status: error",
-    "done": "DONE",
-    "askToMakeChangesMentionFilesRunCommands": "Ask to make changes, @mention files, run /commands",
-    "cannotSwitchProviderOnABoundSessionStartANewConversationInstead": "Cannot switch provider on a bound session. Start a new conversation instead.",
-    "stopResponse": "Stop response",
-    "sendMessage": "Send message",
-    "forkIsNotSupportedByThisProvider": "Fork is not supported by this provider.",
-    "backgroundTaskStateCouldNotBeSavedBeforeClosingTheTab": "Background task state could not be saved before closing the tab.",
-    "loadingConversation": "Loading conversation…",
-    "retry": "Retry",
-    "dropImageHere": "Drop image here",
-    "imageAttachmentsAreNotSupportedByThisProvider": "Image attachments are not supported by this provider.",
-    "conversationDirectory": "Conversation directory",
-    "noUserPromptsInThisConversation": "No user prompts in this conversation",
-    "name": "Name",
-    "searchFiles": "Search files",
-    "newNote": "New note",
-    "newFolder": "New folder",
-    "open": "Open",
-    "openInSplit": "Open in split",
-    "saveInCustomSystemPrompt": "# Save in custom system prompt"
+    "replacementPlaceholder": "Follow applicable AGENTS.md instructions."
   }
 }

@@ -13,12 +13,15 @@ import {
   parseImageDataUri,
 } from '../../../utils/imageAttachment';
 import { isCompactionCanceledStderr, isInterruptSignalText } from '../../../utils/interrupt';
+import { extractXMLTag, parseClaudeTaskNotification } from '../normalization/claudeTaskNotification';
 import { extractToolResultContent } from '../sdk/toolResultContent';
 import type {
   AsyncSubagentResult,
   SDKNativeContentBlock,
   SDKNativeMessage,
 } from './sdkHistoryTypes';
+
+export { extractXMLTag } from '../normalization/claudeTaskNotification';
 
 function extractTextContent(content: string | SDKNativeContentBlock[] | undefined): string {
   if (!content) {
@@ -159,6 +162,17 @@ export function parseSDKMessageToChat(
   sdkMsg: SDKNativeMessage,
   toolResults?: Map<string, { content: string; isError: boolean }>,
 ): ChatMessage | null {
+  if (sdkMsg.type === 'attachment') {
+    const attachment = sdkMsg.attachment;
+    if (attachment?.type !== 'queued_command' || attachment.commandMode !== 'prompt'
+      || (typeof attachment.prompt !== 'string' && !Array.isArray(attachment.prompt))) return null;
+    return parseSDKMessageToChat({
+      type: 'user',
+      uuid: attachment.source_uuid ?? sdkMsg.uuid,
+      timestamp: sdkMsg.timestamp,
+      message: { content: attachment.prompt },
+    }, toolResults);
+  }
   if (sdkMsg.type === 'file-history-snapshot') {
     return null;
   }
@@ -291,9 +305,9 @@ export function collectAsyncSubagentResults(
       continue;
     }
 
-    const taskId = extractXmlTag(sdkMsg.content, 'task-id');
-    const status = extractXmlTag(sdkMsg.content, 'status');
-    const result = extractXmlTag(sdkMsg.content, 'result');
+    const taskId = extractXMLTag(sdkMsg.content, 'task-id');
+    const status = extractXMLTag(sdkMsg.content, 'status');
+    const result = extractXMLTag(sdkMsg.content, 'result');
     if (!taskId || !result) {
       continue;
     }
@@ -307,15 +321,14 @@ export function collectAsyncSubagentResults(
   return results;
 }
 
-export function extractXmlTag(content: string, tagName: string): string | null {
-  const regex = new RegExp(`<${tagName}>\\s*([\\s\\S]*?)\\s*</${tagName}>`, 'i');
-  const match = content.match(regex);
-  if (!match || !match[1]) {
-    return null;
-  }
-
-  const trimmed = match[1].trim();
-  return trimmed.length > 0 ? trimmed : null;
+export function isCanonicalSDKUserMessage(record: SDKNativeMessage): boolean {
+  const queuedPrompt = record.type === 'attachment'
+    && record.attachment?.type === 'queued_command' && record.attachment.commandMode === 'prompt';
+  if ((!queuedPrompt && record.type !== 'user') || isSystemInjectedMessage(record)) return false;
+  const content = queuedPrompt ? record.attachment?.prompt : record.message?.content;
+  const text = extractTextContent(content);
+  if (!text && (!content || typeof content === 'string')) return false;
+  return !isInterruptSignalText(text) && !isRebuiltContextContent(text);
 }
 
 export function isSystemInjectedMessage(sdkMsg: SDKNativeMessage): boolean {
@@ -326,7 +339,11 @@ export function isSystemInjectedMessage(sdkMsg: SDKNativeMessage): boolean {
     return true;
   }
 
-  const text = extractTextContent(sdkMsg.message?.content);
+  const content = sdkMsg.message?.content;
+  if (Array.isArray(content) && content.length > 0
+    && content.every(block => block.type === 'tool_result')) return true;
+
+  const text = extractTextContent(content);
   if (!text) {
     return false;
   }
@@ -352,6 +369,17 @@ export function isSystemInjectedMessage(sdkMsg: SDKNativeMessage): boolean {
   }
 
   return false;
+}
+
+export function parseTaskNotification(sdkMsg: SDKNativeMessage): string | null {
+  const attachment = sdkMsg.attachment;
+  const content = sdkMsg.type === 'user'
+    ? sdkMsg.message?.content
+    : sdkMsg.type === 'attachment' && attachment?.type === 'queued_command'
+      && attachment.commandMode === 'task-notification'
+      ? attachment.prompt
+      : undefined;
+  return parseClaudeTaskNotification(content)?.content ?? null;
 }
 
 export function mergeAssistantMessage(target: ChatMessage, source: ChatMessage): void {

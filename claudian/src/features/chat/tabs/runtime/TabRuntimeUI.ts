@@ -1,4 +1,4 @@
-import { Notice, setIcon } from 'obsidian';
+import { Notice } from 'obsidian';
 
 import {
   getProviderSettingsSnapshotWithModel,
@@ -13,21 +13,18 @@ import type {
   ProviderChatUIConfig,
   ProviderId,
 } from '../../../../core/providers/types';
-import { t } from '../../../../i18n/i18n';
-import { SlashCommandDropdown } from '../../../../shared/components/SlashCommandDropdown';
-import { getEnhancedPath } from '../../../../utils/env';
-import { getVaultPath } from '../../../../utils/path';
-import { BangBashService } from '../../services/BangBashService';
-import { BangBashModeManager as BangBashModeManagerClass } from '../../ui/BangBashModeManager';
+import { getChatSettingsSnapshot } from '../../ChatSettings';
+import { ExternalContextAttachments } from '../../composer/ExternalContextAttachments';
+import { MainChatComposerDropdown } from '../../composer/MainChatComposerDropdown';
+import { LinkedContentController } from '../../linked-content';
+import type { SideChatController } from '../../side-chat/SideChatController';
 import { ComposerContextTray } from '../../ui/ComposerContextTray';
 import { FileContextManager } from '../../ui/FileContext';
 import { ImageContextManager } from '../../ui/ImageContext';
 import { createInputToolbar } from '../../ui/InputToolbar';
-import { InstructionModeManager as InstructionModeManagerClass } from '../../ui/InstructionModeManager';
 import { NavigationSidebar } from '../../ui/NavigationSidebar';
-import { StatusPanel } from '../../ui/StatusPanel';
-import { autoResizeTextarea } from '../../ui/textareaResize';
-import { recalculateUsageForModel } from '../../utils/usageInfo';
+import { installTextareaSizing } from '../../ui/textareaSizing';
+import { clearReportedContextWindowForModel } from '../../utils/usageInfo';
 import { getTabProviderId } from '../providerResolution';
 import { commitProvisionalTab } from '../TabLifecycle';
 import { TabModelSelectionCoordinator } from '../TabModelSelectionCoordinator';
@@ -37,13 +34,14 @@ import {
   getTabCapabilities,
   getTabChatUIConfig,
   getTabHiddenCommands,
-  getTabSelectedModel,
   getTabSettingsSnapshot,
   refreshTabProviderUI,
-  syncSlashCommandDropdownForProvider,
+  syncComposerDropdownForProvider,
   syncTabProviderServices,
   type TabProviderSettings,
+  updateTabPermissionMode,
   updateTabProviderSettings,
+  updateTabReasoning,
   updateTabServiceTier,
 } from '../TabProviderState';
 import type {
@@ -58,27 +56,35 @@ import type {
 } from './TabRuntimeConstruction';
 
 function buildContextManagers(
+  options: TabRuntimeConstructionContext,
   shell: TabRuntimeShellBundle,
   contextTray: ComposerContextTray,
-  externalContextSelector: TabUIComponents['externalContextSelector'],
-  options: TabRuntimeConstructionContext,
   onUserModified: () => void,
-): Pick<TabUIComponents, 'fileContextManager' | 'imageContextManager'> {
+): Pick<
+  TabUIComponents,
+  'fileContextManager' | 'imageContextManager' | 'linkedContentController'
+> {
   const { dom } = shell;
   const { plugin } = options;
-  const fileContextManager = new FileContextManager(
-    plugin.app,
-    dom.contextRowEl,
-    dom.inputEl,
-    {
-      getExcludedTags: () => plugin.settings.excludedTags,
-      getExternalContexts: () => externalContextSelector.getExternalContexts(),
-      onUserChipsChanged: onUserModified,
-    },
-    dom.inputContainerEl,
-    contextTray,
-  );
+  const fileContextManager = new FileContextManager(plugin.app);
   options.registerCleanup('tab file context manager', () => fileContextManager.destroy());
+  const linkedContentController = new LinkedContentController({
+    app: plugin.app,
+    getExcludedTags: () => plugin.settings.excludedTags,
+    getCachedVaultFiles: () => fileContextManager.getCachedVaultFiles(),
+    getCachedVaultFolders: () => fileContextManager.getCachedVaultFolders(),
+  });
+  options.registerCleanup(
+    'tab Linked content controller',
+    () => linkedContentController.destroy(),
+  );
+  if (options.conversation?.id) {
+    linkedContentController.lock(options.conversation.linkedContentPath);
+  } else {
+    linkedContentController.resetAutoDraft();
+  }
+  linkedContentController.mountContextTray(contextTray);
+  if (dom.welcomeEl) linkedContentController.mountWelcome(dom.welcomeEl);
   const imageContextManager = new ImageContextManager(
     dom.inputContainerEl,
     dom.inputEl,
@@ -87,24 +93,22 @@ function buildContextManagers(
     contextTray,
   );
   options.registerCleanup('tab image context manager', () => imageContextManager.destroy());
-  return { fileContextManager, imageContextManager };
+  return { fileContextManager, imageContextManager, linkedContentController };
 }
 
-function buildSlashCommandDropdown(
+function buildComposerDropdown(
   shell: TabRuntimeShellBundle,
-  providerId: ProviderId,
+  providerId: ProviderId | null,
+  fileContextManager: FileContextManager,
   options: TabRuntimeConstructionContext,
   getHiddenCommands?: () => Set<string>,
   catalogInfo?: ProviderCatalogInfo,
-): SlashCommandDropdown {
+): MainChatComposerDropdown {
   const { dom } = shell;
-  const dropdown = new SlashCommandDropdown(
+  const dropdown = new MainChatComposerDropdown(
     dom.inputContainerEl,
     dom.inputEl,
-    {
-      onSelect: () => {},
-      onHide: () => {},
-    },
+    fileContextManager,
     {
       providerId,
       hiddenCommands: getHiddenCommands?.() ?? new Set(),
@@ -112,78 +116,8 @@ function buildSlashCommandDropdown(
       providerDiscovery: catalogInfo?.discovery,
     },
   );
-  options.registerCleanup('tab slash command dropdown', () => dropdown.destroy());
+  options.registerCleanup('tab composer dropdown', () => dropdown.destroy());
   return dropdown;
-}
-
-function buildInstructionComponents(
-  shell: TabRuntimeShellBundle,
-  options: TabRuntimeConstructionContext,
-  runtimeRef: PublishedTabRuntimeRef,
-): Pick<
-  TabUIComponents,
-  'instructionModeManager' | 'bangBashModeManager' | 'statusPanel'
-> {
-  const { dom } = shell;
-  const { plugin } = options;
-  const instructionModeManager = new InstructionModeManagerClass(
-    dom.inputEl,
-    {
-      onSubmit: async (rawInstruction) => {
-        await runtimeRef.requirePublished().controllers.inputController
-          .handleInstructionSubmit(rawInstruction);
-      },
-      getInputWrapper: () => dom.inputWrapper,
-    },
-  );
-  options.registerCleanup(
-    'tab instruction mode manager',
-    () => instructionModeManager.destroy(),
-  );
-
-  const statusPanel = new StatusPanel();
-  options.registerCleanup('tab status panel', () => statusPanel.destroy());
-  statusPanel.mount(dom.statusPanelContainerEl);
-
-  let bangBashModeManager: TabUIComponents['bangBashModeManager'] = null;
-  if (isBangBashEnabled(plugin.settings)) {
-    const vaultPath = getVaultPath(plugin.app);
-    if (vaultPath) {
-      const enhancedPath = getEnhancedPath();
-      const bashService = new BangBashService(vaultPath, enhancedPath);
-
-      bangBashModeManager = new BangBashModeManagerClass(
-        dom.inputEl,
-        {
-          onSubmit: async (command) => {
-            const id = `bash-${Date.now()}`;
-            statusPanel.addBashOutput({ id, command, status: 'running', output: '' });
-
-            const result = await bashService.execute(command);
-            const output = [result.stdout, result.stderr, result.error]
-              .filter(Boolean)
-              .join('\n')
-              .trim();
-            const status = result.exitCode === 0 ? 'completed' : 'error';
-            statusPanel.updateBashOutput(id, { status, output, exitCode: result.exitCode });
-          },
-          getInputWrapper: () => dom.inputWrapper,
-        },
-      );
-      const ownedBangBashModeManager = bangBashModeManager;
-      options.registerCleanup(
-        'tab bang-bash mode manager',
-        () => ownedBangBashModeManager.destroy(),
-      );
-    }
-  }
-  return { bangBashModeManager, instructionModeManager, statusPanel };
-}
-
-function isBangBashEnabled(settings: Record<string, unknown>): boolean {
-  return ProviderRegistry.getEnabledProviderIds(settings).some((providerId) => (
-    ProviderRegistry.getChatUIConfig(providerId).isBangBashEnabled?.(settings) ?? false
-  ));
 }
 
 function buildInputToolbar(
@@ -192,18 +126,14 @@ function buildInputToolbar(
   options: TabRuntimeConstructionContext,
   runtimeRef: PublishedTabRuntimeRef,
   onUserModified: () => void,
-): ReturnType<typeof createInputToolbar> & Pick<
-  TabUIComponents,
-  'sendButtonEl' | 'stopButtonEl'
-> {
+): ReturnType<typeof createInputToolbar> {
   const { dom } = shell;
   const { plugin } = options;
 
   const inputToolbar = dom.inputWrapper.createDiv({ cls: 'claudian-input-toolbar' });
 
   const blankTabUIConfigProxy = (): ProviderChatUIConfig => {
-    const draftProvider = shell.providerId;
-    const baseConfig = ProviderRegistry.getChatUIConfig(draftProvider);
+    const baseConfig = getTabChatUIConfig(shell, plugin);
     return {
       ...baseConfig,
       getModelOptions: (settings: Record<string, unknown>) =>
@@ -221,27 +151,48 @@ function buildInputToolbar(
       model: shell.draftModel,
     }),
     applyModel: (model) => {
-      shell.draftModel = model;
+      shell.session.selectDraft(shell.providerId, model);
     },
     applyProviderTarget: ({ providerId, model }) => {
-      shell.draftModel = model;
-      shell.providerId = providerId;
-      syncTabProviderServices(shell, services, plugin);
-      runtimeRef.requirePublished().ui.slashCommandDropdown.clearProviderCatalog?.();
+      shell.session.selectDraft(providerId, model);
+      syncTabProviderServices(shell, services);
+      runtimeRef.requirePublished().ui.composerDropdown.clearProviderCatalog();
     },
     restoreDraft: ({ providerId, model }) => {
       const tab = runtimeRef.requirePublished();
-      shell.draftModel = model;
-      shell.providerId = providerId;
-      syncTabProviderServices(shell, services, plugin);
-      syncSlashCommandDropdownForProvider(tab, plugin, shell.providerCatalogResolver);
-      refreshTabProviderUI(tab, plugin);
+      shell.session.selectDraft(providerId, model);
+      syncTabProviderServices(shell, services);
+      syncComposerDropdownForProvider(tab, plugin, shell.providerCatalogResolver);
+      refreshTabProviderUI(tab);
       applyProviderUIGating(tab, plugin);
     },
     initializeProvider: async (providerId) => {
       await options.onProviderChanged?.(runtimeRef.requirePublished(), providerId);
     },
   });
+
+  /** Side chat owns an in-memory settings projection while it is selected. */
+  const getSelectedSideChat = (): SideChatController | null => {
+    const tab = runtimeRef.current();
+    if (!tab) return null;
+    const sideChat = tab.controllers.sideChatController;
+    return sideChat.destination === 'side' ? sideChat : null;
+  };
+
+  const applySideSetting = (
+    patch: Parameters<SideChatController['updateSideSettings']>[0],
+  ): boolean => {
+    const sideChat = getSelectedSideChat();
+    if (!sideChat) return false;
+    sideChat.updateSideSettings(patch);
+    const tab = runtimeRef.requirePublished();
+    tab.ui.modelSelector.updateDisplay();
+    tab.ui.modeSelector.updateDisplay();
+    tab.ui.thinkingBudgetSelector.updateDisplay();
+    tab.ui.permissionToggle.updateDisplay();
+    tab.ui.serviceTierToggle.updateDisplay();
+    return true;
+  };
 
   const toolbarComponents = createInputToolbar(inputToolbar, {
     getUIConfig: () => {
@@ -251,11 +202,28 @@ function buildInputToolbar(
       return getTabChatUIConfig(shell, plugin);
     },
     getCapabilities: () => getTabCapabilities(shell, plugin),
-    getSettings: () => getTabSettingsSnapshot(shell, plugin),
+    getSettings: () => {
+      const base = getTabSettingsSnapshot(shell, plugin);
+      const sideSettings = getSelectedSideChat()?.runtime?.settings;
+      if (!sideSettings) return base;
+      return { ...base, ...sideSettings };
+    },
     getEnvironmentVariables: () => plugin.getActiveEnvironmentVariables(),
     onModelChange: async (model: string) => {
       const tab = runtimeRef.requirePublished();
       if (!options.isRuntimeLive(tab)) return;
+      const sideChat = getSelectedSideChat();
+      if (sideChat) {
+        // Enabled-model checks still apply; a side selection never substitutes one.
+        if (getEnabledProviderForModel(model, plugin.settings) !== sideChat.runtime?.providerId) {
+          new Notice('Cannot switch provider inside a side chat.');
+          tab.ui.modelSelector.updateDisplay();
+          return;
+        }
+        const next = getChatSettingsSnapshot(plugin.settings, sideChat.runtime.providerId, model);
+        applySideSetting({ model: next.model, reasoning: next.reasoning });
+        return;
+      }
       if (tab.conversationId === null) {
         const selectionIntent = plugin.chatModelSelection.beginIntent();
         const request = modelSelection.beginRequest();
@@ -263,6 +231,11 @@ function buildInputToolbar(
           model,
           plugin.settings,
         );
+        if (!newProvider) {
+          new Notice('Select an available model in Claudian settings.');
+          tab.ui.modelSelector.updateDisplay();
+          return;
+        }
         const result = await modelSelection.selectBlank(request, {
           providerId: newProvider,
           model,
@@ -286,8 +259,9 @@ function buildInputToolbar(
         );
         if (!didCommit || !isSelectionTargetCurrent()) return;
 
-        syncSlashCommandDropdownForProvider(tab, plugin, shell.providerCatalogResolver);
+        syncComposerDropdownForProvider(tab, plugin, shell.providerCatalogResolver);
         onUserModified();
+        options.onDraftModelChanged?.(tab, tab.draftModel);
         await uiConfig.prepareModelMetadata?.(
           model,
           getProviderSettingsSnapshotWithModel(plugin.settings, newProvider, model),
@@ -306,8 +280,8 @@ function buildInputToolbar(
 
       const boundProvider = tab.providerId;
       const modelProvider = getProviderForModel(model, plugin.settings);
-      if (modelProvider !== boundProvider) {
-        new Notice(t('chatUi.cannotSwitchProviderOnABoundSessionStartANewConversationInstead'));
+      if (!boundProvider || modelProvider !== boundProvider) {
+        new Notice('Cannot switch provider on a bound session. Start a new conversation instead.');
         tab.ui.modelSelector.updateDisplay();
         return;
       }
@@ -321,7 +295,7 @@ function buildInputToolbar(
         plugin.settings,
         model,
       ) ?? model;
-      const providerSettings = getProviderSettingsSnapshotWithModel(
+      const providerSettings = getChatSettingsSnapshot(
         plugin.settings,
         boundProvider,
         normalizedModel,
@@ -361,20 +335,21 @@ function buildInputToolbar(
 
       const currentUsage = tab.state.usage;
       if (currentUsage) {
-        const newContextWindow = uiConfig.getContextWindowSize(
-          normalizedModel,
-          providerSettings.customContextLimits,
-          providerSettings,
-        );
-        tab.state.usage = recalculateUsageForModel(
+        tab.state.usage = clearReportedContextWindowForModel(
           currentUsage,
           normalizedModel,
-          newContextWindow,
+          boundProvider,
         );
       }
     },
     onModeChange: async (mode: string) => {
       const tab = runtimeRef.requirePublished();
+      if (getSelectedSideChat()) {
+        // Mode selection is provider-owned UI state that side chat does not project.
+        new Notice('Mode selection applies to the main chat.');
+        tab.ui.modeSelector.updateDisplay();
+        return;
+      }
       await updateTabProviderSettings(tab, plugin, (settings) => {
         getTabChatUIConfig(tab, plugin).applyModeSelection?.(mode, settings);
       });
@@ -383,43 +358,27 @@ function buildInputToolbar(
       onUserModified();
     },
     onThinkingBudgetChange: async (budget: string) => {
+      if (applySideSetting({ reasoning: budget })) return;
       const tab = runtimeRef.requirePublished();
-      await updateTabProviderSettings(tab, plugin, (settings) => {
-        const model = getTabSelectedModel(tab, plugin) ?? settings.model;
-        settings.thinkingBudget = budget;
-        getTabChatUIConfig(tab, plugin).applyReasoningSelection?.(model, budget, settings);
-      });
+      await updateTabReasoning(tab, plugin, budget);
       onUserModified();
     },
     onEffortLevelChange: async (effort: string) => {
+      if (applySideSetting({ reasoning: effort })) return;
       const tab = runtimeRef.requirePublished();
-      await updateTabProviderSettings(tab, plugin, (settings) => {
-        const model = getTabSelectedModel(tab, plugin) ?? settings.model;
-        settings.effortLevel = effort;
-        getTabChatUIConfig(tab, plugin).applyReasoningSelection?.(model, effort, settings);
-      });
+      await updateTabReasoning(tab, plugin, effort);
       onUserModified();
     },
     onServiceTierChange: async (serviceTier: string) => {
+      if (applySideSetting({ serviceTier })) return;
       const tab = runtimeRef.requirePublished();
       await updateTabServiceTier(tab, plugin, serviceTier);
       onUserModified();
     },
     onPermissionModeChange: async (mode: string) => {
+      if (applySideSetting({ permissionMode: mode })) return;
       const tab = runtimeRef.requirePublished();
-      await updateTabProviderSettings(tab, plugin, (settings) => {
-        const uiConfig = getTabChatUIConfig(tab, plugin);
-        if (uiConfig.applyPermissionMode) {
-          uiConfig.applyPermissionMode(mode, settings);
-        } else {
-          settings.permissionMode = mode;
-        }
-      });
-      tab.ui.permissionToggle.updateDisplay();
-      shell.dom.inputWrapper.toggleClass(
-        'claudian-input-plan-mode',
-        mode === 'plan' && getTabCapabilities(tab, plugin).supportsPlanMode,
-      );
+      await updateTabPermissionMode(tab, plugin, mode);
       onUserModified();
     },
   });
@@ -427,27 +386,7 @@ function buildInputToolbar(
     'tab input toolbar layout',
     () => toolbarComponents.layoutController.destroy(),
   );
-  const composerActionsEl = inputToolbar.createDiv({ cls: 'claudian-composer-actions' });
-  const stopButtonEl = composerActionsEl.createEl('button', {
-    cls: 'claudian-composer-action claudian-composer-stop claudian-hidden',
-    attr: {
-      type: 'button',
-      title: t('chatUi.stopResponse'),
-      'aria-label': t('chatUi.stopResponse'),
-      'aria-hidden': 'true',
-    },
-  });
-  setIcon(stopButtonEl, 'square');
-  const sendButtonEl = composerActionsEl.createEl('button', {
-    cls: 'claudian-composer-action claudian-composer-send',
-    attr: {
-      type: 'button',
-      title: t('chatUi.sendMessage'),
-      'aria-label': t('chatUi.sendMessage'),
-    },
-  });
-  setIcon(sendButtonEl, 'send-horizontal');
-  return { ...toolbarComponents, sendButtonEl, stopButtonEl };
+  return toolbarComponents;
 }
 
 export function buildTabRuntimeUI(
@@ -458,32 +397,41 @@ export function buildTabRuntimeUI(
 ): TabUIComponents {
   const { dom } = shell;
   const { plugin } = options;
-  const onUserModified = (): void => commitProvisionalTab(runtimeRef.requirePublished());
+  const onUserModified = (): void => {
+    commitProvisionalTab(runtimeRef.requirePublished());
+  };
+  options.registerCleanup(
+    'tab textarea sizing',
+    installTextareaSizing(dom.inputEl),
+  );
   const contextTray = new ComposerContextTray(dom.contextRowEl, {
     onDidChange: () => {
-      autoResizeTextarea(dom.inputEl);
       runtimeRef.current()?.renderer.scrollToBottomIfNeeded();
     },
   });
   options.registerCleanup('tab composer context tray', () => contextTray.destroy());
+  const externalContextAttachments = new ExternalContextAttachments(contextTray);
+  options.registerCleanup(
+    'tab external context attachments',
+    () => externalContextAttachments.destroy(),
+  );
 
   const toolbar = buildInputToolbar(shell, services, options, runtimeRef, onUserModified);
   const contextManagers = buildContextManagers(
+    options,
     shell,
     contextTray,
-    toolbar.externalContextSelector,
-    options,
     onUserModified,
   );
   const catalogInfo = shell.providerCatalogResolver();
-  const slashCommandDropdown = buildSlashCommandDropdown(
+  const composerDropdown = buildComposerDropdown(
     shell,
     getTabProviderId(shell, plugin),
+    contextManagers.fileContextManager,
     options,
     () => getTabHiddenCommands(shell, plugin),
     catalogInfo,
   );
-  const instructionComponents = buildInstructionComponents(shell, options, runtimeRef);
   const navigationSidebar = new NavigationSidebar(
     dom.messagesWrapperEl,
     dom.messagesEl,
@@ -492,34 +440,17 @@ export function buildTabRuntimeUI(
 
   const ui: TabUIComponents = {
     contextTray,
+    externalContextAttachments,
     ...contextManagers,
     modelSelector: toolbar.modelSelector,
     modeSelector: toolbar.modeSelector,
     thinkingBudgetSelector: toolbar.thinkingBudgetSelector,
-    externalContextSelector: toolbar.externalContextSelector,
     permissionToggle: toolbar.permissionToggle,
     serviceTierToggle: toolbar.serviceTierToggle,
-    slashCommandDropdown,
-    ...instructionComponents,
+    composerDropdown,
     contextUsageMeter: toolbar.contextUsageMeter,
     navigationSidebar,
-    sendButtonEl: toolbar.sendButtonEl,
-    stopButtonEl: toolbar.stopButtonEl,
   };
-
-  ui.externalContextSelector.setOnChange(() => {
-    ui.fileContextManager.preScanExternalContexts();
-    options.onCommandContextChanged?.(runtimeRef.requirePublished());
-    onUserModified();
-  });
-  ui.externalContextSelector.setPersistentPaths(
-    plugin.settings.persistentExternalContextPaths || [],
-  );
-  ui.externalContextSelector.setOnPersistenceChange((paths) => {
-    void plugin.mutateSettings((settings) => {
-      settings.persistentExternalContextPaths = paths;
-    });
-  });
 
   const resizeObserver = new ResizeObserver(() => {
     navigationSidebar.updateVisibility();

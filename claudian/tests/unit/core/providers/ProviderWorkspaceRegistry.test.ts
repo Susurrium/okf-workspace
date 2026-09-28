@@ -40,36 +40,18 @@ describe('ProviderWorkspaceRegistry', () => {
     ProviderWorkspaceRegistry.clear();
   });
 
-  it('returns agent mention providers through the workspace registry', () => {
-    const claudeProvider = { searchAgents: jest.fn().mockReturnValue([]) };
-    const codexProvider = { searchAgents: jest.fn().mockReturnValue([]) };
-
-    ProviderWorkspaceRegistry.setServices('claude', {
-      agentMentionProvider: claudeProvider as any,
-    });
-    ProviderWorkspaceRegistry.setServices('codex', {
-      agentMentionProvider: codexProvider as any,
-    });
-
-    expect(ProviderWorkspaceRegistry.getAgentMentionProvider('claude')).toBe(claudeProvider);
-    expect(ProviderWorkspaceRegistry.getAgentMentionProvider('codex')).toBe(codexProvider);
-  });
-
-  it('refreshes agent mention state through the workspace registry', async () => {
-    const refreshClaude = jest.fn().mockResolvedValue(undefined);
-    const refreshCodex = jest.fn().mockResolvedValue(undefined);
-
-    ProviderWorkspaceRegistry.setServices('claude', {
-      refreshAgentMentions: refreshClaude,
-    });
-    ProviderWorkspaceRegistry.setServices('codex', {
-      refreshAgentMentions: refreshCodex,
-    });
-
-    await ProviderWorkspaceRegistry.refreshAgentMentions('codex');
-
-    expect(refreshClaude).not.toHaveBeenCalled();
-    expect(refreshCodex).toHaveBeenCalled();
+  it('rejects a different workspace host until disposal', async () => {
+    const initialize = jest.fn(async () => ({}));
+    ProviderWorkspaceRegistry.register('claude', { initialize });
+    const owner = createProviderHost();
+    const other = createProviderHost();
+    await ProviderWorkspaceRegistry.ensureInitialized(owner, 'claude', 'test');
+    await expect(ProviderWorkspaceRegistry.ensureInitialized(other, 'claude', 'test'))
+      .rejects.toThrow('workspace host');
+    expect(initialize).toHaveBeenCalledTimes(1);
+    await ProviderWorkspaceRegistry.disposeInitialized();
+    await ProviderWorkspaceRegistry.ensureInitialized(other, 'claude', 'test');
+    expect(initialize).toHaveBeenCalledTimes(2);
   });
 
   it('returns the assigned catalog for a provider', () => {
@@ -126,18 +108,6 @@ describe('ProviderWorkspaceRegistry', () => {
     expect(services?.commandCatalog).toBe(commandCatalog);
     expect(services?.vaultCommandRepository).toBe(vaultCommandRepository);
     expect(commandCatalog).not.toHaveProperty('saveVaultEntry');
-  });
-
-  it('returns the tab warmup policy for a provider', () => {
-    const tabWarmupPolicy = {
-      resolveMode: jest.fn().mockReturnValue('commands'),
-    };
-
-    ProviderWorkspaceRegistry.setServices('opencode', {
-      tabWarmupPolicy: tabWarmupPolicy as any,
-    });
-
-    expect(ProviderWorkspaceRegistry.getTabWarmupPolicy('opencode')).toBe(tabWarmupPolicy);
   });
 
   it('deduplicates concurrent provider initialization', async () => {
@@ -234,15 +204,6 @@ describe('ProviderWorkspaceRegistry', () => {
 
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(ProviderWorkspaceRegistry.getIfInitialized('codex')).toBeNull();
-  });
-
-  it('prepares provider settings through initialized workspace services', async () => {
-    const prepareSettings = jest.fn().mockResolvedValue(undefined);
-    ProviderWorkspaceRegistry.setServices('codex', { prepareSettings });
-
-    await ProviderWorkspaceRegistry.prepareSettings('codex');
-
-    expect(prepareSettings).toHaveBeenCalledTimes(1);
   });
 
   it('runs cold provider initialization inside the execution lifecycle transition', async () => {

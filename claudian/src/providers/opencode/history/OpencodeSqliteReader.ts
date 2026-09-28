@@ -1,16 +1,17 @@
-import { spawn as defaultSpawn } from 'node:child_process';
+import { type ChildProcess, spawn as defaultSpawn, type SpawnOptions } from 'node:child_process';
 
-import { findNodeExecutable } from '../../../utils/env';
+import { findNodeExecutables } from '../../../utils/env';
 
 export type StoredRow = Record<string, unknown>;
 
 export interface StoredSessionRows {
+  nativeVersion?: 2;
   messageRows: StoredRow[];
   partRows: StoredRow[];
 }
 
 interface SqliteModule {
-  DatabaseSync: new (location: string, options?: Record<string, unknown>) => {
+  DatabaseSync: new (location: string, options: { readOnly: boolean }) => {
     close(): void;
     prepare(sql: string): {
       all(...params: unknown[]): StoredRow[];
@@ -18,22 +19,25 @@ interface SqliteModule {
   };
 }
 
+type SpawnSqliteProcess = (command: string, args: string[], options: SpawnOptions) => ChildProcess;
+
 export interface OpencodeSqliteReaderDependencies {
-  findNodeExecutable?: () => string | null;
+  nativeVersion?: 1 | 2 | 'auto';
+  environment?: NodeJS.ProcessEnv;
+  findNodeExecutables?: () => string[];
   requireSqliteModule?: () => SqliteModule | null;
-  spawn?: typeof defaultSpawn;
+  spawn?: SpawnSqliteProcess;
 }
 
 export const OPENCODE_SQLITE_QUERY_MAX_BUFFER = 100 * 1024 * 1024;
-export const OPENCODE_MESSAGE_ROW_SQL = buildOpencodeMessageRowsSql('?');
+export const OPENCODE_MESSAGE_ROW_SQL = buildOpencodeMessageRowsSQL('?');
 
-const OPENCODE_PART_ROW_SQL = buildOpencodePartRowsSql('?');
 const OPENCODE_SQLITE_CHILD_SCRIPT = `
 const { DatabaseSync } = require('node:sqlite');
 const [databasePath, sessionId, messageSql, partSql] = process.argv.slice(1);
 let db;
 try {
-  db = new DatabaseSync(databasePath, { readonly: true });
+  db = new DatabaseSync(databasePath, { readOnly: true });
   const messageRows = db.prepare(messageSql).all(sessionId);
   const partRows = db.prepare(partSql).all(sessionId);
   process.stdout.write(JSON.stringify({ messageRows, partRows }));
@@ -46,177 +50,211 @@ export async function loadOpencodeSessionRows(
   databasePath: string,
   sessionId: string,
   dependencies: OpencodeSqliteReaderDependencies = {},
-): Promise<StoredSessionRows | null> {
-  const resolvedDependencies = resolveDependencies(dependencies);
-
-  const viaCurrentProcess = loadSessionRowsWithCurrentProcessSqlite(
-    databasePath,
-    sessionId,
-    resolvedDependencies.requireSqliteModule,
-  );
-  if (viaCurrentProcess) {
-    return viaCurrentProcess;
+): Promise<StoredSessionRows> {
+  let nativeVersion = dependencies.nativeVersion ?? 1;
+  if (nativeVersion === 'auto') {
+    // v1.18 also creates an empty session_message scaffold; session_v2 identifies v2.
+    const schema = await querySessionRows(databasePath, sessionId, dependencies,
+      (id) => `SELECT name FROM sqlite_master WHERE name = 'session_v2' AND ${id} IS NOT NULL`,
+      (id) => `SELECT 1 WHERE ${id} IS NULL`);
+    nativeVersion = schema.messageRows.length > 0 ? 2 : 1;
   }
-
-  const viaNodeProcess = await loadSessionRowsWithNodeProcess(
-    databasePath,
-    sessionId,
-    resolvedDependencies.findNodeExecutable,
-    resolvedDependencies.spawn,
-  );
-  if (viaNodeProcess) {
-    return viaNodeProcess;
+  if (nativeVersion === 2) {
+    const rows = await querySessionRows(databasePath, sessionId, dependencies,
+      (id) => `SELECT id, type, time_created, data FROM session_message WHERE session_id = ${id} ORDER BY seq ASC`,
+      (id) => `SELECT 1 WHERE ${id} IS NULL`);
+    return { ...rows, nativeVersion: 2 };
   }
-
-  return loadSessionRowsWithSqliteCli(
-    databasePath,
-    sessionId,
-    resolvedDependencies.spawn,
-  );
+  const rows = await querySessionRows(databasePath, sessionId, dependencies, buildOpencodeMessageRowsSQL, buildOpencodePartRowsSQL);
+  // Usage metadata is optional. Preserve the existing row shape where it is absent.
+  for (const row of rows.messageRows) {
+    for (const key of ['parent_id', 'output_tokens', 'reasoning_tokens', 'finish', 'error']) {
+      if (row[key] === null) delete row[key];
+    }
+  }
+  return rows;
 }
 
-function resolveDependencies(
+export interface OpencodeTurnSelector {
+  userMessageId?: string | null;
+  startedAt: number;
+}
+
+/** Select only the requested turn's scalar metadata, through the same SQLite fallbacks as replay. */
+export async function loadOpencodeTurnRows(
+  databasePath: string,
+  sessionId: string,
+  selector: OpencodeTurnSelector,
+  dependencies: OpencodeSqliteReaderDependencies = {},
+): Promise<StoredSessionRows> {
+  let version = dependencies.nativeVersion ?? 'auto';
+  if (version === 'auto') {
+    const schema = await querySessionRows(databasePath, sessionId, dependencies,
+      id => `SELECT name FROM sqlite_master WHERE name = 'session_v2' AND ${id} IS NOT NULL`,
+      id => `SELECT 1 WHERE ${id} IS NULL`);
+    version = schema.messageRows.length > 0 ? 2 : 1;
+  }
+  const rows = await querySessionRows(databasePath, sessionId, dependencies,
+    id => buildTurnRowsSQL(id, selector, version === 2 ? 2 : 1),
+    id => `SELECT 1 WHERE ${id} IS NULL`);
+  return version === 2 ? { ...rows, nativeVersion: 2 } : rows;
+}
+
+function buildTurnRowsSQL(sessionId: string, selector: OpencodeTurnSelector, version: 1 | 2): string {
+  const table = version === 2 ? 'session_message' : 'message';
+  const userRole = version === 2 ? "type = 'user'" : "json_valid(data) AND json_extract(data, '$.role') = 'user'";
+  const selectedUser = selector.userMessageId
+    ? `id = '${escapeSQLLiteral(selector.userMessageId)}'`
+    : `${userRole} AND time_created >= ${Number.isFinite(selector.startedAt) ? Math.floor(selector.startedAt) : 'NULL'}`;
+  const order = version === 2 ? 'seq' : 'time_created, id';
+  const columns = `id, session_id, time_created${version === 2 ? ', seq' : ''}`;
+  const range = `(${order}) >= (SELECT ${order} FROM selected_user)
+    AND (NOT EXISTS (SELECT 1 FROM next_user) OR (${order}) < (SELECT ${order} FROM next_user))`;
+  return `WITH selected_user AS (
+    SELECT ${columns} FROM ${table} WHERE session_id = ${sessionId} AND ${selectedUser}
+    ORDER BY ${version === 2 ? 'seq' : 'time_created'} DESC, id DESC LIMIT 1
+  ), next_user AS (
+    SELECT ${columns} FROM ${table}
+    WHERE session_id = (SELECT session_id FROM selected_user) AND ${userRole}
+      AND (${order}) > (SELECT ${order} FROM selected_user)
+    ORDER BY ${order} LIMIT 1
+  ), turn_rows AS (
+    SELECT *, json_valid(data) AS data_valid FROM ${table}
+    WHERE session_id = (SELECT session_id FROM selected_user) AND ${range}
+  )
+  SELECT id, time_created, data_valid,
+    ${version === 2 ? 'type' : "CASE WHEN data_valid THEN json_extract(data, '$.role') END"} AS role,
+    CASE WHEN data_valid THEN json_extract(data, '$.time.created') END AS data_time_created,
+    CASE WHEN data_valid THEN json_extract(data, '$.time.completed') END AS data_time_completed,
+    CASE WHEN data_valid THEN json_extract(data, '$.parentID') END AS parent_id,
+    CASE WHEN data_valid THEN json_extract(data, '$.tokens.output') END AS output_tokens,
+    CASE WHEN data_valid THEN json_extract(data, '$.tokens.reasoning') END AS reasoning_tokens,
+    CASE WHEN data_valid THEN json_extract(data, '$.finish') END AS finish,
+    CASE WHEN data_valid THEN json_extract(data, '$.error') END AS error
+  FROM turn_rows ORDER BY ${version === 2 ? 'seq' : 'time_created'}, id;`;
+}
+
+async function querySessionRows(
+  databasePath: string,
+  sessionId: string,
   dependencies: OpencodeSqliteReaderDependencies,
-): Required<OpencodeSqliteReaderDependencies> {
-  return {
-    findNodeExecutable,
-    requireSqliteModule,
-    spawn: defaultSpawn,
-    ...dependencies,
-  };
+  messageSql: (id: string) => string,
+  partSql: (id: string) => string,
+): Promise<StoredSessionRows> {
+  const spawn = dependencies.spawn ?? defaultSpawn;
+  const environment = dependencies.environment ?? process.env;
+  const errors: string[] = [];
+  try {
+    const sqlite = (dependencies.requireSqliteModule ?? requireSqliteModule)();
+    if (!sqlite) throw new Error('node:sqlite is unavailable.');
+    const db = new sqlite.DatabaseSync(databasePath, { readOnly: true });
+    try {
+      return {
+        messageRows: db.prepare(messageSql('?')).all(sessionId),
+        partRows: db.prepare(partSql('?')).all(sessionId),
+      };
+    } finally {
+      db.close();
+    }
+  } catch (error) {
+    errors.push(`Obsidian SQLite: ${formatError(error)}`);
+  }
+
+  const nodePaths = dependencies.findNodeExecutables?.() ?? findNodeExecutables(environment.PATH);
+  if (nodePaths.length === 0) errors.push('Node.js: no executable found.');
+  for (const nodePath of nodePaths) {
+    try {
+      const stdout = await runBufferedChild(nodePath, [
+        '-e',
+        OPENCODE_SQLITE_CHILD_SCRIPT,
+        databasePath,
+        sessionId,
+        messageSql('?'),
+        partSql('?'),
+      ], spawn, environment);
+      const rows = parseStoredSessionRows(stdout);
+      if (!rows) throw new Error('Invalid SQLite query output.');
+      return rows;
+    } catch (error) {
+      errors.push(`Node.js (${nodePath}): ${formatError(error)}`);
+    }
+  }
+
+  try {
+    const escapedSessionId = escapeSQLLiteral(sessionId);
+    const messageRows = await runSqlite3JSONQuery(
+      databasePath,
+      messageSql(`'${escapedSessionId}'`),
+      spawn,
+      environment,
+    );
+    const partRows = await runSqlite3JSONQuery(
+      databasePath,
+      partSql(`'${escapedSessionId}'`),
+      spawn,
+      environment,
+    );
+    return { messageRows, partRows };
+  } catch (error) {
+    errors.push(`sqlite3: ${formatError(error)}`);
+  }
+
+  throw new Error([
+    'Could not read OpenCode session rows from SQLite.',
+    ...errors,
+    'History requires working SQLite support in Obsidian, Node.js 22.13+ (or a newer supported release), or sqlite3.',
+  ].join('\n'));
 }
 
 function requireSqliteModule(): SqliteModule | null {
-  try {
-    if (typeof module === 'undefined' || typeof module.require !== 'function') {
-      return null;
-    }
-
-    const sqlite = module.require('node:sqlite') as unknown;
-    return isSqliteModule(sqlite) ? sqlite : null;
-  } catch {
-    return null;
-  }
+  // Obsidian supplies require separately from its plain { exports } module object.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Load optional SQLite lazily through Obsidian's injected require.
+  const sqlite = require('node:sqlite') as unknown;
+  return isPlainObject(sqlite) && typeof sqlite.DatabaseSync === 'function'
+    ? sqlite as unknown as SqliteModule
+    : null;
 }
 
-function isSqliteModule(value: unknown): value is SqliteModule {
-  return (
-    isPlainObject(value)
-    && typeof value.DatabaseSync === 'function'
-  );
-}
-
-function loadSessionRowsWithCurrentProcessSqlite(
-  databasePath: string,
-  sessionId: string,
-  requireSqlite: () => SqliteModule | null,
-): StoredSessionRows | null {
-  const sqlite = requireSqlite();
-  if (!sqlite) {
-    return null;
-  }
-
-  let db: InstanceType<SqliteModule['DatabaseSync']> | null = null;
-  try {
-    db = new sqlite.DatabaseSync(databasePath, { readonly: true });
-    const messageRows = db.prepare(OPENCODE_MESSAGE_ROW_SQL).all(sessionId);
-    const partRows = db.prepare(OPENCODE_PART_ROW_SQL).all(sessionId);
-    return { messageRows, partRows };
-  } catch {
-    return null;
-  } finally {
-    db?.close();
-  }
-}
-
-async function loadSessionRowsWithNodeProcess(
-  databasePath: string,
-  sessionId: string,
-  findNode: () => string | null,
-  spawn: typeof defaultSpawn,
-): Promise<StoredSessionRows | null> {
-  const nodePath = findNode();
-  if (!nodePath) {
-    return null;
-  }
-
-  const stdout = await runBufferedChild(
-    nodePath,
-    [
-      '-e',
-      OPENCODE_SQLITE_CHILD_SCRIPT,
-      databasePath,
-      sessionId,
-      OPENCODE_MESSAGE_ROW_SQL,
-      OPENCODE_PART_ROW_SQL,
-    ],
-    spawn,
-  );
-  return stdout === null ? null : parseStoredSessionRows(stdout);
-}
-
-async function loadSessionRowsWithSqliteCli(
-  databasePath: string,
-  sessionId: string,
-  spawn: typeof defaultSpawn,
-): Promise<StoredSessionRows | null> {
-  const escapedSessionId = escapeSqlLiteral(sessionId);
-  const messageRows = await runSqlite3JsonQuery(
-    databasePath,
-    buildOpencodeMessageRowsSql(`'${escapedSessionId}'`),
-    spawn,
-  );
-  const partRows = await runSqlite3JsonQuery(
-    databasePath,
-    buildOpencodePartRowsSql(`'${escapedSessionId}'`),
-    spawn,
-  );
-
-  if (!messageRows || !partRows) {
-    return null;
-  }
-
-  return { messageRows, partRows };
-}
-
-async function runSqlite3JsonQuery(
+async function runSqlite3JSONQuery(
   databasePath: string,
   sql: string,
-  spawn: typeof defaultSpawn,
-): Promise<StoredRow[] | null> {
+  spawn: SpawnSqliteProcess,
+  environment: NodeJS.ProcessEnv,
+): Promise<StoredRow[]> {
   const stdout = await runBufferedChild(
     'sqlite3',
-    ['-json', databasePath, sql],
+    ['-readonly', '-json', databasePath, sql],
     spawn,
+    environment,
   );
-  return stdout === null ? null : parseStoredRows(stdout);
+  const rows = parseStoredRows(stdout);
+  if (!rows) throw new Error('Invalid SQLite query output.');
+  return rows;
 }
 
 function runBufferedChild(
   command: string,
   args: string[],
-  spawn: typeof defaultSpawn,
-): Promise<string | null> {
-  return new Promise((resolve) => {
+  spawn: SpawnSqliteProcess,
+  environment: NodeJS.ProcessEnv,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
     let settled = false;
     let size = 0;
     let timer: number | null = null;
     const chunks: Buffer[] = [];
-    let child: ReturnType<typeof defaultSpawn>;
-    try {
-      child = spawn(command, args, {
-        stdio: ['ignore', 'pipe', 'ignore'],
-        windowsHide: true,
-      });
-    } catch {
-      resolve(null);
-      return;
-    }
-    const finish = (value: string | null): void => {
+    let stderr = '';
+    const child = spawn(command, args, {
+      env: environment,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    const finish = (error?: Error): void => {
       if (settled) return;
       settled = true;
       if (timer !== null) window.clearTimeout(timer);
-      resolve(value);
+      if (error) reject(error);
+      else resolve(Buffer.concat(chunks).toString('utf8'));
     };
 
     child.stdout?.on('data', (chunk: Buffer | string) => {
@@ -224,20 +262,27 @@ function runBufferedChild(
       size += buffer.length;
       if (size > OPENCODE_SQLITE_QUERY_MAX_BUFFER) {
         child.kill('SIGKILL');
-        finish(null);
+        finish(new Error('SQLite query output exceeded the size limit.'));
         return;
       }
       chunks.push(buffer);
     });
-    child.once('error', () => finish(null));
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      stderr = (stderr + chunk.toString()).slice(0, 2_000);
+    });
+    child.once('error', (error) => finish(error));
     child.once('close', (code) => {
-      finish(code === 0 ? Buffer.concat(chunks).toString('utf8') : null);
+      finish(code === 0 ? undefined : new Error(stderr.trim() || `Process exited with code ${code}.`));
     });
     timer = window.setTimeout(() => {
       child.kill('SIGKILL');
-      finish(null);
+      finish(new Error('SQLite query timed out after 10 seconds.'));
     }, 10_000);
   });
+}
+
+function formatError(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).slice(0, 2_000);
 }
 
 function parseStoredSessionRows(value: string): StoredSessionRows | null {
@@ -269,7 +314,7 @@ function parseStoredRowsValue(value: unknown): StoredRow[] | null {
     : null;
 }
 
-function escapeSqlLiteral(value: string): string {
+function escapeSQLLiteral(value: string): string {
   return value.replaceAll('\'', '\'\'');
 }
 
@@ -277,7 +322,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function buildOpencodeMessageRowsSql(sessionIdExpression: string): string {
+function buildOpencodeMessageRowsSQL(sessionIdExpression: string): string {
   return `
 with message_json as (
   select
@@ -296,12 +341,17 @@ select
   case when data_valid then json_extract(data, '$.providerID') end as provider_id,
   case when data_valid then json_extract(data, '$.modelID') end as model_id,
   case when data_valid then json_extract(data, '$.time.created') end as data_time_created,
-  case when data_valid then json_extract(data, '$.time.completed') end as data_time_completed
+  case when data_valid then json_extract(data, '$.time.completed') end as data_time_completed,
+  case when data_valid then json_extract(data, '$.parentID') end as parent_id,
+  case when data_valid then json_extract(data, '$.tokens.output') end as output_tokens,
+  case when data_valid then json_extract(data, '$.tokens.reasoning') end as reasoning_tokens,
+  case when data_valid then json_extract(data, '$.finish') end as finish,
+  case when data_valid then json_extract(data, '$.error') end as error
 from message_json
 order by time_created asc, id asc;`.trim();
 }
 
-function buildOpencodePartRowsSql(sessionIdExpression: string): string {
+function buildOpencodePartRowsSQL(sessionIdExpression: string): string {
   return `
 select id, message_id, data
 from part

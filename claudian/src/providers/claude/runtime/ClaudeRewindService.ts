@@ -17,6 +17,7 @@ interface BackupEntrySymlink {
   existedBefore: true;
   kind: 'symlink';
   symlinkTarget: string;
+  symlinkTargetIsDirectory: boolean;
 }
 
 interface BackupEntryMissing {
@@ -65,7 +66,12 @@ async function copyDir(from: string, to: string): Promise<void> {
 
     if (dirent.isSymbolicLink()) {
       const target = await fs.readlink(srcPath);
-      await fs.symlink(target, destPath);
+      const resolvedTarget = path.resolve(path.dirname(srcPath), target);
+      const targetIsDirectory = await fs.stat(resolvedTarget).then(
+        stats => stats.isDirectory(),
+        () => false,
+      );
+      await fs.symlink(target, destPath, process.platform === 'win32' && targetIsDirectory ? 'junction' : undefined);
       continue;
     }
 
@@ -95,7 +101,18 @@ export async function createClaudeRewindBackup(
 
       if (stats.isSymbolicLink()) {
         const target = await fs.readlink(originalPath);
-        entries.push({ originalPath, existedBefore: true, kind: 'symlink', symlinkTarget: target });
+        const resolvedTarget = path.resolve(path.dirname(originalPath), target);
+        const symlinkTargetIsDirectory = await fs.stat(resolvedTarget).then(
+          targetStats => targetStats.isDirectory(),
+          () => false,
+        );
+        entries.push({
+          originalPath,
+          existedBefore: true,
+          kind: 'symlink',
+          symlinkTarget: target,
+          symlinkTargetIsDirectory,
+        });
         continue;
       }
 
@@ -139,7 +156,11 @@ export async function createClaudeRewindBackup(
         await fs.mkdir(path.dirname(entry.originalPath), { recursive: true });
 
         if (entry.kind === 'symlink') {
-          await fs.symlink(entry.symlinkTarget, entry.originalPath);
+          await fs.symlink(
+            entry.symlinkTarget,
+            entry.originalPath,
+            process.platform === 'win32' && entry.symlinkTargetIsDirectory ? 'junction' : undefined,
+          );
           continue;
         }
 
@@ -155,7 +176,8 @@ export async function createClaudeRewindBackup(
     }
 
     if (errors.length > 0) {
-      throw new Error(`Failed to restore ${errors.length} file(s) after rewind failure.`);
+      const details = errors.map(error => error instanceof Error ? error.message : String(error));
+      throw new Error(`Failed to restore ${errors.length} file(s) after rewind failure: ${details.join('; ')}`);
     }
   };
 

@@ -1,3 +1,4 @@
+import type { ProviderLinkedContentContext } from '../../../core/execution';
 import type { ChatMessage, ImageAttachment } from '../../../core/types';
 import {
   appendBrowserContext,
@@ -8,25 +9,23 @@ import {
   type CanvasSelectionContext,
 } from '../../../utils/canvas';
 import {
-  appendCurrentNote,
-  appendCurrentNoteContent,
+  appendLinkedContent,
+  appendLinkedContentBody,
 } from '../../../utils/context';
 import {
   appendEditorContext,
   type EditorSelectionContext,
 } from '../../../utils/editor';
 import { buildContextFromHistory, buildPromptWithHistoryContext } from '../../../utils/session';
-import type { AcpContentBlock } from '../../acp';
+import type { ACPContentBlock } from '../../acp';
 
 export interface OpencodePromptRequest {
   text: string;
   images?: ImageAttachment[];
-  currentNotePath?: string;
-  currentNoteContent?: string;
+  linkedContent?: ProviderLinkedContentContext;
   editorSelection?: EditorSelectionContext | null;
   browserSelection?: BrowserSelectionContext | null;
   canvasSelection?: CanvasSelectionContext | null;
-  externalContextPaths?: string[];
 }
 
 export function buildOpencodePromptText(
@@ -35,13 +34,13 @@ export function buildOpencodePromptText(
 ): string {
   let prompt = request.text;
 
-  if (request.currentNotePath) {
-    prompt = request.currentNoteContent === undefined
-      ? appendCurrentNote(prompt, request.currentNotePath)
-      : appendCurrentNoteContent(
+  if (request.linkedContent) {
+    prompt = request.linkedContent.content === undefined
+      ? appendLinkedContent(prompt, request.linkedContent.path)
+      : appendLinkedContentBody(
         prompt,
-        request.currentNotePath,
-        request.currentNoteContent,
+        request.linkedContent.path,
+        request.linkedContent.content,
       );
   }
 
@@ -73,8 +72,8 @@ export function buildOpencodePromptText(
 export function buildOpencodePromptBlocks(
   request: OpencodePromptRequest,
   conversationHistory: ChatMessage[] = [],
-): AcpContentBlock[] {
-  const blocks: AcpContentBlock[] = [
+): ACPContentBlock[] {
+  const blocks: ACPContentBlock[] = [
     { type: 'text', text: buildOpencodePromptText(request, conversationHistory) },
   ];
 

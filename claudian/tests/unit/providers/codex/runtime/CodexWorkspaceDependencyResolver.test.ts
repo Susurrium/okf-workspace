@@ -8,9 +8,7 @@ import {
   resolveCodexWorkspaceDependencies,
 } from '@/providers/codex/runtime/CodexWorkspaceDependencyResolver';
 
-const toUnixTargetPath = (value: string): string => value.replace(/\\/g, '/');
-
-function createRuntimeBundle(home: string): string {
+function createRuntimeBundle(home: string, platform: NodeJS.Platform = process.platform): string {
   const runtimeRoot = path.join(
     home,
     '.cache',
@@ -31,10 +29,10 @@ function createRuntimeBundle(home: string): string {
   fs.writeFileSync(path.join(runtimeRoot, 'runtime.json'), JSON.stringify({
     bundleFormatVersion: 2,
     bundleVersion: '26.715.12143',
-    targetPlatform: 'darwin',
+    targetPlatform: platform,
   }));
   fs.writeFileSync(path.join(dependenciesRoot, 'node', 'bin', 'node'), '');
-  fs.writeFileSync(path.join(dependenciesRoot, 'python', 'bin', 'python3'), '');
+  fs.writeFileSync(path.join(dependenciesRoot, 'python', 'bin', platform === 'win32' ? 'python.exe' : 'python3'), '');
   fs.writeFileSync(path.join(dependenciesRoot, 'bin', 'fallback', 'git'), '');
   fs.writeFileSync(path.join(dependenciesRoot, 'bin', 'fallback', 'pnpm'), '');
   fs.writeFileSync(
@@ -50,9 +48,9 @@ function createHostRuntimeContext(
   env: Record<string, string> = { HOME: home },
 ): CodexRuntimeContext {
   const target = {
-    method: 'host-native' as const,
-    platformFamily: 'unix' as const,
-    platformOs: 'macos' as const,
+    method: process.platform === 'win32' ? 'native-windows' as const : 'host-native' as const,
+    platformFamily: process.platform === 'win32' ? 'windows' as const : 'unix' as const,
+    platformOs: process.platform === 'win32' ? 'windows' as const : process.platform === 'darwin' ? 'macos' as const : 'linux' as const,
   };
 
   return {
@@ -74,8 +72,8 @@ function createHostRuntimeContext(
     initializeResult: {
       userAgent: 'test',
       codexHome: path.join(home, '.codex'),
-      platformFamily: 'unix',
-      platformOs: 'macos',
+      platformFamily: target.platformFamily,
+      platformOs: target.platformOs,
     },
     codexHomeTarget: path.join(home, '.codex'),
     codexHomeHost: path.join(home, '.codex'),
@@ -106,17 +104,17 @@ describe('CodexWorkspaceDependencyResolver', () => {
     expect(result).toEqual(expect.objectContaining({
       bundleVersion: '26.715.12143',
       artifactToolVersion: '2.8.24',
-      runtimeRoot: toUnixTargetPath(runtimeRoot),
-      nodeExecutable: toUnixTargetPath(path.join(runtimeRoot, 'dependencies', 'node', 'bin', 'node')),
-      nodePackages: toUnixTargetPath(path.join(runtimeRoot, 'dependencies', 'node', 'node_modules')),
-      pythonExecutable: toUnixTargetPath(path.join(runtimeRoot, 'dependencies', 'python', 'bin', 'python3')),
-      pythonPackages: toUnixTargetPath(path.join(runtimeRoot, 'dependencies', 'python')),
-      gitExecutable: toUnixTargetPath(path.join(runtimeRoot, 'dependencies', 'bin', 'fallback', 'git')),
-      pnpmExecutable: toUnixTargetPath(path.join(runtimeRoot, 'dependencies', 'bin', 'fallback', 'pnpm')),
+      runtimeRoot,
+      nodeExecutable: path.join(runtimeRoot, 'dependencies', 'node', 'bin', 'node'),
+      nodePackages: path.join(runtimeRoot, 'dependencies', 'node', 'node_modules'),
+      pythonExecutable: path.join(runtimeRoot, 'dependencies', 'python', 'bin', process.platform === 'win32' ? 'python.exe' : 'python3'),
+      pythonPackages: path.join(runtimeRoot, 'dependencies', 'python'),
+      gitExecutable: path.join(runtimeRoot, 'dependencies', 'bin', 'fallback', 'git'),
+      pnpmExecutable: path.join(runtimeRoot, 'dependencies', 'bin', 'fallback', 'pnpm'),
     }));
 
     expect(formatCodexWorkspaceDependencies(result!)).toContain(
-      `- Node.js packages: \`${toUnixTargetPath(path.join(runtimeRoot, 'dependencies', 'node', 'node_modules'))}\``,
+      `- Node.js packages: \`${path.join(runtimeRoot, 'dependencies', 'node', 'node_modules')}\``,
     );
   });
 
@@ -135,7 +133,26 @@ describe('CodexWorkspaceDependencyResolver', () => {
       },
     ));
 
-    expect(result?.runtimeRoot).toBe(toUnixTargetPath(explicitRuntimeRoot));
+    expect(result?.runtimeRoot).toBe(explicitRuntimeRoot);
+  });
+
+  it('resolves Windows executable names through the target-to-host filesystem mapping', async () => {
+    const runtimeRoot = createRuntimeBundle(tempDir, 'win32');
+    const targetRoot = 'C:\\Users\\tester\\.cache\\codex-runtimes\\codex-primary-runtime';
+    const context = createHostRuntimeContext(tempDir);
+    context.launchSpec.target = {
+      method: 'native-windows', platformFamily: 'windows', platformOs: 'windows',
+    };
+    context.launchSpec.pathMapper.target = context.launchSpec.target;
+    context.launchSpec.pathMapper.toHostPath = value => path.join(
+      runtimeRoot, path.win32.relative(targetRoot, value).split('\\').join(path.sep),
+    );
+    context.launchSpec.env = { CODEX_RUNTIME_DEPENDENCIES: `${targetRoot}\\dependencies` };
+
+    const result = await resolveCodexWorkspaceDependencies(context);
+
+    expect(result?.runtimeRoot).toBe(targetRoot);
+    expect(result?.pythonExecutable).toBe(`${targetRoot}\\dependencies\\python\\bin\\python.exe`);
   });
 
   it('does not expose a partial bundle without artifact-tool', async () => {
@@ -151,7 +168,7 @@ describe('CodexWorkspaceDependencyResolver', () => {
   });
 
   it('returns target paths while validating mapped host paths for WSL', async () => {
-    const runtimeRoot = createRuntimeBundle(tempDir);
+    const runtimeRoot = createRuntimeBundle(tempDir, 'linux');
     const targetHome = '/home/tester';
     const targetRuntimeRoot = `${targetHome}/.cache/codex-runtimes/codex-primary-runtime`;
     const context = createHostRuntimeContext(tempDir) as CodexRuntimeContext;

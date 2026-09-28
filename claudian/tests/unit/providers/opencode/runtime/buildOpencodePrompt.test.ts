@@ -1,0 +1,91 @@
+import { buildOpencodePromptBlocks, buildOpencodePromptText } from '@/providers/opencode/runtime/buildOpencodePrompt';
+
+describe('buildOpencodePromptText', () => {
+  it('appends Claudian XML context to the user query', () => {
+    const prompt = buildOpencodePromptText({
+      browserSelection: {
+        selectedText: 'Browser quote',
+        source: 'browser:https://example.com',
+        title: 'Example',
+        url: 'https://example.com',
+      },
+      linkedContent: { path: 'notes/"today" & draft.md' },
+      editorSelection: {
+        mode: 'selection',
+        notePath: 'notes/"today" & draft.md',
+        selectedText: 'Selected text',
+        startLine: 4,
+        lineCount: 2,
+      },
+      text: 'Summarize this',
+    });
+
+    expect(prompt).toContain('Summarize this');
+    expect(prompt).toContain('<linked_content path="notes/&quot;today&quot; &amp; draft.md" />');
+    expect(prompt).not.toMatch(/<(?:linked_note|current_note)\b/);
+    expect(prompt).toContain('<editor_selection path="notes/&quot;today&quot; &amp; draft.md" lines="4-5">');
+    expect(prompt).toContain('<browser_selection source="browser:https://example.com" title="Example" url="https://example.com">');
+  });
+
+  it('encodes Linked content without allowing CDATA to close early', () => {
+    const prompt = buildOpencodePromptText({
+      linkedContent: {
+        content: 'Before\n]]>\nAfter',
+        path: 'notes/"draft".md',
+      },
+      text: 'Review this',
+    });
+
+    expect(prompt).toContain(
+      '<linked_content path="notes/&quot;draft&quot;.md">\n<![CDATA[Before\n]]]]><![CDATA[>\nAfter]]>\n</linked_content>',
+    );
+    expect(prompt).not.toMatch(/<(?:linked_note|current_note)\b/);
+  });
+
+  it('rebuilds prior conversation context when a native session must be recreated', () => {
+    const prompt = buildOpencodePromptText(
+      {
+        text: 'Continue with the fix',
+      },
+      [
+        {
+          content: 'Inspect the bug',
+          id: 'user-1',
+          role: 'user',
+          timestamp: 1,
+        },
+        {
+          content: 'I found the failing path',
+          id: 'assistant-1',
+          role: 'assistant',
+          timestamp: 2,
+        },
+      ],
+    );
+
+    expect(prompt).toContain('User: Inspect the bug');
+    expect(prompt).toContain('Assistant: I found the failing path');
+    expect(prompt).toContain('User: Continue with the fix');
+  });
+});
+
+describe('buildOpencodePromptBlocks', () => {
+  it('includes image attachments after the main text block', () => {
+    const blocks = buildOpencodePromptBlocks({
+      images: [{
+        data: 'base64-image',
+        id: 'img-1',
+        mediaType: 'image/png',
+        name: 'diagram.png',
+        size: 123,
+        source: 'file',
+      }],
+      text: 'Inspect this image',
+    });
+
+    expect(blocks).toEqual([
+      { type: 'text', text: 'Inspect this image' },
+      { type: 'image', mimeType: 'image/png', data: 'base64-image' },
+    ]);
+  });
+});

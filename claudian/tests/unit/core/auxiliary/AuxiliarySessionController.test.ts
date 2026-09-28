@@ -1,11 +1,11 @@
+import { FakeAuxiliarySession } from '@test/helpers/core/auxiliary/AuxiliaryExecutionTestHarness';
+
 import { AuxiliarySessionController } from '@/core/auxiliary/AuxiliarySessionController';
 import type {
   ProviderExecutionBackend,
   ProviderSessionConfig,
 } from '@/core/execution';
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
-
-import { FakeAuxiliarySession } from './AuxiliaryExecutionTestHarness';
 
 class RejectingCleanupSession extends FakeAuxiliarySession {
   private rejectCleanup!: (reason: unknown) => void;
@@ -40,12 +40,12 @@ function createController() {
         askUserQuestion: jest.fn(),
         dismissInteraction: jest.fn(),
         requestApproval: jest.fn(),
-        requestPlanDecision: jest.fn(),
       },
       lifecycleRegistry: new ProviderExecutionLifecycleRegistry(),
+      nativePersistence: 'provider-default',
       vaultWorkingDirectory: '/vault',
     },
-    'instruction',
+    'inline-edit',
     { kind: 'passive' },
   );
   return { backend, controller };

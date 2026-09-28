@@ -1,10 +1,8 @@
-const mockGetCatalogFingerprint = jest.fn();
 const mockDiscoverCatalog = jest.fn();
 
 jest.mock('@/providers/grok/runtime/GrokModelCatalogService', () => ({
   GrokModelCatalogService: jest.fn().mockImplementation(() => ({
     discoverCatalog: mockDiscoverCatalog,
-    getCatalogFingerprint: mockGetCatalogFingerprint,
   })),
 }));
 
@@ -15,7 +13,7 @@ import {
   grokWorkspaceRegistration,
 } from '@/providers/grok/app/GrokWorkspaceServices';
 import { GrokCommandCatalog } from '@/providers/grok/commands/GrokCommandCatalog';
-import { GrokCliResolver } from '@/providers/grok/runtime/GrokCliResolver';
+import { GrokCLIResolver } from '@/providers/grok/runtime/GrokCLIResolver';
 import { grokSettingsTabRenderer } from '@/providers/grok/ui/GrokSettingsTab';
 
 function createPlugin(cached = true): any {
@@ -55,7 +53,6 @@ jest.mock('@/utils/env', () => ({
 describe('GrokWorkspaceServices', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockGetCatalogFingerprint.mockResolvedValue('cached-fingerprint');
     mockDiscoverCatalog.mockResolvedValue({
       defaultModelId: 'grok-4.5',
       fingerprint: 'fresh-fingerprint',
@@ -68,12 +65,10 @@ describe('GrokWorkspaceServices', () => {
     const plugin = createPlugin();
     const services = await grokWorkspaceRegistration.initialize({ plugin } as any);
 
-    expect(services.cliResolver).toBeInstanceOf(GrokCliResolver);
+    expect(services.cliResolver).toBeInstanceOf(GrokCLIResolver);
     expect(services.commandCatalog).toBeInstanceOf(GrokCommandCatalog);
     expect(services.settingsTabRenderer).toBe(grokSettingsTabRenderer);
-    expect(services.tabWarmupPolicy?.resolveMode({} as any)).toBe('commands');
     expect(services.commandLoader).toBeInstanceOf(GrokCommandLoader);
-    expect(services.agentMentionProvider).toBeUndefined();
     expect(services).not.toHaveProperty('beginAuxiliaryServicesEnvironmentChange');
     expect(mockDiscoverCatalog).not.toHaveBeenCalled();
   });
@@ -84,26 +79,26 @@ describe('GrokWorkspaceServices', () => {
     expect(services.modelCatalogCoordinator.getCachedCatalog()).toEqual(
       expect.objectContaining({ fingerprint: 'cached-fingerprint' }),
     );
-    await expect(services.refreshModelCatalog()).resolves.toEqual({
+    await expect(services.modelCatalog!.refresh({ force: true })).resolves.toEqual({
       changed: false,
-      persistedSettingsChanged: true,
+      diagnostics: undefined,
     });
     expect(mockDiscoverCatalog).toHaveBeenCalledTimes(1);
   });
 
-  it('uses stale-while-revalidate preparation and disposes its catalog owner', async () => {
+  it('disposes its explicitly requested catalog discovery', async () => {
     let releaseRefresh!: (value: unknown) => void;
-    mockGetCatalogFingerprint.mockResolvedValue('changed-fingerprint');
     mockDiscoverCatalog.mockReturnValue(new Promise(resolve => { releaseRefresh = resolve; }));
     const services = await createGrokWorkspaceServices(createPlugin());
     const dispose = jest.spyOn(services.modelCatalogCoordinator, 'dispose');
 
-    await services.prepareSettings();
+    const refresh = services.modelCatalog!.refresh();
     expect(mockDiscoverCatalog).toHaveBeenCalledTimes(1);
 
     const disposing = services.dispose();
     releaseRefresh({ kind: 'skipped', reason: 'provider-disabled' });
     await disposing;
+    await refresh;
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
@@ -145,7 +140,7 @@ describe('GrokWorkspaceServices', () => {
         beforeTransition: expect.any(Function),
       },
     );
-    expect(quiesce).toHaveBeenCalledTimes(2);
+    expect(quiesce).toHaveBeenCalledTimes(1);
     expect(commandMetadataProbe.quiesceForEnvironmentChange).toHaveBeenCalledTimes(1);
     expect(commandMetadataProbe.dispose).toHaveBeenCalledTimes(1);
     expect(unregister).toHaveBeenCalledTimes(1);
@@ -196,10 +191,9 @@ describe('GrokWorkspaceServices', () => {
     const commandLoad = services.commandLoader!.loadCommands({
       allowIsolatedMetadataCreation: true,
       conversation: null,
-      externalContextPaths: [],
       plugin,
     });
-    const ensure = services.modelCatalogCoordinator.ensureFresh('settings');
+    const ensure = services.modelCatalogCoordinator.refresh();
     const refresh = services.modelCatalogCoordinator.refresh();
     const liveMerge = services.modelCatalogCoordinator.mergeLiveModels([{
       displayName: 'Live B',
@@ -210,7 +204,6 @@ describe('GrokWorkspaceServices', () => {
     await Promise.resolve();
 
     expect(nativeCreate).not.toHaveBeenCalled();
-    expect(mockGetCatalogFingerprint).not.toHaveBeenCalled();
     expect(mockDiscoverCatalog).not.toHaveBeenCalled();
     expect(plugin.mutateSettingsConditionally).not.toHaveBeenCalled();
 

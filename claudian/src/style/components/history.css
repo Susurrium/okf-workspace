@@ -1,4 +1,5 @@
-.claudian-history-container {
+.claudian-history-container,
+.claudian-nav-dropup-container {
   position: static;
 }
 
@@ -9,7 +10,6 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--background-primary);
 }
 
 .claudian-session-resizer {
@@ -54,67 +54,22 @@
   display: none;
 }
 
-.claudian-sidebar-surface-switcher {
+.claudian-sidebar-surface-track {
   display: flex;
-  flex: 0 0 28px;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  gap: 14px;
-  padding: 4px 12px;
-  background: transparent;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  scrollbar-width: none;
 }
 
-.claudian-session-sidebar .claudian-sidebar-surface-button {
+.claudian-session-surface {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  min-width: 20px;
-  height: 20px;
-  padding: 0;
-  color: var(--text-normal);
-  cursor: pointer;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.claudian-session-sidebar .claudian-sidebar-surface-button:hover,
-.claudian-session-sidebar .claudian-sidebar-surface-button:active {
-  background: transparent;
-  box-shadow: none;
-}
-
-.claudian-session-sidebar .claudian-sidebar-surface-button::before {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  content: "";
-  opacity: 0.22;
-  transition: opacity 0.12s ease;
-}
-
-.claudian-session-sidebar .claudian-sidebar-surface-button:hover::before {
-  opacity: 0.45;
-}
-
-.claudian-session-sidebar .claudian-sidebar-surface-button.is-active::before {
-  opacity: 0.72;
-}
-
-.claudian-session-sidebar .claudian-sidebar-surface-button:focus-visible {
-  background: transparent;
-  box-shadow: none;
-  outline: none;
-}
-
-.claudian-session-sidebar .claudian-sidebar-surface-button:focus-visible::before {
-  opacity: 0.72;
-  outline: 2px solid var(--interactive-accent);
-  outline-offset: 2px;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .claudian-session-new-control,
@@ -214,7 +169,6 @@
 .claudian-session-sidebar .claudian-session-section-header {
   flex-shrink: 0;
   min-height: 40px;
-  background: var(--background-primary);
 }
 
 .claudian-session-header-actions {
@@ -366,6 +320,37 @@
   height: 14px;
   animation: spin 1s linear infinite;
   stroke-width: 2.5;
+}
+
+.claudian-session-status-indicator {
+  display: flex;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  align-items: center;
+  justify-content: center;
+}
+
+.claudian-session-group-status-indicator {
+  display: none;
+}
+
+.claudian-session-group-status-indicator--visible {
+  display: flex;
+}
+
+.claudian-session-status-indicator svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.5;
+}
+
+.claudian-session-status-indicator--action-required {
+  color: var(--color-orange);
+}
+
+.claudian-session-status-indicator--error {
+  color: var(--text-error);
 }
 
 .claudian-session-group-new-action {
@@ -532,14 +517,14 @@ body.theme-dark .claudian-session-metadata-popover {
   white-space: nowrap;
 }
 
-.claudian-session-metadata-value--note {
+.claudian-session-metadata-value--content {
   overflow-x: auto;
   overflow-y: hidden;
   text-overflow: clip;
   scrollbar-width: none;
 }
 
-.claudian-session-metadata-value--note::-webkit-scrollbar {
+.claudian-session-metadata-value--content::-webkit-scrollbar {
   display: none;
 }
 
@@ -607,8 +592,8 @@ body.theme-dark .claudian-session-metadata-popover {
   color: var(--text-normal);
 }
 
-/* History dropup menu (opens upward since it's at bottom of view) */
-.claudian-history-menu {
+/* Single-pane dropup shell (opens upward since it's at bottom of view) */
+.claudian-nav-dropup-menu {
   display: none;
   position: absolute;
   bottom: 100%;
@@ -626,8 +611,14 @@ body.theme-dark .claudian-session-metadata-popover {
   inset-inline-end: 0;
 }
 
-.claudian-history-menu.visible {
+.claudian-nav-dropup-menu.visible {
   display: block;
+}
+
+.claudian-nav-dropup-menu--surface.visible {
+  display: flex;
+  height: min(400px, 60vh);
+  flex-direction: column;
 }
 
 .claudian-history-header {

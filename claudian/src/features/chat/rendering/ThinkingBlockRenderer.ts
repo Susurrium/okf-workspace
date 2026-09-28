@@ -1,4 +1,3 @@
-import { t } from '../../../i18n/i18n';
 import { collapseElement, setupCollapsible } from './collapsible';
 
 export type RenderContentFn = (el: HTMLElement, markdown: string) => Promise<void>;
@@ -28,12 +27,11 @@ export function createThinkingBlock(
   header.setAttribute('tabindex', '0');
   header.setAttribute('role', 'button');
   header.setAttribute('aria-expanded', 'false');
-  header.setAttribute('aria-label', t('chatUi.extendedThinkingClickToExpand'));
 
   // Label with timer
   const labelEl = header.createSpan({ cls: 'claudian-thinking-label' });
   const startTime = Date.now();
-  labelEl.setText(t('chatUi.thinking0s'));
+  labelEl.setText('Thinking 0s...');
 
   // Start timer interval to update label every second
   const timerInterval = window.setInterval(() => {
@@ -60,15 +58,6 @@ export function createThinkingBlock(
   });
 
   return state;
-}
-
-export async function appendThinkingContent(
-  state: ThinkingBlockState,
-  content: string,
-  renderContent: RenderContentFn
-) {
-  state.content += content;
-  await renderContent(state.contentEl, state.content);
 }
 
 export function finalizeThinkingBlock(state: ThinkingBlockState): number {
@@ -111,7 +100,6 @@ export function renderStoredThinkingBlock(
   const header = wrapperEl.createDiv({ cls: 'claudian-thinking-header' });
   header.setAttribute('tabindex', '0');
   header.setAttribute('role', 'button');
-  header.setAttribute('aria-label', t('chatUi.extendedThinkingClickToExpand'));
 
   // Label with duration
   const labelEl = header.createSpan({ cls: 'claudian-thinking-label' });

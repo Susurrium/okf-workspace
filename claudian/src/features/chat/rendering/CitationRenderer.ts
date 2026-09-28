@@ -1,5 +1,4 @@
 import type { CitationGroup } from '../../../core/types';
-import { t } from '../../../i18n/i18n';
 import { setupCollapsible } from './collapsible';
 
 function formatCitationLocation(
@@ -21,7 +20,7 @@ export function renderCitationGroup(
   headerEl.setAttribute('role', 'button');
 
   headerEl.createSpan({ cls: 'claudian-citations-chevron', text: '\u203a' });
-  headerEl.createSpan({ cls: 'claudian-citations-label', text: t('chatUi.memoryUsed') });
+  headerEl.createSpan({ cls: 'claudian-citations-label', text: 'Memory used' });
   headerEl.createSpan({
     cls: 'claudian-citations-count',
     text: `${citations.entries.length} ${citations.entries.length === 1 ? 'source' : 'sources'}`,

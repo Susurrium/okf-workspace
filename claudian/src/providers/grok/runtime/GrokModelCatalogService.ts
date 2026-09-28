@@ -1,5 +1,7 @@
-import { spawn } from 'node:child_process';
+import type { spawn as nodeSpawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+
+import crossSpawn from 'cross-spawn';
 
 import { getRuntimeEnvironmentVariables } from '../../../core/providers/providerEnvironment';
 import type { ProviderHost } from '../../../core/providers/ProviderHost';
@@ -14,12 +16,14 @@ import {
   normalizeGrokDiscoveredModels,
 } from '../models';
 import { getGrokProviderSettings } from '../settings';
+import { GrokModelCatalogProbe, type GrokModelCatalogProbeLike } from './GrokModelCatalogProbe';
 import { buildGrokRuntimeEnv } from './GrokRuntimeEnvironment';
 
 const FINGERPRINT_VERSION = '1';
 const MODEL_COMMAND_TIMEOUT_MS = 20_000;
 const VERSION_COMMAND_TIMEOUT_MS = 5_000;
 const MAX_STDOUT_BYTES = 512 * 1024;
+const spawn = crossSpawn as typeof nodeSpawn;
 const ANSI_ESCAPE_SEQUENCE = new RegExp(
   `${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`,
   'g',
@@ -62,14 +66,11 @@ export interface GrokModelCatalogServiceLike {
     signal?: AbortSignal,
     context?: ProviderTransitionOwnerContext,
   ): Promise<GrokModelCatalogDiscoveryResult>;
-  getCatalogFingerprint(
-    signal?: AbortSignal,
-    context?: ProviderTransitionOwnerContext,
-  ): Promise<string>;
 }
 
 export interface GrokModelCatalogServiceOptions {
   modelCommandTimeoutMs?: number;
+  probe?: GrokModelCatalogProbeLike;
   runner?: GrokCatalogCommandRunner;
   versionCommandTimeoutMs?: number;
 }
@@ -142,20 +143,14 @@ export function parseGrokModelsOutput(output: string): {
 
 export class GrokModelCatalogService implements GrokModelCatalogServiceLike {
   private readonly runner: GrokCatalogCommandRunner;
+  private readonly probe: GrokModelCatalogProbeLike;
 
   constructor(
     private readonly plugin: ProviderHost,
     private readonly options: GrokModelCatalogServiceOptions = {},
   ) {
     this.runner = options.runner ?? new SpawnGrokCatalogCommandRunner();
-  }
-
-  async getCatalogFingerprint(
-    signal?: AbortSignal,
-    ownerContext?: ProviderTransitionOwnerContext,
-  ): Promise<string> {
-    const context = await this.resolveCommandContext(ownerContext);
-    return this.resolveFingerprint(context, signal);
+    this.probe = options.probe ?? new GrokModelCatalogProbe();
   }
 
   async discoverCatalog(
@@ -167,8 +162,35 @@ export class GrokModelCatalogService implements GrokModelCatalogServiceLike {
     }
 
     try {
-      const context = await this.resolveCommandContext(ownerContext);
-      const fingerprint = await this.resolveFingerprint(context, signal);
+      const context = await this.#resolveCommandContext(ownerContext);
+      const fingerprint = await this.#resolveFingerprint(context, signal);
+      try {
+        const catalog = await this.probe.discover({
+          command: context.command,
+          cwd: context.cwd,
+          env: context.env,
+          signal,
+          timeoutMs: this.options.modelCommandTimeoutMs ?? MODEL_COMMAND_TIMEOUT_MS,
+          version: this.plugin.manifest?.version ?? '0.0.0',
+        });
+        return {
+          defaultModelId: catalog.currentModelId,
+          fingerprint,
+          kind: 'completed',
+          models: catalog.models,
+        };
+      } catch {
+        if (signal?.aborted) {
+          return {
+            defaultModelId: null,
+            diagnostics: 'Grok models was cancelled',
+            fingerprint,
+            kind: 'completed',
+            models: [],
+          };
+        }
+        // Older runtimes may not expose the session-independent ACP catalog.
+      }
       const commandResult = await this.runner.run({
         args: ['models'],
         command: context.command,
@@ -213,7 +235,7 @@ export class GrokModelCatalogService implements GrokModelCatalogServiceLike {
     }
   }
 
-  private async resolveCommandContext(
+  async #resolveCommandContext(
     ownerContext?: ProviderTransitionOwnerContext,
   ): Promise<GrokResolvedCatalogCommandContext> {
     const command = await this.plugin.getResolvedProviderCliPath(
@@ -229,7 +251,7 @@ export class GrokModelCatalogService implements GrokModelCatalogServiceLike {
     };
   }
 
-  private async resolveFingerprint(
+  async #resolveFingerprint(
     context: GrokResolvedCatalogCommandContext,
     signal?: AbortSignal,
   ): Promise<string> {
@@ -273,7 +295,6 @@ export class SpawnGrokCatalogCommandRunner implements GrokCatalogCommandRunner {
         env: request.env,
         stdio: ['ignore', 'pipe', 'ignore'],
         windowsHide: true,
-        ...(spawnSpec.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       });
       const chunks: Buffer[] = [];
       let byteLength = 0;

@@ -9,7 +9,8 @@
 
 import type { App, TFile } from 'obsidian';
 
-import { escapeHtml } from './html';
+import { escapeHTML } from './html';
+import { transformMarkdownSegments } from './markdownSegments';
 import { getVaultFileByPath } from './obsidianCompat';
 
 const IMAGE_EXTENSIONS = new Set([
@@ -72,20 +73,20 @@ function buildStyleAttribute(altText: string | undefined): string {
   return ` style="width: ${width}px;"`;
 }
 
-function createImageHtml(
+function createImageHTML(
   app: App,
   file: TFile,
   altText: string | undefined
 ): string {
   const src = app.vault.getResourcePath(file);
-  const alt = escapeHtml(altText || file.basename);
+  const alt = escapeHTML(altText || file.basename);
   const style = buildStyleAttribute(altText);
 
-  return `<span class="claudian-embedded-image"><img src="${escapeHtml(src)}" alt="${alt}" loading="lazy"${style}></span>`;
+  return `<span class="claudian-embedded-image"><img src="${escapeHTML(src)}" alt="${alt}" loading="lazy"${style}></span>`;
 }
 
-function createFallbackHtml(wikilink: string): string {
-  return `<span class="claudian-embedded-image-fallback">${escapeHtml(wikilink)}</span>`;
+function createFallbackHTML(wikilink: string): string {
+  return `<span class="claudian-embedded-image-fallback">${escapeHTML(wikilink)}</span>`;
 }
 
 function normalizeOptions(options?: string | ReplaceImageEmbedsOptions): Required<ReplaceImageEmbedsOptions> {
@@ -103,7 +104,7 @@ function normalizeOptions(options?: string | ReplaceImageEmbedsOptions): Require
  * Call before MarkdownRenderer.render().
  * Non-image embeds (e.g., ![[note.md]]) pass through unchanged.
  */
-export function replaceImageEmbedsWithHtml(
+export function replaceImageEmbedsWithHTML(
   markdown: string,
   app: App,
   options?: string | ReplaceImageEmbedsOptions
@@ -117,23 +118,31 @@ export function replaceImageEmbedsWithHtml(
   // Reset lastIndex to avoid issues with global regex
   IMAGE_EMBED_PATTERN.lastIndex = 0;
 
-  return markdown.replace(
-    IMAGE_EMBED_PATTERN,
-    (match, imagePath: string, altText: string | undefined) => {
-      try {
-        if (!isImagePath(imagePath)) {
-          return match;
-        }
-
-        const file = resolveImageFile(app, imagePath, normalizedOptions);
-        if (!file) {
-          return createFallbackHtml(match);
-        }
-
-        return createImageHtml(app, file, altText);
-      } catch {
-        return createFallbackHtml(match);
+  return transformMarkdownSegments(markdown, {
+    wikilink: (wikilink, { embedded }) => {
+      if (!embedded) {
+        return wikilink;
       }
-    }
-  );
+
+      return wikilink.replace(
+        IMAGE_EMBED_PATTERN,
+        (match, imagePath: string, altText: string | undefined) => {
+          try {
+            if (!isImagePath(imagePath)) {
+              return match;
+            }
+
+            const file = resolveImageFile(app, imagePath, normalizedOptions);
+            if (!file) {
+              return createFallbackHTML(match);
+            }
+
+            return createImageHTML(app, file, altText);
+          } catch {
+            return createFallbackHTML(match);
+          }
+        }
+      );
+    },
+  });
 }

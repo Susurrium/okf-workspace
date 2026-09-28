@@ -1,10 +1,10 @@
-import { InlineEditService } from '@/core/auxiliary/InlineEditService';
-import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
-
 import {
   FakeAuxiliaryBackend,
   waitFor,
-} from './AuxiliaryExecutionTestHarness';
+} from '@test/helpers/core/auxiliary/AuxiliaryExecutionTestHarness';
+
+import { InlineEditService } from '@/core/auxiliary/InlineEditService';
+import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 
 function createService() {
   const backend = new FakeAuxiliaryBackend();
@@ -15,9 +15,9 @@ function createService() {
       askUserQuestion: jest.fn(),
       dismissInteraction: jest.fn(),
       requestApproval: jest.fn(),
-      requestPlanDecision: jest.fn(),
     },
     lifecycleRegistry,
+    nativePersistence: 'provider-default',
     vaultWorkingDirectory: '/vault',
   });
   return { backend, lifecycleRegistry, service };
@@ -58,7 +58,10 @@ describe('InlineEditService', () => {
     expect(backend.sessions[0].requests[0]).toMatchObject({
       configuration: {
         model: 'edit-model',
-        systemInstructions: { kind: 'explicit' },
+        systemInstructions: {
+          instructions: expect.stringContaining('Vault absolute path: /vault'),
+          kind: 'explicit',
+        },
       },
       toolPolicy: { kind: 'read-only' },
     });

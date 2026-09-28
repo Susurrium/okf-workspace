@@ -1,4 +1,5 @@
 import type { ProviderId } from '../../../core/providers/types';
+import { TurnCoordinator } from '../controllers/TurnCoordinator';
 import type { ChatExecutionCoordinator } from '../execution/ChatExecutionCoordinator';
 import type { TabLifecycleState } from './types';
 
@@ -7,38 +8,95 @@ export interface TabSessionState {
   draftModel: string | null;
   id: string;
   lifecycleState: TabLifecycleState;
-  providerId: ProviderId;
+  providerId: ProviderId | null;
 }
 
 export class TabSession {
-  private activeTurnValue: Promise<void> | null = null;
+  /** Runtime selections survive tab activation and execution cooling, but not tab disposal. */
+  readonly reasoningSelections = new Map<string, string>();
+  readonly turns: TurnCoordinator;
   private backgroundWork: Promise<void> = Promise.resolve();
   private backgroundWorkPauseDepth = 0;
   private coordinatorDisposal: Promise<void> | null = null;
   private intentAdmissionPauseDepth = 0;
   private userOwnershipRevisionValue = 0;
+  private identityRevisionValue = 0;
+  private identitySealed = false;
 
   constructor(
     private readonly state: TabSessionState,
     private readonly coordinator: ChatExecutionCoordinator,
-  ) {}
+    private readonly onWorkChanged?: () => void,
+    private readonly isConversationBusy: () => boolean = () => false,
+  ) {
+    this.turns = new TurnCoordinator(() => {
+      this.onWorkChanged?.();
+      if (!this.turns.isActive) this.coordinator.notifyMayCool();
+    }, () => this.acceptsIntents && this.lifecycleState !== 'closing' && !this.identitySealed && !this.isConversationBusy());
+  }
 
   get id(): string { return this.state.id; }
   get lifecycleState(): TabLifecycleState { return this.state.lifecycleState; }
-  set lifecycleState(value: TabLifecycleState) { this.state.lifecycleState = value; }
-  get providerId(): ProviderId { return this.state.providerId; }
-  set providerId(value: ProviderId) { this.state.providerId = value; }
+  get providerId(): ProviderId | null { return this.state.providerId; }
   get conversationId(): string | null { return this.state.conversationId; }
-  set conversationId(value: string | null) { this.state.conversationId = value; }
   get draftModel(): string | null { return this.state.draftModel; }
-  set draftModel(value: string | null) { this.state.draftModel = value; }
   get executionCoordinator(): ChatExecutionCoordinator { return this.coordinator; }
   get acceptsIntents(): boolean { return this.intentAdmissionPauseDepth === 0; }
   get userOwnershipRevision(): number { return this.userOwnershipRevisionValue; }
-  get activeTurn(): Promise<void> | null { return this.activeTurnValue; }
-  set activeTurn(value: Promise<void> | null) {
-    this.activeTurnValue = value;
-    if (value === null) this.coordinator.notifyMayCool();
+  get identityRevision(): number { return this.identityRevisionValue; }
+
+  get canNavigateConversation(): boolean {
+    return this.acceptsIntents && this.lifecycleState !== 'closing' && !this.identitySealed
+      && !this.turns.isActive && !this.coordinator.hasBackgroundWork && !this.isConversationBusy();
+  }
+
+  async runConversationNavigation(operation: (signal: AbortSignal) => Promise<unknown>): Promise<void> {
+    if (!this.canNavigateConversation) return;
+    await this.turns.run(async signal => { await operation(signal); }, 'navigation');
+  }
+
+  bindConversation(conversationId: string | null, providerId: ProviderId | null): void {
+    this.replaceIdentity(conversationId, providerId, null);
+    this.setExecutionWarm(false);
+  }
+
+  selectDraft(providerId: ProviderId | null, model: string | null): void {
+    if (this.conversationId !== null) throw new Error('Cannot select a draft on a bound tab');
+    this.replaceIdentity(null, providerId, model);
+  }
+
+  startDraft(providerId: ProviderId | null, model: string | null): void {
+    this.replaceIdentity(null, providerId, model);
+  }
+
+  setConversationId(conversationId: string | null): void {
+    this.replaceIdentity(conversationId, this.providerId, conversationId ? null : this.draftModel);
+  }
+
+  private replaceIdentity(conversationId: string | null, providerId: ProviderId | null, draftModel: string | null): void {
+    if (this.identitySealed) return;
+    if (this.conversationId !== conversationId || this.providerId !== providerId || this.draftModel !== draftModel) {
+      this.identityRevisionValue++;
+      Object.assign(this.state, { conversationId, providerId, draftModel });
+    }
+  }
+
+  commitAdmission(): void {
+    if (this.lifecycleState === 'provisional') this.state.lifecycleState = 'cold';
+  }
+
+  sealIdentity(): void {
+    this.identitySealed = true;
+    this.identityRevisionValue++;
+  }
+
+  beginClose(): void {
+    this.state.lifecycleState = 'closing';
+  }
+
+  setExecutionWarm(warm: boolean): void {
+    if (this.lifecycleState === 'closing' || this.lifecycleState === 'provisional') return;
+    this.state.lifecycleState = warm ? 'warm' : 'cold';
   }
 
   claimUserOwnership(): void {
@@ -60,13 +118,15 @@ export class TabSession {
     await this.coordinatorDisposal;
   }
 
-  enqueueBackgroundWork(work: () => Promise<void>): Promise<void> | null {
+  enqueueBackgroundWork(work: () => Promise<void>, independent = false): Promise<void> | null {
     if (this.backgroundWorkPauseDepth > 0) return null;
 
-    const pending = this.backgroundWork
-      .catch(() => undefined)
-      .then(work);
-    this.backgroundWork = pending;
+    const previous = this.backgroundWork.catch(() => undefined);
+    // Independent notifications must precede reservations from later native events.
+    const pending = independent ? (async () => work())() : previous.then(work);
+    this.backgroundWork = independent
+      ? Promise.allSettled([previous, pending]).then(() => undefined)
+      : pending;
     return pending;
   }
 

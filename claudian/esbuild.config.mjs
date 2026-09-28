@@ -7,14 +7,20 @@ import {
   promises as fsPromises,
   rmSync,
 } from 'fs';
+import { assertRuntimeDependencyParity } from './scripts/runtimeDependencyParity.mjs';
 import rendererSafeUnrefHelpers from './scripts/rendererSafeUnref.js';
+import desktopRuntimeAliasHelpers from './scripts/desktopRuntimeAliases.js';
+import compressedStaticAssetsHelpers from './scripts/compressedStaticAssets.js';
 
 const {
   findUnsafeTimerUnrefSites,
   patchRendererUnsafeUnrefSites,
 } = rendererSafeUnrefHelpers;
+const { createDesktopRuntimeAliases } = desktopRuntimeAliasHelpers;
+const { createCompressedStaticAssetsPlugin } = compressedStaticAssetsHelpers;
 
 const prod = process.argv[2] === 'production';
+if (prod) assertRuntimeDependencyParity(process.cwd());
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -142,20 +148,27 @@ const external = [
   '@lezer/highlight',
   '@lezer/lr',
   ...builtinModules,
-  ...builtinModules.map(m => `node:${m}`),
+  // Older build hosts omit prefix-only modules such as node:sqlite from builtinModules.
+  'node:*',
 ];
 
 const mainContext = await esbuild.context({
   entryPoints: ['src/main.ts'],
+  alias: {
+    ...createDesktopRuntimeAliases(),
+  },
   bundle: true,
   plugins: [
     patchSdkImportMeta,
+    createCompressedStaticAssetsPlugin(),
     createPatchRendererUnsafeUnref(['main.js']),
     cleanupBuildArtifacts,
   ],
   external,
   format: 'cjs',
-  target: 'es2018',
+  loader: { '.wasm': 'binary' },
+  target: 'es2022',
+  charset: 'utf8',
   logLevel: 'info',
   minify: prod,
   sourcemap: prod ? false : 'inline',

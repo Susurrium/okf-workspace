@@ -29,7 +29,7 @@ export function systemPromptVersion(mode: SystemPromptMode): string {
     case 'okf-native':
       return OKF_NATIVE_PROMPT_VERSION;
     case 'claudian-full':
-      return 'claudian-full.v2.1.4';
+      return 'claudian-full.v2.3.6';
     case 'custom-replace':
       return 'custom-replace.v1';
   }

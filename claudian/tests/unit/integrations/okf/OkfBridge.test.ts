@@ -1,3 +1,4 @@
+import { applyExternalChatHandoff } from '@/features/chat/ExternalChatHandoff';
 import {
   createOkfBridge,
   OKF_BRIDGE_VERSION,
@@ -57,6 +58,83 @@ describe('OKF bridge v1', () => {
     });
   });
 
+  it('returns counts and mode matching the actual Codex draft it creates', async () => {
+    const target = {
+      providerId: 'codex',
+      setAttachedFiles: jest.fn(),
+      setActionMode: jest.fn(),
+      setComposerText: jest.fn(),
+      focusComposer: jest.fn(),
+      sendComposer: jest.fn().mockResolvedValue(undefined),
+    };
+    const host: OkfBridgeHost = {
+      openProvider: jest.fn().mockResolvedValue(undefined),
+      handoff: request => applyExternalChatHandoff({
+        getActiveTarget: () => null,
+        createTarget: async providerId => providerId === 'codex' ? target : null,
+      }, request),
+    };
+    const bridge = createOkfBridge(host);
+
+    const result = await bridge.handoff({
+      prompt: 'Review the source',
+      contextPaths: ['sources/example.md', '.\\sources\\example.md'],
+      actionMode: 'read',
+      skill: 'source-review',
+      autoSend: false,
+      newSession: true,
+    });
+
+    expect(target.setComposerText).toHaveBeenCalledWith('$source-review\n\nReview the source');
+    expect(target.setAttachedFiles).toHaveBeenCalledWith(['sources/example.md']);
+    expect(target.setActionMode).toHaveBeenCalledWith('read');
+    expect(target.sendComposer).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      accepted: true,
+      sent: false,
+      contextCount: target.setAttachedFiles.mock.calls[0][0].length,
+      actionMode: target.setActionMode.mock.calls[0][0],
+      skill: 'source-review',
+    });
+  });
+
+  it.each([
+    [false, false],
+    [false, true],
+    [true, false],
+    [true, true],
+  ])('preserves autoSend=%s and newSession=%s', async (autoSend, newSession) => {
+    const host = createHost();
+    const bridge = createOkfBridge(host);
+
+    const result = await bridge.handoff({
+      prompt: 'Review this source',
+      contextPaths: ['sources/example.md'],
+      actionMode: 'read',
+      autoSend,
+      newSession,
+    });
+
+    expect(host.handoff).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: 'codex',
+      contextPaths: ['sources/example.md'],
+      autoSend,
+      newSession,
+    }));
+    expect(result.sent).toBe(autoSend);
+    expect(result.contextCount).toBe(1);
+  });
+
+  it('rejects unknown action modes before handing off', async () => {
+    const host = createHost();
+    const bridge = createOkfBridge(host);
+
+    await expect(bridge.handoff({ actionMode: 'delete' as never })).rejects.toThrow(
+      'Invalid OKF action mode',
+    );
+    expect(host.handoff).not.toHaveBeenCalled();
+  });
+
   it.each(['../secret.md', 'C:\\secret.md', '/secret.md'])(
     'rejects context outside the Vault: %s',
     async (path) => {
@@ -69,4 +147,14 @@ describe('OKF bridge v1', () => {
       expect(host.handoff).not.toHaveBeenCalled();
     },
   );
+
+  it('rejects empty context paths instead of accepting an unresolvable attachment', async () => {
+    const host = createHost();
+    const bridge = createOkfBridge(host);
+
+    await expect(bridge.handoff({ contextPaths: ['  '] })).rejects.toThrow(
+      'Invalid Vault context path',
+    );
+    expect(host.handoff).not.toHaveBeenCalled();
+  });
 });
