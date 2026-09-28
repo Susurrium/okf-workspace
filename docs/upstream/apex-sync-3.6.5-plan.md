@@ -76,6 +76,11 @@ complete root-script run passed.
 Real Obsidian acceptance is partial and is recorded in `docs/APEX-OKF-ACCEPTANCE-LEDGER.md`.
 On 2026-09-28, the disposable `OKF-Apex-Manual-Test` Vault loaded the candidate in an isolated profile.
 Schema-99 preservation, duplicate sections, two-pane updates, plugin hot reload, the single plugin identity,
-and unavailable-Engine behavior were exercised. Authenticated Feed sync, the full upstream-control
-walkthrough, an Obsidian process restart, and UI package rollback still need completion before changing the
-candidate status or advancing the locked baseline.
+and unavailable-Engine behavior were exercised. A temporary Engine with a generated local token synced the
+checked-in synthetic Feed fixtures before and after an Obsidian process restart. That run found and fixed a
+missing AI Papers scroll-state initialization; the rebuilt plugin restored its scroll offset across workbench
+switches. Calendar week view rendered scheduled, reminder, and due-only task times as expected. The prior
+3.6.0 package loaded during rollback, but settings and native-takeover audit byte hashes changed, so rollback
+preservation remains unverified. Live producer sync, subscription pagination, the full upstream-control
+walkthrough, and byte-preserving UI rollback still need completion before changing the candidate status or
+advancing the locked baseline.

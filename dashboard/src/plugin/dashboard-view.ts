@@ -345,12 +345,8 @@ export class OkfDashboardView {
     for (const [section, page] of Object.entries(state.pages)) {
       this.pageScroll.set(section as Section, page.scrollTop);
     }
-    this.feedScroll["ai-daily"] = state.feeds["ai-daily"].scrollTop;
-    this.feedScroll["ai-daily-hotspot"] = state.feeds["ai-daily-hotspot"].scrollTop;
-    this.feedScroll["ai-daily-news"] = state.feeds["ai-daily-news"].scrollTop;
-    this.feedScroll["ai-daily-learning"] = state.feeds["ai-daily-learning"].scrollTop;
-    this.feedScroll.treehole = state.feeds.treehole.scrollTop;
     for (const feed of DASHBOARD_FEEDS) {
+      this.feedScroll[feed] = state.feeds[feed].scrollTop;
       const editionId = state.feeds[feed].editionId;
       if (editionId) this.feedScrollEdition[feed] = editionId;
     }

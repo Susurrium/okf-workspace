@@ -44,7 +44,7 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 | M4 | Full Project experience and managed-artifact edit policy | **Complete after parity repair:** shared Project Surface restores contextual Capture/import, Claudian, catalog, metrics and state-aware actions, while retaining formal tasks, dates and Decision creation; nonempty real Obsidian run passed |
 | M5 | Unified task/calendar/Daily/Capture loop | **Complete after parity repair:** shared Today and Life Surfaces restore continuation, attention, Feed, reflection/review and global entry points; anchored task/date regression and nonempty real run passed |
 | M6 | Learning/Knowledge/Inbox/Import sections and details | **Complete after parity repair:** registered Apex types mount the complete shared Surfaces; scope/context, operation states, filters, verification, decisions, recovery and Claudian paths are reachable; nonempty real run passed |
-| M7 | Feed/Reading and default workbench presets | **Conditional:** complete Reading controller, presets, cache/scroll/request lifecycle and sync UI are mounted and automated tests pass; authenticated real-Feed rerun remains required |
+| M7 | Feed/Reading and default workbench presets | **Conditional:** complete Reading controller, presets, cache/scroll/request lifecycle and sync UI are mounted and automated tests pass; authenticated isolated fixture sync passed, while live producer sync and subscription pagination remain |
 | M8 | Native-data takeover, UX, capability, and performance work | **Complete for desktop implementation:** native takeover remains intact; eight shared Surfaces, Life/System access, custom-section cleanup and 9-to-9 rerender stability passed in real Obsidian |
 | M9 | Full release, rollback, real Obsidian, and upstream-update exercise | **Reopened:** the recorded 19 scenarios and upstream exercise are valid but insufficient; release remains blocked until the functional-parity gate passes |
 
@@ -61,8 +61,8 @@ claim of complete Dashboard replacement. The following additional release gate i
 | P04 | Project feature parity | Registered Apex section exposes contextual capture/import, Claudian, catalog, status-aware action, and precise related navigation | **Passed:** full action panel, formal task/date and nonempty real Project run |
 | P05 | Today/Life feature parity | Registered Apex sections expose continuation, attention, Feed, reflection/review, calendar, and capture organization | **Passed:** nonempty Today task/continuation run and real Life navigation |
 | P06 | System/global controls | Registered surface exposes diagnostics, task center, failed-operation recovery, settings, search, quick create, and Ask Notes | **Passed:** registered System Surface, embedded navigation and existing recovery tests |
-| P07 | Reading controller parity | Registered Apex section passes full-load, pagination, cache, stale-response, scroll, refresh-failure, and sync scenarios | **Conditional:** automated scenarios pass; isolated Obsidian verified unavailable-Engine messaging and retained local-note access. Engine was unavailable at `127.0.0.1:8765`; authenticated Feed sync, pagination and real cache/scroll behavior remain pending |
-| P08 | Reachable-surface acceptance | Nonempty real Obsidian run verifies every inventory action through the registered Apex surfaces | **Partial:** synthetic task-center walkthrough covers queued, generating, publishing, failed, cancelled, conversion fallback, cancel/retry/continue actions. Isolated Obsidian verified the newer-schema warning, duplicate sections, add/delete, and two-pane synchronization; full inventory walkthrough and live Feed remain pending |
+| P07 | Reading controller parity | Registered Apex section passes full-load, pagination, cache, stale-response, scroll, refresh-failure, and sync scenarios | **Conditional:** automated scenarios pass; isolated Obsidian authenticated to a temporary Engine with a generated local token, synced checked-in Feed fixtures before and after a real process restart, rendered 12 synthetic papers, and restored a 220 px reading offset across workbench switches. Live producer sync and subscription pagination remain pending |
+| P08 | Reachable-surface acceptance | Nonempty real Obsidian run verifies every inventory action through the registered Apex surfaces | **Partial:** synthetic task-center walkthrough covers queued, generating, publishing, failed, cancelled, conversion fallback, cancel/retry/continue actions. Isolated Obsidian verified newer-schema preservation, duplicate sections, two-pane synchronization, authenticated synthetic Feed sync, repaired papers-scroll restoration, and Calendar week-view rendering for scheduled, reminder-only, and due-only task times. New-note templates, table-column edits, card deletion, focal points, and progressive rendering remain pending |
 
 | ID | Scenario | Required evidence | Status |
 | --- | --- | --- | --- |
@@ -112,9 +112,30 @@ profile was not used. The isolated Vault contained only synthetic notes.
   `8C64634DF56415A2392F2F74172729360D4BFF6859BE7CCFA03163AAA12AAD17`.
 - Ran Obsidian's `app:reload` command. The isolated Vault reopened with the candidate plugin loaded, the
   single dashboard identity enabled, the `dashboard` workbench active, and the schema-99 warning visible.
-- Opened Reading and clicked “同步最新内容”. The UI returned the expected local-service-unavailable state
-  without affecting local note access. `127.0.0.1:8765/health` was unavailable, and this disposable install
-  had no Engine token; authenticated Feed behavior could not be exercised.
-- This run did not restart the Obsidian process, perform a package rollback in the UI, or exercise every
-  upstream 3.6.5 control. Those release gates remain open; the run is evidence for P07 offline handling,
-  P08 surface integrity, and part of M9 only.
+- Started a separate Engine at `127.0.0.1:18765` with the disposable Vault and fresh temporary State and
+  Originals directories. Its random token stayed in the temporary State directory outside the Vault; the
+  plugin stored only the token-file path. An unauthenticated Feed request returned 401.
+- Configured the isolated plugin to use that Engine and clicked “同步最新内容”. The authenticated sync
+  returned synthetic AI Daily and Treehole editions. A 12-item synthetic Papers edition rendered in Reading;
+  the UI displayed all 12 items and reported successful synchronization.
+- A 220 px Papers scroll offset initially reset after switching workbenches. The view constructor omitted
+  `ai-daily-papers` when restoring persisted feed offsets. The constructor now initializes all feeds through
+  `DASHBOARD_FEEDS`; after rebuilding and reloading the isolated plugin, 220 px was restored across the same
+  workbench switch. Regression coverage is in `dashboard/tests/dashboard-view.test.ts`.
+- Created three synthetic formal tasks for 2026-09-28, opened the Calendar section in Week view, and verified
+  `10:00–18:00` for a scheduled same-day task, `08:00–14:30` for a reminder task, and `09:15` for a due-only
+  task. Deleted the temporary section through its UI confirmation and trashed the synthetic note afterward.
+- Closed and relaunched the isolated Obsidian process with the same isolated profile and CDP port. The
+  candidate loaded with only `okf-workspace-dashboard` enabled, restored the schema-99 board warning and
+  workbench, and successfully authenticated to the temporary Engine for another two-feed sync. The token
+  remained in memory only; the external token-file path and Engine URL persisted, and `data.json` had no
+  `token` property.
+- Loaded the prior 3.6.0 package under the same unified plugin identity, then restored and loaded the 3.6.5
+  candidate. The rollback package loaded, but the plugin settings and native-takeover audit file hashes
+  changed during the exercise. Their JSON remained readable and key workbench/settings state remained
+  available, but byte-preserving rollback is not proven and M9 remains open.
+- The temporary Engine uses checked-in synthetic Feed fixtures, not an external producer account. Actual
+  producer-backed sync and subscription-page pagination remain open.
+- This run did not exercise every upstream 3.6.5 control. Those release gates remain open; the run is evidence
+  for P07 authenticated fixture handling and scroll restoration, P08 surface integrity and Calendar task-time
+  rendering, and part of M9 only.

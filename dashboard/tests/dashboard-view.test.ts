@@ -2465,6 +2465,31 @@ describe("real Dashboard View source handoff", () => {
     await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(3));
   });
 
+  it("restores the AI Papers scroll position when the dashboard view is recreated", () => {
+    const edition = feedEdition("papers", "papers-3", "2026-09-08");
+    const digest = { ai_daily: [], ai_papers: edition, treehole: null };
+    const state = normalizeDashboardUiState({
+      feeds: { "ai-daily-papers": { scrollTop: 220, editionId: "papers-3" } },
+    });
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, {
+      getDashboardUiState: () => state,
+      feedDashboardDigestSnapshot: () => digest,
+      loadFeedDashboardDigest: async () => digest,
+      feedDecisionSnapshot: () => undefined,
+      feedReadingPosition: () => undefined,
+      updateDashboardFeedUiState: () => undefined,
+      openFeedItem: async () => undefined,
+      openFeedDigest: async () => undefined,
+    } as never);
+    const runtime = view as unknown as { renderReadingPapers: (parent: HTMLElement) => void };
+    const root = new TestElement();
+
+    runtime.renderReadingPapers(root as unknown as HTMLElement);
+
+    expect(root.descendants("okf-feed-project__scroll")[0]?.scrollTop).toBe(220);
+  });
+
   it("updates Papers health even when the digest identity has not changed", async () => {
     const edition = feedEdition("papers", "same-id", "2026-09-08");
     const digest = { ai_daily: [], ai_papers: edition, treehole: null };
