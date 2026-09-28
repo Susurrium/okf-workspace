@@ -18,11 +18,25 @@ function resolveExistingPath(value: string, pathModule: typeof path.posix): stri
     return pathModule.resolve(value);
   }
 
-  try {
-    return fs.realpathSync.native(value);
-  } catch {
-    return pathModule.resolve(value);
+  const missingSegments: string[] = [];
+  let existingPath = pathModule.resolve(value);
+  while (!fs.existsSync(existingPath)) {
+    const parent = pathModule.dirname(existingPath);
+    if (parent === existingPath) {
+      return pathModule.resolve(value);
+    }
+    missingSegments.unshift(pathModule.basename(existingPath));
+    existingPath = parent;
   }
+
+  let resolvedExistingPath: string;
+  try {
+    resolvedExistingPath = fs.realpathSync.native(existingPath);
+  } catch {
+    resolvedExistingPath = existingPath;
+  }
+
+  return pathModule.resolve(resolvedExistingPath, ...missingSegments);
 }
 
 export function isPathWithinRoot(candidate: string, root: string): boolean {

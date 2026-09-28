@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { type ProviderExecutionEvent, ProviderExecutionLifecycleRegistry, type ProviderExecutionRequest, type ProviderSessionConfig } from '@/core/execution';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
@@ -300,7 +301,7 @@ it('preserves explicit user config references and watches edits without overwrit
     const lease = await f.workspace.serverService.acquire(f.cli, f.root, { ...f.environment, OPENCODE_CONFIG: source });
     const effective = await lease.request<{ data: { config: any; path: string } }>('/fixture/config');
     expect(effective.data.path.startsWith(f.root + path.sep)).toBe(false);
-    expect(effective.data.config.plugins[0]).toEqual({ package: new URL(`file://${path.join(f.root, 'plugin.ts')}`).href, options: { unchanged: true } });
+    expect(effective.data.config.plugins[0]).toEqual({ package: pathToFileURL(path.join(f.root, 'plugin.ts')).href, options: { unchanged: true } });
     expect(effective.data.config.agent.user.prompt).toBe('User prompt with {env:LITERAL_TEXT}');
     expect(readFileSync(source, 'utf8')).toBe(content);
     const updated = JSON.stringify({ agent: { user: { prompt: 'Updated user instructions' } } });
