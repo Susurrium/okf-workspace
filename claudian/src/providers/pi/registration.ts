@@ -10,27 +10,23 @@ import { PI_PROVIDER_CAPABILITIES } from './capabilities';
 import { piSettingsReconciler } from './env/PiSettingsReconciler';
 import { PiExecutionBackend } from './execution/PiExecutionBackend';
 import { PiConversationHistoryService } from './history/PiConversationHistoryService';
-import { getPiProviderSettings, updatePiProviderSettings } from './settings';
-import { ObsidianPiExtensionUiRenderer } from './ui/ObsidianPiExtensionUiRenderer';
+import { piModelPolicy } from './PiModelPolicy';
+import { getPiProviderSettings, projectPiModelSettings, updatePiProviderSettings } from './settings';
+import { ObsidianPiExtensionUIRenderer } from './ui/ObsidianPiExtensionUIRenderer';
 import { piChatUIConfig } from './ui/PiChatUIConfig';
 
 export const piProviderRegistration: ProviderModule = {
   id: 'pi',
   blankTabOrder: 11,
   capabilities: PI_PROVIDER_CAPABILITIES,
+  modelPolicy: piModelPolicy,
   chatUIConfig: piChatUIConfig,
   createExecutionBackend: (plugin) => new PiExecutionBackend(
     plugin,
     getPiWorkspaceServices(),
-    { extensionUiRenderer: new ObsidianPiExtensionUiRenderer(plugin.app) },
+    { extensionUiRenderer: new ObsidianPiExtensionUIRenderer(plugin.app) },
   ),
-  resolveTitleGenerationModel: (plugin) => {
-    const settings = plugin.settings as unknown as Record<string, unknown>;
-    const titleModel = typeof settings.titleGenerationModel === 'string'
-      ? settings.titleGenerationModel
-      : '';
-    return piChatUIConfig.ownsModel(titleModel, settings) ? titleModel : undefined;
-  },
+
   displayName: 'Pi',
   environmentKeyPatterns: [/^PI_/i],
   historyService: new PiConversationHistoryService(),
@@ -38,6 +34,14 @@ export const piProviderRegistration: ProviderModule = {
   setEnabled: (settings, enabled) => updatePiProviderSettings(settings, { enabled }),
   settingsReconciler: piSettingsReconciler,
   settingsStorage: {
+    projectPersistedConfig: projectPiModelSettings,
+    needsReasoningMetadata(settings) {
+      const current = getPiProviderSettings(settings);
+      return current.visibleModels.some(id => {
+        const model = current.discoveredModels.find(model => model.encodedId === id);
+        return !model || model.reasoningMetadataResolved === false;
+      });
+    },
     hostScopedFields: ['cliPathsByHost'],
     normalizeStored(target, stored) {
       const storedConfig = getProviderConfig(stored, 'pi');

@@ -7,7 +7,9 @@ describe('SettingsCoordinator', () => {
   it('serializes mutation closures over the latest in-memory settings', async () => {
     const settings: Record<string, unknown> = { alpha: 0, beta: 0 };
     const persisted: Array<Record<string, unknown>> = [];
+    const visibleDuringWrites: Array<Record<string, unknown>> = [];
     const coordinator = new SettingsCoordinator(settings, async (current) => {
+      visibleDuringWrites.push({ ...coordinator.getCommittedSettings() });
       persisted.push({ ...current });
     });
 
@@ -21,6 +23,11 @@ describe('SettingsCoordinator', () => {
     await Promise.all([first, second]);
 
     expect(settings).toEqual({ alpha: 1, beta: 2 });
+    expect(coordinator.getCommittedSettings()).toEqual(settings);
+    expect(visibleDuringWrites).toEqual([
+      { alpha: 0, beta: 0 },
+      { alpha: 1, beta: 0 },
+    ]);
     expect(persisted).toEqual([
       { alpha: 1, beta: 0 },
       { alpha: 1, beta: 2 },
@@ -36,35 +43,39 @@ describe('SettingsCoordinator', () => {
 
     const first = coordinator.mutate(
       current => { current.value = 1; },
-      () => { events.push('commit'); },
+      () => { events.push(`commit:${coordinator.getCommittedSettings().value}`); },
     );
     const second = coordinator.mutate(current => {
       events.push(`next:${current.value}`);
     });
     await Promise.all([first, second]);
 
-    expect(events).toEqual(['persist', 'commit', 'next:1', 'persist']);
+    expect(events).toEqual(['persist', 'commit:1', 'next:1', 'persist']);
   });
 
   it('rolls back a failed save before running later queued mutations', async () => {
     const settings: Record<string, unknown> = {
       nested: { committed: true },
     };
+    const writeError = new Error('write failed');
+    const commit = jest.fn();
     const persist = jest.fn()
-      .mockRejectedValueOnce(new Error('write failed'))
+      .mockRejectedValueOnce(writeError)
       .mockResolvedValueOnce(undefined);
     const coordinator = new SettingsCoordinator(settings, persist);
 
     const first = coordinator.mutate(current => {
       current.first = true;
       current.nested = { committed: false };
-    });
+    }, commit);
     const second = coordinator.mutate(current => {
       expect(current).toEqual({ nested: { committed: true } });
+      expect(coordinator.getCommittedSettings()).toEqual({ nested: { committed: true } });
       current.second = true;
     });
 
-    await expect(first).rejects.toThrow('write failed');
+    await expect(first).rejects.toBe(writeError);
+    expect(commit).not.toHaveBeenCalled();
     await expect(second).resolves.toBeUndefined();
 
     expect(settings).toEqual({ nested: { committed: true }, second: true });
@@ -79,29 +90,13 @@ describe('SettingsCoordinator', () => {
 
     await expect(coordinator.mutate(async current => {
       current.value = 'partial';
+      expect(coordinator.getCommittedSettings()).toEqual({ value: 'committed' });
       throw originalError;
     })).rejects.toBe(originalError);
 
     expect(settings).toEqual({ value: 'committed' });
+    expect(coordinator.getCommittedSettings()).toEqual(settings);
     expect(persist).not.toHaveBeenCalled();
-  });
-
-  it('does not publish committed side effects when persistence rejects', async () => {
-    const writeError = new Error('write failed');
-    const settings: Record<string, unknown> = { value: 'old' };
-    const coordinator = new SettingsCoordinator(
-      settings,
-      jest.fn().mockRejectedValue(writeError),
-    );
-    const commit = jest.fn();
-
-    await expect(coordinator.mutate(
-      current => { current.value = 'new'; },
-      commit,
-    )).rejects.toBe(writeError);
-
-    expect(commit).not.toHaveBeenCalled();
-    expect(settings).toEqual({ value: 'old' });
   });
 
   it('reports post-commit publication separately and keeps the durable state for queued work', async () => {
@@ -114,7 +109,10 @@ describe('SettingsCoordinator', () => {
 
     const first = coordinator.mutate(
       current => { current.value = 'durable'; },
-      () => { throw publicationError; },
+      () => {
+        expect(coordinator.getCommittedSettings()).toEqual({ value: 'durable' });
+        throw publicationError;
+      },
     );
     const second = coordinator.mutate(current => {
       expect(current.value).toBe('durable');
@@ -157,8 +155,10 @@ describe('SettingsCoordinator', () => {
 
     await coordinator.mutateConditionally(current => {
       current.transient = 1;
+      expect(coordinator.getCommittedSettings()).toEqual({ transient: 0, persisted: 0 });
       return false;
     });
+    expect(coordinator.getCommittedSettings()).toEqual({ transient: 1, persisted: 0 });
     await coordinator.mutateConditionally(current => {
       current.persisted = 2;
       return true;
@@ -167,4 +167,26 @@ describe('SettingsCoordinator', () => {
     expect(settings).toEqual({ transient: 1, persisted: 2 });
     expect(persisted).toEqual([{ transient: 1, persisted: 2 }]);
   });
+});
+
+
+it('keeps shared settings readers on committed values throughout a failed write', async () => {
+  const settings = { nested: { prompt: 'committed' } };
+  const retained = settings.nested;
+  let rejectWrite!: (error: Error) => void;
+  let markStarted!: () => void;
+  const started = new Promise<void>(resolve => { markStarted = resolve; });
+  const gate = new Promise<void>((_, reject) => { rejectWrite = reject; });
+  const coordinator = new SettingsCoordinator(settings, () => { markStarted(); return gate; });
+  const mutation = coordinator.mutate(draft => { draft.nested.prompt = 'uncommitted'; });
+  const settled = mutation.catch(() => undefined);
+  await started;
+  try {
+    expect(settings.nested.prompt).toBe('committed');
+    expect(retained.prompt).toBe('committed');
+  } finally {
+    rejectWrite(new Error('simulated storage failure'));
+    await settled;
+    expect(settings.nested.prompt).toBe('committed');
+  }
 });

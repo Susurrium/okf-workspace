@@ -13,23 +13,24 @@ export type ProviderExecutionInputBlock =
       readonly image: ImageAttachment;
     };
 
-export interface ProviderCurrentNoteContext {
+export interface ProviderLinkedContentContext {
   readonly path: string;
   readonly content?: string;
 }
 
 export interface ProviderExecutionContext {
-  readonly currentNote?: ProviderCurrentNoteContext;
-  readonly contextFiles?: readonly string[];
+  readonly linkedContent?: ProviderLinkedContentContext;
+  readonly externalContextPaths?: readonly string[];
+  readonly executionMode?: 'read' | 'write' | 'plan';
   readonly editorSelection?: EditorSelectionContext | null;
   readonly browserSelection?: BrowserSelectionContext | null;
   readonly canvasSelection?: CanvasSelectionContext | null;
-  readonly externalContextPaths?: readonly string[];
 }
 
 export type ProviderSystemInstructions =
   | {
       readonly kind: 'provider-default';
+      readonly dynamicSections?: readonly string[];
     }
   | {
       readonly kind: 'explicit';
@@ -39,11 +40,10 @@ export type ProviderSystemInstructions =
 export interface ProviderExecutionConfiguration {
   readonly systemInstructions: ProviderSystemInstructions;
   readonly model?: string;
-  readonly reasoning?: string;
+  /** Explicit choices cannot be replaced by saved defaults. Null omits the native override; undefined permits auxiliary defaults. */
+  readonly reasoning?: string | null;
   readonly permissionMode?: string;
-  readonly mode?: string;
   readonly serviceTier?: string;
-  readonly externalWorkspaceRoots?: readonly string[];
 }
 
 export type ProviderToolPolicy =

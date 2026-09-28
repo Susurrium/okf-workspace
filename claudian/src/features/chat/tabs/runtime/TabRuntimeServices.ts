@@ -15,6 +15,7 @@ export function buildTabRuntimeServices(
 ): TabServices {
   const subagentManager = new SubagentManager((subagent) => {
     runtimeRef.requirePublished().controllers.streamController.onAsyncSubagentStateChange(subagent);
+    options.onWorkChanged?.(runtimeRef.requirePublished());
   });
   options.registerCleanup('tab subagent state', () => subagentManager.clear());
 
@@ -28,16 +29,8 @@ export function buildTabRuntimeServices(
 
   const services: TabServices = {
     subagentManager,
-    instructionRefineService: null,
     titleGenerationService,
   };
-  options.registerCleanup('tab instruction refinement state', () => {
-    services.instructionRefineService?.resetConversation();
-  });
-  options.registerCleanup('tab instruction refinement', () => {
-    services.instructionRefineService?.cancel();
-  });
-
-  syncTabProviderServices(shell, services, options.plugin);
+  syncTabProviderServices(shell, services);
   return services;
 }

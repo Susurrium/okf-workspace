@@ -20,6 +20,8 @@ export interface ProviderCommandDiscoveryController<T>
 export interface ProviderCommandDiscoveryStoreOptions {
   /** Evicts upstream discovery state before retry observers can start a new load. */
   onBeforeRetry?: () => void;
+  /** Re-resolves the deadline for each load; null delegates the bound to the loader. */
+  resolveTimeoutMs?: () => number | null | undefined;
   timeoutMs?: number;
 }
 
@@ -46,6 +48,7 @@ implements ProviderCommandDiscoveryController<T> {
   private generation = 0;
   private readonly listeners = new Set<() => void>();
   private readonly onBeforeRetry: (() => void) | undefined;
+  private readonly resolveTimeoutMs: (() => number | null | undefined) | undefined;
   private readonly timeoutMs: number;
 
   constructor(
@@ -55,6 +58,7 @@ implements ProviderCommandDiscoveryController<T> {
     options: ProviderCommandDiscoveryStoreOptions = {},
   ) {
     this.onBeforeRetry = options.onBeforeRetry;
+    this.resolveTimeoutMs = options.resolveTimeoutMs;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_DISCOVERY_TIMEOUT_MS;
   }
 
@@ -80,7 +84,7 @@ implements ProviderCommandDiscoveryController<T> {
     const generation = this.generation;
     const abortController = new AbortController();
     this.loadAbortController = abortController;
-    const load = this.loadWithTimeout(abortController)
+    const load = this.#loadWithTimeout(abortController)
       .catch((): ProviderCommandDiscoveryResult<T> => ({
         status: 'error',
         message: 'Could not load provider commands',
@@ -130,9 +134,17 @@ implements ProviderCommandDiscoveryController<T> {
     };
   }
 
-  private async loadWithTimeout(
+  async #loadWithTimeout(
     abortController: AbortController,
   ): Promise<ProviderCommandDiscoveryResult<T>> {
+    const resolvedTimeoutMs = this.resolveTimeoutMs?.();
+    const timeoutMs = resolvedTimeoutMs === undefined
+      ? this.timeoutMs
+      : resolvedTimeoutMs;
+    if (timeoutMs === null) {
+      return await this.loader(abortController.signal);
+    }
+
     let timeoutId: number | null = null;
     const timeout = new Promise<ProviderCommandDiscoveryResult<T>>(resolve => {
       timeoutId = window.setTimeout(() => {
@@ -142,7 +154,7 @@ implements ProviderCommandDiscoveryController<T> {
           retryable: true,
         });
         abortController.abort();
-      }, this.timeoutMs);
+      }, timeoutMs);
     });
 
     try {

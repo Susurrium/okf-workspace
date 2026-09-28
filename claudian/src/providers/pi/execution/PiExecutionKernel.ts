@@ -1,20 +1,21 @@
 import type { StreamChunk } from '../../../core/types';
 import {
-  PiExtensionUiBridge,
-  type PiExtensionUiRenderer,
-} from '../runtime/PiExtensionUiBridge';
+  PiExtensionUIBridge,
+  type PiExtensionUIRenderer,
+} from '../runtime/PiExtensionUIBridge';
 import type { PiLaunchSpec } from '../runtime/PiLaunchSpec';
 import {
-  type PiRpcRecord,
-  PiRpcTransport,
-} from '../runtime/PiRpcTransport';
+  type PiRPCRecord,
+  PiRPCTransport,
+} from '../runtime/PiRPCTransport';
 import { PiSubprocess } from '../runtime/PiSubprocess';
+import { isPiTreeResponse, PI_TREE_EXTENSION_SOURCE, requestPiTree } from '../runtime/PiTreeBridge';
 
 export interface PiExecutionKernelCallbacks {
   onClose(error?: Error): void;
-  onEvent(event: PiRpcRecord): void;
+  onEvent(event: PiRPCRecord): void;
   onExtensionChunk(chunk: StreamChunk): void;
-  onExtensionRequest(request: PiRpcRecord): void;
+  onExtensionRequest(request: PiRPCRecord): boolean;
 }
 
 export interface PiExecutionKernel {
@@ -26,7 +27,7 @@ export interface PiExecutionKernel {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<T>;
-  send(record: PiRpcRecord): void;
+  send(record: PiRPCRecord): void;
   shutdown(): Promise<void>;
   start(): void;
 }
@@ -34,49 +35,64 @@ export interface PiExecutionKernel {
 export type PiExecutionKernelFactory = (
   launchSpec: PiLaunchSpec,
   callbacks: PiExecutionKernelCallbacks,
-  extensionUiRenderer: PiExtensionUiRenderer | null,
+  extensionUiRenderer: PiExtensionUIRenderer | null,
 ) => PiExecutionKernel;
 
-export class PiRpcSessionKernel implements PiExecutionKernel {
+export class PiRPCSessionKernel implements PiExecutionKernel {
   private readonly subprocess: PiSubprocess;
-  private transport: PiRpcTransport | null = null;
-  private extensionBridge: PiExtensionUiBridge | null = null;
+  private transport: PiRPCTransport | null = null;
+  private extensionBridge: PiExtensionUIBridge | null = null;
   private removeCloseListener: (() => void) | null = null;
   private removeEventListener: (() => void) | null = null;
   private started = false;
   private shutdownPromise: Promise<void> | null = null;
+  private treeExtensionDirectory: string | null = null;
 
   constructor(
     readonly launchSpec: PiLaunchSpec,
     private readonly callbacks: PiExecutionKernelCallbacks,
-    extensionUiRenderer: PiExtensionUiRenderer | null,
+    extensionUiRenderer: PiExtensionUIRenderer | null,
   ) {
-    this.subprocess = new PiSubprocess(launchSpec);
+    let processSpec = launchSpec;
+    if (launchSpec.enableTreeBridge) {
+      const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'claudian-pi-tree-'));
+      try {
+        const extension = path.join(directory, 'extension.ts');
+        fs.writeFileSync(extension, PI_TREE_EXTENSION_SOURCE, 'utf8');
+        processSpec = { ...launchSpec, args: [...launchSpec.args, '--extension', extension] };
+        this.treeExtensionDirectory = directory;
+      } catch (error) {
+        fs.rmSync(directory, { recursive: true, force: true });
+        throw error;
+      }
+    }
+    this.subprocess = new PiSubprocess(processSpec);
     this.extensionUiRenderer = extensionUiRenderer;
   }
 
-  private readonly extensionUiRenderer: PiExtensionUiRenderer | null;
+  private readonly extensionUiRenderer: PiExtensionUIRenderer | null;
 
   start(): void {
     if (this.started) return;
     this.started = true;
     this.subprocess.start();
-    const transport = new PiRpcTransport({
+    const transport = new PiRPCTransport({
       input: this.subprocess.stdout,
       onClose: listener => this.subprocess.onClose(listener),
       output: this.subprocess.stdin,
     });
-    const extensionBridge = new PiExtensionUiBridge(
+    const extensionBridge = new PiExtensionUIBridge(
       transport,
       this.extensionUiRenderer,
       chunk => this.callbacks.onExtensionChunk(chunk),
+      request => this.callbacks.onExtensionRequest(request),
     );
     this.transport = transport;
     this.extensionBridge = extensionBridge;
     transport.start();
     this.removeEventListener = transport.onEvent((event) => {
+      if (isPiTreeResponse(event)) return;
       if (event.type === 'extension_ui_request') {
-        this.callbacks.onExtensionRequest(event);
         extensionBridge.handleRequest(event);
         return;
       }
@@ -97,20 +113,23 @@ export class PiRpcSessionKernel implements PiExecutionKernel {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<T> {
-    return this.requireTransport().request(type, payload, timeoutMs, signal);
+    if (type === 'claudian_tree') {
+      return requestPiTree(this.#requireTransport(), payload, signal) as Promise<T>;
+    }
+    return this.#requireTransport().request(type, payload, timeoutMs, signal);
   }
 
-  send(record: PiRpcRecord): void {
-    this.requireTransport().send(record);
+  send(record: PiRPCRecord): void {
+    this.#requireTransport().send(record);
   }
 
   shutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
-    this.shutdownPromise = this.shutdownInternal();
+    this.shutdownPromise = this.#shutdownInternal();
     return this.shutdownPromise;
   }
 
-  private async shutdownInternal(): Promise<void> {
+  async #shutdownInternal(): Promise<void> {
     this.extensionBridge?.cleanup();
     this.removeEventListener?.();
     this.removeEventListener = null;
@@ -120,9 +139,13 @@ export class PiRpcSessionKernel implements PiExecutionKernel {
     this.transport = null;
     this.extensionBridge = null;
     await this.subprocess.shutdown();
+    if (this.treeExtensionDirectory) {
+      await fsp.rm(this.treeExtensionDirectory, { recursive: true, force: true });
+      this.treeExtensionDirectory = null;
+    }
   }
 
-  private requireTransport(): PiRpcTransport {
+  #requireTransport(): PiRPCTransport {
     if (!this.transport) {
       throw new Error('Pi execution kernel is not started');
     }
@@ -134,8 +157,12 @@ export const createPiExecutionKernel: PiExecutionKernelFactory = (
   launchSpec,
   callbacks,
   extensionUiRenderer,
-) => new PiRpcSessionKernel(
+) => new PiRPCSessionKernel(
   launchSpec,
   callbacks,
   extensionUiRenderer,
 );
+import * as fs from 'node:fs';
+import * as fsp from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';

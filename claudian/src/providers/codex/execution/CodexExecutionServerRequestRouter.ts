@@ -15,6 +15,8 @@ import type {
   FileChangeApprovalDecision,
   FileChangeApprovalRequest,
   FileChangeApprovalResponse,
+  MCPElicitationRequest,
+  MCPElicitationResponse,
   PermissionsApprovalRequest,
   PermissionsApprovalResponse,
   RequestId,
@@ -66,27 +68,29 @@ export class CodexExecutionServerRequestRouter {
   ): Promise<unknown> {
     switch (method) {
       case 'item/commandExecution/requestApproval':
-        return this.handleCommandApproval(
+        return this.#handleCommandApproval(
           requestId,
           params as CommandApprovalRequest,
         );
       case 'item/fileChange/requestApproval':
-        return this.handleFileChangeApproval(
+        return this.#handleFileChangeApproval(
           requestId,
           params as FileChangeApprovalRequest,
         );
       case 'item/permissions/requestApproval':
-        return this.handlePermissionsApproval(
+        return this.#handlePermissionsApproval(
           requestId,
           params as PermissionsApprovalRequest,
         );
       case 'item/tool/requestUserInput':
-        return this.handleUserInputRequest(
+        return this.#handleUserInputRequest(
           requestId,
           params as UserInputRequest,
         );
+      case 'mcpServer/elicitation/request':
+        return this.#handleMcpElicitation(requestId, params);
       case 'item/tool/call':
-        return this.handleDynamicToolCall(params as DynamicToolCallParams);
+        return this.#handleDynamicToolCall(params as DynamicToolCallParams);
       default:
         throw new Error(`Unsupported server request: ${method}`);
     }
@@ -101,7 +105,7 @@ export class CodexExecutionServerRequestRouter {
 
     this.interactionPort.dismissInteraction(pending.interactionId, 'resolved');
     pending.controller.abort();
-    this.removePending(pending);
+    this.#removePending(pending);
     return true;
   }
 
@@ -109,26 +113,26 @@ export class CodexExecutionServerRequestRouter {
     for (const pending of [...this.pendingByLocalId.values()]) {
       this.interactionPort.dismissInteraction(pending.interactionId, reason);
       pending.controller.abort();
-      this.removePending(pending);
+      this.#removePending(pending);
     }
     this.activeTurn = null;
   }
 
-  private async handleDynamicToolCall(
+  async #handleDynamicToolCall(
     params: DynamicToolCallParams,
   ): Promise<DynamicToolCallResponse> {
-    const turn = this.requireActiveTurn(params.threadId, params.turnId);
+    const turn = this.#requireActiveTurn(params.threadId, params.turnId);
     if (!this.dynamicToolRegistry || !isDynamicToolAllowed(turn.toolPolicy, params)) {
       throw new Error(`Unsupported dynamic tool: ${qualifiedToolName(params)}`);
     }
     return this.dynamicToolRegistry.execute(params);
   }
 
-  private async handleCommandApproval(
+  async #handleCommandApproval(
     requestId: RequestId,
     params: CommandApprovalRequest,
   ): Promise<CommandExecutionApprovalResponse> {
-    const turn = this.requireActiveTurn(params.threadId, params.turnId);
+    const turn = this.#requireActiveTurn(params.threadId, params.turnId);
     if (!shouldRouteApproval(turn.toolPolicy)) {
       return { decision: 'decline' };
     }
@@ -145,7 +149,7 @@ export class CodexExecutionServerRequestRouter {
       proposedExecpolicyAmendment: params.proposedExecpolicyAmendment ?? null,
       proposedNetworkPolicyAmendments: params.proposedNetworkPolicyAmendments ?? null,
     };
-    const pending = this.createPending(requestId, params.threadId);
+    const pending = this.#createPending(requestId, params.threadId);
     try {
       const response = await this.interactionPort.requestApproval({
         interactionId: pending.interactionId,
@@ -173,20 +177,20 @@ export class CodexExecutionServerRequestRouter {
           : 'decline',
       };
     } finally {
-      this.removePending(pending);
+      this.#removePending(pending);
     }
   }
 
-  private async handleFileChangeApproval(
+  async #handleFileChangeApproval(
     requestId: RequestId,
     params: FileChangeApprovalRequest,
   ): Promise<FileChangeApprovalResponse> {
-    const turn = this.requireActiveTurn(params.threadId, params.turnId);
+    const turn = this.#requireActiveTurn(params.threadId, params.turnId);
     if (!shouldRouteApproval(turn.toolPolicy)) {
       return { decision: 'decline' };
     }
 
-    const pending = this.createPending(requestId, params.threadId);
+    const pending = this.#createPending(requestId, params.threadId);
     try {
       const response = await this.interactionPort.requestApproval({
         interactionId: pending.interactionId,
@@ -212,20 +216,20 @@ export class CodexExecutionServerRequestRouter {
           : 'decline',
       };
     } finally {
-      this.removePending(pending);
+      this.#removePending(pending);
     }
   }
 
-  private async handlePermissionsApproval(
+  async #handlePermissionsApproval(
     requestId: RequestId,
     params: PermissionsApprovalRequest,
   ): Promise<PermissionsApprovalResponse> {
-    const turn = this.requireActiveTurn(params.threadId, params.turnId);
+    const turn = this.#requireActiveTurn(params.threadId, params.turnId);
     if (!shouldRouteApproval(turn.toolPolicy)) {
       return { permissions: {}, scope: 'turn' };
     }
 
-    const pending = this.createPending(requestId, params.threadId);
+    const pending = this.#createPending(requestId, params.threadId);
     try {
       const response = await this.interactionPort.requestApproval({
         interactionId: pending.interactionId,
@@ -256,19 +260,19 @@ export class CodexExecutionServerRequestRouter {
       }
       return { permissions: {}, scope: 'turn' };
     } finally {
-      this.removePending(pending);
+      this.#removePending(pending);
     }
   }
 
-  private async handleUserInputRequest(
+  async #handleUserInputRequest(
     requestId: RequestId,
     params: UserInputRequest,
   ): Promise<UserInputResponse> {
-    const turn = this.requireActiveTurn(params.threadId, params.turnId);
+    const turn = this.#requireActiveTurn(params.threadId, params.turnId);
     if (!shouldRouteApproval(turn.toolPolicy)) {
       return { answers: {} };
     }
-    const pending = this.createPending(requestId, params.threadId);
+    const pending = this.#createPending(requestId, params.threadId);
     try {
       const response = await this.interactionPort.askUserQuestion({
         interactionId: pending.interactionId,
@@ -300,11 +304,81 @@ export class CodexExecutionServerRequestRouter {
       }
       return { answers };
     } finally {
-      this.removePending(pending);
+      this.#removePending(pending);
     }
   }
 
-  private requireActiveTurn(
+  async #handleMcpElicitation(
+    requestId: RequestId,
+    params: unknown,
+  ): Promise<MCPElicitationResponse> {
+    if (!isMCPElicitationRequest(params) || params.turnId === null) {
+      return { action: 'cancel', content: null };
+    }
+    if (
+      params.mode === 'url'
+      || !isEmptyConfirmationSchema(params.requestedSchema)
+    ) {
+      return { action: 'decline', content: null };
+    }
+
+    let pending: PendingInteraction | undefined;
+    try {
+      const turn = this.#requireActiveTurn(params.threadId, params.turnId);
+      if (!shouldRouteApproval(turn.toolPolicy)) {
+        return { action: 'decline', content: null };
+      }
+      pending = this.#createPending(requestId, params.threadId);
+      const response = await this.interactionPort.askUserQuestion({
+        interactionId: pending.interactionId,
+        sessionInstanceId: this.sessionInstanceId,
+        turnId: turn.localTurnId,
+        kind: 'question',
+        input: {
+          questions: [{
+            id: MCP_CONFIRMATION_QUESTION_ID,
+            header: 'MCP request',
+            question: `MCP server: ${params.serverName}\n\n${params.message}`,
+            options: [
+              { label: 'Cancel', description: 'Cancel this request.', value: 'cancel' },
+              { label: 'Decline', description: 'Decline this request.', value: 'decline' },
+              { label: 'Allow', description: 'Accept this request.', value: 'accept' },
+            ],
+            multiSelect: false,
+            isOther: false,
+            isSecret: false,
+          }],
+        },
+        nativeContext: {
+          requestId,
+          threadId: params.threadId,
+          nativeTurnId: params.turnId,
+          serverName: params.serverName,
+        },
+      }, pending.controller.signal);
+      if (
+        pending.controller.signal.aborted
+        || this.activeTurn !== turn
+        || this.pendingByLocalId.get(pending.interactionId) !== pending
+        || response.interactionId !== pending.interactionId
+        || !isPlainRecord(response.answers)
+        || Object.keys(response.answers).length !== 1
+      ) {
+        return { action: 'cancel', content: null };
+      }
+      const answer = response.answers[MCP_CONFIRMATION_QUESTION_ID];
+      if (answer === 'accept') return { action: 'accept', content: {} };
+      if (answer === 'decline') return { action: 'decline', content: null };
+      return { action: 'cancel', content: null };
+    } catch {
+      // Stale, aborted, and failed interactions must not grant MCP access.
+      return { action: 'cancel', content: null };
+    } finally {
+      if (pending) this.#removePending(pending);
+    }
+  }
+
+  #requireActiveTurn(
     threadId: string,
     nativeTurnId: string,
   ): ActiveInteractionTurn {
@@ -323,7 +397,7 @@ export class CodexExecutionServerRequestRouter {
     return turn;
   }
 
-  private createPending(
+  #createPending(
     requestId: RequestId,
     threadId: string,
   ): PendingInteraction {
@@ -345,7 +419,7 @@ export class CodexExecutionServerRequestRouter {
     return pending;
   }
 
-  private removePending(pending: PendingInteraction): void {
+  #removePending(pending: PendingInteraction): void {
     if (this.pendingByNativeKey.get(pending.nativeKey) === pending) {
       this.pendingByNativeKey.delete(pending.nativeKey);
     }
@@ -353,6 +427,36 @@ export class CodexExecutionServerRequestRouter {
       this.pendingByLocalId.delete(pending.interactionId);
     }
   }
+}
+
+const MCP_CONFIRMATION_QUESTION_ID = 'mcp-elicitation-confirmation';
+const EMPTY_CONFIRMATION_SCHEMA_KEYS = new Set([
+  'type', 'properties', 'required', 'additionalProperties',
+]);
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function isMCPElicitationRequest(value: unknown): value is MCPElicitationRequest {
+  return isPlainRecord(value)
+    && typeof value.threadId === 'string' && value.threadId.length > 0
+    && (value.turnId === null || (typeof value.turnId === 'string' && value.turnId.length > 0))
+    && typeof value.serverName === 'string' && value.serverName.trim().length > 0
+    && typeof value.message === 'string'
+    && (value.mode === 'form' || value.mode === 'openai/form' || value.mode === 'url');
+}
+
+function isEmptyConfirmationSchema(value: unknown): boolean {
+  return isPlainRecord(value)
+    && Object.keys(value).every(key => EMPTY_CONFIRMATION_SCHEMA_KEYS.has(key))
+    && value.type === 'object'
+    && isPlainRecord(value.properties)
+    && Object.keys(value.properties).length === 0
+    && (!('required' in value) || (Array.isArray(value.required) && value.required.length === 0))
+    && (!('additionalProperties' in value) || typeof value.additionalProperties === 'boolean');
 }
 
 function nativeRequestKey(threadId: string, requestId: RequestId): string {

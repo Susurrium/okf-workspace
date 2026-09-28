@@ -20,7 +20,9 @@ import type { OpencodeProviderState } from '../types';
 import {
   loadOpencodeSessionRows,
   type StoredRow,
+  type StoredSessionRows,
 } from './OpencodeSqliteReader';
+import { getMessageCompletedAt, getMessageCreatedAt, OpencodeTurnStats } from './OpencodeTurnStats';
 
 export { OPENCODE_MESSAGE_ROW_SQL } from './OpencodeSqliteReader';
 
@@ -39,20 +41,25 @@ const OPENCODE_HYDRATION_DIAGNOSTIC_ID_PREFIX = 'opencode-hydration-error';
 export async function loadOpencodeSessionMessages(
   sessionId: string,
   providerState?: OpencodeProviderState,
+  environment: NodeJS.ProcessEnv = process.env,
 ): Promise<ChatMessage[]> {
-  const databasePath = resolveExistingOpencodeDatabasePath(providerState?.databasePath);
+  const databasePath = resolveExistingOpencodeDatabasePath(providerState?.databasePath, environment);
   if (!databasePath || databasePath === ':memory:' || !fs.existsSync(databasePath)) {
     return [];
   }
 
-  const rows = await loadOpencodeSessionRows(databasePath, sessionId);
-  if (!rows) {
+  let rows: StoredSessionRows;
+  try {
+    rows = await loadOpencodeSessionRows(databasePath, sessionId, { environment, nativeVersion: providerState?.nativeVersion === 2 ? 2 : 'auto' });
+  } catch (error) {
     return [createOpencodeHydrationDiagnosticMessage({
       databasePath,
-      reason: 'Could not read OpenCode session rows from SQLite.',
+      reason: formatUnknownError(error),
       sessionId,
     })];
   }
+
+  if (rows.nativeVersion === 2) return mapOpencodeV2Messages(rows.messageRows, { databasePath, sessionId });
 
   return mapOpencodeMessages(
     hydrateStoredMessages(rows.messageRows, rows.partRows),
@@ -63,18 +70,20 @@ export async function loadOpencodeSessionMessages(
 export async function loadOpencodeSessionModel(
   sessionId: string,
   providerState?: OpencodeProviderState,
+  environment: NodeJS.ProcessEnv = process.env,
 ): Promise<string | null> {
-  const databasePath = resolveExistingOpencodeDatabasePath(providerState?.databasePath);
+  const databasePath = resolveExistingOpencodeDatabasePath(providerState?.databasePath, environment);
   if (!databasePath || databasePath === ':memory:' || !fs.existsSync(databasePath)) {
     return null;
   }
 
-  const rows = await loadOpencodeSessionRows(databasePath, sessionId);
+  const rows = await loadOpencodeSessionRows(databasePath, sessionId, { environment, nativeVersion: providerState?.nativeVersion === 2 ? 2 : 'auto' }).catch(() => null);
   let rawModelId: string | null = null;
   for (const row of rows?.messageRows ?? []) {
-    const data = parseJsonObject(row.data);
-    const providerId = getString(row.provider_id) ?? getString(data?.providerID);
-    const modelId = getString(row.model_id) ?? getString(data?.modelID);
+    const data = parseJSONObject(row.data);
+    const model = rows?.nativeVersion === 2 ? getObject(data?.model) : null;
+    const providerId = getString(model?.providerID) ?? getString(row.provider_id) ?? getString(data?.providerID);
+    const modelId = getString(model?.id) ?? getString(row.model_id) ?? getString(data?.modelID);
     if (providerId && modelId) {
       rawModelId = `${providerId}/${modelId}`;
     }
@@ -87,14 +96,24 @@ export function mapOpencodeMessages(
   context: OpencodeHydrationDiagnosticContext = {},
 ): ChatMessage[] {
   const mappedMessages: ChatMessage[] = [];
+  const stats = new OpencodeTurnStats();
+  let previousAssistant: ChatMessage | undefined;
 
   for (const message of messages) {
     try {
       const mappedMessage = mapStoredMessage(message, context);
       if (mappedMessage) {
+        if (mappedMessage.role === 'user') previousAssistant = undefined;
+        else {
+          if (previousAssistant) previousAssistant.turnStats = undefined;
+          previousAssistant = mappedMessage;
+        }
+        mappedMessage.turnStats = stats.add(message.info, 1);
         mappedMessages.push(mappedMessage);
       }
     } catch (error) {
+      stats.reset();
+      previousAssistant = undefined;
       mappedMessages.push(createOpencodeHydrationDiagnosticMessage({
         ...context,
         messageId: getString(message.info.id) ?? undefined,
@@ -115,7 +134,7 @@ function hydrateStoredMessages(
   for (const row of partRows) {
     const messageId = getString(row.message_id);
     const id = getString(row.id);
-    const data = parseJsonObject(row.data);
+    const data = parseJSONObject(row.data);
     if (!messageId || !id || !data) {
       continue;
     }
@@ -131,7 +150,7 @@ function hydrateStoredMessages(
       return [];
     }
 
-    const data = parseJsonObject(row.data);
+    const data = parseJSONObject(row.data);
     return [{
       info: data
         ? { ...data, id, time_created: row.time_created }
@@ -139,6 +158,10 @@ function hydrateStoredMessages(
             data_time_completed: row.data_time_completed,
             data_time_created: row.data_time_created,
             data_valid: row.data_valid,
+            parentID: row.parent_id,
+            tokens: { output: row.output_tokens, reasoning: row.reasoning_tokens },
+            finish: row.finish,
+            error: row.error,
             id,
             role: row.role,
             time_created: row.time_created,
@@ -151,6 +174,7 @@ function hydrateStoredMessages(
 function mapStoredMessage(
   message: StoredMessage,
   context: OpencodeHydrationDiagnosticContext,
+  nativeVersion: 1 | 2 = 1,
 ): ChatMessage | null {
   const role = getString(message.info.role);
   const id = getString(message.info.id);
@@ -186,7 +210,7 @@ function mapStoredMessage(
   }
 
   const contentBlocks = buildAssistantContentBlocks(message.parts);
-  const toolCalls = buildAssistantToolCalls(message.parts);
+  const toolCalls = buildAssistantToolCalls(message.parts, nativeVersion);
   const completedAt = getMessageCompletedAt(message.info);
   const durationSeconds = completedAt && completedAt >= createdAt
     ? Math.max(0, (completedAt - createdAt) / 1_000)
@@ -200,6 +224,7 @@ function mapStoredMessage(
       .join(''),
     contentBlocks: contentBlocks.length > 0 ? contentBlocks : undefined,
     durationSeconds,
+    completedAt: durationSeconds !== undefined ? completedAt ?? undefined : undefined,
     id,
     role: 'assistant',
     timestamp: createdAt,
@@ -224,6 +249,8 @@ function mergeAdjacentAssistantMessages(messages: ChatMessage[]): ChatMessage[] 
       previous.assistantMessageId = message.assistantMessageId ?? previous.assistantMessageId;
       previous.durationFlavorWord = message.durationFlavorWord ?? previous.durationFlavorWord;
       previous.durationSeconds = mergeAssistantDurationSeconds(previous, message);
+      previous.completedAt = message.completedAt;
+      previous.turnStats = message.turnStats;
       previous.toolCalls = mergeOptionalArrays(previous.toolCalls, message.toolCalls);
       previous.contentBlocks = mergeOptionalArrays(previous.contentBlocks, message.contentBlocks);
       continue;
@@ -268,22 +295,11 @@ function getMessageCompletionTime(message: ChatMessage): number | null {
   return message.timestamp + (message.durationSeconds * 1_000);
 }
 
-function getMessageCreatedAt(info: StoredRow): number | null {
-  return getNestedNumber(info, ['time', 'created'])
-    ?? getNumber(info.data_time_created)
-    ?? getNumber(info.time_created);
-}
-
-function getMessageCompletedAt(info: StoredRow): number | null {
-  return getNestedNumber(info, ['time', 'completed'])
-    ?? getNumber(info.data_time_completed);
-}
-
 function isInvalidStoredMessageData(info: StoredRow): boolean {
   return getNumber(info.data_valid) === 0;
 }
 
-function createOpencodeHydrationDiagnosticMessage(params: {
+export function createOpencodeHydrationDiagnosticMessage(params: {
   databasePath?: string;
   messageId?: string;
   reason: string;
@@ -297,7 +313,10 @@ function createOpencodeHydrationDiagnosticMessage(params: {
     ...(params.messageId ? [`messageId: ${params.messageId}`] : []),
     `reason: ${params.reason}`,
   ];
-  const content = detailLines.join('\n');
+  const details = detailLines.join('\n');
+  const fenceLength = (details.match(/`+/g) ?? []).reduce((length, run) => Math.max(length, run.length + 1), 3);
+  const fence = '`'.repeat(fenceLength);
+  const content = `${fence}text\n${details}\n${fence}`;
 
   return {
     assistantMessageId: undefined,
@@ -360,7 +379,7 @@ function buildAssistantContentBlocks(parts: StoredRow[]): ContentBlock[] {
         break;
       }
       case 'tool': {
-        const toolId = getString(part.callID);
+        const toolId = getString(part.callID) ?? getString(part.id);
         if (!toolId) {
           break;
         }
@@ -376,14 +395,14 @@ function buildAssistantContentBlocks(parts: StoredRow[]): ContentBlock[] {
   return blocks;
 }
 
-function buildAssistantToolCalls(parts: StoredRow[]): ToolCallInfo[] {
+function buildAssistantToolCalls(parts: StoredRow[], nativeVersion: 1 | 2): ToolCallInfo[] {
   return parts.flatMap((part) => {
     if (getString(part.type) !== 'tool') {
       return [];
     }
 
-    const id = getString(part.callID);
-    const rawName = getString(part.tool);
+    const id = getString(part.callID) ?? getString(part.id);
+    const rawName = getString(part.tool) ?? getString(part.name);
     const state = getObject(part.state);
     const status = mapToolStatus(getString(state?.status));
     if (!id || !rawName || !status) {
@@ -392,7 +411,10 @@ function buildAssistantToolCalls(parts: StoredRow[]): ToolCallInfo[] {
 
     const input = normalizeOpencodeToolInput(rawName, getObject(state?.input) ?? {});
     const name = normalizeOpencodeToolName(rawName);
-    const result = getString(state?.output) ?? getString(state?.error) ?? undefined;
+    const nativeContent = Array.isArray(state?.content) ? state.content.filter(isPlainObject) : [];
+    const result = getString(state?.output) ?? getString(state?.error)
+      ?? getString(getObject(state?.error)?.message)
+      ?? (nativeContent.length ? nativeContent.filter((item) => item.type === 'text').map((item) => getString(item.text) ?? '').join('\n') : undefined);
     const toolUseResult = normalizeOpencodeToolUseResult(rawName, input, {
       ...(result ? { output: result } : {}),
       ...(getObject(state?.metadata) ? { metadata: getObject(state?.metadata) } : {}),
@@ -404,6 +426,11 @@ function buildAssistantToolCalls(parts: StoredRow[]): ToolCallInfo[] {
       name,
       result,
       status,
+      ...(nativeVersion === 2 ? { providerPayload: {
+        rawInput: state?.input,
+        rawName,
+        rawOutput: state,
+      } } : {}),
     };
 
     if (name === TOOL_ASK_USER_QUESTION) {
@@ -440,7 +467,7 @@ function buildUserImages(parts: StoredRow[], messageId: string): ImageAttachment
     const parsed = parseImageDataUri(getString(part.url));
     const mime = getString(part.mime);
     const mediaType = parsed?.mediaType ?? mime;
-    const data = parsed?.data;
+    const data = parsed?.data ?? getString(part.data);
     if (!data || !mediaType) {
       continue;
     }
@@ -460,8 +487,8 @@ function buildUserImages(parts: StoredRow[], messageId: string): ImageAttachment
 }
 
 function getDurationSeconds(part: StoredRow): number | undefined {
-  const start = getNestedNumber(part, ['time', 'start']);
-  const end = getNestedNumber(part, ['time', 'end']);
+  const start = getNestedNumber(part, ['time', 'start']) ?? getNestedNumber(part, ['time', 'created']);
+  const end = getNestedNumber(part, ['time', 'end']) ?? getNestedNumber(part, ['time', 'completed']);
   if (start === null || end === null || end < start) {
     return undefined;
   }
@@ -471,6 +498,7 @@ function getDurationSeconds(part: StoredRow): number | undefined {
 
 function mapToolStatus(status: string | null): ToolCallInfo['status'] | null {
   switch (status) {
+    case 'streaming':
     case 'pending':
     case 'running':
       return 'running';
@@ -483,7 +511,7 @@ function mapToolStatus(status: string | null): ToolCallInfo['status'] | null {
   }
 }
 
-function parseJsonObject(value: unknown): StoredRow | null {
+function parseJSONObject(value: unknown): StoredRow | null {
   if (typeof value !== 'string') {
     return null;
   }
@@ -528,4 +556,71 @@ function getNestedNumber(
     current = current[key];
   }
   return getNumber(current);
+}
+
+/** v2 control entries delimit turns even when they have no chat presentation. */
+export function mapOpencodeV2Messages(
+  rows: StoredRow[],
+  context: OpencodeHydrationDiagnosticContext = {},
+): ChatMessage[] {
+  return mapV2Messages(rows.map(row => ({ row, data: parseJSONObject(row.data) })), context);
+}
+
+export function mapOpencodeV2NativeMessages(
+  messages: StoredRow[],
+  context: OpencodeHydrationDiagnosticContext = {},
+): ChatMessage[] {
+  return mapV2Messages(messages.map(data => ({ row: data, data })), context);
+}
+
+function mapV2Messages(
+  messages: Array<{ row: StoredRow; data: StoredRow | null }>,
+  context: OpencodeHydrationDiagnosticContext,
+): ChatMessage[] {
+  const result: ChatMessage[] = [];
+  let segment: ChatMessage[] = [];
+  const stats = new OpencodeTurnStats();
+  let previousAssistant: ChatMessage | undefined;
+  const flush = () => {
+    result.push(...mergeAdjacentAssistantMessages(segment));
+    segment = [];
+    stats.reset();
+    previousAssistant = undefined;
+  };
+  for (const { row, data } of messages) {
+    if (!data) {
+      flush();
+      result.push(createOpencodeHydrationDiagnosticMessage({
+        ...context, messageId: getString(row.id) ?? undefined,
+        reason: 'OpenCode message metadata is not valid JSON.',
+      }));
+      continue;
+    }
+    if (row.type !== 'user' && row.type !== 'assistant') {
+      flush();
+      continue;
+    }
+    const parts = row.type === 'user'
+      ? [
+          { type: 'text', text: data.text },
+          ...(Array.isArray(data.files) ? data.files.filter(isPlainObject).map((file) => ({ ...file, type: 'file' })) : []),
+        ]
+      : Array.isArray(data.content) ? data.content.filter(isPlainObject) : [];
+    const info = { ...data, id: row.id, role: row.type, time_created: row.time_created };
+    const message = mapStoredMessage({
+      info,
+      parts,
+    }, context, 2);
+    if (message) {
+      if (message.role === 'user') previousAssistant = undefined;
+      else {
+        if (previousAssistant) previousAssistant.turnStats = undefined;
+        previousAssistant = message;
+      }
+      message.turnStats = stats.add(info, 2);
+      segment.push(message);
+    }
+  }
+  flush();
+  return result;
 }

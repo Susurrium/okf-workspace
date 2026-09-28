@@ -1,3 +1,7 @@
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
 import type { Conversation } from '@/core/types';
 import { ClaudeConversationHistoryService } from '@/providers/claude/history/ClaudeConversationHistoryService';
 import * as historyStore from '@/providers/claude/history/ClaudeHistoryStore';
@@ -17,34 +21,6 @@ function createConversation(overrides: Partial<Conversation> = {}): Conversation
 }
 
 describe('ClaudeConversationHistoryService', () => {
-  describe('legacy conversation backup recovery', () => {
-    it('reads a matching safe session id from the metadata header', () => {
-      const content = [
-        JSON.stringify({
-          type: 'meta',
-          id: 'conversation-1',
-          sessionId: 'recovered-session',
-        }),
-        JSON.stringify({ type: 'message', message: { content: 'History' } }),
-      ].join('\r\n');
-
-      expect(historyStore.parseLegacyConversationSessionId(
-        content,
-        'conversation-1',
-      )).toBe('recovered-session');
-    });
-
-    it.each([
-      ['mismatched conversation', { type: 'meta', id: 'other', sessionId: 'session-1' }],
-      ['cleared session', { type: 'meta', id: 'conversation-1', sessionId: null }],
-      ['unsafe session', { type: 'meta', id: 'conversation-1', sessionId: '../session' }],
-    ])('rejects a %s header', (_label, header) => {
-      expect(historyStore.parseLegacyConversationSessionId(
-        JSON.stringify(header),
-        'conversation-1',
-      )).toBeNull();
-    });
-  });
 
   describe('getConversationSessionAvailability', () => {
     it('reports a missing native session', async () => {
@@ -61,19 +37,6 @@ describe('ClaudeConversationHistoryService', () => {
       availabilitySpy.mockRestore();
     });
 
-    it('reports an available native session', async () => {
-      const availabilitySpy = jest.spyOn(historyStore, 'locateSDKSession')
-        .mockResolvedValue({ availability: 'available', sessionPath: '/vault/session-1.jsonl' });
-      const service = new ClaudeConversationHistoryService();
-
-      await expect(service.getConversationSessionAvailability(
-        createConversation(),
-        '/vault',
-      )).resolves.toBe('available');
-
-      availabilitySpy.mockRestore();
-    });
-
     it('uses the effective SDK environment when locating a native session', async () => {
       const availabilitySpy = jest.spyOn(historyStore, 'locateSDKSession')
         .mockResolvedValue({ availability: 'available', sessionPath: '/custom/session-1.jsonl' });
@@ -83,29 +46,13 @@ describe('ClaudeConversationHistoryService', () => {
         vaultPath: '/vault',
       };
 
-      await service.getConversationSessionAvailability(
-        createConversation(),
-        '/vault',
-        pathContext,
-      );
-
-      expect(availabilitySpy).toHaveBeenCalledWith('/vault', 'session-1', pathContext);
-      availabilitySpy.mockRestore();
-    });
-
-    it('reports a native session from a previous vault path as relocated', async () => {
-      const availabilitySpy = jest.spyOn(historyStore, 'locateSDKSession')
-        .mockResolvedValue({
-          availability: 'relocated',
-          sessionPath: '/old-vault/session-1.jsonl',
-        });
-      const service = new ClaudeConversationHistoryService();
-
       await expect(service.getConversationSessionAvailability(
         createConversation(),
         '/vault',
-      )).resolves.toBe('relocated');
+        pathContext,
+      )).resolves.toBe('available');
 
+      expect(availabilitySpy).toHaveBeenCalledWith('/vault', 'session-1', pathContext);
       availabilitySpy.mockRestore();
     });
 
@@ -279,10 +226,12 @@ describe('ClaudeConversationHistoryService', () => {
       const loadSpy = jest.spyOn(historyStore, 'loadSDKSessionMessages')
         .mockResolvedValue({ messages: [], skippedLines: 0 });
 
-      await expect(service.prepareRelocatedConversationSession(
+      const update1 = await service.prepareRelocatedConversationSession(
         conversation,
         '/vault',
-      )).resolves.toBe(true);
+      );
+      expect(update1).not.toBeNull();
+      Object.assign(conversation, update1);
       expect(conversation.sessionId).toBeNull();
       expect(conversation.providerState).toEqual({
         previousProviderSessionIds: ['session-previous', 'session-1'],
@@ -311,10 +260,12 @@ describe('ClaudeConversationHistoryService', () => {
         .mockResolvedValue({ messages: [], skippedLines: 0 });
 
       await service.getConversationSessionAvailability(conversation, '/vault');
-      await expect(service.prepareRelocatedConversationSession(
+      const update2 = await service.prepareRelocatedConversationSession(
         conversation,
         '/vault',
-      )).resolves.toBe(false);
+      );
+      expect(update2).toBeNull();
+      Object.assign(conversation, update2);
 
       expect(conversation.sessionId).toBe('session-1');
       expect(conversation.providerState).toEqual({
@@ -335,11 +286,13 @@ describe('ClaudeConversationHistoryService', () => {
       const locationSpy = jest.spyOn(historyStore, 'locateSDKSessions')
         .mockResolvedValue(new Map([['session-1', { availability: 'missing' }]]));
 
-      await expect(service.resolveMissingConversationSession(
+      const update3 = await service.resolveMissingConversationSession(
         conversation,
         '/vault',
         'session-1',
-      )).resolves.toBe('delete');
+      );
+      expect(update3.outcome).toBe('delete');
+      Object.assign(conversation, update3.changes);
       expect(conversation.sessionId).toBe('session-1');
 
       locationSpy.mockRestore();
@@ -359,11 +312,13 @@ describe('ClaudeConversationHistoryService', () => {
           ['session-1', { availability: 'missing' }],
         ]));
 
-      await expect(service.resolveMissingConversationSession(
+      const update4 = await service.resolveMissingConversationSession(
         conversation,
         '/vault',
         'session-1',
-      )).resolves.toBe('reset');
+      );
+      expect(update4.outcome).toBe('reset');
+      Object.assign(conversation, update4.changes);
       expect(conversation.sessionId).toBeNull();
       expect(conversation.providerState).toEqual({
         previousProviderSessionIds: ['session-previous'],
@@ -382,15 +337,15 @@ describe('ClaudeConversationHistoryService', () => {
         createdAt: 1_000,
         lastActivityAt: 2_000,
       });
-      const legacySpy = jest.spyOn(historyStore, 'readLegacyConversationSessionId')
-        .mockResolvedValue(null);
       const recoverySpy = jest.spyOn(historyStore, 'recoverSDKSessionIdByTime')
         .mockResolvedValue('recovered-session');
 
-      await expect(service.recoverConversationSessionReference(
+      const update5 = await service.recoverConversationSessionReference(
         conversation,
         '/vault',
-      )).resolves.toBe(true);
+      );
+      expect(update5).not.toBeNull();
+      Object.assign(conversation, update5);
 
       expect(recoverySpy).toHaveBeenCalledWith('/vault', {
         createdAt: 1_000,
@@ -401,45 +356,30 @@ describe('ClaudeConversationHistoryService', () => {
         providerState: { providerSessionId: 'recovered-session' },
       });
 
-      legacySpy.mockRestore();
       recoverySpy.mockRestore();
     });
 
-    it('recovers a cleared session pointer from the legacy conversation backup', async () => {
+    it('uses native recovery instead of old conversation backup headers', async () => {
+      const vaultPath = await fs.mkdtemp(path.join(os.tmpdir(), 'claudian-retired-backup-'));
       const service = new ClaudeConversationHistoryService();
-      const conversation = createConversation({
-        sessionId: null,
-        providerState: undefined,
-      });
-      const legacySpy = jest.spyOn(historyStore, 'readLegacyConversationSessionId')
-        .mockResolvedValue('recovered-session');
-      const locationSpy = jest.spyOn(historyStore, 'locateSDKSessions')
-        .mockResolvedValue(new Map([['recovered-session', {
-          availability: 'available',
-          sessionPath: '/vault/recovered-session.jsonl',
-        }]]));
-      const loadSpy = jest.spyOn(historyStore, 'loadSDKSessionMessages')
-        .mockResolvedValue({
-          messages: [{
-            id: 'recovered-message',
-            role: 'user',
-            content: 'Recovered',
-            timestamp: 1,
-          }],
-          skippedLines: 0,
-        });
-
-      await service.hydrateConversationHistory(conversation, '/vault');
-
-      expect(legacySpy).toHaveBeenCalledWith('/vault', conversation.id);
-      expect(conversation.providerState).toEqual({
-        previousProviderSessionIds: ['recovered-session'],
-      });
-      expect(conversation.messages.map(message => message.content)).toEqual(['Recovered']);
-
-      legacySpy.mockRestore();
-      locationSpy.mockRestore();
-      loadSpy.mockRestore();
+      const conversation = createConversation({ sessionId: null, providerState: undefined });
+      const recoverySpy = jest.spyOn(historyStore, 'recoverSDKSessionIdByTime').mockResolvedValue(null);
+      try {
+        const folder = path.join(vaultPath, '.claude', 'sessions');
+        await fs.mkdir(folder, { recursive: true });
+        await fs.writeFile(path.join(folder, conversation.id + '.jsonl'), JSON.stringify({
+          type: 'meta', id: conversation.id, sessionId: 'retired-session',
+        }));
+        const update6 = await service.recoverConversationSessionReference(conversation, vaultPath);
+      expect(update6).toBeNull();
+      Object.assign(conversation, update6);
+        expect(recoverySpy).toHaveBeenCalled();
+        expect(conversation.sessionId).toBeNull();
+        expect(conversation.providerState).toBeUndefined();
+      } finally {
+        recoverySpy.mockRestore();
+        await fs.rm(vaultPath, { recursive: true, force: true });
+      }
     });
 
     it('re-resolves history when the effective Claude config directory changes', async () => {
@@ -474,15 +414,17 @@ describe('ClaudeConversationHistoryService', () => {
           };
         });
 
-      await service.hydrateConversationHistory(conversation, '/vault', contextA);
-      await service.hydrateConversationHistory(conversation, '/vault', contextB);
+      const first = await service.hydrateConversationHistory(conversation, '/vault', contextA);
+      expect(conversation.messages).toEqual([]);
+      expect(await service.hydrateConversationHistory(conversation, '/vault', contextA)).toEqual(first);
+      Object.assign(conversation, first);
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, '/vault', contextB));
 
       expect(conversation.messages.map(message => message.content)).toEqual([
         '/config-a',
         '/config-b',
       ]);
-      expect(locationSpy).toHaveBeenCalledTimes(2);
-      expect(loadSpy).toHaveBeenCalledTimes(2);
+      expect(loadSpy).toHaveBeenCalledTimes(3);
 
       locationSpy.mockRestore();
       loadSpy.mockRestore();
@@ -507,7 +449,7 @@ describe('ClaudeConversationHistoryService', () => {
 
       await service.getConversationSessionAvailability(conversation, '/vault');
       await service.getConversationSessionAvailability(conversation, '/vault');
-      await service.hydrateConversationHistory(conversation, '/vault');
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, '/vault'));
 
       expect(loadSpy).toHaveBeenCalledWith('/vault', 'session-1', undefined);
 
@@ -530,9 +472,10 @@ describe('ClaudeConversationHistoryService', () => {
       const loadSpy = jest.spyOn(historyStore, 'loadSDKSessionMessages')
         .mockResolvedValue({ messages: [], skippedLines: 0 });
 
+      await expect(service.getConversationSessionAvailability(conversation, '/vault'))
+        .resolves.toBe('relocated');
       await service.getConversationSessionAvailability(conversation, '/vault');
-      await service.getConversationSessionAvailability(conversation, '/vault');
-      await service.hydrateConversationHistory(conversation, '/vault');
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, '/vault'));
 
       expect(loadSpy).toHaveBeenCalledWith(
         '/vault',
@@ -572,7 +515,7 @@ describe('ClaudeConversationHistoryService', () => {
           skippedLines: 0,
         }));
 
-      await service.hydrateConversationHistory(conversation, '/vault');
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, '/vault'));
 
       expect(conversation.messages.map(message => message.content)).toEqual([
         'session-previous',
@@ -615,8 +558,8 @@ describe('ClaudeConversationHistoryService', () => {
           skippedLines: 0,
         });
 
-      await service.hydrateConversationHistory(conversation, '/vault');
-      await service.hydrateConversationHistory(conversation, '/vault');
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, '/vault'));
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, '/vault'));
 
       expect(conversation.messages).toHaveLength(1);
       expect(locationSpy).toHaveBeenCalledTimes(2);
@@ -657,8 +600,8 @@ describe('ClaudeConversationHistoryService', () => {
           };
         });
 
-      await service.hydrateConversationHistory(conversation, '/vault');
-      await service.hydrateConversationHistory(conversation, '/vault');
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, '/vault'));
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, '/vault'));
 
       expect(conversation.messages.map(message => message.content)).toEqual([
         'session-previous',
@@ -703,8 +646,8 @@ describe('ClaudeConversationHistoryService', () => {
           skippedLines: 0,
         }));
 
-      await service.hydrateConversationHistory(conversation, '/vault');
-      await service.hydrateConversationHistory(conversation, '/vault');
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, '/vault'));
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, '/vault'));
 
       expect(conversation.messages.map(message => message.content)).toEqual([
         'session-previous',

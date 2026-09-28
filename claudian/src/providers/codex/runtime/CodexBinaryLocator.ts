@@ -2,13 +2,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { findCliBinaryPath, resolveConfiguredCliPath } from '../../../utils/cliBinaryLocator';
-import { parseEnvironmentVariables } from '../../../utils/env';
-import { expandHomePath } from '../../../utils/path';
-import type { CodexInstallationMethod } from '../settings';
-import type { CodexExecutionTarget } from './codexLaunchTypes';
+import { findBinaryInDirectories, findCLIBinaryPath, isExistingFile, parseCLIPathEntries } from '@/utils/cliBinaryLocator';
+import { expandHomePath, stripSurroundingQuotes } from '@/utils/path';
 
-export function isWindowsStyleCliReference(value: string | null | undefined): boolean {
+export function isWindowsStyleCLIReference(value: string | null | undefined): boolean {
   const trimmed = (value ?? '').trim();
   if (!trimmed) {
     return false;
@@ -23,46 +20,26 @@ export function findCodexBinaryPath(
   additionalPath?: string,
   platform: NodeJS.Platform = process.platform,
 ): string | null {
-  const explicitPathBinary = findCodexBinaryInDirs(
-    parsePathEntriesForPlatform(additionalPath, platform),
-    platform,
+  const binaryNames = platform === 'win32'
+    ? ['codex.exe', 'codex.cmd', 'codex']
+    : ['codex'];
+  const explicitPathBinary = findBinaryInDirectories(
+    parseCLIPathEntries(additionalPath, platform),
+    binaryNames,
   );
   if (explicitPathBinary) {
     return explicitPathBinary;
   }
 
-  const preferredBinary = findCodexBinaryInDirs(
+  const preferredBinary = findBinaryInDirectories(
     getPreferredCodexBinaryDirs(platform),
-    platform,
+    binaryNames,
   );
   if (preferredBinary) {
     return preferredBinary;
   }
 
-  return findCliBinaryPath('codex', additionalPath, platform);
-}
-
-function getCodexBinaryNames(platform: NodeJS.Platform): string[] {
-  return platform === 'win32'
-    ? ['codex.exe', 'codex.cmd', 'codex']
-    : ['codex'];
-}
-
-function findCodexBinaryInDirs(dirs: string[], platform: NodeJS.Platform): string | null {
-  const binaryNames = getCodexBinaryNames(platform);
-
-  for (const dir of dirs) {
-    if (!dir) continue;
-
-    for (const binaryName of binaryNames) {
-      const candidate = path.join(dir, binaryName);
-      if (isExistingFile(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  return null;
+  return findCLIBinaryPath('codex', additionalPath, platform);
 }
 
 function getPreferredCodexBinaryDirs(platform: NodeJS.Platform): string[] {
@@ -75,6 +52,8 @@ function getPreferredCodexBinaryDirs(platform: NodeJS.Platform): string[] {
       path.join(home, 'Applications', 'Codex.app', 'Contents', 'MacOS'),
       '/Applications/Codex.app/Contents/MacOS',
       path.join(home, '.local', 'bin'),
+      path.join(home, 'Applications', 'ChatGPT.app', 'Contents', 'Resources'),
+      '/Applications/ChatGPT.app/Contents/Resources',
     ];
   }
 
@@ -84,80 +63,66 @@ function getPreferredCodexBinaryDirs(platform: NodeJS.Platform): string[] {
     ];
   }
 
-  return [];
+  return getPreferredWindowsCodexBinaryDirs();
+}
+
+function getPreferredWindowsCodexBinaryDirs(): string[] {
+  const preferredDirs: string[] = [];
+  const configuredInstallDir = process.env.CODEX_INSTALL_DIR?.trim();
+  if (configuredInstallDir) {
+    preferredDirs.push(expandHomePath(stripSurroundingQuotes(configuredInstallDir)));
+  }
+
+  const localAppData = process.env.LOCALAPPDATA;
+  if (localAppData) {
+    preferredDirs.push(path.join(localAppData, 'Programs', 'OpenAI', 'Codex', 'bin'));
+    preferredDirs.push(...getCompleteCodexDesktopRuntimeDirs(
+      path.join(localAppData, 'OpenAI', 'Codex', 'bin'),
+    ));
+  }
+
+  return [...new Set(preferredDirs)].filter(isCompleteWindowsCodexRuntimeDir);
+}
+
+function getCompleteCodexDesktopRuntimeDirs(runtimeRoot: string): string[] {
+  try {
+    return fs.readdirSync(runtimeRoot, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => path.join(runtimeRoot, entry.name))
+      .filter(isCompleteWindowsCodexRuntimeDir)
+      // Executable timestamps are a freshness heuristic, not an app-owned active-version marker.
+      .map(dir => ({ dir, mtime: getCodexBinaryMtime(dir) }))
+      .sort((left, right) => right.mtime - left.mtime
+        || (left.dir < right.dir ? -1 : left.dir > right.dir ? 1 : 0))
+      .map(candidate => candidate.dir);
+  } catch {
+    return [];
+  }
+}
+
+function isCompleteWindowsCodexRuntimeDir(dir: string): boolean {
+  return isExistingFile(path.join(dir, 'codex.exe'))
+    && isExistingFile(path.join(dir, 'codex-code-mode-host.exe'));
+}
+
+function getCodexBinaryMtime(dir: string): number {
+  try {
+    return fs.statSync(path.join(dir, 'codex.exe')).mtimeMs;
+  } catch {
+    return 0;
+  }
 }
 
 function getHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || os.homedir();
 }
 
-function isExistingFile(filePath: string): boolean {
-  try {
-    return fs.statSync(filePath).isFile();
-  } catch {
-    return false;
-  }
-}
-
-function parsePathEntriesForPlatform(pathValue: string | undefined, platform: NodeJS.Platform): string[] {
-  if (!pathValue) {
-    return [];
-  }
-
-  const delimiter = platform === 'win32' ? ';' : ':';
-  return pathValue
-    .split(delimiter)
-    .map(segment => stripSurroundingQuotes(segment.trim()))
-    .filter(segment => {
-      if (!segment) return false;
-      const upper = segment.toUpperCase();
-      return upper !== '$PATH' && upper !== '${PATH}' && upper !== '%PATH%';
-    })
-    .map(segment => expandHomePath(segment));
-}
-
-function stripSurroundingQuotes(value: string): string {
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1);
-  }
-  return value;
-}
-
-export function resolveCodexCliPath(
+export function resolveCodexWSLCLIPath(
   hostnamePath: string | undefined,
   legacyPath: string | undefined,
-  envText: string,
-  options: {
-    executionTarget?: CodexExecutionTarget;
-    installationMethod?: CodexInstallationMethod;
-    hostPlatform?: NodeJS.Platform;
-  } = {},
-): string | null {
-  const hostPlatform = options.hostPlatform ?? process.platform;
-  const isWslTarget = options.executionTarget
-    ? options.executionTarget.method === 'wsl'
-    : hostPlatform === 'win32' && options.installationMethod === 'wsl';
-
-  if (isWslTarget) {
-    const configuredCommand = [hostnamePath, legacyPath]
-      .map(value => (value ?? '').trim())
-      .find(value => value.length > 0 && !isWindowsStyleCliReference(value));
-    return configuredCommand || 'codex';
-  }
-
-  const configuredHostnamePath = resolveConfiguredCliPath(hostnamePath);
-  if (configuredHostnamePath) {
-    return configuredHostnamePath;
-  }
-
-  const configuredLegacyPath = resolveConfiguredCliPath(legacyPath);
-  if (configuredLegacyPath) {
-    return configuredLegacyPath;
-  }
-
-  const customEnv = parseEnvironmentVariables(envText || '');
-  return findCodexBinaryPath(customEnv.PATH, hostPlatform);
+): string {
+  const configuredCommand = [hostnamePath, legacyPath]
+    .map(value => stripSurroundingQuotes((value ?? '').trim()))
+    .find(value => value.length > 0 && !isWindowsStyleCLIReference(value));
+  return configuredCommand || 'codex';
 }

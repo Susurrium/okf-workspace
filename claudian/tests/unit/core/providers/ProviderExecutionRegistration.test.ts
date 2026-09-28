@@ -5,18 +5,13 @@ import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import { ClaudeExecutionBackend } from '@/providers/claude/execution/ClaudeExecutionBackend';
 import { ClaudeSubagentHistoryService } from '@/providers/claude/history/ClaudeSubagentHistoryService';
-import { claudeProviderRegistration } from '@/providers/claude/registration';
 import { CodexExecutionBackend } from '@/providers/codex/execution/CodexExecutionBackend';
-import { codexProviderRegistration } from '@/providers/codex/registration';
 import { GrokCommandCatalog } from '@/providers/grok/commands/GrokCommandCatalog';
 import { GrokExecutionBackend } from '@/providers/grok/execution/GrokExecutionBackend';
-import { grokProviderRegistration } from '@/providers/grok/registration';
 import { OpencodeCommandCatalog } from '@/providers/opencode/commands/OpencodeCommandCatalog';
 import { OpencodeExecutionBackend } from '@/providers/opencode/execution/OpencodeExecutionBackend';
-import { opencodeProviderRegistration } from '@/providers/opencode/registration';
 import { PiCommandCatalog } from '@/providers/pi/commands/PiCommandCatalog';
 import { PiExecutionBackend } from '@/providers/pi/execution/PiExecutionBackend';
-import { piProviderRegistration } from '@/providers/pi/registration';
 
 function createHost(): any {
   const executionLifecycleRegistry = new ProviderExecutionLifecycleRegistry();
@@ -52,30 +47,8 @@ describe('provider execution registration', () => {
     ProviderWorkspaceRegistry.setServices('pi', undefined);
   });
 
-  it('exposes exactly one execution factory per provider registration', () => {
-    for (const registration of [
-      claudeProviderRegistration,
-      codexProviderRegistration,
-      grokProviderRegistration,
-      opencodeProviderRegistration,
-      piProviderRegistration,
-    ]) {
-      expect(registration).toHaveProperty('createExecutionBackend', expect.any(Function));
-      expect(
-        Object.keys(registration).filter(key => (
-          key.startsWith('create') && key.endsWith('Backend')
-        )),
-      ).toEqual(['createExecutionBackend']);
-    }
-  });
-
   it('constructs every registered backend without creating a provider session', () => {
     const host = createHost();
-    ProviderWorkspaceRegistry.setServices('claude', {
-      agentManager: {},
-      commandCatalog: {},
-      pluginManager: {},
-    } as any);
     ProviderWorkspaceRegistry.setServices('codex', {} as any);
     ProviderWorkspaceRegistry.setServices('grok', {
       commandCatalog: new GrokCommandCatalog(),

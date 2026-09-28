@@ -43,6 +43,246 @@
   letter-spacing: -0.01em;
 }
 
+.claudian-welcome-linked-content {
+  position: relative;
+  min-width: 0;
+  width: min(420px, 100%);
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.claudian-welcome-linked-content:empty {
+  display: none;
+}
+
+.claudian-linked-content-selector-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 4px;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.claudian-linked-content-selector {
+  appearance: none;
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  overflow: hidden;
+  direction: ltr;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.claudian-linked-content-selector:hover,
+.claudian-linked-content-selector:focus-visible,
+.claudian-linked-content-selector:active {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+}
+
+.claudian-linked-content-selector:focus-visible {
+  outline: none;
+}
+
+.claudian-linked-content-selector:disabled {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.claudian-welcome-linked-content .claudian-linked-content-selector-row > button.claudian-linked-content-selector,
+.claudian-welcome-linked-content .claudian-linked-content-selector-row > button.claudian-linked-content-selector:hover,
+.claudian-welcome-linked-content .claudian-linked-content-selector-row > button.claudian-linked-content-selector:focus-visible,
+.claudian-welcome-linked-content .claudian-linked-content-selector-row > button.claudian-linked-content-selector:active {
+  appearance: none;
+  min-width: 0;
+  width: auto;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
+.claudian-linked-content-selector-row.is-editing .claudian-linked-content-selector {
+  display: none;
+}
+
+.claudian-linked-content-selector-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+}
+
+.claudian-linked-content-selector-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.claudian-linked-content-selector-prefix {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.claudian-linked-content-picker.claudian-composer-dropdown.is-visible {
+  position: absolute;
+  inset-block-start: calc(100% + 6px);
+  inset-inline: 0;
+  bottom: auto;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  max-height: min(360px, 55vh);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  text-align: start;
+}
+
+.claudian-linked-content-picker-search {
+  min-width: 0;
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--interactive-accent);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+  font: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.claudian-linked-content-picker-search:hover {
+  border: 0;
+  border-bottom: 1px solid var(--interactive-accent);
+  background: transparent;
+  box-shadow: none;
+}
+
+.claudian-linked-content-picker-search:focus {
+  outline: none;
+  border: 0;
+  border-bottom: 1px solid var(--interactive-accent);
+  background: transparent;
+  box-shadow: none;
+}
+
+.claudian-welcome-linked-content .claudian-linked-content-selector-row > input[type='text'].claudian-linked-content-picker-search,
+.claudian-welcome-linked-content .claudian-linked-content-selector-row > input[type='text'].claudian-linked-content-picker-search:hover,
+.claudian-welcome-linked-content .claudian-linked-content-selector-row > input[type='text'].claudian-linked-content-picker-search:focus,
+.claudian-welcome-linked-content .claudian-linked-content-selector-row > input[type='text'].claudian-linked-content-picker-search:active {
+  appearance: none;
+  min-height: 0;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--interactive-accent);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.claudian-linked-content-picker-search::placeholder {
+  color: var(--text-muted);
+}
+
+.claudian-linked-content-picker-search:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.claudian-linked-content-picker-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.claudian-linked-content-picker-option-path::before {
+  content: ' ';
+}
+
+.claudian-linked-content-picker button.claudian-linked-content-picker-option {
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-family: inherit;
+  text-align: start;
+}
+
+.claudian-linked-content-picker button.claudian-linked-content-picker-option:focus-visible,
+.claudian-linked-content-picker button.claudian-linked-content-picker-option:active {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.claudian-linked-content-picker button.claudian-linked-content-picker-option:focus-visible {
+  outline: 1px solid var(--interactive-accent);
+  outline-offset: -1px;
+}
+
+.claudian-linked-content-picker button.claudian-linked-content-picker-option:hover,
+.claudian-linked-content-picker button.claudian-linked-content-picker-option.is-selected {
+  background: var(--background-modifier-hover);
+}
+
+.claudian-linked-content-picker button.claudian-linked-content-picker-option:disabled {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.claudian-linked-content-picker-empty {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.claudian-linked-content-picker-empty {
+  padding: 8px;
+  text-align: center;
+}
+
 .claudian-message {
   padding: 10px 14px;
   border-radius: 8px;
@@ -52,9 +292,25 @@
 
 .claudian-message-user {
   position: relative;
-  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 0;
   align-self: flex-end;
+}
+
+.claudian-message-user > .claudian-message-content {
+  position: relative;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
   border-end-end-radius: 4px;
+}
+
+.claudian-message-user ol {
+  list-style-position: inside;
 }
 
 .claudian-message-user ol > li::marker {
@@ -68,6 +324,9 @@
 }
 
 .claudian-message-assistant {
+  flex-shrink: 0;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 23.5rem;
   background: transparent;
   align-self: stretch;
   width: 100%;
@@ -76,8 +335,14 @@
   text-align: start;
 }
 
+body.mod-windows .claudian-message-assistant {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
+
 .claudian-message-content {
   line-height: 1.5;
+  overflow-x: auto;
   user-select: text;
   -webkit-user-select: text;
   unicode-bidi: plaintext; /* Proper BiDi text handling for mixed RTL/LTR */
@@ -96,13 +361,22 @@
   margin: 0;
 }
 
-.claudian-text-copy-btn {
+button.claudian-text-copy-btn {
+  appearance: none;
   position: absolute;
   bottom: 0;
   inset-inline-end: 0;
-  border: none;
+  width: auto;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--text-faint);
   cursor: pointer;
+  font: inherit;
   opacity: 0;
   transition: opacity 0.15s ease, color 0.15s ease;
   z-index: 2;
@@ -111,20 +385,41 @@
   gap: 4px;
 }
 
-.claudian-text-copy-btn svg {
+button.claudian-text-copy-btn svg {
   width: 16px;
   height: 16px;
 }
 
-.claudian-text-block:hover .claudian-text-copy-btn {
+.claudian-text-block:hover button.claudian-text-copy-btn {
   opacity: 1;
 }
 
-.claudian-text-copy-btn:hover {
+button.claudian-text-copy-btn:hover,
+button.claudian-text-copy-btn:focus-visible,
+button.claudian-text-copy-btn:active {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--text-normal);
 }
 
-.claudian-text-copy-btn.copied {
+button.claudian-text-copy-btn:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+  opacity: 1;
+}
+
+button.claudian-text-copy-btn:disabled {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-faint);
+  cursor: default;
+}
+
+button.claudian-text-copy-btn.copied {
   color: var(--text-accent);
   font-size: 11px;
   font-family: var(--font-monospace);
@@ -164,6 +459,8 @@
   border: 1px solid var(--background-modifier-border);
   padding: 6px 10px;
   text-align: start;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .claudian-message-content th {
@@ -192,53 +489,221 @@
   background: var(--background-modifier-border-hover);
 }
 
-/* Response duration footer - styled as another line of content */
-.claudian-response-footer {
+/* Message timestamps and throughput share the toolbar's text size. */
+.claudian-message-timestamp,
+.claudian-response-throughput {
+  font-size: 11px;
+}
+
+.claudian-message-timestamp {
+  margin-top: 6px;
+  color: var(--text-faint);
+  line-height: 1.2;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.claudian-message-user .claudian-message-timestamp {
+  text-align: end;
+}
+
+.claudian-message-images .claudian-message-timestamp {
+  flex-basis: 100%;
+  margin-top: 0;
+  text-align: end;
+}
+
+/* Completed turn history and message actions */
+.claudian-work,
+.claudian-task-notification {
+  margin-bottom: 10px;
+}
+
+button.claudian-work-header {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+button.claudian-work-header:hover,
+button.claudian-work-header:focus-visible,
+button.claudian-work-header:active {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-normal);
+}
+
+button.claudian-work-header:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+button.claudian-work-header:disabled {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.claudian-work-history {
+  margin-top: 8px;
+  padding-inline-start: 12px;
+  border-inline-start: 1px solid var(--background-modifier-border);
+}
+
+.claudian-work-history[hidden] {
+  display: none;
+}
+
+.claudian-work-history > .claudian-message {
+  padding: 0 0 8px;
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
+
+.claudian-user-msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-top: 8px;
 }
 
-.claudian-baked-duration {
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 500;
-  font-style: italic;
+.claudian-message-user > .claudian-user-msg-actions {
+  justify-content: flex-end;
 }
 
-/* Action buttons toolbar below user messages */
-.claudian-user-msg-actions {
-  position: absolute;
-  bottom: -20px;
-  right: 0;
-  display: flex;
-  gap: 12px;
+/* Keep the row in the message's hover area without shifting the conversation. */
+.claudian-message-actions {
   opacity: 0;
-  transition: opacity 0.15s;
-  z-index: 1;
+  pointer-events: none;
 }
 
-.claudian-message-user:hover .claudian-user-msg-actions {
+/* Focus reveals the row only from its own buttons: collapsible headers elsewhere in
+   the turn keep DOM focus after a click and would otherwise pin the row open. */
+.claudian-message:hover > .claudian-message-actions,
+.claudian-message-images:hover > .claudian-message-actions,
+.claudian-message-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.claudian-branch-position {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  font-variant-numeric: tabular-nums;
+}
+
+.claudian-message-user.claudian-message-branched {
+  max-width: min(95%, calc(100% - 26px));
+}
+
+/* Keep the marker outside the bubble visible while long prompt content scrolls. */
+.claudian-message-branched > .claudian-message-content {
+  overflow: visible;
+}
+
+.claudian-message-branched > .claudian-message-content > .claudian-text-block {
+  overflow-x: auto;
+}
+
+.claudian-branch-marker {
+  position: absolute;
+  left: -22px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  color: var(--text-faint);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.claudian-branch-marker svg {
+  width: 14px;
+  height: 14px;
+}
+
+.claudian-message-user:hover .claudian-branch-marker,
+.claudian-message-user:focus-within .claudian-branch-marker {
+  opacity: 0;
+}
+
+.claudian-message-actions .claudian-message-timestamp {
+  margin-top: 0;
+}
+
+/* Toolbar text sits in the same 16px box as the action icons. */
+.claudian-message-actions .claudian-message-timestamp,
+.claudian-message-actions .claudian-response-throughput {
+  font-size: var(--font-ui-small);
+  line-height: 16px;
+}
+
+.claudian-message-assistant > .claudian-message-actions .claudian-message-timestamp {
+  margin-inline-start: auto;
+}
+
+.claudian-message-actions button.claudian-text-copy-btn {
+  position: static;
   opacity: 1;
 }
 
-.claudian-user-msg-actions span {
+.claudian-user-msg-actions button {
+  appearance: none;
+  width: auto;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-faint);
+  color: var(--text-muted);
+  font: inherit;
   transition: color 0.15s;
 }
 
-.claudian-user-msg-actions span svg {
+.claudian-user-msg-actions button svg {
   width: 16px;
   height: 16px;
 }
 
-.claudian-user-msg-actions span:hover {
+.claudian-user-msg-actions button:hover,
+.claudian-user-msg-actions button:focus-visible,
+.claudian-user-msg-actions button:active {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   color: var(--text-normal);
 }
 
-.claudian-user-msg-actions span.copied {
+.claudian-user-msg-actions button:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.claudian-user-msg-actions button:disabled {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.claudian-user-msg-actions button.copied {
   color: var(--text-accent);
   font-size: 11px;
   font-family: var(--font-monospace);
@@ -293,4 +758,65 @@
 .claudian-tab-hydration-error {
   max-width: 420px;
   color: var(--text-error, var(--claudian-error));
+}
+
+.claudian-message-actions:empty {
+  display: none;
+}
+
+.claudian-message-images > .claudian-message-actions {
+  flex-basis: 100%;
+  justify-content: flex-end;
+}
+
+.claudian-response-throughput {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Floating Quote action over text selected in a message */
+.claudian-messages-wrapper button.claudian-message-quote-btn,
+.claudian-messages-wrapper button.claudian-message-quote-btn:hover,
+.claudian-messages-wrapper button.claudian-message-quote-btn:focus-visible,
+.claudian-messages-wrapper button.claudian-message-quote-btn:active {
+  appearance: none;
+  position: absolute;
+  top: var(--claudian-quote-btn-top, 0);
+  left: var(--claudian-quote-btn-left, 0);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: auto;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  padding: 3px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+  box-shadow: var(--shadow-s);
+  color: var(--text-normal);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--font-ui-small);
+}
+
+.claudian-messages-wrapper button.claudian-message-quote-btn:hover {
+  background: var(--background-secondary-alt);
+}
+
+.claudian-messages-wrapper button.claudian-message-quote-btn:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+
+.claudian-messages-wrapper button.claudian-message-quote-btn[hidden] {
+  display: none;
+}
+
+.claudian-message-quote-btn-icon {
+  display: block;
+  width: 1em;
+  height: 1em;
 }

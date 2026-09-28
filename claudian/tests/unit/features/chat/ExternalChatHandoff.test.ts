@@ -62,6 +62,67 @@ describe('applyExternalChatHandoff', () => {
     expect(result.sent).toBe(true);
   });
 
+  it('does not send an empty composer even when auto-send is requested', async () => {
+    const codex = createTarget('codex');
+    const host: jest.Mocked<ExternalChatHandoffHost> = {
+      getActiveTarget: jest.fn(() => codex),
+      createTarget: jest.fn(),
+    };
+
+    const result = await applyExternalChatHandoff(host, {
+      providerId: 'codex',
+      composerText: '',
+      contextPaths: ['sources/example.md'],
+      actionMode: 'read',
+      autoSend: true,
+      newSession: false,
+    });
+
+    expect(codex.setComposerText).not.toHaveBeenCalled();
+    expect(codex.sendComposer).not.toHaveBeenCalled();
+    expect(result).toEqual({ accepted: true, sent: false, contextCount: 1, actionMode: 'read' });
+  });
+
+  it('creates a new Codex target when newSession is requested, even if Codex is active', async () => {
+    const activeCodex = createTarget('codex');
+    const newCodex = createTarget('codex');
+    const host: jest.Mocked<ExternalChatHandoffHost> = {
+      getActiveTarget: jest.fn(() => activeCodex),
+      createTarget: jest.fn().mockResolvedValue(newCodex),
+    };
+
+    const result = await applyExternalChatHandoff(host, {
+      providerId: 'codex',
+      composerText: 'Review this source',
+      contextPaths: ['sources/example.md'],
+      actionMode: 'plan',
+      autoSend: false,
+      newSession: true,
+    });
+
+    expect(host.createTarget).toHaveBeenCalledWith('codex');
+    expect(activeCodex.setComposerText).not.toHaveBeenCalled();
+    expect(newCodex.setComposerText).toHaveBeenCalledWith('Review this source');
+    expect(newCodex.setActionMode).toHaveBeenCalledWith('plan');
+    expect(result).toEqual({ accepted: true, sent: false, contextCount: 1, actionMode: 'plan' });
+  });
+
+  it('fails clearly when the host cannot create the requested view', async () => {
+    const host: jest.Mocked<ExternalChatHandoffHost> = {
+      getActiveTarget: jest.fn(() => null),
+      createTarget: jest.fn().mockResolvedValue(null),
+    };
+
+    await expect(applyExternalChatHandoff(host, {
+      providerId: 'codex',
+      composerText: 'Review this source',
+      contextPaths: [],
+      actionMode: 'read',
+      autoSend: false,
+      newSession: true,
+    })).rejects.toThrow('Could not create a codex chat target.');
+  });
+
   it('fails before mutating a target returned for the wrong provider', async () => {
     const claude = createTarget('claude');
     const host: jest.Mocked<ExternalChatHandoffHost> = {

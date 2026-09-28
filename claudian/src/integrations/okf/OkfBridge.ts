@@ -8,6 +8,7 @@ import type { ChatActionMode } from '../../features/chat/state/types';
 export const OKF_BRIDGE_VERSION = 1 as const;
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+const ACTION_MODES = ['read', 'write', 'plan'] as const;
 
 export interface OkfHandoffRequestV1 {
   prompt?: string;
@@ -86,11 +87,15 @@ export function normalizeOkfHandoff(
     throw new Error('Invalid OKF skill name.');
   }
 
+  const actionMode = request.actionMode ?? 'read';
+  if (!(ACTION_MODES as readonly unknown[]).includes(actionMode)) {
+    throw new Error('Invalid OKF action mode.');
+  }
   const contextPaths = [...new Set((request.contextPaths ?? []).map(normalizeVaultPath))];
   return {
     prompt: request.prompt?.trim() ?? '',
     contextPaths,
-    actionMode: request.actionMode ?? 'read',
+    actionMode,
     skill,
     autoSend: request.autoSend === true,
     newSession: request.newSession !== false,
@@ -103,6 +108,9 @@ function buildOkfComposerText(handoff: NormalizedOkfHandoffV1): string {
 }
 
 function normalizeVaultPath(value: string): string {
+  if (typeof value !== 'string') {
+    throw new Error('Invalid Vault context path: expected a string.');
+  }
   const path = value.replaceAll('\\', '/').replace(/^\.\//u, '').trim();
   if (
     !path

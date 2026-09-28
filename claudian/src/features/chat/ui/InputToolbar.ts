@@ -1,7 +1,6 @@
 import { Notice, setIcon } from 'obsidian';
-import * as os from 'os';
-import * as path from 'path';
 
+import { formatReasoningValueLabel } from '../../../core/providers/reasoning';
 import type {
   ProviderCapabilities,
   ProviderChatUIConfig,
@@ -12,27 +11,14 @@ import type {
   ProviderUIOption,
 } from '../../../core/providers/types';
 import type { UsageInfo } from '../../../core/types';
-import { t } from '../../../i18n/i18n';
 import { createProviderIconSvg } from '../../../shared/icons';
 import {
   cancelScheduledAnimationFrame,
   scheduleAnimationFrame,
   type ScheduledAnimationFrame,
 } from '../../../utils/animationFrame';
-import { filterValidPaths, findConflictingPath, isDuplicatePath, isValidDirectoryPath, validateDirectoryPath } from '../../../utils/externalContext';
-import { expandHomePath, normalizePathForFilesystem } from '../../../utils/path';
 import { toggleServiceTier } from '../actions/toggleServiceTier';
-
-interface ElectronOpenDialogResult {
-  canceled: boolean;
-  filePaths: string[];
-}
-
-interface ElectronRemoteApi {
-  dialog: {
-    showOpenDialog(options: { properties: string[]; title: string }): Promise<ElectronOpenDialogResult>;
-  };
-}
+import type { ChatSettings } from '../ChatSettings';
 
 function runToolbarAction(action: () => Promise<void>, failureMessage: string): void {
   void action().catch(() => {
@@ -40,14 +26,7 @@ function runToolbarAction(action: () => Promise<void>, failureMessage: string): 
   });
 }
 
-export interface ToolbarSettings {
-  model: string;
-  thinkingBudget: string;
-  effortLevel: string;
-  serviceTier: string;
-  permissionMode: string;
-  [key: string]: unknown;
-}
+export type ToolbarSettings = ChatSettings & Record<string, unknown>;
 
 export interface ToolbarCallbacks {
   onModelChange: (model: string) => Promise<void>;
@@ -77,7 +56,7 @@ export class ModelSelector {
     });
   }
 
-  private getAvailableModels() {
+  #getAvailableModels() {
     const settings = this.callbacks.getSettings();
     const uiConfig = this.callbacks.getUIConfig();
     return uiConfig.getModelOptions({
@@ -99,7 +78,7 @@ export class ModelSelector {
   updateDisplay() {
     if (!this.buttonEl) return;
     const currentModel = this.callbacks.getSettings().model;
-    const models = this.getAvailableModels();
+    const models = this.#getAvailableModels();
     const modelInfo = models.find(m => m.value === currentModel);
 
     const displayModel = modelInfo || models[0];
@@ -117,7 +96,8 @@ export class ModelSelector {
       });
     }
     const labelEl = this.buttonEl.createSpan({ cls: 'claudian-model-label' });
-    labelEl.setText(displayModel?.label || t('interface.unknown'));
+    labelEl.setText(modelInfo?.label || (currentModel ? 'Model unavailable' : 'Set up models'));
+    this.buttonEl.title = modelInfo ? '' : 'Choose an enabled model in provider settings. If discovery failed, refresh the model list.';
   }
 
   renderOptions() {
@@ -125,7 +105,10 @@ export class ModelSelector {
     this.dropdownEl.empty();
 
     const currentModel = this.callbacks.getSettings().model;
-    const models = this.getAvailableModels();
+    const models = this.#getAvailableModels();
+    if (!models.length) {
+      this.dropdownEl.createDiv({ text: 'No models available. Check provider settings and refresh the model list if discovery failed.', attr: { role: 'status' } });
+    }
     const reversed = [...models].reverse();
 
     let lastGroup: string | undefined;
@@ -161,7 +144,7 @@ export class ModelSelector {
           await this.callbacks.onModelChange(model.value);
           this.updateDisplay();
           this.renderOptions();
-        }, t('interface.modelFailed'));
+        }, 'Failed to change model');
       });
     }
   }
@@ -179,7 +162,7 @@ export class ModeSelector {
     this.render();
   }
 
-  private getSelectorConfig(): ProviderModeSelectorConfig | null {
+  #getSelectorConfig(): ProviderModeSelectorConfig | null {
     return this.callbacks.getUIConfig().getModeSelector?.(this.callbacks.getSettings()) ?? null;
   }
 
@@ -190,14 +173,14 @@ export class ModeSelector {
     this.toggleEl = this.container.createDiv({ cls: 'claudian-toggle-switch' });
 
     this.toggleEl.addEventListener('click', () => {
-      runToolbarAction(() => this.toggle(), t('interface.modeFailed'));
+      runToolbarAction(() => this.toggle(), 'Failed to change mode');
     });
 
     this.updateDisplay();
   }
 
   /** Resolves the active/inactive option pair for a two-option toggle. */
-  private resolveOptionPair(
+  #resolveOptionPair(
     selectorConfig: ProviderModeSelectorConfig,
   ): { active: ProviderUIOption; inactive: ProviderUIOption } {
     const [first, second] = selectorConfig.options;
@@ -213,14 +196,14 @@ export class ModeSelector {
       return;
     }
 
-    const selectorConfig = this.getSelectorConfig();
+    const selectorConfig = this.#getSelectorConfig();
     if (!selectorConfig || selectorConfig.options.length !== 2) {
       this.container.addClass('claudian-hidden');
       return;
     }
 
     this.container.removeClass('claudian-hidden');
-    const { active, inactive } = this.resolveOptionPair(selectorConfig);
+    const { active, inactive } = this.#resolveOptionPair(selectorConfig);
     const currentOption = selectorConfig.options.find((option) => option.value === selectorConfig.value)
       ?? selectorConfig.options[0];
     const isActive = currentOption.value === active.value;
@@ -245,12 +228,12 @@ export class ModeSelector {
   }
 
   private async toggle() {
-    const selectorConfig = this.getSelectorConfig();
+    const selectorConfig = this.#getSelectorConfig();
     if (!selectorConfig || selectorConfig.options.length !== 2) {
       return;
     }
 
-    const { active, inactive } = this.resolveOptionPair(selectorConfig);
+    const { active, inactive } = this.#resolveOptionPair(selectorConfig);
     const nextValue = selectorConfig.value === active.value ? inactive.value : active.value;
     await this.callbacks.onModeChange(nextValue);
     this.updateDisplay();
@@ -277,31 +260,31 @@ export class ThinkingBudgetSelector {
     // Effort selector (for adaptive thinking models)
     this.effortEl = this.container.createDiv({ cls: 'claudian-thinking-effort' });
     const effortLabel = this.effortEl.createSpan({ cls: 'claudian-thinking-label-text' });
-    effortLabel.setText(t('interface.effort'));
+    effortLabel.setText('Effort:');
     this.effortGearsEl = this.effortEl.createDiv({ cls: 'claudian-thinking-gears' });
 
     // Legacy budget selector (for custom models)
     this.budgetEl = this.container.createDiv({ cls: 'claudian-thinking-budget' });
     const budgetLabel = this.budgetEl.createSpan({ cls: 'claudian-thinking-label-text' });
-    budgetLabel.setText(t('interface.thinking'));
+    budgetLabel.setText('Thinking:');
     this.budgetGearsEl = this.budgetEl.createDiv({ cls: 'claudian-thinking-gears' });
 
     this.updateDisplay();
   }
 
-  private renderEffortGears() {
+  #renderEffortGears() {
     if (!this.effortGearsEl) return;
     this.effortGearsEl.empty();
 
-    const currentEffort = this.callbacks.getSettings().effortLevel;
-    const uiConfig = this.callbacks.getUIConfig();
     const settings = this.callbacks.getSettings();
+    const currentEffort = settings.reasoning;
+    const uiConfig = this.callbacks.getUIConfig();
     const model = settings.model;
     const options = uiConfig.getReasoningOptions(model, settings);
     const currentInfo = options.find(e => e.value === currentEffort);
 
     const currentEl = this.effortGearsEl.createDiv({ cls: 'claudian-thinking-current' });
-    currentEl.setText(currentInfo?.label || options[0]?.label || 'High');
+    currentEl.setText(currentInfo?.label ?? (currentEffort ? formatReasoningValueLabel(currentEffort) : 'Default'));
 
     const optionsEl = this.effortGearsEl.createDiv({ cls: 'claudian-thinking-options' });
 
@@ -326,19 +309,19 @@ export class ThinkingBudgetSelector {
     }
   }
 
-  private renderBudgetGears() {
+  #renderBudgetGears() {
     if (!this.budgetGearsEl) return;
     this.budgetGearsEl.empty();
 
-    const currentBudget = this.callbacks.getSettings().thinkingBudget;
-    const uiConfig = this.callbacks.getUIConfig();
     const settings = this.callbacks.getSettings();
+    const currentBudget = settings.reasoning;
+    const uiConfig = this.callbacks.getUIConfig();
     const model = settings.model;
     const options: ProviderReasoningOption[] = uiConfig.getReasoningOptions(model, settings);
     const currentBudgetInfo = options.find(b => b.value === currentBudget);
 
     const currentEl = this.budgetGearsEl.createDiv({ cls: 'claudian-thinking-current' });
-    currentEl.setText(currentBudgetInfo?.label || options[0]?.label || 'Off');
+    currentEl.setText(currentBudgetInfo?.label ?? (currentBudget ? formatReasoningValueLabel(currentBudget) : 'Default'));
 
     const optionsEl = this.budgetGearsEl.createDiv({ cls: 'claudian-thinking-options' });
 
@@ -394,9 +377,9 @@ export class ThinkingBudgetSelector {
     }
 
     if (adaptive) {
-      this.renderEffortGears();
+      this.#renderEffortGears();
     } else {
-      this.renderBudgetGears();
+      this.#renderBudgetGears();
     }
   }
 }
@@ -428,11 +411,11 @@ export class PermissionToggle {
     this.updateDisplay();
 
     this.toggleEl.addEventListener('click', () => {
-      runToolbarAction(() => this.toggle(), t('interface.permissionFailed'));
+      runToolbarAction(() => this.toggle(), 'Failed to change permission mode');
     });
   }
 
-  private getToggleConfig(): ProviderPermissionModeToggleConfig | null {
+  #getToggleConfig(): ProviderPermissionModeToggleConfig | null {
     const uiConfig = this.callbacks.getUIConfig();
     return uiConfig.getPermissionModeToggle?.() ?? null;
   }
@@ -440,8 +423,7 @@ export class PermissionToggle {
   updateDisplay() {
     if (!this.toggleEl || !this.labelEl) return;
 
-    const toggleConfig = this.getToggleConfig();
-    const capabilities = this.callbacks.getCapabilities();
+    const toggleConfig = this.#getToggleConfig();
     if (!this.visible || !toggleConfig) {
       this.container.addClass('claudian-hidden');
       return;
@@ -449,36 +431,17 @@ export class PermissionToggle {
 
     this.container.removeClass('claudian-hidden');
     const mode = this.callbacks.getSettings().permissionMode;
-    const planValue = toggleConfig.planValue;
-    const planLabel = toggleConfig.planLabel ?? 'PLAN';
-    const canShowPlan = Boolean(planValue) && capabilities.supportsPlanMode;
-    const description = canShowPlan && mode === planValue
-      ? toggleConfig.planDescription
-      : mode === toggleConfig.activeValue
-        ? toggleConfig.activeDescription
-        : toggleConfig.inactiveDescription;
-    if (description) this.container.setAttribute('title', description);
-    else this.container.removeAttribute('title');
-
-    if (canShowPlan && planValue && mode === planValue) {
-      this.toggleEl.addClass('claudian-hidden');
-      this.labelEl.setText(planLabel);
-      this.labelEl.addClass('plan-active');
+    if (mode === toggleConfig.activeValue) {
+      this.toggleEl.addClass('active');
+      this.labelEl.setText(toggleConfig.activeLabel);
     } else {
-      this.toggleEl.removeClass('claudian-hidden');
-      this.labelEl.removeClass('plan-active');
-      if (mode === toggleConfig.activeValue) {
-        this.toggleEl.addClass('active');
-        this.labelEl.setText(toggleConfig.activeLabel);
-      } else {
-        this.toggleEl.removeClass('active');
-        this.labelEl.setText(toggleConfig.inactiveLabel);
-      }
+      this.toggleEl.removeClass('active');
+      this.labelEl.setText(toggleConfig.inactiveLabel);
     }
   }
 
   private async toggle() {
-    const toggleConfig = this.getToggleConfig();
+    const toggleConfig = this.#getToggleConfig();
     if (!toggleConfig) return;
 
     const current = this.callbacks.getSettings().permissionMode;
@@ -518,7 +481,7 @@ export class ServiceTierToggle {
     });
   }
 
-  private getToggleConfig(): ProviderServiceTierToggleConfig | null {
+  #getToggleConfig(): ProviderServiceTierToggleConfig | null {
     const uiConfig = this.callbacks.getUIConfig();
     return uiConfig.getServiceTierToggle?.(this.callbacks.getSettings()) ?? null;
   }
@@ -526,7 +489,7 @@ export class ServiceTierToggle {
   updateDisplay() {
     if (!this.buttonEl || !this.iconEl) return;
 
-    const toggleConfig = this.getToggleConfig();
+    const toggleConfig = this.#getToggleConfig();
     if (!toggleConfig) {
       this.container.addClass('claudian-hidden');
       return;
@@ -554,356 +517,6 @@ export class ServiceTierToggle {
   }
 }
 
-export type AddExternalContextResult =
-  | { success: true; normalizedPath: string }
-  | { success: false; error: string };
-
-export class ExternalContextSelector {
-  private container: HTMLElement;
-  private iconEl: HTMLElement | null = null;
-  private badgeEl: HTMLElement | null = null;
-  private dropdownEl: HTMLElement | null = null;
-  private callbacks: ToolbarCallbacks;
-  /**
-   * Current external context paths. May contain:
-   * - Persistent paths only (new sessions via clearExternalContexts)
-   * - Restored session paths (loaded sessions via setExternalContexts)
-   * - Mixed paths during active sessions
-   */
-  private externalContextPaths: string[] = [];
-  /** Paths that persist across all sessions (stored in settings). */
-  private persistentPaths: Set<string> = new Set();
-  private onChangeCallback: ((paths: string[]) => void) | null = null;
-  private onPersistenceChangeCallback: ((paths: string[]) => void) | null = null;
-
-  constructor(parentEl: HTMLElement, callbacks: ToolbarCallbacks) {
-    this.callbacks = callbacks;
-    this.container = parentEl.createDiv({ cls: 'claudian-external-context-selector' });
-    this.render();
-  }
-
-  setOnChange(callback: (paths: string[]) => void): void {
-    this.onChangeCallback = callback;
-  }
-
-  setOnPersistenceChange(callback: (paths: string[]) => void): void {
-    this.onPersistenceChangeCallback = callback;
-  }
-
-  getExternalContexts(): string[] {
-    return [...this.externalContextPaths];
-  }
-
-  getPersistentPaths(): string[] {
-    return [...this.persistentPaths];
-  }
-
-  setPersistentPaths(paths: string[]): void {
-    // Validate paths - remove non-existent directories
-    const validPaths = filterValidPaths(paths);
-    const invalidPaths = paths.filter(p => !validPaths.includes(p));
-
-    this.persistentPaths = new Set(validPaths);
-    // Merge persistent paths into external context paths
-    this.mergePersistentPaths();
-    this.updateDisplay();
-    this.renderDropdown();
-
-    // If invalid paths were removed, notify user and save updated list
-    if (invalidPaths.length > 0) {
-      const pathNames = invalidPaths.map(p => this.shortenPath(p)).join(', ');
-      new Notice(`Removed ${invalidPaths.length} invalid external context path(s): ${pathNames}`, 5000);
-      this.onPersistenceChangeCallback?.([...this.persistentPaths]);
-    }
-  }
-
-  togglePersistence(path: string): void {
-    if (this.persistentPaths.has(path)) {
-      this.persistentPaths.delete(path);
-    } else {
-      // Validate path still exists before persisting
-      if (!isValidDirectoryPath(path)) {
-        new Notice(`Cannot persist "${this.shortenPath(path)}" - directory no longer exists`, 4000);
-        return;
-      }
-      this.persistentPaths.add(path);
-    }
-    this.onPersistenceChangeCallback?.([...this.persistentPaths]);
-    this.renderDropdown();
-  }
-
-  private mergePersistentPaths(): void {
-    const pathSet = new Set(this.externalContextPaths);
-    for (const path of this.persistentPaths) {
-      pathSet.add(path);
-    }
-    this.externalContextPaths = [...pathSet];
-  }
-
-  /**
-   * Restore exact external context paths from a saved conversation.
-   * Does NOT merge with persistent paths - preserves the session's historical state.
-   * Use clearExternalContexts() for new sessions to start with current persistent paths.
-   */
-  setExternalContexts(paths: string[]): void {
-    this.externalContextPaths = [...paths];
-    this.updateDisplay();
-    this.renderDropdown();
-  }
-
-  /**
-   * Remove a path from external contexts (and persistent paths if applicable).
-   * Exposed for testing the remove button behavior.
-   */
-  removePath(pathStr: string): void {
-    this.externalContextPaths = this.externalContextPaths.filter(p => p !== pathStr);
-    // Also remove from persistent paths if it was persistent
-    if (this.persistentPaths.has(pathStr)) {
-      this.persistentPaths.delete(pathStr);
-      this.onPersistenceChangeCallback?.([...this.persistentPaths]);
-    }
-    this.onChangeCallback?.(this.externalContextPaths);
-    this.updateDisplay();
-    this.renderDropdown();
-  }
-
-  /**
-   * Add an external context path programmatically (e.g., from /add-dir command).
-   * Validates the path and handles duplicates/conflicts.
-   * @param pathInput - Path string (supports ~/ expansion)
-   * @returns Result with success status and normalized path, or error message on failure
-   */
-  addExternalContext(pathInput: string): AddExternalContextResult {
-    const trimmed = pathInput?.trim();
-    if (!trimmed) {
-      return { success: false, error: t('interface.noPath') };
-    }
-
-    // Strip surrounding quotes if present (e.g., "/path/with spaces")
-    let cleanPath = trimmed;
-    if ((cleanPath.startsWith('"') && cleanPath.endsWith('"')) ||
-        (cleanPath.startsWith("'") && cleanPath.endsWith("'"))) {
-      cleanPath = cleanPath.slice(1, -1);
-    }
-
-    // Expand home directory and normalize path
-    const expandedPath = expandHomePath(cleanPath);
-    const normalizedPath = normalizePathForFilesystem(expandedPath);
-
-    if (!path.isAbsolute(normalizedPath)) {
-      return { success: false, error: t('interface.absolutePath') };
-    }
-
-    // Validate path exists and is a directory with specific error messages
-    const validation = validateDirectoryPath(normalizedPath);
-    if (!validation.valid) {
-      return { success: false, error: `${validation.error}: ${pathInput}` };
-    }
-
-    // Check for duplicate (normalized comparison for cross-platform support)
-    if (isDuplicatePath(normalizedPath, this.externalContextPaths)) {
-      return { success: false, error: t('interface.duplicateFolder') };
-    }
-
-    // Check for nested/overlapping paths
-    const conflict = findConflictingPath(normalizedPath, this.externalContextPaths);
-    if (conflict) {
-      return { success: false, error: this.formatConflictMessage(normalizedPath, conflict) };
-    }
-
-    // Add the path
-    this.externalContextPaths = [...this.externalContextPaths, normalizedPath];
-    this.onChangeCallback?.(this.externalContextPaths);
-    this.updateDisplay();
-    this.renderDropdown();
-
-    return { success: true, normalizedPath };
-  }
-
-  /**
-   * Clear session-only external context paths (call on new conversation).
-   * Uses persistent paths from settings if provided, otherwise falls back to local cache.
-   * Validates paths before using them (silently filters invalid during session init).
-   */
-  clearExternalContexts(persistentPathsFromSettings?: string[]): void {
-    // Use settings value if provided (most up-to-date), otherwise use local cache
-    if (persistentPathsFromSettings) {
-      // Validate paths - silently filter during session initialization (not user action)
-      const validPaths = filterValidPaths(persistentPathsFromSettings);
-      this.persistentPaths = new Set(validPaths);
-    }
-    this.externalContextPaths = [...this.persistentPaths];
-    this.updateDisplay();
-    this.renderDropdown();
-  }
-
-  private render() {
-    this.container.empty();
-
-    const iconWrapper = this.container.createDiv({ cls: 'claudian-external-context-icon-wrapper' });
-
-    this.iconEl = iconWrapper.createDiv({ cls: 'claudian-external-context-icon' });
-    setIcon(this.iconEl, 'folder');
-
-    this.badgeEl = iconWrapper.createDiv({ cls: 'claudian-external-context-badge' });
-
-    this.updateDisplay();
-
-    // Click to open native folder picker
-    iconWrapper.addEventListener('click', (e) => {
-      e.stopPropagation();
-      void this.openFolderPicker();
-    });
-
-    this.dropdownEl = this.container.createDiv({ cls: 'claudian-external-context-dropdown' });
-    this.renderDropdown();
-  }
-
-  private async openFolderPicker() {
-    try {
-      // Access Electron's dialog through remote
-      // eslint-disable-next-line @typescript-eslint/no-require-imports -- Electron remote is exposed only at runtime in Obsidian's renderer.
-      const { remote } = require('electron') as { remote?: ElectronRemoteApi };
-      if (!remote) {
-        throw new Error('Electron remote API is unavailable');
-      }
-      const result = await remote.dialog.showOpenDialog({
-        properties: ['openDirectory'],
-        title: t('interface.externalContext'),
-      });
-
-      if (!result.canceled && result.filePaths.length > 0) {
-        const selectedPath = result.filePaths[0];
-
-        // Check for duplicate (normalized comparison for cross-platform support)
-        if (isDuplicatePath(selectedPath, this.externalContextPaths)) {
-          new Notice(t('interface.duplicateFolder'), 3000);
-          return;
-        }
-
-        // Check for nested/overlapping paths
-        const conflict = findConflictingPath(selectedPath, this.externalContextPaths);
-        if (conflict) {
-          new Notice(this.formatConflictMessage(selectedPath, conflict), 5000);
-          return;
-        }
-
-        this.externalContextPaths = [...this.externalContextPaths, selectedPath];
-        this.onChangeCallback?.(this.externalContextPaths);
-        this.updateDisplay();
-        this.renderDropdown();
-      }
-    } catch {
-      new Notice(t('interface.folderPickerFailed'), 5000);
-    }
-  }
-
-  /** Formats a conflict error message for display. */
-  private formatConflictMessage(newPath: string, conflict: { path: string; type: 'parent' | 'child' }): string {
-    const shortNew = this.shortenPath(newPath);
-    const shortExisting = this.shortenPath(conflict.path);
-    return conflict.type === 'parent'
-      ? `Cannot add "${shortNew}" - it's inside existing path "${shortExisting}"`
-      : `Cannot add "${shortNew}" - it contains existing path "${shortExisting}"`;
-  }
-
-  private renderDropdown() {
-    if (!this.dropdownEl) return;
-
-    this.dropdownEl.empty();
-
-    // Header
-    const headerEl = this.dropdownEl.createDiv({ cls: 'claudian-external-context-header' });
-    headerEl.setText(t('interface.externalContexts'));
-
-    // Path list
-    const listEl = this.dropdownEl.createDiv({ cls: 'claudian-external-context-list' });
-
-    if (this.externalContextPaths.length === 0) {
-      const emptyEl = listEl.createDiv({ cls: 'claudian-external-context-empty' });
-      emptyEl.setText(t('interface.addFolder'));
-    } else {
-      for (const pathStr of this.externalContextPaths) {
-        const itemEl = listEl.createDiv({ cls: 'claudian-external-context-item' });
-
-        const pathTextEl = itemEl.createSpan({ cls: 'claudian-external-context-text' });
-        // Show shortened path for display
-        const displayPath = this.shortenPath(pathStr);
-        pathTextEl.setText(displayPath);
-        pathTextEl.setAttribute('title', pathStr);
-
-        // Lock toggle button
-        const isPersistent = this.persistentPaths.has(pathStr);
-        const lockBtn = itemEl.createSpan({ cls: 'claudian-external-context-lock' });
-        if (isPersistent) {
-          lockBtn.addClass('locked');
-        }
-        setIcon(lockBtn, isPersistent ? 'lock' : 'unlock');
-        lockBtn.setAttribute('title', isPersistent ? t('interface.persistentFolder') : t('interface.sessionFolder'));
-        lockBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          this.togglePersistence(pathStr);
-        });
-
-        const removeBtn = itemEl.createSpan({ cls: 'claudian-external-context-remove' });
-        setIcon(removeBtn, 'x');
-        removeBtn.setAttribute('title', t('interface.removePath'));
-        removeBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          this.removePath(pathStr);
-        });
-      }
-    }
-  }
-
-  /** Shorten path for display (replace home dir with ~) */
-  private shortenPath(fullPath: string): string {
-    try {
-      const homeDir = os.homedir();
-      const normalize = (value: string) => value.replace(/\\/g, '/');
-      const normalizedFull = normalize(fullPath);
-      const normalizedHome = normalize(homeDir);
-      const compareFull = process.platform === 'win32'
-        ? normalizedFull.toLowerCase()
-        : normalizedFull;
-      const compareHome = process.platform === 'win32'
-        ? normalizedHome.toLowerCase()
-        : normalizedHome;
-      if (compareFull.startsWith(compareHome)) {
-        // Use normalized path length and normalize the result for consistent display
-        const remainder = normalizedFull.slice(normalizedHome.length);
-        return '~' + remainder;
-      }
-    } catch {
-      // Fall through to return full path
-    }
-    return fullPath;
-  }
-
-  updateDisplay() {
-    if (!this.iconEl || !this.badgeEl) return;
-
-    const count = this.externalContextPaths.length;
-
-    if (count > 0) {
-      this.iconEl.addClass('active');
-      this.iconEl.setAttribute('title', t('interface.externalCount', { count }));
-
-      // Show badge only when more than 1 path
-      if (count > 1) {
-        this.badgeEl.setText(String(count));
-        this.badgeEl.addClass('visible');
-      } else {
-        this.badgeEl.removeClass('visible');
-      }
-    } else {
-      this.iconEl.removeClass('active');
-      this.iconEl.setAttribute('title', t('interface.addContexts'));
-      this.badgeEl.removeClass('visible');
-    }
-  }
-}
-
 export class ContextUsageMeter {
   private container: HTMLElement;
   private fillPath: SVGPathElement | null = null;
@@ -913,7 +526,7 @@ export class ContextUsageMeter {
   constructor(parentEl: HTMLElement) {
     this.container = parentEl.createDiv({ cls: 'claudian-context-meter' });
     this.container.setAttribute('role', 'progressbar');
-    this.container.setAttribute('aria-label', t('interface.contextUsage'));
+    this.container.setAttribute('aria-label', 'Context usage');
     this.container.setAttribute('aria-valuemin', '0');
     this.container.setAttribute('aria-valuemax', '100');
     this.render();
@@ -992,27 +605,20 @@ export class ContextUsageMeter {
       this.percentEl.setText(`${usage.percentage}%`);
     }
 
-    // Toggle warning class for > 80%
-    if (usage.percentage > 80) {
-      this.container.addClass('warning');
-    } else {
-      this.container.removeClass('warning');
-    }
+    this.container.toggleClass('warning', usage.percentage > 80);
 
     // Set tooltip with detailed usage
-    let tooltip = `${this.formatTokens(usage.contextTokens)} / ${this.formatTokens(usage.contextWindow)}`;
+    const usageText = `${this.#formatTokens(usage.contextTokens)} / ${this.#formatTokens(usage.contextWindow)}`;
+    let tooltip = usageText;
     if (usage.percentage > 80) {
-      tooltip += t('interface.nearContextLimit');
+      tooltip += ' (Approaching limit, run `/compact` to continue)';
     }
-    this.container.setAttribute('data-tooltip', tooltip);
+    this.container.setAttribute('aria-label', `Context usage: ${tooltip}`);
     this.container.setAttribute('aria-valuenow', String(usage.percentage));
-    this.container.setAttribute(
-      'aria-valuetext',
-      `${this.formatTokens(usage.contextTokens)} / ${this.formatTokens(usage.contextWindow)}`,
-    );
+    this.container.setAttribute('aria-valuetext', usageText);
   }
 
-  private formatTokens(tokens: number): string {
+  #formatTokens(tokens: number): string {
     if (tokens >= 1000) {
       return `${Math.round(tokens / 1000)}k`;
     }
@@ -1031,8 +637,8 @@ export class InputToolbarLayoutController {
 
   constructor(private readonly toolbarEl: HTMLElement) {
     try {
-      this.observeLayoutChanges();
-      this.scheduleLayout();
+      this.#observeLayoutChanges();
+      this.#scheduleLayout();
     } catch (error) {
       this.destroy();
       throw error;
@@ -1041,7 +647,7 @@ export class InputToolbarLayoutController {
 
   refreshLayout(): void {
     this.toolbarEl.classList.remove(TOOLBAR_COMPACT_CLASS);
-    this.toolbarEl.classList.toggle(TOOLBAR_COMPACT_CLASS, this.hasWrappedItems());
+    this.toolbarEl.classList.toggle(TOOLBAR_COMPACT_CLASS, this.#hasWrappedItems());
   }
 
   destroy(): void {
@@ -1055,7 +661,7 @@ export class InputToolbarLayoutController {
     this.mutationObserver = null;
   }
 
-  private hasWrappedItems(): boolean {
+  #hasWrappedItems(): boolean {
     const rowCenters = Array.from(this.toolbarEl.children)
       .map((item) => item.getBoundingClientRect())
       .filter((rect) => rect.width > 0 && rect.height > 0)
@@ -1066,7 +672,7 @@ export class InputToolbarLayoutController {
     return rowCenters.some((center) => Math.abs(center - firstRowCenter) > ROW_CENTER_TOLERANCE);
   }
 
-  private scheduleLayout(): void {
+  #scheduleLayout(): void {
     if (this.pendingLayout !== null) {
       cancelScheduledAnimationFrame(this.pendingLayout);
     }
@@ -1076,11 +682,11 @@ export class InputToolbarLayoutController {
     }, this.toolbarEl.ownerDocument.defaultView);
   }
 
-  private observeLayoutChanges(): void {
+  #observeLayoutChanges(): void {
     const ownerWindow = this.toolbarEl.ownerDocument.defaultView;
     const ResizeObserverConstructor = ownerWindow?.ResizeObserver;
     if (typeof ResizeObserverConstructor === 'function') {
-      this.resizeObserver = new ResizeObserverConstructor(() => this.scheduleLayout());
+      this.resizeObserver = new ResizeObserverConstructor(() => this.#scheduleLayout());
       this.resizeObserver.observe(this.toolbarEl);
     }
 
@@ -1094,7 +700,7 @@ export class InputToolbarLayoutController {
         || mutation.attributeName !== 'class'
       ));
       if (hasContentChange) {
-        this.scheduleLayout();
+        this.#scheduleLayout();
       }
     });
     this.mutationObserver.observe(this.toolbarEl, {
@@ -1116,7 +722,6 @@ export function createInputToolbar(
   thinkingBudgetSelector: ThinkingBudgetSelector;
   contextUsageMeter: ContextUsageMeter;
   layoutController: InputToolbarLayoutController;
-  externalContextSelector: ExternalContextSelector;
   permissionToggle: PermissionToggle;
   serviceTierToggle: ServiceTierToggle;
 } {
@@ -1124,7 +729,6 @@ export function createInputToolbar(
   const thinkingBudgetSelector = new ThinkingBudgetSelector(parentEl, callbacks);
   const serviceTierToggle = new ServiceTierToggle(parentEl, callbacks);
   const contextUsageMeter = new ContextUsageMeter(parentEl);
-  const externalContextSelector = new ExternalContextSelector(parentEl, callbacks);
   const permissionToggle = new PermissionToggle(parentEl, callbacks);
   const modeSelector = new ModeSelector(parentEl, callbacks);
   const layoutController = new InputToolbarLayoutController(parentEl);
@@ -1136,7 +740,6 @@ export function createInputToolbar(
     serviceTierToggle,
     contextUsageMeter,
     layoutController,
-    externalContextSelector,
     permissionToggle,
   };
 }

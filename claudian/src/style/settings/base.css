@@ -37,15 +37,58 @@
   display: block;
 }
 
-/* Codex placeholder */
-.claudian-settings-codex-placeholder {
-  padding: 40px 20px;
-  text-align: center;
+.claudian-settings-provider-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.claudian-settings button.claudian-settings-provider-tab {
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
   color: var(--text-muted);
   font-size: var(--font-ui-small);
+  cursor: pointer;
+}
+
+.claudian-settings button.claudian-settings-provider-tab:hover,
+.claudian-settings button.claudian-settings-provider-tab:focus,
+.claudian-settings button.claudian-settings-provider-tab:active {
+  color: var(--text-normal);
+  background: transparent;
+  box-shadow: none;
+}
+
+.claudian-settings button.claudian-settings-provider-tab--active {
+  color: var(--text-normal);
+  background: transparent;
+  box-shadow: none;
+}
+
+.claudian-settings-provider-content {
+  display: none;
+}
+
+.claudian-settings-provider-content--active {
+  display: block;
 }
 
 /* Settings page - remove separator lines from setting items */
+.setting-group > .setting-items.claudian-settings-items {
+  background: transparent;
+}
+
+.setting-item.claudian-settings {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border-top: none;
+  background: transparent;
+}
+
 .claudian-settings .setting-item {
   border-top: none;
 }
@@ -69,15 +112,12 @@
   color: var(--text-normal);
 }
 
-.claudian-mcp-settings-desc {
-  margin-bottom: 12px;
+/* Custom section descriptions - align with items */
+.claudian-opencode-migration-notice {
+  margin-bottom: var(--size-4-5);
 }
 
-/* Custom section descriptions - align with items */
-.claudian-sp-settings-desc,
-.claudian-mcp-settings-desc,
-.claudian-plugin-settings-desc,
-.claudian-approved-desc {
+.claudian-sp-settings-desc {
   padding: 0 12px;
 }
 
@@ -174,7 +214,7 @@
   width: 200px;
 }
 
-/* ── Shared settings panel layout (used by slash-settings + agent-settings) ── */
+/* ── Shared settings panel layout (used by command, skill, and provider agent settings) ── */
 
 .claudian-sp-header {
   display: flex;

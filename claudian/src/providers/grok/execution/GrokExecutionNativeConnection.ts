@@ -1,8 +1,8 @@
 import {
-  AcpClientConnection,
-  AcpJsonRpcTransport,
-  AcpSubprocess,
-  normalizeAcpAvailableCommands,
+  ACPClientConnection,
+  ACPJSONRPCTransport,
+  ACPSubprocess,
+  normalizeACPAvailableCommands,
 } from '../../acp';
 import {
   requestGrokInterjection,
@@ -39,36 +39,36 @@ const GROK_MODEL_UPDATE_NOTIFICATION_METHODS = [
 
 export class GrokExecutionNativeConnectionImpl
 implements GrokExecutionNativeConnection {
-  private readonly connection: AcpClientConnection;
+  private readonly connection: ACPClientConnection;
   private readonly listeners = new Set<Parameters<GrokExecutionNativeConnection['onNotification']>[0]>();
+  private readonly interjectionListeners = new Set<Parameters<NonNullable<GrokExecutionNativeConnection['onInterjection']>>[0]>();
   private readonly modeListeners = new Set<(mode: 'normal' | 'yolo') => void>();
   private readonly modelListeners = new Set<
     Parameters<NonNullable<GrokExecutionNativeConnection['onModelsChanged']>>[0]
   >();
-  private readonly process: AcpSubprocess;
-  private readonly transport: AcpJsonRpcTransport;
+  private readonly process: ACPSubprocess;
+  private readonly transport: ACPJSONRPCTransport;
   private readonly unsubscribers: Array<() => void> = [];
 
   constructor(options: GrokExecutionNativeCreateOptions) {
-    this.process = new AcpSubprocess({
+    this.process = new ACPSubprocess({
       args: ['agent', '--no-leader', 'stdio'],
       command: options.command,
       cwd: options.cwd,
       env: options.env,
     });
     this.process.start();
-    this.transport = new AcpJsonRpcTransport({
+    this.transport = new ACPJSONRPCTransport({
       input: this.process.stdout,
       onClose: listener => this.process.onClose(listener),
       output: this.process.stdin,
     });
-    this.connection = new AcpClientConnection({
+    this.connection = new ACPClientConnection({
       clientInfo: { name: 'claudian', version: options.version },
       delegate: {
         onSessionNotification: notification => this.notify(notification, 'standard'),
         requestPermission: request => options.requestPermission(request),
       },
-      methodOverrides: { cancel: 'session/cancel' },
       transport: this.transport,
     });
     for (const method of [
@@ -80,11 +80,29 @@ implements GrokExecutionNativeConnection {
         if (notification) this.notify(notification, 'extension');
       }));
     }
+    for (const method of ['x.ai/session/interjection', '_x.ai/session/interjection']) {
+      this.unsubscribers.push(this.transport.onNotification(method, params => {
+        if (!isRecord(params) || typeof params.sessionId !== 'string') return;
+        const notification = {
+          sessionId: params.sessionId,
+          ...(typeof params.interjectionId === 'string' ? { interjectionId: params.interjectionId } : {}),
+        };
+        for (const listener of this.interjectionListeners) listener(notification);
+      }));
+    }
     for (const method of GROK_EXTENSION_REQUEST_METHODS) {
       this.unsubscribers.push(this.transport.onRequest(
         method,
         params => options.requestExtension(method, params),
       ));
+    }
+    for (const method of ['x.ai/hooks/run', '_x.ai/hooks/run']) {
+      // This client registers only plan-mode hooks. Always return a denial:
+      // Grok fails open on callback errors, even during cancellation.
+      this.unsubscribers.push(this.transport.onRequest(method, () => ({
+        decision: 'deny',
+        systemMessage: 'Plan mode is unavailable in Claudian. Continue in normal mode.',
+      })));
     }
     for (const method of GROK_EXTENSION_NOTIFICATION_METHODS) {
       this.unsubscribers.push(this.transport.onNotification(method, params => {
@@ -115,11 +133,26 @@ implements GrokExecutionNativeConnection {
   );
 
   async initialize(): Promise<void> {
-    await this.connection.initialize();
+    const response = await this.connection.initialize();
+    const meta = isRecord(response.agentCapabilities) ? response.agentCapabilities._meta : undefined;
+    const hooks = isRecord(meta) ? meta['x.ai/hooks'] : undefined;
+    if (
+      !isRecord(hooks)
+      || !Array.isArray(hooks.blockingEvents)
+      || !hooks.blockingEvents.includes('pre_tool_use')
+      || !Array.isArray(hooks.decisions)
+      || !hooks.decisions.includes('deny')
+    ) {
+      throw new Error('Grok does not support blocking tool hooks. Update Grok to the latest version.');
+    }
   }
 
   isAlive(): boolean {
     return this.process.isAlive();
+  }
+
+  onClose(listener: (error?: Error) => void): () => void {
+    return this.process.onClose(listener);
   }
 
   interject(
@@ -130,7 +163,7 @@ implements GrokExecutionNativeConnection {
   }
 
   loadSession: GrokExecutionNativeConnection['loadSession'] = request => (
-    this.connection.loadSession(request)
+    this.connection.loadSession({ ...request, _meta: withPlanModeHooks(request._meta) })
   );
 
   async listCommands(
@@ -145,11 +178,11 @@ implements GrokExecutionNativeConnection {
     if (!Array.isArray(response.commands)) {
       throw new Error('Grok returned malformed command metadata.');
     }
-    return normalizeAcpAvailableCommands(response.commands);
+    return normalizeACPAvailableCommands(response.commands);
   }
 
   newSession: GrokExecutionNativeConnection['newSession'] = request => (
-    this.connection.newSession(request)
+    this.connection.newSession({ ...request, _meta: withPlanModeHooks(request._meta) })
   );
 
   onNotification(
@@ -157,6 +190,11 @@ implements GrokExecutionNativeConnection {
   ): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  onInterjection(listener: Parameters<NonNullable<GrokExecutionNativeConnection['onInterjection']>>[0]): () => void {
+    this.interjectionListeners.add(listener);
+    return () => { this.interjectionListeners.delete(listener); };
   }
 
   onModeChanged(listener: (mode: 'normal' | 'yolo') => void): () => void {
@@ -191,6 +229,7 @@ implements GrokExecutionNativeConnection {
     while (this.unsubscribers.length > 0) this.unsubscribers.pop()?.();
     this.listeners.clear();
     this.modeListeners.clear();
+    this.interjectionListeners.clear();
     this.modelListeners.clear();
     this.connection.dispose();
     this.transport.dispose();
@@ -203,6 +242,18 @@ implements GrokExecutionNativeConnection {
   ): void {
     for (const listener of this.listeners) listener(notification, source);
   }
+}
+
+function withPlanModeHooks(meta: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  return {
+    ...meta,
+    'x.ai/hooks': {
+      PreToolUse: [{
+        matcher: '^(enter_plan_mode|exit_plan_mode)$',
+        hookCallbackIds: ['claudian-block-plan'],
+      }],
+    },
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

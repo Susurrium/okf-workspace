@@ -1,7 +1,7 @@
 import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 
 import type { ProviderInteractionPort } from '@/core/execution';
-import { createClaudeExecutionCanUseTool } from '@/providers/claude/execution/ClaudeInteractionHandler';
+import { ClaudeInteractionHandler } from '@/providers/claude/execution/ClaudeInteractionHandler';
 
 function createPort(): jest.Mocked<ProviderInteractionPort> {
   return {
@@ -13,10 +13,6 @@ function createPort(): jest.Mocked<ProviderInteractionPort> {
       interactionId: request.interactionId,
       answers: { answer: 'yes' },
     })),
-    requestPlanDecision: jest.fn().mockImplementation(async (request) => ({
-      interactionId: request.interactionId,
-      decision: { type: 'feedback', text: 'Revise it' },
-    })),
     dismissInteraction: jest.fn(),
   };
 }
@@ -25,15 +21,13 @@ function createHandler(
   port: jest.Mocked<ProviderInteractionPort>,
   onToolBlocked: jest.Mock = jest.fn(),
 ): CanUseTool {
-  return createClaudeExecutionCanUseTool({
+  return new ClaudeInteractionHandler({
     interactionPort: port,
     sessionInstanceId: 'session-local',
     getTurnId: () => 'turn-local',
     isToolAllowed: () => true,
-    getPermissionMode: () => 'normal',
-    resolveSdkPermissionMode: () => 'default',
     onToolBlocked,
-  });
+  }).canUseTool;
 }
 
 const nativeOptions = {
@@ -42,7 +36,7 @@ const nativeOptions = {
   requestId: 'native-request-1',
 };
 
-describe('createClaudeExecutionCanUseTool', () => {
+describe('ClaudeInteractionHandler', () => {
   it('allows only the current invocation for an allow-once decision', async () => {
     const port = createPort();
     port.requestApproval.mockImplementation(async (request) => ({
@@ -178,37 +172,15 @@ describe('createClaudeExecutionCanUseTool', () => {
     });
   });
 
-  it('routes plan feedback without resolving it as approval', async () => {
-    const port = createPort();
-    const handler = createHandler(port);
-
-    const result = await handler('ExitPlanMode', {}, nativeOptions);
-
-    expect(port.requestPlanDecision).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: 'plan-decision',
-        interactionId: 'claude:session-local:native-tool-1',
-      }),
-      nativeOptions.signal,
-    );
-    expect(result).toEqual({
-      behavior: 'deny',
-      message: 'Revise it',
-      interrupt: false,
-    });
-  });
-
   it('fails closed for disallowed tools before opening an interaction', async () => {
     const port = createPort();
-    const handler = createClaudeExecutionCanUseTool({
+    const handler = new ClaudeInteractionHandler({
       interactionPort: port,
       sessionInstanceId: 'session-local',
       getTurnId: () => 'turn-local',
       isToolAllowed: (toolName) => toolName === 'Read',
-      getPermissionMode: () => 'normal',
-      resolveSdkPermissionMode: () => 'default',
       onToolBlocked: jest.fn(),
-    });
+    }).canUseTool;
 
     const result = await handler('Edit', {}, nativeOptions);
 

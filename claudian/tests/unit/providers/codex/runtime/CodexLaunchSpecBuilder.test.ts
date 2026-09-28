@@ -1,12 +1,29 @@
+import type * as ChildProcess from 'child_process';
+
 import { buildCodexLaunchSpec } from '@/providers/codex/runtime/CodexLaunchSpecBuilder';
+import { getHostnameKey } from '@/utils/env';
+
+const childProcess = jest.requireActual<typeof ChildProcess>('child_process');
 
 describe('buildCodexLaunchSpec', () => {
+  let execFileSyncSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    execFileSyncSpy = jest.spyOn(childProcess, 'execFileSync').mockImplementation(() => {
+      throw Object.assign(new Error('spawnSync wsl.exe ENOENT'), { code: 'ENOENT' });
+    });
+  });
+
+  afterEach(() => {
+    execFileSyncSpy.mockRestore();
+  });
+
   it('builds a native Windows launch spec with a direct codex executable', () => {
     const spec = buildCodexLaunchSpec({
       settings: {
         providerConfigs: {
           codex: {
-            installationMethod: 'native-windows',
+            installationMethodsByHost: { [getHostnameKey()]: 'native-windows' },
           },
         },
       },
@@ -27,13 +44,26 @@ describe('buildCodexLaunchSpec', () => {
     });
   });
 
+  it('uses the same WSL shell and working directory for an auxiliary CLI command', () => {
+    const spec = buildCodexLaunchSpec({
+      settings: {},
+      resolvedCliCommand: 'codex',
+      cliArgs: ['--version'],
+      hostVaultPath: 'C:\\repo',
+      env: {},
+      executionTarget: { method: 'wsl', platformFamily: 'unix', platformOs: 'linux', distroName: 'Ubuntu' },
+    });
+    expect(spec.command).toBe('wsl.exe');
+    expect(spec.args).toEqual(['--distribution', 'Ubuntu', '--cd', '/mnt/c/repo', 'codex', '--version']);
+  });
+
   it('builds a WSL launch spec with translated cwd and distro targeting', () => {
     const spec = buildCodexLaunchSpec({
       settings: {
         providerConfigs: {
           codex: {
-            installationMethod: 'wsl',
-            wslDistroOverride: 'Ubuntu',
+            installationMethodsByHost: { [getHostnameKey()]: 'wsl' },
+            wslDistroOverridesByHost: { [getHostnameKey()]: 'Ubuntu' },
           },
         },
       },
@@ -68,7 +98,7 @@ describe('buildCodexLaunchSpec', () => {
       settings: {
         providerConfigs: {
           codex: {
-            installationMethod: 'wsl',
+            installationMethodsByHost: { [getHostnameKey()]: 'wsl' },
           },
         },
       },
@@ -95,13 +125,78 @@ describe('buildCodexLaunchSpec', () => {
     );
   });
 
+  it('uses the native WSL default when the injected resolver returns no distro', () => {
+    execFileSyncSpy.mockReturnValue(Buffer.from(
+      '  NAME              STATE           VERSION\r\n'
+      + '* Ubuntu-24.04      Running         2\r\n'
+      + '  Debian            Stopped         2\r\n',
+      'utf16le',
+    ));
+
+    const spec = buildCodexLaunchSpec({
+      settings: {
+        providerConfigs: {
+          codex: {
+            installationMethodsByHost: { [getHostnameKey()]: 'wsl' },
+          },
+        },
+      },
+      resolvedCliCommand: 'codex',
+      hostVaultPath: 'C:\\repo',
+      env: {},
+      hostPlatform: 'win32',
+      resolveDefaultWslDistro: () => undefined,
+    });
+
+    expect(spec.command).toBe('wsl.exe');
+    expect(spec.args).toEqual([
+      '--distribution',
+      'Ubuntu-24.04',
+      '--cd',
+      '/mnt/c/repo',
+      'codex',
+      'app-server',
+      '--listen',
+      'stdio://',
+    ]);
+    expect(spec.target.distroName).toBe('Ubuntu-24.04');
+    expect(spec.pathMapper.toHostPath('/home/user/.codex/sessions')).toBe(
+      '\\\\wsl$\\Ubuntu-24.04\\home\\user\\.codex\\sessions',
+    );
+  });
+
+  it('fails fast when the native WSL list has no default distro', () => {
+    execFileSyncSpy.mockReturnValue(Buffer.from(
+      '  NAME              STATE           VERSION\r\n'
+      + '  Ubuntu-24.04      Running         2\r\n'
+      + '  Debian            Stopped         2\r\n',
+      'utf16le',
+    ));
+
+    expect(() => buildCodexLaunchSpec({
+      settings: {
+        providerConfigs: {
+          codex: {
+            installationMethodsByHost: { [getHostnameKey()]: 'wsl' },
+          },
+        },
+      },
+      resolvedCliCommand: 'codex',
+      hostVaultPath: 'C:\\repo',
+      env: {},
+      hostPlatform: 'win32',
+    })).toThrow(
+      'Unable to determine the WSL distro. Set WSL distro override or configure a default WSL distro.',
+    );
+  });
+
   it('fails fast when the workspace path cannot be represented inside WSL', () => {
     expect(() => buildCodexLaunchSpec({
       settings: {
         providerConfigs: {
           codex: {
-            installationMethod: 'wsl',
-            wslDistroOverride: 'Ubuntu',
+            installationMethodsByHost: { [getHostnameKey()]: 'wsl' },
+            wslDistroOverridesByHost: { [getHostnameKey()]: 'Ubuntu' },
           },
         },
       },
@@ -117,8 +212,8 @@ describe('buildCodexLaunchSpec', () => {
       settings: {
         providerConfigs: {
           codex: {
-            installationMethod: 'wsl',
-            wslDistroOverride: 'Debian',
+            installationMethodsByHost: { [getHostnameKey()]: 'wsl' },
+            wslDistroOverridesByHost: { [getHostnameKey()]: 'Debian' },
           },
         },
       },
@@ -134,7 +229,7 @@ describe('buildCodexLaunchSpec', () => {
       settings: {
         providerConfigs: {
           codex: {
-            installationMethod: 'wsl',
+            installationMethodsByHost: { [getHostnameKey()]: 'wsl' },
           },
         },
       },

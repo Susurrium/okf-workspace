@@ -30,6 +30,7 @@ describe('isPathWithinRoot', () => {
     fs.symlinkSync(outside, path.join(root, 'escape'));
 
     expect(isPathWithinRoot(path.join(root, 'escape', 'session.jsonl'), root)).toBe(false);
+    expect(isPathWithinRoot(path.join(root, 'escape', 'missing.jsonl'), root)).toBe(false);
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 });

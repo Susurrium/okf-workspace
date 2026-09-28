@@ -21,6 +21,7 @@ export class Plugin {
 export class PluginSettingTab {
   app: any;
   plugin: any;
+  settingItems: any[] = [];
   containerEl: any = {
     empty: jest.fn(),
     createEl: jest.fn().mockReturnValue({ createEl: jest.fn(), createDiv: jest.fn() }),
@@ -32,13 +33,20 @@ export class PluginSettingTab {
     this.plugin = plugin;
   }
 
-  display() {}
+  getSettingDefinitions(): any[] {
+    return [];
+  }
+
+  update() {
+    this.settingItems = this.getSettingDefinitions();
+  }
 }
 
 export class ItemView {
-  app: any;
+  app: any = { workspace: { on: jest.fn(), offref: jest.fn() } };
   leaf: any;
   containerEl: any = {
+    isShown: () => true,
     children: [{}, { empty: jest.fn(), addClass: jest.fn(), createDiv: jest.fn().mockReturnValue({
       createEl: jest.fn().mockReturnValue({ addEventListener: jest.fn(), setAttribute: jest.fn() }),
       createDiv: jest.fn().mockReturnValue({ createEl: jest.fn().mockReturnValue({ addEventListener: jest.fn() }) }),
@@ -60,6 +68,12 @@ export class ItemView {
   getIcon(): string {
     return '';
   }
+}
+
+export class FileView extends ItemView {
+  allowNoFile = false;
+  file: any = null;
+  navigation = true;
 }
 
 export class WorkspaceLeaf {}
@@ -136,31 +150,6 @@ export class Setting {
   setDesc = jest.fn().mockReturnThis();
   addToggle = jest.fn().mockReturnThis();
   addTextArea = jest.fn().mockReturnThis();
-}
-
-export class TextAreaComponent {
-  inputEl: any;
-  private _value = '';
-
-  constructor(_container?: any) {
-    this.inputEl = {
-      addClass: jest.fn(),
-      rows: 0,
-      placeholder: '',
-      focus: jest.fn(),
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn(),
-    };
-  }
-
-  setValue(value: string): this {
-    this._value = value;
-    return this;
-  }
-
-  getValue(): string {
-    return this._value;
-  }
 }
 
 export class Modal {
@@ -286,6 +275,8 @@ export const MarkdownRenderer = {
   ),
   renderMarkdown: renderMarkdownMock,
 };
+
+export const loadMermaid = jest.fn();
 
 export const loadPrism = jest.fn().mockResolvedValue({
   highlightElement: jest.fn(),

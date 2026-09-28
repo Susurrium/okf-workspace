@@ -3,11 +3,9 @@ import {
   encodeGrokModelId,
   findGrokModel,
   getGrokAvailableReasoningEfforts,
-  GROK_CONTEXT_WINDOW_FALLBACK,
   isGrokModelSelectionId,
   mergeGrokDiscoveredModels,
   normalizeGrokDiscoveredModels,
-  resolveGrokContextWindow,
   resolveGrokDefaultReasoningEffort,
 } from '@/providers/grok/models';
 
@@ -168,7 +166,7 @@ describe('Grok model metadata', () => {
     expect(getGrokAvailableReasoningEfforts(resolvedEmpty)).toEqual([]);
   });
 
-  it('resolves preferred, declared, high, and first reasoning defaults in order', () => {
+  it('preserves explicit preferences and always defaults to High', () => {
     const model = normalizeGrokDiscoveredModels([{
       defaultReasoningEffort: 'medium',
       displayName: 'Reasoner',
@@ -178,7 +176,11 @@ describe('Grok model metadata', () => {
     }])[0];
 
     expect(resolveGrokDefaultReasoningEffort(model, 'low')).toBe('low');
-    expect(resolveGrokDefaultReasoningEffort(model)).toBe('medium');
+    expect(resolveGrokDefaultReasoningEffort(model)).toBe('high');
+    expect(resolveGrokDefaultReasoningEffort({
+      ...model,
+      reasoningMetadataResolved: true,
+    })).toBe('high');
     expect(resolveGrokDefaultReasoningEffort({
       ...model,
       defaultReasoningEffort: undefined,
@@ -187,24 +189,7 @@ describe('Grok model metadata', () => {
       ...model,
       defaultReasoningEffort: undefined,
       reasoningEfforts: [{ label: 'Low', value: 'low' }],
-    })).toBe('low');
+    })).toBe('high');
   });
 
-  it('resolves context from metadata, custom limits, then the shared fallback', () => {
-    const models = normalizeGrokDiscoveredModels([{
-      contextWindow: 300_000,
-      displayName: 'Known',
-      rawId: 'known',
-    }]);
-
-    expect(resolveGrokContextWindow('grok/known', models, {
-      'grok/known': 150_000,
-    })).toBe(300_000);
-    expect(resolveGrokContextWindow('grok/custom', models, {
-      'grok/custom': 123_000,
-    })).toBe(123_000);
-    expect(resolveGrokContextWindow('grok/other', models)).toBe(
-      GROK_CONTEXT_WINDOW_FALLBACK,
-    );
-  });
 });

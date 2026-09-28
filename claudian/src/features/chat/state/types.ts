@@ -1,6 +1,5 @@
 import type { EditorView } from '@codemirror/view';
 
-import type { TodoItem } from '../../../core/tools/todo';
 import type {
   ChatMessage,
   ImageAttachment,
@@ -19,17 +18,18 @@ export type ChatActionMode = 'read' | 'write' | 'plan';
 export interface ChatTurnRequest {
   text: string;
   images?: ImageAttachment[];
-  currentNotePath?: string;
-  contextFiles?: string[];
+  linkedContentPath?: string;
+  externalContextPaths?: string[];
   actionMode?: ChatActionMode;
   editorSelection?: EditorSelectionContext | null;
   browserSelection?: BrowserSelectionContext | null;
   canvasSelection?: CanvasSelectionContext | null;
-  externalContextPaths?: string[];
 }
 
 /** Queued message waiting to be sent after current streaming completes. */
 export interface QueuedMessage {
+  /** Transient delivery observer; queues never persist callbacks. */
+  onDelivery?: (accepted: boolean) => void;
   content: string;
   images?: ImageAttachment[];
   editorContext: EditorSelectionContext | null;
@@ -47,10 +47,19 @@ export interface PendingToolCall {
 
 export type TabAttentionKind = 'review' | 'action-required';
 
-export type TabAttention = {
-  kind: TabAttentionKind;
-  since: number;
-} | null;
+export type TabReviewOutcome = 'completed' | 'error';
+
+export type TabAttention =
+  | {
+      kind: 'review';
+      outcome: TabReviewOutcome;
+      since: number;
+    }
+  | {
+      kind: 'action-required';
+      since: number;
+    }
+  | null;
 
 /** Stored selection state from editor polling. */
 export interface StoredSelection {
@@ -109,9 +118,6 @@ export interface ChatStateData {
   // Flag to ignore usage updates (during session reset)
   ignoreUsageUpdates: boolean;
 
-  // Current todo items for the persistent bottom panel
-  currentTodos: TodoItem[] | null;
-
   // Runtime-only attention state
   attention: TabAttention;
 
@@ -121,25 +127,14 @@ export interface ChatStateData {
   // Response timer state
   responseStartTime: number | null;
   flavorTimerInterval: number | null;
-
-  // Pending plan content for approve-new-session (auto-sends in new session after stream ends)
-  pendingNewSessionPlan: string | null;
-
-  // Plan file path captured from Write tool calls to provider plan directory during plan mode
-  planFilePath: string | null;
-
-  // Saved permission mode before entering plan mode (for Shift+Tab toggle restore)
-  prePlanPermissionMode: string | null;
 }
 
 /** Callbacks for ChatState changes. */
 export interface ChatStateCallbacks {
-  onMessagesChanged?: () => void;
   onStreamingStateChanged?: (isStreaming: boolean) => void;
   onRewindingStateChanged?: (isRewinding: boolean) => void;
   onConversationChanged?: (id: string | null) => void;
   onUsageChanged?: (usage: UsageInfo | null) => void;
-  onTodosChanged?: (todos: TodoItem[] | null) => void;
   onAttentionChanged?: (attention: TabAttention) => void;
   onAutoScrollChanged?: (enabled: boolean) => void;
 }
@@ -151,7 +146,6 @@ export type {
   ImageAttachment,
   SubagentInfo,
   ThinkingBlockState,
-  TodoItem,
   ToolCallInfo,
   UsageInfo,
   WriteEditState,

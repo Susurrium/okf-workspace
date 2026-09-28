@@ -97,3 +97,40 @@ After bringing in an upstream Claudian change:
    bridge/prompt and Codex runtime tests, then `npm run build`.
 4. Update this file only if the adapter boundary or bridge contract actually
    changes.
+
+## Synced upstream base
+
+The current vendored Claudian source is based on upstream
+`14a6abcc2f1628ad99122dbe6ad5f56033331ac3` (2.3.6), replacing the former
+`40880cabec40d61766c84f2da9f403ed36016f08` (2.1.4) import. Upstream-owned
+source and tests follow the pinned snapshot, including provider runtime,
+conversation/history, UI, and lifecycle changes. The local delta is accounted
+for by this adapter inventory, plugin identity/version metadata, and the
+monorepo build/dependency configuration described in `UPSTREAM.md`.
+
+The adapter also uses generic chat handoff and composer attachment components
+under `src/features/chat/`; these contain no OKF imports. `ClaudianView` adapts
+the bridge request to those generic components and creates a Codex draft while
+leaving other provider sessions untouched. Dashboard-side protocol behavior is
+implemented and tested in `dashboard/src/plugin/claudian-bridge.ts`.
+
+## Local source delta register
+
+The following paths are the complete intentional source delta from the pinned
+upstream snapshot. All other upstream `src/` and `tests/` files match the pinned
+tree; vendoring and repository packaging files are accounted for by
+`UPSTREAM.md`.
+
+| Paths | Reason |
+| --- | --- |
+| `src/main.ts`; `src/integrations/okf/OkfBridge.ts`; `src/features/chat/ExternalChatHandoff.ts`; `tests/unit/integrations/okf/OkfBridge.test.ts`; `tests/unit/features/chat/ExternalChatHandoff.test.ts` | Publish bridge v1 and provider-neutral handoff. The bridge validates and deduplicates requests, composes Skill and prompt text, targets Codex, and reports the handoff result. |
+| `src/app/settings/defaultSettings.ts`; `src/core/types/settings.ts`; `src/features/settings/ClaudianSettings.ts`; `src/providers/codex/types/index.ts`; `src/providers/codex/execution/CodexExecutionSession.ts`; `src/integrations/okf/OkfPromptPolicy.ts`; `tests/unit/integrations/okf/OkfPromptPolicy.test.ts`; `tests/unit/providers/codex/execution/CodexExecutionBackend.test.ts` | Persist the three prompt modes and resolve them for new Codex sessions. Keep prompt mode/version with native session state; apply action mode to the Codex sandbox. |
+| `src/core/execution/ProviderExecutionRequest.ts`; `src/features/chat/state/types.ts`; `src/features/chat/tabs/types.ts`; `src/features/chat/controllers/InputController.ts`; `src/features/chat/tabs/runtime/TabRuntimeControllers.ts`; `src/features/chat/tabs/runtime/TabRuntimeUI.ts`; `src/features/chat/ClaudianView.ts`; `src/features/chat/ui/ComposerContextTray.ts`; `src/features/chat/composer/ExternalContextAttachments.ts`; `tests/unit/features/chat/composer/ExternalContextAttachments.test.ts` | Carry Vault context paths and read/write/plan mode from handoff to the next turn, validate existing Vault files, render removable attachment chips, and keep read/plan turns read-only. The new attachment and handoff mechanics are provider-neutral. |
+| `src/i18n/locales/{de,en,es,fr,ja,ko,pt,ru,zh-CN,zh-TW}.json` | Translate the OKF prompt-mode controls while retaining the pinned upstream locale structure. |
+| `src/providers/claude/runtime/ClaudeRewindService.ts` | Cross-platform correctness fix: restore Windows directory links as junctions so rewind rollback preserves the original Vault state. This is not OKF policy. |
+| `tests/integration/build/build.test.ts`; `tests/integration/providers/claude/history/ClaudeTurnStats.test.ts`; `tests/unit/providers/claude/execution/ClaudeExecutionBackend.test.ts`; `tests/unit/providers/opencode/execution/OpencodeACPSessionKernel.test.ts`; `tests/unit/core/storage/VaultFileAdapter.test.ts` | Monorepo/platform test adaptations: use npm lockfiles, derive Claude history paths through the SDK encoder, use Windows junctions for directory-link fixtures, and capability-gate only file-symlink tests when the host denies symlink creation. |
+
+OKF-specific production imports remain limited to the four locations listed
+above. Generic turn request types and chat wiring carry opaque action/context
+values without importing the OKF adapter or copying Workspace rules into
+Claudian.

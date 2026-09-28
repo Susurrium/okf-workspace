@@ -6,17 +6,13 @@ jest.mock('../../../../src/utils/env', () => ({
 }));
 
 import {
-  clearCurrentGrokCatalog,
-  DEFAULT_GROK_PROVIDER_SETTINGS,
   getCurrentGrokCatalog,
   getGrokProviderSettings,
   normalizeGrokCatalogSnapshot,
   updateCurrentGrokCatalog,
   updateGrokProviderSettings,
-  updateGrokVisibleModels,
 } from '@/providers/grok/settings';
 import {
-  buildGrokProviderState,
   buildPersistedGrokProviderState,
   parseGrokProviderState,
 } from '@/providers/grok/types';
@@ -48,21 +44,6 @@ describe('Grok settings', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetHostnameKey.mockReturnValue('device:current');
-  });
-
-  it('defaults to disabled with empty environment and host state', () => {
-    expect(DEFAULT_GROK_PROVIDER_SETTINGS).toEqual({
-      catalogsByHost: {},
-      cliPath: '',
-      cliPathsByHost: {},
-      enabled: false,
-      environmentHash: '',
-      environmentVariables: '',
-      modelAliases: {},
-      planBasePermissionMode: 'normal',
-      preferredReasoningByModel: {},
-      visibleModels: null,
-    });
   });
 
   it('preserves hostname-scoped state without assigning it to the current device', () => {
@@ -132,10 +113,6 @@ describe('Grok settings', () => {
     expect(updateCurrentGrokCatalog(settings, replacement)).toEqual(replacement);
     expect(getCurrentGrokCatalog(settings)).toEqual(replacement);
     expect(getGrokProviderSettings(settings).catalogsByHost['other-host']).toEqual(otherCatalog);
-    expect(clearCurrentGrokCatalog(settings)).toBe(true);
-    expect(getCurrentGrokCatalog(settings)).toBeNull();
-    expect(getGrokProviderSettings(settings).catalogsByHost['other-host']).toEqual(otherCatalog);
-    expect(clearCurrentGrokCatalog(settings)).toBe(false);
   });
 
   it('whitelists catalog metadata and never persists opaque or secret fields', () => {
@@ -230,14 +207,15 @@ describe('Grok settings', () => {
       },
     });
 
-    expect(settings.visibleModels).toEqual(['kimi-coding', 'legacy-model']);
+    expect(settings.visibleModels).toEqual(['kimi-coding', 'legacy-model', 'unknown']);
     expect(settings.modelAliases).toEqual({
       'kimi-coding': 'Kimi',
-      'legacy-model': 'Legacy',
+      'legacy-model': 'Legacy', unknown: 'Drop me',
     });
     expect(settings.preferredReasoningByModel).toEqual({
       'kimi-coding': 'medium',
       'legacy-model': 'low',
+      unknown: 'xhigh',
     });
   });
 
@@ -266,7 +244,7 @@ describe('Grok settings', () => {
     expect((settings.providerConfigs as Record<string, unknown>).codex).toEqual({ enabled: true });
   });
 
-  it('prunes disabled reasoning state from every host catalog', () => {
+  it('prunes disabled preferences while retaining discovered capabilities in memory', () => {
     const settings: Record<string, unknown> = {
       providerConfigs: {
         grok: {
@@ -294,15 +272,15 @@ describe('Grok settings', () => {
       },
     };
 
-    updateGrokVisibleModels(settings, []);
+    updateGrokProviderSettings(settings, { visibleModels: [] });
 
     const grok = getGrokProviderSettings(settings);
     expect(grok.preferredReasoningByModel).toEqual({});
     for (const catalogSnapshot of Object.values(grok.catalogsByHost)) {
       for (const model of catalogSnapshot.models) {
-        expect(model.reasoningEfforts).toEqual([]);
-        expect(model.supportsReasoning).toBe(false);
-        expect(model).not.toHaveProperty('reasoningMetadataResolved');
+        expect(model.reasoningEfforts).toEqual([{ label: 'High', value: 'high' }]);
+        expect(model.supportsReasoning).toBe(true);
+        expect(model.reasoningMetadataResolved).toBe(true);
       }
     }
   });
@@ -330,10 +308,10 @@ describe('Grok provider state', () => {
       sessionDirectory: '/tmp/.grok/sessions/vault/session-id',
     });
     expect(parseGrokProviderState({ sessionDirectory: '../outside' })).toEqual({});
-    expect(buildGrokProviderState('/tmp/.grok/sessions/vault/session-id')).toEqual({
+    expect(buildPersistedGrokProviderState({ sessionDirectory: '/tmp/.grok/sessions/vault/session-id' })).toEqual({
       sessionDirectory: '/tmp/.grok/sessions/vault/session-id',
     });
-    expect(buildGrokProviderState('../outside')).toBeUndefined();
+    expect(buildPersistedGrokProviderState({ sessionDirectory: '../outside' })).toBeUndefined();
   });
 
   it('sanitizes and persists pending native fork state without unrelated fields', () => {

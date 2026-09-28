@@ -7,22 +7,22 @@ import {
 } from '../../../utils/animationFrame';
 
 export type ComposerContextSlot =
-  | 'current-note'
-  | 'referenced-files'
+  | 'external-context'
+  | 'linked-content'
   | 'editor-selection'
   | 'browser-selection'
   | 'canvas-selection'
   | 'images';
 
-export type ComposerContextItemKind = 'note' | 'selection' | 'image';
+export type ComposerContextItemKind = 'content' | 'selection' | 'image';
 
 export interface ComposerContextItem {
   id: string;
   kind: ComposerContextItemKind;
   label: string;
   icon?: string;
-  title?: string;
   ariaLabel?: string;
+  status?: 'missing';
   onActivate?: () => void;
   onRemove?: () => void;
 }
@@ -32,8 +32,8 @@ export interface ComposerContextTrayOptions {
 }
 
 const SLOT_ORDER: readonly ComposerContextSlot[] = [
-  'current-note',
-  'referenced-files',
+  'external-context',
+  'linked-content',
   'editor-selection',
   'browser-selection',
   'canvas-selection',
@@ -66,7 +66,7 @@ export class ComposerContextTray {
     this.options = options;
     this.containerEl.addClass('claudian-context-row');
     try {
-      this.observeSize();
+      this.#observeSize();
       this.render();
     } catch (error) {
       this.destroy();
@@ -102,7 +102,7 @@ export class ComposerContextTray {
     }
     moreButton.addClass('claudian-hidden');
 
-    const rows = this.getRows(chips);
+    const rows = this.#getRows(chips);
     const hasOverflow = rows.length > MAX_COLLAPSED_ROWS;
     if (!hasOverflow) {
       this.expanded = false;
@@ -164,7 +164,7 @@ export class ComposerContextTray {
     this.containerEl.toggleClass('has-content', entries.length > 0);
 
     for (const { item, slot } of entries) {
-      this.renderItem(slot, item);
+      this.#renderItem(slot, item);
     }
 
     if (entries.length > 0) {
@@ -183,13 +183,14 @@ export class ComposerContextTray {
     }
 
     this.options.onDidChange?.();
-    this.scheduleLayout();
+    this.#scheduleLayout();
   }
 
-  private renderItem(slot: ComposerContextSlot, item: ComposerContextItem): void {
+  #renderItem(slot: ComposerContextSlot, item: ComposerContextItem): void {
     const chipEl = this.containerEl.createDiv({
       cls: `claudian-context-chip claudian-context-chip--${item.kind}`,
     });
+    if (item.status === 'missing') chipEl.addClass('claudian-context-chip--missing');
     chipEl.dataset.contextSlot = slot;
     chipEl.dataset.contextId = item.id;
 
@@ -200,9 +201,6 @@ export class ComposerContextTray {
       })
       : chipEl.createSpan({ cls: 'claudian-context-chip-main' });
 
-    if (item.title) {
-      contentEl.setAttribute('title', item.title);
-    }
     contentEl.setAttribute('aria-label', item.ariaLabel ?? item.label);
     if (item.onActivate) {
       contentEl.addEventListener('click', item.onActivate);
@@ -216,6 +214,7 @@ export class ComposerContextTray {
     contentEl.createSpan({ cls: 'claudian-context-chip-label', text: item.label });
 
     if (item.onRemove) {
+      chipEl.addClass('claudian-context-chip--removable');
       const removeButton = chipEl.createEl('button', {
         cls: 'claudian-context-chip-remove',
         text: '\u00D7',
@@ -228,7 +227,7 @@ export class ComposerContextTray {
     }
   }
 
-  private getRows(chips: readonly HTMLElement[]): ContextTrayRow[] {
+  #getRows(chips: readonly HTMLElement[]): ContextTrayRow[] {
     const rows: ContextTrayRow[] = [];
     for (const [index, chip] of chips.entries()) {
       const top = chip.offsetTop;
@@ -249,7 +248,7 @@ export class ComposerContextTray {
     return rows.sort((left, right) => left.top - right.top);
   }
 
-  private scheduleLayout(): void {
+  #scheduleLayout(): void {
     if (this.pendingLayout) {
       cancelScheduledAnimationFrame(this.pendingLayout);
     }
@@ -259,11 +258,11 @@ export class ComposerContextTray {
     }, this.containerEl.ownerDocument.defaultView);
   }
 
-  private observeSize(): void {
+  #observeSize(): void {
     const ResizeObserverConstructor = this.containerEl.ownerDocument.defaultView?.ResizeObserver;
     if (typeof ResizeObserverConstructor !== 'function') return;
 
-    this.resizeObserver = new ResizeObserverConstructor(() => this.scheduleLayout());
+    this.resizeObserver = new ResizeObserverConstructor(() => this.#scheduleLayout());
     this.resizeObserver.observe(this.containerEl);
   }
 }

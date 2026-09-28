@@ -1,10 +1,10 @@
 {
   "id": "okf-claudian",
   "name": "Claudian",
-  "version": "2.1.4-okf.3",
-  "minAppVersion": "1.7.2",
-  "description": "\u7ed3\u5408 Obsidian \u7b14\u8bb0\u4e0e AI \u63d0\u95ee\u3001\u8ba8\u8bba\u548c\u7f16\u8f91\u5185\u5bb9\uff0c\u652f\u6301\u591a\u79cd\u6a21\u578b\u4e0e\u52a9\u624b\u3002",
+  "version": "2.3.6-okf.4",
+  "minAppVersion": "1.13.0",
+  "description": "Embeds Claude Code, Codex, and other coding agents as AI collaborators in your vault. Your vault becomes their working directory, giving them capabilities for file reads and writes, search, bash commands, and multi-step workflows.",
   "author": "susurrus, based on Claudian by Yishen Tu",
-  "authorUrl": "https://github.com/YishenTu/claudian",
+  "authorUrl": "https://github.com/YishenTu",
   "isDesktopOnly": true
 }
