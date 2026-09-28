@@ -30,6 +30,7 @@ export function planDashboardUpdate(
 	if (previous.columns.length !== next.columns.length) return { kind: 'full' };
 
 	const changed: string[] = [];
+	const changedIdx: number[] = [];
 	for (let i = 0; i < next.columns.length; i++) {
 		const before = previous.columns[i];
 		const after = next.columns[i];
@@ -43,7 +44,29 @@ export function planDashboardUpdate(
 			|| before.cards.length !== after.cards.length) {
 			return { kind: 'full' };
 		}
-		if (!sameValue(before, after)) changed.push(sectionRef(after));
+		if (!sameValue(before, after)) {
+			changed.push(sectionRef(after));
+			changedIdx.push(i);
+		}
+	}
+
+	// A width change mirrors onto the section's PAIR PARTNER (the right member
+	// renders the complement basis). An in-place refresh of only the actor
+	// would leave the partner carrying its pre-change inline value — after a
+	// pair-divider drag that is the un-rounded live percentage, the two bases
+	// sum past 100% and the pair wraps into stacked full-width rows (the
+	// "pair drag breaks" bug). Pull every adjacent partner of a changed
+	// column into the refresh set.
+	const refsSet = new Set(changed);
+	for (const i of changedIdx) {
+		if (!next.columns[i]!.half) continue;
+		for (const j of [i - 1, i + 1]) {
+			const neighbor = next.columns[j];
+			if (neighbor?.half && !refsSet.has(sectionRef(neighbor))) {
+				refsSet.add(sectionRef(neighbor));
+				changed.push(sectionRef(neighbor));
+			}
+		}
 	}
 
 	return changed.length > 0

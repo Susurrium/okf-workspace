@@ -10,7 +10,7 @@ export function revealSectionType(
 	const column = data?.columns.find((item) => item.sectionType === sectionType);
 	if (!column) return false;
 	const rows = container.querySelectorAll<HTMLElement>('.dashboard-section-row');
-	const row = [...rows].find((item) => item.dataset.column === sectionRef(column));
+	const row = Array.from(rows).find((item) => item.dataset.column === sectionRef(column));
 	if (!row) return false;
 	if (row.hasClass('dashboard-section-row--collapsed')) {
 		row.removeClass('dashboard-section-row--collapsed');

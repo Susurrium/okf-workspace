@@ -4,12 +4,13 @@ import type { ApexHost } from './host';
 import type { AppWithCommands } from './obsidian-internal';
 import { sectionRef, type DashboardData, type DashboardColumn, type DashboardCard, type QuickAction, type BannerData, type LibraryConfig, type QuickNotePreset, type PinnedNote, type QuickCommand, type DataviewConfig } from './types';
 import { acquireSyncEngine, SyncEngine, type SyncEngineLease } from './sync';
-import { renderDashboard, destroyAllCharts, renderSidebarWidgets, sidebarWidgetSignature, refreshSidebarWeatherWidget, renderSidebarWeekCalendar, renderSidebarPomodoro, renderSidebarReading, refreshScanningSections, refreshMediaSections, renderSection, refreshWeatherCards } from './renderer';
+import { renderDashboard, destroyAllCharts, renderSidebarWidgets, sidebarWidgetSignature, isStackedLayout, refreshSidebarWeatherWidget, renderSidebarWeekCalendar, renderSidebarPomodoro, renderSidebarReading, refreshScanningSections, refreshMediaSections, renderSection, refreshWeatherCards } from './renderer';
 import { refreshSidebarTaskCalendar, renderSidebarCalendar } from './calendar-widget';
 import { refreshCalendarSections } from './calendar-section';
 import { renderSidebarHabitWidget, refreshHabitWidget } from './habit-widget';
 import { renderSidebarExpenseWidget, refreshExpenseWidget } from './expense-widget';
-import { refreshAlbumWidget, destroyAlbumWidgets } from './album-widget';
+import { refreshAlbumWidgets, destroyAlbumWidgets } from './album-widget';
+import { destroyAnniversaryTimers, parseAnniversaryDate, anniversaryDateThisYear } from './anniversary-widget';
 import { refreshMusicWidget } from './music-widget';
 import { getMusicService } from './music-service';
 import { getHabitService } from './habit-service';
@@ -18,7 +19,7 @@ import { renderBanner, BannerEditModal, resolveVaultImage } from './banner';
 import { renderWorkspaceSwitcher } from './workspace-switcher';
 import { refreshBannerStats } from './banner-stats';
 import { applyAppearance } from './appearance';
-import { createNoteFromPreset, captureThought, openPinnedNote, openTodayNote } from './quick-note-section';
+import { createNoteFromPreset, captureThought, openPinnedNote, openTodayNote, renderQuickNoteRegion } from './quick-note-section';
 import { QuickNoteConfigModal } from './quick-note-config-modal';
 import { getRecentDocs, renderRecentDocs } from './recent';
 import { renderQuickActions, AddActionModal, DocSearchModal } from './quick-actions';
@@ -541,6 +542,8 @@ export class DashboardView extends ItemView implements HoverParent {
 		const root = this.containerEl.children[1] as HTMLElement;
 		const kanbanEl = root?.querySelector('.dashboard-kanban');
 		const sidebarScrollEl = root?.querySelector('.dashboard-sidebar-scroll');
+		const regionEl = root?.querySelector('.dashboard-scroll-region');
+		const savedRegionScroll = regionEl ? regionEl.scrollTop : 0;
 		let savedKanbanScroll = kanbanEl ? kanbanEl.scrollTop : 0;
 		let savedSidebarScroll = sidebarScrollEl ? sidebarScrollEl.scrollTop : 0;
 
@@ -574,6 +577,10 @@ export class DashboardView extends ItemView implements HoverParent {
 		container.empty();
 		container.addClass('apex-dashboard-root');
 		container.setAttribute('data-theme', this.plugin.settings.stylePreset);
+		// Layout mode rides on an attribute so CSS owns the switch. Phones
+		// always report 'side' (isStackedLayout excludes them) so their DOM and
+		// CSS stay byte-identical regardless of this desktop-only setting.
+		container.setAttribute('data-layout', isStackedLayout(this.plugin.settings) ? 'stacked' : 'side');
 
 		// Apply user appearance overrides (background image layer + custom colors).
 		// Must run after data-theme so inline `--db-*` overrides win by specificity,
@@ -626,7 +633,28 @@ export class DashboardView extends ItemView implements HoverParent {
 
 		const mainLayout = container.createDiv({ cls: 'dashboard-main' });
 
-		const sidebar = mainLayout.createDiv({ cls: 'dashboard-sidebar' });
+		// Stacked layout: the quick-notes work bar (capture pill, today note,
+		// chips) moves OUT of the kanban to sit directly under the banner,
+		// above the widget strip — the kanban sits below the strip there, so
+		// its usual top slot would land the bar beneath the widgets. The side
+		// layout keeps rendering it inside the kanban as before.
+		//
+		// Scroll model: the bar stays PINNED, while the widget deck and the
+		// board scroll TOGETHER inside one region below it (the user wheels
+		// through widgets and sections as one page). The side layout keeps the
+		// old split (rail scrolls alone, board scrolls alone).
+		const stacked = isStackedLayout(this.plugin.settings);
+		if (stacked && this.plugin.settings.quickNotesEnabled) {
+			renderQuickNoteRegion(mainLayout, this.plugin.settings, this.createCallbacks());
+		}
+		const contentHost = stacked
+			? mainLayout.createDiv({ cls: 'dashboard-scroll-region' })
+			: mainLayout;
+
+		// Rail state classes apply in BOTH layouts: in stacked mode they carry
+		// strip semantics instead (collapse to a slim bar, expand on click,
+		// pin keeps it open) via the [data-layout="stacked"] CSS overrides.
+		const sidebar = contentHost.createDiv({ cls: 'dashboard-sidebar' });
 		if (this.sidebarPinned) {
 			sidebar.addClass('dashboard-sidebar--pinned');
 		} else if (this.sidebarExpanded) {
@@ -640,9 +668,9 @@ export class DashboardView extends ItemView implements HoverParent {
 		// Two-layer board: a NON-scrolling wrapper around the scrolling
 		// .dashboard-kanban. (The switcher itself lives on the banner; the split
 		// stays because it gives the scroll layer a clean, non-scrolling host.)
-		const kanbanWrapper = mainLayout.createDiv({ cls: 'dashboard-kanban-wrapper' });
+		const kanbanWrapper = contentHost.createDiv({ cls: 'dashboard-kanban-wrapper' });
 		const kanban = kanbanWrapper.createDiv({ cls: 'dashboard-kanban' });
-		renderDashboard(kanban, data, this.createCallbacks(), this.app, this.plugin.settings, this);
+		renderDashboard(kanban, data, this.createCallbacks(), this.app, this.plugin.settings, this, { skipQuickNotes: stacked });
 		setupDragAndDrop(kanban, this.createCallbacks(), this.dndCleanupFns);
 		// Library config event delegation
 		kanban.addEventListener('dashboard-library-config', ((e: CustomEvent) => {
@@ -705,6 +733,8 @@ export class DashboardView extends ItemView implements HoverParent {
 		// Restore scroll positions
 		const newKanban = container.querySelector('.dashboard-kanban');
 		const newSidebarScroll = container.querySelector('.dashboard-sidebar-scroll');
+		const newRegion = container.querySelector('.dashboard-scroll-region');
+		if (newRegion) newRegion.scrollTop = savedRegionScroll;
 		if (newKanban) newKanban.scrollTop = savedKanbanScroll;
 		if (newSidebarScroll) newSidebarScroll.scrollTop = savedSidebarScroll;
 
@@ -1075,7 +1105,13 @@ export class DashboardView extends ItemView implements HoverParent {
 
 		const scroll = sidebar.createDiv({ cls: 'dashboard-sidebar-scroll' });
 
-		renderSidebarWeekCalendar(scroll);
+		// Week calendar and recent docs are CSS-hidden in stacked mode, so skip
+		// building them there: the recent-docs list costs a full markdown-file
+		// mtime sort per render, and the debounced refresh already no-ops when
+		// the .dashboard-recent block is absent.
+		if (!isStackedLayout(this.plugin.settings)) {
+			renderSidebarWeekCalendar(scroll);
+		}
 
 		// Quick buttons participate in the widget drag/reorder system now; the
 		// renderer adds them to the widget area like any other sidebar widget.
@@ -1149,17 +1185,21 @@ export class DashboardView extends ItemView implements HoverParent {
 			renderQuickActionsWidget,
 		);
 
-		const docs = getRecentDocs(this.app, this.plugin.settings.recentDocCount);
-		renderRecentDocs(
-			scroll,
-			docs,
-			(path) => { void this.navigateToPath(path); },
-		);
+		if (!isStackedLayout(this.plugin.settings)) {
+			const docs = getRecentDocs(this.app, this.plugin.settings.recentDocCount);
+			renderRecentDocs(
+				scroll,
+				docs,
+				(path) => { void this.navigateToPath(path); },
+			);
+		}
 	}
 
 	/** Desktop-only sidebar pin, anchored at the banner's bottom-left corner.
 	 *  Distinct from the banner-collapse bookmark button (top-right,
-	 *  .dashboard-banner-pin-btn): this one pins/unpins the sidebar. */
+	 *  .dashboard-banner-pin-btn): this one pins/unpins the sidebar. Works in
+	 *  both layouts — in stacked mode it pins the widget strip open instead of
+	 *  the left rail. */
 	private renderBannerPinButton(bannerEl: HTMLElement): void {
 		if (Platform.isMobile) return;
 		const pinBtn = bannerEl.createEl('button', {
@@ -2184,13 +2224,13 @@ export class DashboardView extends ItemView implements HoverParent {
 	 *  vault. In-place via the widget's controller: an unchanged path list
 	 *  leaves the slideshow position and timer untouched. */
 	private debouncedRefreshAlbumWidget(): void {
-		if (!this.plugin.settings.widgetAlbumEnabled) return;
-		if (!this.plugin.settings.widgetAlbumFolder.trim()) return;
+		const albums = this.plugin.settings.albums ?? [];
+		if (!albums.some(a => a.folder.trim())) return;
 		if (this.albumRefreshTimer) window.clearTimeout(this.albumRefreshTimer);
 		this.albumRefreshTimer = window.setTimeout(() => {
 			this.albumRefreshTimer = null;
 			const root = this.containerEl.children[1] as HTMLElement | undefined;
-			if (root) refreshAlbumWidget(root, this.plugin.settings, this.app);
+			if (root) refreshAlbumWidgets(root, albums, this.app);
 		}, this.ALBUM_REFRESH_DEBOUNCE);
 	}
 
@@ -2285,6 +2325,14 @@ export class DashboardView extends ItemView implements HoverParent {
 		const parent = widget.parentElement;
 		if (!parent) return;
 		const mount = createDiv();
+		mount.addClass('dashboard-sidebar-widget-mount');
+		// Carry the replaced widget's identity onto the mount: the stacked
+		// widget grid keys its per-type sizing off [data-widget-key] on the
+		// DIRECT child, which after this swap is the mount, not the widget.
+		const key = widget.dataset.widgetKey;
+		if (key) mount.dataset.widgetKey = key;
+		const span = widget.style.getPropertyValue('--db-widget-span');
+		if (span) mount.style.setProperty('--db-widget-span', span);
 		parent.insertBefore(mount, widget);
 		widget.remove();
 		render(mount);
@@ -2379,6 +2427,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	private runCleanup(preserveSidebarWidgets = false): void {
 		destroyAllCharts(preserveSidebarWidgets ? this.sidebarWidgetsEl : null);
 		destroyAlbumWidgets(preserveSidebarWidgets ? this.sidebarWidgetsEl : null);
+		destroyAnniversaryTimers(preserveSidebarWidgets ? this.sidebarWidgetsEl : null);
 		if (!preserveSidebarWidgets) {
 			if (this.pomodoroService) {
 				this.pomodoroService.setOnTick(null);
@@ -2423,9 +2472,12 @@ export class DashboardView extends ItemView implements HoverParent {
 		// Pick the element that actually scrolls in the current layout.
 		const root = container;
 		const kanbanEl = container.querySelector('.dashboard-kanban');
+		const regionEl = container.querySelector('.dashboard-scroll-region');
 		const pickScroller = (): HTMLElement => {
 			if (window.innerWidth <= 640) return root;
-			return (kanbanEl as HTMLElement) ?? root;
+			// Stacked layout: the shared region scrolls (widgets + sections);
+			// the kanban itself is a static pass-through there.
+			return (regionEl as HTMLElement) ?? (kanbanEl as HTMLElement) ?? root;
 		};
 
 		const updateVisibility = (): void => {
@@ -2575,6 +2627,29 @@ export class DashboardView extends ItemView implements HoverParent {
 						const label = cd.label || cd.targetDate;
 						new Notice(t('countdown.reminderNotice', { label, days: String(daysLeft) }));
 					}
+				}
+			}
+		}
+
+		// Anniversary reminders: fire once a year on the entry's month/day
+		// (outside the columns loop — a per-column placement would just repeat
+		// the same guarded check). Feb 29 entries roll to Mar 1 in common
+		// years via the Date overflow in anniversaryDateThisYear.
+		if (this.plugin.settings.anniversaryEnabled) {
+			for (const av of this.plugin.settings.anniversaries ?? []) {
+				if (!av.annualReminder || !av.startDate) continue;
+				const avKey = `anniversary-remind-${av.id}`;
+				if (this.firedReminders.has(avKey)) continue;
+				const start = parseAnniversaryDate(av.startDate);
+				if (!start) continue;
+				const today = anniversaryDateThisYear(start, now);
+				if (now.getFullYear() === today.getFullYear()
+					&& now.getMonth() === today.getMonth()
+					&& now.getDate() === today.getDate()) {
+					this.firedReminders.add(avKey);
+					const label = av.label || av.startDate;
+					const years = String(now.getFullYear() - start.getFullYear());
+					new Notice(t('anniversary.reminderNotice', { label, years }));
 				}
 			}
 		}
