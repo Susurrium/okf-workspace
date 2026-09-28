@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   FeedDashboardDigest,
   FeedDigestEdition,
+  FeedSubscriptionPage,
+  FeedSubscriptionSourcePage,
   FeedSubscriptionSource,
 } from "../src/feeds/types.js";
 import {
@@ -12,6 +14,8 @@ import {
   mergeUniqueSources,
   readingStreams,
 } from "../src/features/reading/reading-projection.js";
+import { createReadingSectionDefinition, type ReadingSectionHost } from "../src/features/reading/reading-section.js";
+import { TestElement } from "./obsidian-runtime.js";
 
 function edition(id: string, section: "hotspot" | "news" | "learning" | "papers", issuedAt: string): FeedDigestEdition {
   return {
@@ -79,5 +83,101 @@ describe("Reading section projections", () => {
     expect(feedDecisionLabel("learn-now")).toBe("已选择学习");
     expect(feedDecisionLabel("source-only")).toBe("已保存来源");
     expect(feedDecisionLabel(undefined)).toBe("");
+  });
+});
+
+describe("Reading section subscription pagination", () => {
+  it("loads source and edition cursor pages from the visible controls without duplicating sources", async () => {
+    const sourcePages: FeedSubscriptionSourcePage[] = [
+      {
+        section: "learning",
+        sources: Array.from({ length: 8 }, (_, index) => source(`source-${index + 1}`)),
+        total_sources: 10,
+        matched_sources: 10,
+        next_cursor: "sources-page-2",
+        has_more: true,
+      },
+      {
+        section: "learning",
+        sources: [source("source-8", "updated source 8"), source("source-9"), source("source-10")],
+        total_sources: 10,
+        matched_sources: 10,
+        next_cursor: null,
+        has_more: false,
+      },
+    ];
+    const editionPages: FeedSubscriptionPage[] = [
+      {
+        section: "learning",
+        source_id: "source-1",
+        editions: Array.from({ length: 4 }, (_, index) =>
+          edition(`edition-${index + 1}`, "learning", `2026-09-${String(20 - index).padStart(2, "0")}`),
+        ),
+        next_cursor: "editions-page-2",
+        has_more: true,
+      },
+      {
+        section: "learning",
+        source_id: "source-1",
+        editions: [
+          edition("edition-4", "learning", "2026-09-15"),
+          edition("edition-5", "learning", "2026-09-15"),
+          edition("edition-6", "learning", "2026-09-14"),
+        ],
+        next_cursor: null,
+        has_more: false,
+      },
+    ];
+    const loadSources = vi.fn(async (query?: { cursor?: string }) =>
+      sourcePages[query?.cursor ? 1 : 0]!,
+    );
+    const loadEditions = vi.fn(async (query?: { cursor?: string }) =>
+      editionPages[query?.cursor ? 1 : 0]!,
+    );
+    const host: ReadingSectionHost = {
+      feedDashboardDigestSnapshot: () => undefined,
+      loadFeedDashboardDigest: async () => ({ ai_daily: [], ai_papers: null, treehole: null }),
+      loadFeedSubscriptionSources: loadSources,
+      loadFeedSubscriptions: loadEditions,
+      syncFeedsNow: async () => [],
+      promptAddFeedSubscription: () => undefined,
+      promptFeedSubscriptionSettings: () => undefined,
+      openFeedDigest: async () => undefined,
+      openFeedItem: async () => undefined,
+      feedReadingPosition: () => undefined,
+      rememberFeedReadingPosition: async () => undefined,
+      feedDecisionSnapshot: () => undefined,
+    };
+    const container = new TestElement();
+    const definition = createReadingSectionDefinition(host);
+
+    definition.render({ container: container as unknown as HTMLElement } as never);
+    await vi.waitFor(() => expect(container.descendants("okf-reading-source-card")).toHaveLength(8));
+    expect(container.descendants().some((element) => element.textContent === "加载更多来源")).toBe(true);
+
+    container.descendants().find((element) => element.textContent === "加载更多来源")!.click();
+    await vi.waitFor(() => expect(container.descendants("okf-reading-source-card")).toHaveLength(10));
+    expect(loadSources.mock.calls.map(([query]) => query)).toEqual([
+      { limit: 8 },
+      { limit: 8, cursor: "sources-page-2" },
+    ]);
+    const sourceCards = container.descendants("okf-reading-source-card");
+    expect(sourceCards.filter((card) =>
+      card.descendants().some((item) =>
+        item.textContent === "source-8" || item.textContent === "updated source 8",
+      ),
+    )).toHaveLength(1);
+    expect(sourceCards[7]?.descendants().some((item) => item.textContent === "updated source 8")).toBe(true);
+
+    sourceCards[0]!.descendants().find((element) => element.textContent === "查看来源与历史")!.click();
+    await vi.waitFor(() => expect(container.descendants("okf-feed-digest__edition")).toHaveLength(4));
+    expect(container.descendants().some((element) => element.textContent === "加载更早内容")).toBe(true);
+    container.descendants().find((element) => element.textContent === "加载更早内容")!.click();
+    await vi.waitFor(() => expect(container.descendants("okf-feed-digest__edition")).toHaveLength(6));
+    expect(container.descendants().some((element) => element.textContent === "加载更早内容")).toBe(false);
+    expect(loadEditions.mock.calls.map(([query]) => query)).toEqual([
+      { limit: 4, source_id: "source-1" },
+      { limit: 4, source_id: "source-1", cursor: "editions-page-2" },
+    ]);
   });
 });

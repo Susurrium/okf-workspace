@@ -83,6 +83,40 @@ describe("Apex native data takeover", () => {
     expect(adapter.files.get(source)).toBe("legacy");
   });
 
+  it("keeps takeover results stable while refreshing the diagnostic completion timestamp", async () => {
+    const adapter = new MemoryAdapter();
+    const source = ".obsidian/plugins/apex-dashboard/habits.json";
+    const target = ".obsidian/plugins/okf-workspace-dashboard/habits.json";
+    const receiptPath = ".obsidian/plugins/okf-workspace-dashboard/apex-native-data-takeover.json";
+    adapter.files.set(source, "{\"version\":1,\"entries\":{}}\n");
+
+    const first = await takeoverApexNativeData(app(adapter), "okf-workspace-dashboard", new Date("2026-09-28T00:00:00Z"));
+    const firstRaw = adapter.files.get(receiptPath)!;
+    const targetBeforeRetry = adapter.files.get(target);
+    const second = await takeoverApexNativeData(app(adapter), "okf-workspace-dashboard", new Date("2026-09-28T01:00:00Z"));
+    const secondRaw = adapter.files.get(receiptPath)!;
+    const stableReceipt = (raw: string): Record<string, unknown> => {
+      const receipt = JSON.parse(raw) as Record<string, unknown>;
+      delete receipt.completedAt;
+      receipt.entries = (receipt.entries as Record<string, unknown>[]).map((entry) => ({
+        ...entry,
+        status: entry.status === "copied" || entry.status === "already-copied"
+          ? "target-present"
+          : entry.status,
+      }));
+      return receipt;
+    };
+
+    expect(first.completedAt).not.toBe(second.completedAt);
+    expect(firstRaw).not.toBe(secondRaw);
+    expect(stableReceipt(secondRaw)).toEqual(stableReceipt(firstRaw));
+    expect(adapter.files.get(target)).toBe(targetBeforeRetry);
+    expect(second.entries).toEqual(first.entries.map((entry) => ({
+      ...entry,
+      status: entry.status === "copied" ? "already-copied" : entry.status,
+    })));
+  });
+
   it("resumes a verified temporary copy after interruption", async () => {
     const adapter = new MemoryAdapter();
     const source = ".obsidian/plugins/apex-dashboard/reading.json";

@@ -16,6 +16,7 @@ import {
 	formatDate,
 } from './media-views';
 import { trashMediaFile } from './media-utils';
+import { createToolbarDropdown } from './toolbar-dropdown';
 
 /** Image file extensions shown in an images section (excludes pdf). */
 export const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp']);
@@ -93,11 +94,22 @@ function isMediaSection(sectionType: string): boolean {
 	return sectionType === 'images' || sectionType === 'videos';
 }
 
-function queryMediaFiles(app: App, exts: Set<string>, excludeFolders: string[], tagService?: MediaTagService): MediaFileResult[] {
+function queryMediaFiles(app: App, exts: Set<string>, excludeFolders: string[], includeFolders: string[], tagService?: MediaTagService): MediaFileResult[] {
 	const excluded = normalizeExcludeFolders(excludeFolders);
+	// Display scope: normalized lowercase prefixes; a file qualifies when its
+	// path equals a scope folder or lives under it. Empty scope = whole vault.
+	const includes = includeFolders
+		.map(f => f.trim().toLowerCase().replace(/\/+$/, ''))
+		.filter(Boolean);
+	const inScope = (path: string): boolean => {
+		if (includes.length === 0) return true;
+		const p = path.toLowerCase();
+		return includes.some(inc => p === inc || p.startsWith(inc + '/'));
+	};
 	const results: MediaFileResult[] = [];
 	for (const file of app.vault.getFiles()) {
 		if (file.path.startsWith('.')) continue;
+		if (!inScope(file.path)) continue;
 		if (isUnderExcludedFolder(file.path, excluded)) continue;
 		if (!exts.has(file.extension)) continue;
 		results.push({
@@ -274,42 +286,87 @@ export function renderMediaSection(
 	}
 	groupSelect.addEventListener('change', () => { groupBy = groupSelect.value as MediaGroupMode; currentPage = 1; render(); });
 
-	// View mode toggle (reuses library's view-toggle styling)
+	// One-click collapse/expand for EVERY group at once (grouped mode only;
+	// the visibility flip lives in render() where groupBy is applied). Same
+	// in-place discipline as the per-group header toggle: flip collapsedGroups
+	// and the DOM classes/chevrons directly, never re-query the vault. The
+	// icon mirrors the current state — chevrons-down-up ("collapse all") while
+	// any group is open, chevrons-up-down ("expand all") once folded.
+	const collapseToggle = toolbar.createDiv({ cls: 'dashboard-library-view-toggle dashboard-media-collapse-toggle' });
+	const collapseBtn = collapseToggle.createDiv({
+		cls: 'dashboard-library-view-btn',
+		attr: { 'aria-label': t('library.collapseAllGroups'), title: t('library.collapseAllGroups') },
+	});
+	setIcon(collapseBtn, 'chevrons-down-up');
+	const updateCollapseToggle = (): void => {
+		const headers = Array.from(resultArea.querySelectorAll<HTMLElement>('.dashboard-media-group-header'));
+		const collapse = headers.some(h => !h.hasClass('is-collapsed'));
+		collapseBtn.empty();
+		setIcon(collapseBtn, collapse ? 'chevrons-down-up' : 'chevrons-up-down');
+		const label = collapse ? t('library.collapseAllGroups') : t('library.expandAllGroups');
+		collapseBtn.title = label;
+		collapseBtn.setAttribute('aria-label', label);
+	};
+	collapseBtn.addEventListener('click', (e) => {
+		e.stopPropagation();
+		const headers = Array.from(resultArea.querySelectorAll<HTMLElement>('.dashboard-media-group-header'));
+		if (headers.length === 0) return;
+		const collapse = headers.some(h => !h.hasClass('is-collapsed'));
+		for (const header of headers) {
+			const key = header.dataset.groupKey ?? '';
+			const body = header.nextElementSibling;
+			const chevron = header.querySelector<HTMLElement>('.dashboard-media-group-chevron');
+			if (collapse) {
+				collapsedGroups.add(key);
+				header.addClass('is-collapsed');
+				body?.addClass('is-hidden');
+				if (chevron) setIcon(chevron, 'chevron-right');
+			} else {
+				collapsedGroups.delete(key);
+				header.removeClass('is-collapsed');
+				body?.removeClass('is-hidden');
+				if (chevron) setIcon(chevron, 'chevron-down');
+			}
+		}
+		updateCollapseToggle();
+	});
+
+	// View mode toggle (single dropdown button; menu lists the views)
 	let viewMode: MediaViewMode = 'grid';
 	const viewToggle = toolbar.createDiv({ cls: 'dashboard-library-view-toggle' });
-	const viewIcons: Record<MediaViewMode, string> = { grid: 'layout-grid', list: 'list' };
 	const buildViewToggle = (): void => {
 		viewToggle.empty();
-		(['grid', 'list'] as MediaViewMode[]).forEach((mode) => {
-			const btn = viewToggle.createDiv({
-				cls: 'dashboard-library-view-btn' + (mode === viewMode ? ' active' : ''),
-			});
-			setIcon(btn, viewIcons[mode]);
-			btn.addEventListener('click', () => { viewMode = mode; currentPage = 1; buildViewToggle(); render(); });
+		createToolbarDropdown(viewToggle, viewMode, (['grid', 'list'] as MediaViewMode[]).map(mode => ({
+			key: mode,
+			label: t('media.view' + mode.charAt(0).toUpperCase() + mode.slice(1)),
+			icon: mode === 'grid' ? 'layout-grid' : 'list',
+		})), (key) => {
+			viewMode = key as MediaViewMode;
+			currentPage = 1;
+			buildViewToggle();
+			render();
 		});
 	};
 	buildViewToggle();
 
 	// Thumbnail size toggle (small / medium / large) — affects the grid view.
 	// The choice persists via localStorage (same channel the note popover uses
-	// for its edit/preview mode), shared across every media section.
+	// for its edit/preview mode), shared across every media section. Single
+	// dropdown button showing the current letter.
 	let thumbSize: ThumbSize = readStoredThumbSize(app);
 	const sizeToggle = toolbar.createDiv({ cls: 'dashboard-library-view-toggle dashboard-media-size-toggle' });
 	const sizeLabels: Record<ThumbSize, string> = { small: 'S', medium: 'M', large: 'L' };
 	const buildSizeToggle = (): void => {
 		sizeToggle.empty();
-		(['small', 'medium', 'large'] as ThumbSize[]).forEach((s) => {
-			const btn = sizeToggle.createDiv({
-				cls: 'dashboard-library-view-btn' + (s === thumbSize ? ' active' : ''),
-				attr: { 'aria-label': t('media.size' + s.charAt(0).toUpperCase() + s.slice(1)) },
-			});
-			btn.textContent = sizeLabels[s];
-			btn.addEventListener('click', () => {
-				thumbSize = s;
-				app.saveLocalStorage(THUMB_SIZE_STORAGE_KEY, s);
-				buildSizeToggle();
-				render();
-			});
+		createToolbarDropdown(sizeToggle, thumbSize, (['small', 'medium', 'large'] as ThumbSize[]).map(s => ({
+			key: s,
+			label: t('media.size' + s.charAt(0).toUpperCase() + s.slice(1)),
+			short: sizeLabels[s],
+		})), (key) => {
+			thumbSize = key as ThumbSize;
+			app.saveLocalStorage(THUMB_SIZE_STORAGE_KEY, thumbSize);
+			buildSizeToggle();
+			render();
 		});
 	};
 	buildSizeToggle();
@@ -560,8 +617,11 @@ export function renderMediaSection(
 		releaseVideoMedia(resultArea);
 		resultArea.empty();
 		paginationArea.empty();
+		// Collapse-all sweep only exists in grouped mode; flip early so every
+		// render path (including early returns below) leaves it correct.
+		collapseToggle.toggleClass('is-hidden', groupBy === 'none');
 
-		let results = queryMediaFiles(app, exts!, column.libraryConfig?.excludeFolders ?? [], tagService);
+		let results = queryMediaFiles(app, exts!, column.libraryConfig?.excludeFolders ?? [], column.libraryConfig?.includeFolders ?? [], tagService);
 		const q = searchInput.value.trim().toLowerCase();
 		if (q) {
 			results = results.filter(r => r.basename.toLowerCase().includes(q) || r.path.toLowerCase().includes(q));
@@ -631,6 +691,9 @@ export function renderMediaSection(
 				const header = resultArea.createDiv({
 					cls: 'dashboard-media-group-header' + (collapsed ? ' is-collapsed' : ''),
 				});
+				// Key for the collapse-all sweep (it syncs collapsedGroups from
+				// the rendered headers instead of re-querying the vault).
+				header.dataset.groupKey = group.key;
 				const chevron = header.createDiv({ cls: 'dashboard-media-group-chevron' });
 				setIcon(chevron, collapsed ? 'chevron-right' : 'chevron-down');
 				header.createDiv({ cls: 'dashboard-media-group-name', text: group.key });
@@ -651,6 +714,7 @@ export function renderMediaSection(
 						body.addClass('is-hidden');
 						setIcon(chevron, 'chevron-right');
 					}
+					updateCollapseToggle();
 				});
 				const onOpen = (i: number): void => openGroupLightbox(group.offset + i);
 				if (viewMode === 'grid') {
@@ -659,6 +723,10 @@ export function renderMediaSection(
 					renderMediaList(body, group.items, app, kind, onOpen, deleteCb, render, onOpenNote, mounter, openTagEditor);
 				}
 			}
+			// No groups rendered (filters emptied everything): the sweep has
+			// nothing to act on, so hide the button entirely.
+			if (groups.length === 0) collapseToggle.addClass('is-hidden');
+			else updateCollapseToggle();
 			return;
 		}
 

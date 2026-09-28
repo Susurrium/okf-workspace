@@ -1,6 +1,6 @@
 import { memoCardText } from './card-move';
 import { extractCardParts } from './parser';
-import { App, Platform, TFile, setIcon } from 'obsidian';
+import { App, Component, MarkdownRenderer, Platform, TFile, setIcon } from 'obsidian';
 import type { HoverParent, EventRef } from 'obsidian';
 import { sectionRef, type DashboardData, type DashboardColumn, type DashboardCard, type RenderCallbacks, type TaskItem, type DocNode, type DashboardSettings, type CardSize, type TrackerStyle } from './types';
 import { t, getLanguage } from './i18n';
@@ -14,12 +14,15 @@ import { renderDataviewSection, setDataviewApp } from './dataview-section';
 import { renderWebSection } from './web-section';
 import { renderQuickNoteRegion } from './quick-note-section';
 import { resolveVaultImage } from './banner';
+import { focalToBackgroundPosition, isCenterFocal } from './focal-point-picker';
 import { ITEM_DRAG_TYPE } from './dnd';
 import { captureScrollStates, restoreScrollStates } from './scroll-preserve';
 import { attachFileSuggest } from './file-suggest';
 import { showConfirmDialog } from './confirm-dialog';
 import { applyModalTheme } from './modal-theme';
 import { partnerIndexOf } from './column-pairs';
+import { RATIO_SPAN, buildStackedSpanSpecs, resolveStackedSpans, isTieredWidgetKey } from './widget-span';
+import { normalizeExcludeFolders, isUnderExcludedFolder } from './exclude-folders';
 import { attachNoteHover } from './hover-preview';
 import { fetchWeather, getCachedWeather, getWeatherEmoji, getWeatherDescription } from './weather-service';
 import { readTrackerData, computeStreak } from './tracker-service';
@@ -35,6 +38,9 @@ import { renderCalendarSection } from './calendar-section';
 import { renderSidebarHabitWidget } from './habit-widget';
 import { renderSidebarExpenseWidget } from './expense-widget';
 import { renderSidebarAlbumWidget } from './album-widget';
+import { renderSidebarAnniversaryWidget } from './anniversary-widget';
+import { applyWidgetBackground, appendInlineBackgroundButton, getWidgetPlugin } from './widget-background';
+import { startGuardedDrag } from './drag-guard';
 import { renderSidebarMusicWidget } from './music-widget';
 import { SUPPORTED_FILE_EXTS, iconForExtension } from './file-types';
 import type { HolidayInfo } from './holiday-service';
@@ -127,6 +133,10 @@ let docDragSource: { cardId: string; docPath: number[] } | null = null;
 // through every function signature. Mirrors the docDragSource module-level idiom.
 let activeHoverParent: HoverParent | null = null;
 let activeNoteOpener: ((file: TFile, subpath?: string) => void) | null = null;
+// The rendering view as a Component — MarkdownRenderer.render requires one for
+// its async lifecycle; null when the caller passed a bare hover parent, in
+// which case memo cards keep the synchronous plain-lines paint.
+let activeMarkdownComponent: Component | null = null;
 
 const VAULT_FILE_EXTS = SUPPORTED_FILE_EXTS;
 
@@ -263,6 +273,14 @@ export function renderSidebarWeekCalendar(container: HTMLElement): void {
 	}
 }
 
+/** True when the board should render top-bottom (widget strip under the
+ *  banner). Phones are excluded: their layout is CSS-fixed and must not
+ *  change shape because a desktop-only setting flipped. Every call site
+ *  funnels through this one helper so the gate can never drift. */
+export function isStackedLayout(settings: import('./types').DashboardSettings): boolean {
+	return settings.layoutMode === 'stacked' && !Platform.isPhone;
+}
+
 /** Fingerprint of every input the sidebar widgets depend on. The view compares
  *  it across full re-renders: when unchanged, the previous widgets DOM is
  *  re-attached instead of rebuilt (see renderSidebarWidgets), so dashboard data
@@ -275,6 +293,11 @@ export function sidebarWidgetSignature(
 	quickActionsSig: string,
 ): string {
 	return JSON.stringify({
+		// The stacked widget area has a different internal structure (quick
+		// actions card pinned leftmost + column-major strip wrapper), so a
+		// layout switch must rebuild rather than re-attach the previous mode's
+		// DOM.
+		stacked: isStackedLayout(settings),
 		weatherEnabled: settings.widgetWeatherEnabled,
 		weatherCity: settings.widgetWeatherCity,
 		weatherLat: settings.widgetWeatherLat,
@@ -286,19 +309,28 @@ export function sidebarWidgetSignature(
 		calendarEnabled: settings.widgetCalendarEnabled,
 		calendarExcludeFolders: settings.calendarExcludeFolders,
 		habitEnabled: settings.widgetHabitEnabled,
+		// Tier settings must break the reuse signature: they change the stacked
+		// grid spans, which are written as inline CSS variables at build time.
+		// (sidebarWidth / widgetUnitHeight deliberately stay OUT — those apply
+		// as plain CSS variables on the outer sidebar every render and must not
+		// churn the widgets DOM.)
+		habitHeightRatio: settings.habitHeightRatio,
+		readingHeightRatio: settings.readingHeightRatio,
 		expenseEnabled: settings.widgetExpenseEnabled,
 		expenseCurrency: settings.expenseCurrency,
-		albumEnabled: settings.widgetAlbumEnabled,
-		albumFolder: settings.widgetAlbumFolder,
-		albumIntervalSec: settings.widgetAlbumIntervalSec,
-		albumRecursive: settings.widgetAlbumRecursive,
+		albums: settings.albums ?? [],
+		quickActionsBackground: settings.quickActionsBackground,
+		pomodoroBackground: settings.pomodoroBackground,
+		habitBackground: settings.habitBackground,
+		musicBackground: settings.musicBackground,
+		yearProgressBackground: settings.yearProgressBackground,
+		anniversaryEnabled: settings.anniversaryEnabled,
+		anniversaries: settings.anniversaries ?? [],
 		// Playlist content itself must NOT enter the signature: every add would
 		// rebuild the whole widget area. The service subscription refreshes it
 		// in place instead; only the enable flag matters here. Phones have no
 		// sidebar widget area; tablets share the desktop layout.
 		musicEnabled: settings.widgetMusicEnabled && !Platform.isPhone,
-		albumRatio: settings.widgetAlbumRatio,
-		albumTransition: settings.widgetAlbumTransition,
 		countdownEnabled: settings.countdownEnabled,
 		countdowns: settings.countdowns,
 		readingEnabled: settings.readingEnabled,
@@ -322,6 +354,22 @@ export function sidebarWidgetSignature(
  *  navigation state all survive the surrounding full re-render.
  *  Returns the widgets area element (reused or fresh), or null when no widget
  *  is enabled. */
+
+/** Persist a singleton widget's background straight from the card's config
+ *  button (plugin reached via the app service locator — the same idiom the
+ *  countdown settings button uses). */
+function saveSingletonBackground(
+	app: App,
+	key: 'quickActionsBackground' | 'pomodoroBackground' | 'habitBackground' | 'musicBackground' | 'yearProgressBackground',
+	bg: import('./types').WidgetBackground | undefined,
+): void {
+	const plugin = getWidgetPlugin(app);
+	if (!plugin) return;
+	plugin.settings = { ...plugin.settings, [key]: bg };
+	void plugin.saveSettings();
+	plugin.refreshAllDashboards();
+}
+
 export function renderSidebarWidgets(
 	container: HTMLElement,
 	settings: import('./types').DashboardSettings,
@@ -334,87 +382,182 @@ export function renderSidebarWidgets(
 	onOpenNote?: (file: TFile, line?: number) => void,
 	renderQuickActions?: (container: HTMLElement) => void,
 ): HTMLElement | null {
-	const anyEnabled = settings.widgetWeatherEnabled || settings.pomodoroEnabled || settings.widgetLunarEnabled || settings.widgetYearProgressEnabled || settings.widgetCalendarEnabled || settings.widgetHabitEnabled || settings.widgetExpenseEnabled || settings.widgetAlbumEnabled || (settings.countdownEnabled && (settings.countdowns?.length ?? 0) > 0) || settings.readingEnabled || (settings.widgetQuickActionsEnabled && !!renderQuickActions) || (settings.widgetMusicEnabled && !Platform.isPhone);
+	const anyEnabled = settings.widgetWeatherEnabled || settings.pomodoroEnabled || settings.widgetLunarEnabled || settings.widgetYearProgressEnabled || settings.widgetCalendarEnabled || settings.widgetHabitEnabled || settings.widgetExpenseEnabled || (settings.albums?.length ?? 0) > 0 || (settings.anniversaryEnabled && (settings.anniversaries?.length ?? 0) > 0) || (settings.countdownEnabled && (settings.countdowns?.length ?? 0) > 0) || settings.readingEnabled || (settings.widgetQuickActionsEnabled && !!renderQuickActions) || (settings.widgetMusicEnabled && !Platform.isPhone);
 	if (!anyEnabled) return null;
 
+	const stacked = isStackedLayout(settings);
 	// Unchanged inputs: keep the previous DOM (and its live timers/listeners).
-	if (reuse && reuse.isConnected === false && reuse.childElementCount > 0) {
+	// The layout marker check is local defense-in-depth on top of the caller's
+	// signature gate: a side-built area (flat children) must never re-attach
+	// into a stacked render (strip wrapper expected) or vice versa, even if a
+	// future caller forgets to include the layout in its signature.
+	if (reuse && reuse.isConnected === false && reuse.childElementCount > 0
+		&& reuse.dataset.layout === (stacked ? 'stacked' : 'side')) {
 		container.appendChild(reuse);
 		return reuse;
 	}
 
 	const widgetArea = container.createDiv({ cls: 'dashboard-sidebar-widgets' });
+	widgetArea.dataset.layout = stacked ? 'stacked' : 'side';
 
-	const DEFAULT_ORDER = ['quickActions', 'lunar', 'weather', 'pomodoro', 'reading', 'countdown', 'yearProgress', 'calendar', 'habit', 'expense', 'album', 'music'];
+	const DEFAULT_ORDER = ['quickActions', 'lunar', 'weather', 'pomodoro', 'reading', 'countdown', 'anniversary', 'yearProgress', 'calendar', 'habit', 'expense', 'album', 'music'];
 	// Legacy: an order saved before quick buttons were a widget lacks the
 	// 'quickActions' key. Render it first there (its historical spot, above the
 	// other widgets) until the user drags it elsewhere.
 	const order = settings.widgetOrder?.length ? settings.widgetOrder : DEFAULT_ORDER;
 
-	type WidgetEntry = { key: string; render: () => void };
+	type WidgetEntry = { key: string; render: (host: HTMLElement) => void };
 	const enabled: WidgetEntry[] = [];
 	if (settings.widgetQuickActionsEnabled && renderQuickActions) {
 		const renderQuick = renderQuickActions;
-		enabled.push({ key: 'quickActions', render: () => { renderQuick(widgetArea); } });
+		enabled.push({ key: 'quickActions', render: (host) => { renderQuick(host); } });
 	}
 	if (settings.widgetLunarEnabled) {
-		enabled.push({ key: 'lunar', render: () => renderSidebarLunarWidget(widgetArea, holidayData ?? {}, app) });
+		enabled.push({ key: 'lunar', render: (host) => renderSidebarLunarWidget(host, holidayData ?? {}, app) });
 	}
 	if (settings.widgetYearProgressEnabled) {
-		enabled.push({ key: 'yearProgress', render: () => renderSidebarYearProgress(widgetArea) });
+		enabled.push({ key: 'yearProgress', render: (host) => renderSidebarYearProgress(host, settings.yearProgressBackground, app, bg => saveSingletonBackground(app, 'yearProgressBackground', bg)) });
 	}
 	if (settings.widgetCalendarEnabled) {
-		enabled.push({ key: 'calendar', render: () => renderSidebarCalendar(widgetArea, settings, app, onOpenNote) });
+		enabled.push({ key: 'calendar', render: (host) => renderSidebarCalendar(host, settings, app, onOpenNote) });
 	}
 	if (settings.widgetWeatherEnabled) {
-		enabled.push({ key: 'weather', render: () => renderSidebarWeather(widgetArea, settings, app) });
+		enabled.push({ key: 'weather', render: (host) => renderSidebarWeather(host, settings, app) });
 	}
 	if (settings.pomodoroEnabled && pomodoroService) {
-		enabled.push({ key: 'pomodoro', render: () => renderSidebarPomodoro(widgetArea, pomodoroService, settings) });
+		enabled.push({ key: 'pomodoro', render: (host) => renderSidebarPomodoro(host, pomodoroService, settings, app, bg => saveSingletonBackground(app, 'pomodoroBackground', bg)) });
 	}
 	if (settings.readingEnabled && readingService) {
-		enabled.push({ key: 'reading', render: () => renderSidebarReading(widgetArea, readingService) });
+		enabled.push({ key: 'reading', render: (host) => renderSidebarReading(host, readingService) });
 	}
 	if (settings.widgetHabitEnabled) {
-		enabled.push({ key: 'habit', render: () => renderSidebarHabitWidget(widgetArea, app) });
+		enabled.push({ key: 'habit', render: (host) => renderSidebarHabitWidget(host, app, settings.habitBackground, bg => saveSingletonBackground(app, 'habitBackground', bg)) });
 	}
 	if (settings.widgetExpenseEnabled) {
-		enabled.push({ key: 'expense', render: () => renderSidebarExpenseWidget(widgetArea, app) });
+		enabled.push({ key: 'expense', render: (host) => renderSidebarExpenseWidget(host, app) });
 	}
-	if (settings.widgetAlbumEnabled) {
-		enabled.push({ key: 'album', render: () => renderSidebarAlbumWidget(widgetArea, settings, app) });
+	// Multiple album widgets: one card per albums[] entry, keyed album-<id>.
+	// renderSidebarAlbumWidget reads the legacy flat fields, so each entry
+	// renders through a per-album settings shim (spread — never mutated).
+	for (const cfg of settings.albums ?? []) {
+		const ref = cfg;
+		enabled.push({
+			key: `album-${ref.id}`,
+			render: (host) => renderSidebarAlbumWidget(host, {
+				...settings,
+				widgetAlbumFolder: ref.folder,
+				widgetAlbumIntervalSec: ref.intervalSec,
+				widgetAlbumRecursive: ref.recursive,
+				widgetAlbumRatio: ref.ratio,
+				widgetAlbumTransition: ref.transition,
+			}, app),
+		});
+	}
+	// Anniversary widgets: one card per anniversaries[] entry, keyed
+	// anniversary-<id> (the countdown multi-instance pattern).
+	if (settings.anniversaryEnabled) {
+		for (const cfg of settings.anniversaries ?? []) {
+			const ref = cfg;
+			enabled.push({ key: `anniversary-${ref.id}`, render: (host) => renderSidebarAnniversaryWidget(host, ref, app, updated => {
+			const plugin = getWidgetPlugin(app);
+			if (!plugin) return;
+			plugin.settings = {
+				...plugin.settings,
+				anniversaries: (plugin.settings.anniversaries ?? []).map(a => a.id === updated.id ? updated : a),
+			};
+			void plugin.saveSettings();
+			plugin.refreshAllDashboards();
+		}) });
+		}
 	}
 	if (settings.widgetMusicEnabled && !Platform.isPhone) {
-		enabled.push({ key: 'music', render: () => renderSidebarMusicWidget(widgetArea) });
+		enabled.push({ key: 'music', render: (host) => renderSidebarMusicWidget(host, settings.musicBackground, app, bg => saveSingletonBackground(app, 'musicBackground', bg)) });
 	}
 	if (settings.countdownEnabled) {
 		for (const cd of settings.countdowns ?? []) {
 			const cdRef = cd;
-			enabled.push({ key: `countdown-${cd.id}`, render: () => renderSidebarCountdown(widgetArea, cdRef, app) });
+			enabled.push({ key: `countdown-${cd.id}`, render: (host) => renderSidebarCountdown(host, cdRef, app) });
 		}
 	}
 
 	const ordered = sortByOrder(enabled, order);
 
-	for (const { key, render } of ordered) {
-		const childCount = widgetArea.children.length;
-		render();
-		const el = widgetArea.children[childCount] as HTMLElement | undefined;
+	// Stacked mode: quick actions is a regular card in the strip grid, always
+	// FIRST in the build order = leftmost column (it also exits the reorder
+	// system there, so the pinned position is deterministic). The saved drag
+	// order is untouched and still rules the side layout. The strip wrapper is
+	// created lazily on the first widget, so an empty enable set never gets a
+	// stray container.
+	const buildOrder = stacked
+		? [...ordered.filter(e => e.key === 'quickActions'), ...ordered.filter(e => e.key !== 'quickActions')]
+		: ordered;
+	let stripRow: HTMLElement | null = null;
+	const hostFor = (_key: string): HTMLElement => {
+		if (!stacked) return widgetArea;
+		stripRow ??= widgetArea.createDiv({ cls: 'dashboard-sidebar-widgets-row' });
+		return stripRow;
+	};
+
+	// Stacked-mode height ratios: rows of the 6-row widget grid per fraction.
+	const albumById = new Map((settings.albums ?? []).map(a => [String(a.id), a]));
+	// Adaptive column packing ("首选档 + 放不下自动换挡"): simulate the sparse
+	// column-first grid over the DOM order and resolve each TIERED card's
+	// span (habit / reading / album-*). Fixed cards keep their hardcoded
+	// per-type CSS spans; tiered cards get the resolved span inline as
+	// --db-widget-span, which their CSS rule reads with a historical fallback.
+	const spans = stacked
+		? resolveStackedSpans(buildStackedSpanSpecs(buildOrder.map(e => e.key), {
+			// Explicit mapping: the settings field names (habitHeightRatio)
+			// differ from the StackedRatios shape, and a whole-settings pass
+			// would type-check (all-optional interface) while silently reading
+			// undefined -> default tiers.
+			habit: settings.habitHeightRatio,
+			reading: settings.readingHeightRatio,
+			albums: settings.albums,
+		}))
+		: null;
+
+	for (let i = 0; i < buildOrder.length; i++) {
+		const { key, render } = buildOrder[i]!;
+		const host = hostFor(key);
+		const childCount = host.children.length;
+		render(host);
+		const el = host.children[childCount] as HTMLElement | undefined;
 		if (el) {
 			el.dataset.widgetKey = key;
 			// The quick-actions section carries its own section classes; give it
 			// the widget class too so it joins the drag-to-reorder system.
-			if (key === 'quickActions') el.addClass('dashboard-sidebar-widget');
+			if (key === 'quickActions') {
+				el.addClass('dashboard-sidebar-widget');
+				// Card background + config gear INSIDE the header's button group
+				// (left of palette/add) — a corner button would overlap them.
+				applyWidgetBackground(el, settings.quickActionsBackground, app, { skipFrame: true });
+				const btnGroup = el.querySelector<HTMLElement>('.dashboard-qa-btn-group');
+				if (btnGroup) {
+					const gear = appendInlineBackgroundButton(btnGroup, app, settings.quickActionsBackground,
+						bg => saveSingletonBackground(app, 'quickActionsBackground', bg));
+					btnGroup.insertBefore(gear, btnGroup.firstChild);
+				}
+			}
+			// Album cards carry their config id (the multi-instance refresh
+			// matches on it).
+			if (key.startsWith('album-')) {
+				const cfg = albumById.get(key.slice('album-'.length));
+				if (cfg) el.dataset.albumId = String(cfg.id);
+			}
+			if (spans && isTieredWidgetKey(key)) {
+				el.setCssProps({ '--db-widget-span': String(spans[i] ?? RATIO_SPAN.full) });
+			}
 		}
 	}
 
 	if (onWidgetReorder) {
-		setupWidgetDnD(widgetArea, ordered.map(e => e.key), onWidgetReorder);
+		setupWidgetDnD(widgetArea, ordered.map(e => e.key), onWidgetReorder, stacked);
 	}
 	return widgetArea;
 }
 
-type WidgetEntry = { key: string; render: () => void };
+type WidgetEntry = { key: string; render: (host: HTMLElement) => void };
 
 function sortByOrder(items: WidgetEntry[], order: string[]): WidgetEntry[] {
 	const orderMap = new Map(order.map((k, i) => [k, i]));
@@ -432,10 +575,31 @@ function setupWidgetDnD(
 	widgetArea: HTMLElement,
 	currentKeys: string[],
 	onReorder: (order: string[]) => void,
+	stacked: boolean,
 ): void {
 	let draggedKey: string | null = null;
 
-	const widgets = () => widgetArea.querySelectorAll('.dashboard-sidebar-widget');
+	/** All drag-order cards: keyed by [data-widget-key], which sits on the
+	 *  widget itself OR on the bare mount wrapper refreshDataWidget re-renders
+	 *  lunar/pomodoro/reading into (the wrapper inherits the key). */
+	const widgets = () => widgetArea.querySelectorAll('[data-widget-key]');
+
+	/** Clear every drag-over indicator class (both axes swept as defense). */
+	const clearDragOver = (el: HTMLElement): void => {
+		el.removeClass('dashboard-sidebar-widget--drag-over-top');
+		el.removeClass('dashboard-sidebar-widget--drag-over-bottom');
+		el.removeClass('dashboard-sidebar-widget--drag-over-left');
+		el.removeClass('dashboard-sidebar-widget--drag-over-right');
+	};
+
+	/** Insertion side for a pointer position over `wEl`: against the vertical
+	 *  midpoint. Both layouts read the Y axis — the side rail stacks widgets
+	 *  vertically, and the stacked deck is a column-major grid where "above
+	 *  the target" is exactly "earlier in the flat order". */
+	const isBefore = (wEl: HTMLElement, e: DragEvent): boolean => {
+		const rect = wEl.getBoundingClientRect();
+		return e.clientY < rect.top + rect.height / 2;
+	};
 
 	/** Controls whose own pointer gesture must not be hijacked by the widget's
 	 *  drag-to-reorder: the music volume slider, text inputs, selects, buttons
@@ -447,75 +611,92 @@ function setupWidgetDnD(
 	 *  (playlist rows and similar) that want the same protection. */
 	const DRAG_BLOCKED = 'input, textarea, select, button, a[href], [contenteditable], [data-no-drag]';
 
+	// Stacked mode pins the quick-actions card to the leftmost slot, so
+	// dropping onto it (or dragging it) could never move anything on screen.
+	// It exits the reorder system there entirely: no insertion indicators, no
+	// persisted no-op order writes that would read as a broken drag.
+	const isPinned = (keyEl: HTMLElement): boolean =>
+		stacked && keyEl.dataset.widgetKey === 'quickActions';
+
 	widgets().forEach(el => {
 		const wEl = el as HTMLElement;
+		if (isPinned(wEl)) return;
 		wEl.setAttribute('draggable', 'false');
-		wEl.dataset.widgetKey ??= wEl.dataset.widgetKey ?? '';
+	});
 
-		wEl.addEventListener('mousedown', (e) => {
-			const target = e.target as HTMLElement | null;
-			const blocked = e.button !== 0 || !!target?.closest(DRAG_BLOCKED);
-			wEl.setAttribute('draggable', blocked ? 'false' : 'true');
-		});
+	// Delegation on the widget AREA, not per-widget listeners: the in-place
+	// data refresh (view.refreshDataWidget) re-mounts lunar/pomodoro/reading
+	// inside a new wrapper mid-session, and drag events bubble — delegated
+	// handlers keep working across those swaps without re-wiring.
+	const keyElOf = (e: Event): HTMLElement | null => {
+		const target = e.target as HTMLElement | null;
+		const hit = target?.closest('[data-widget-key]') as HTMLElement | null;
+		if (!hit || !widgetArea.contains(hit)) return null;
+		return hit;
+	};
 
-		wEl.addEventListener('dragstart', (e) => {
-			draggedKey = wEl.dataset.widgetKey ?? null;
-			wEl.addClass('dashboard-sidebar-widget--dragging');
-			if (e.dataTransfer) {
-				e.dataTransfer.effectAllowed = 'move';
-				e.dataTransfer.setData('text/plain', draggedKey ?? '');
-			}
-		});
+	widgetArea.addEventListener('mousedown', (e) => {
+		const keyEl = keyElOf(e);
+		if (!keyEl || isPinned(keyEl)) return;
+		const blocked = e.button !== 0 || !!(e.target as HTMLElement | null)?.closest(DRAG_BLOCKED);
+		keyEl.setAttribute('draggable', blocked ? 'false' : 'true');
+	});
 
-		wEl.addEventListener('dragend', () => {
-			wEl.setAttribute('draggable', 'false');
-			wEl.removeClass('dashboard-sidebar-widget--dragging');
-			widgets().forEach(el2 => el2.removeClass('dashboard-sidebar-widget--drag-over'));
-			draggedKey = null;
-		});
+	widgetArea.addEventListener('dragstart', (e) => {
+		const keyEl = keyElOf(e);
+		if (!keyEl || isPinned(keyEl)) return;
+		draggedKey = keyEl.dataset.widgetKey ?? null;
+		keyEl.addClass('dashboard-sidebar-widget--dragging');
+		if (e.dataTransfer) {
+			e.dataTransfer.effectAllowed = 'move';
+			e.dataTransfer.setData('text/plain', draggedKey ?? '');
+		}
+	});
 
-		wEl.addEventListener('dragover', (e) => {
-			e.preventDefault();
-			if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-			if (!draggedKey || wEl.dataset.widgetKey === draggedKey) return;
-			widgets().forEach(el2 => el2.removeClass('dashboard-sidebar-widget--drag-over'));
-			const rect = wEl.getBoundingClientRect();
-			const midY = rect.top + rect.height / 2;
-			if (e.clientY < midY) {
-				wEl.addClass('dashboard-sidebar-widget--drag-over-top');
-				wEl.removeClass('dashboard-sidebar-widget--drag-over-bottom');
-			} else {
-				wEl.addClass('dashboard-sidebar-widget--drag-over-bottom');
-				wEl.removeClass('dashboard-sidebar-widget--drag-over-top');
-			}
-		});
+	widgetArea.addEventListener('dragend', (e) => {
+		const keyEl = keyElOf(e);
+		if (keyEl) {
+			keyEl.setAttribute('draggable', 'false');
+			keyEl.removeClass('dashboard-sidebar-widget--dragging');
+		}
+		widgets().forEach(el2 => clearDragOver(el2 as HTMLElement));
+		draggedKey = null;
+	});
 
-		wEl.addEventListener('dragleave', () => {
-			wEl.removeClass('dashboard-sidebar-widget--drag-over-top');
-			wEl.removeClass('dashboard-sidebar-widget--drag-over-bottom');
-		});
+	widgetArea.addEventListener('dragover', (e) => {
+		const keyEl = keyElOf(e);
+		if (!keyEl || isPinned(keyEl)) return;
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		if (!draggedKey || keyEl.dataset.widgetKey === draggedKey) return;
+		widgets().forEach(el2 => clearDragOver(el2 as HTMLElement));
+		keyEl.addClass(isBefore(keyEl, e) ? 'dashboard-sidebar-widget--drag-over-top' : 'dashboard-sidebar-widget--drag-over-bottom');
+	});
 
-		wEl.addEventListener('drop', (e) => {
-			e.preventDefault();
-			wEl.removeClass('dashboard-sidebar-widget--drag-over-top');
-			wEl.removeClass('dashboard-sidebar-widget--drag-over-bottom');
-			if (!draggedKey || wEl.dataset.widgetKey === draggedKey) return;
+	widgetArea.addEventListener('dragleave', (e) => {
+		const keyEl = keyElOf(e);
+		if (keyEl) clearDragOver(keyEl);
+	});
 
-			const targetKey = wEl.dataset.widgetKey ?? '';
-			const rect = wEl.getBoundingClientRect();
-			const midY = rect.top + rect.height / 2;
-			const insertBefore = e.clientY < midY;
+	widgetArea.addEventListener('drop', (e) => {
+		const keyEl = keyElOf(e);
+		if (!keyEl || isPinned(keyEl)) return;
+		e.preventDefault();
+		clearDragOver(keyEl);
+		if (!draggedKey || keyEl.dataset.widgetKey === draggedKey) return;
 
-			const keys = [...currentKeys];
-			const fromIdx = keys.indexOf(draggedKey);
-			if (fromIdx === -1) return;
-			keys.splice(fromIdx, 1);
-			let toIdx = keys.indexOf(targetKey);
-			if (toIdx === -1) return;
-			if (!insertBefore) toIdx += 1;
-			keys.splice(toIdx, 0, draggedKey);
-			onReorder(keys);
-		});
+		const targetKey = keyEl.dataset.widgetKey ?? '';
+		const insertBefore = isBefore(keyEl, e);
+
+		const keys = [...currentKeys];
+		const fromIdx = keys.indexOf(draggedKey);
+		if (fromIdx === -1) return;
+		keys.splice(fromIdx, 1);
+		let toIdx = keys.indexOf(targetKey);
+		if (toIdx === -1) return;
+		if (!insertBefore) toIdx += 1;
+		keys.splice(toIdx, 0, draggedKey);
+		onReorder(keys);
 	});
 }
 
@@ -600,8 +781,11 @@ export function renderSidebarPomodoro(
 	container: HTMLElement,
 	service: PomodoroService,
 	settings: import('./types').DashboardSettings,
+	app?: App,
+	onBgChange?: (bg: import('./types').WidgetBackground | undefined) => void,
 ): void {
 	const widget = container.createDiv({ cls: 'dashboard-sidebar-widget dashboard-sidebar-pomodoro' });
+	if (app) applyWidgetBackground(widget, settings.pomodoroBackground, app);
 
 	const state = service.getState();
 	const isRunning = state.status === 'running';
@@ -623,6 +807,13 @@ export function renderSidebarPomodoro(
 
 	const statsBtn = topRow.createDiv({ cls: 'dashboard-sidebar-pomodoro-stats-btn' });
 	setIcon(statsBtn, 'bar-chart-2');
+
+	// Background gear rides the top row's right cluster (before stats), the
+	// inline pattern shared with habit/music/quick-actions.
+	if (app && onBgChange) {
+		const gear = appendInlineBackgroundButton(topRow, app, settings.pomodoroBackground, onBgChange);
+		topRow.insertBefore(gear, statsBtn);
+	}
 
 	// Ring
 	const ringWrap = widget.createDiv({ cls: 'dashboard-sidebar-pomodoro-ring-wrap' });
@@ -851,6 +1042,7 @@ export function renderSidebarCountdown(
 	app: App,
 ): void {
 	const widget = container.createDiv({ cls: 'dashboard-sidebar-widget dashboard-sidebar-countdown' });
+	applyWidgetBackground(widget, cd.background, app);
 
 	// Settings button (absolute positioned)
 	const settingsBtn = widget.createEl('button', {
@@ -1673,15 +1865,22 @@ export function renderDashboard(
 	app: App,
 	settings?: DashboardSettings,
 	hoverParent: HoverParent | null = null,
+	opts?: { skipQuickNotes?: boolean },
 ): void {
 	activeHoverParent = hoverParent;
 	activeNoteOpener = callbacks.onOpenNoteInPopover ?? null;
+	// The dashboard view doubles as the markdown Component (ItemView extends
+	// Component); other hover-parent callers fall back to plain memo lines.
+	activeMarkdownComponent = hoverParent instanceof Component ? hoverParent : null;
 
 	container.empty();
 	container.addClass('dashboard-kanban');
 
 	// Quick Notes region: pinned at the top, above all sections (non-reorderable).
-	if (settings?.quickNotesEnabled) {
+	// Stacked layout hoists it out of the kanban entirely — the view renders it
+	// above the widget strip instead (skipQuickNotes), because the kanban sits
+	// below the strip there and the bar must stay directly under the banner.
+	if (settings?.quickNotesEnabled && !opts?.skipQuickNotes) {
 		renderQuickNoteRegion(container, settings, callbacks);
 	}
 
@@ -1701,11 +1900,52 @@ export function renderDashboard(
 const SCANNING_SECTION_TYPES = new Set(['library', 'folder']);
 const MEDIA_SECTION_TYPES = new Set(['images', 'videos']);
 
+/** Render-input signatures per scanning section, keyed
+ *  `<scope>|<index>:<name>` (scope = the owning board file, so two open
+ *  dashboards on different workspaces never share entries). Populated by
+ *  refreshScanningSections; see scanningSectionSignature. */
+const scanningSectionSignatures = new Map<string, string>();
+
+/** Drop every cached scanning-section signature. Called when the metadata
+ *  cache (re)resolves: a section first rendered before resolution may hold
+ *  partially-indexed frontmatter/tags, and a path+mtime signature cannot see
+ *  that difference — clearing forces the next vault event to rebuild it. */
+export function invalidateScanningSectionSignatures(): void {
+	scanningSectionSignatures.clear();
+}
+
+/** Cheap fingerprint of everything a library/folder section's render derives
+ *  from vault state: its libraryConfig plus the path, mtime, and ctime of
+ *  every in-scope markdown file. Frontmatter/tag changes ride mtime (any
+ *  content write bumps it). An equal signature means a rebuild would be
+ *  byte-identical, so the DOM swap can be skipped without visible loss. */
+function scanningSectionSignature(column: DashboardColumn, app: App): string {
+	const cfg = column.libraryConfig;
+	const folders = (cfg?.folders ?? [])
+		.map(f => f.trim().replace(/^\/+|\/+$/g, ''))
+		.filter(f => f.length > 0);
+	const excluded = normalizeExcludeFolders(cfg?.excludeFolders ?? []);
+	const parts: string[] = [];
+	for (const file of app.vault.getMarkdownFiles()) {
+		if (folders.length > 0) {
+			const lp = file.path.toLowerCase();
+			if (!folders.some(f => lp.startsWith(f.toLowerCase() + '/'))) continue;
+		}
+		if (isUnderExcludedFolder(file.path, excluded)) continue;
+		parts.push(`${file.path}|${file.stat.mtime}|${file.stat.ctime}`);
+	}
+	// Vault iteration order is not contractual; sort for a stable signature.
+	parts.sort();
+	return JSON.stringify([column.name, cfg ?? null, parts]);
+}
+
 /**
- * Re-render only the vault-scanning sections (library/folder/calendar)
- * in place, leaving media and card sections untouched. Used by the view's
- * vault-event debounce so editing a note no longer tears down the whole board
- * (and the media section's <video> thumbnails with it).
+ * Re-render only the vault-scanning sections (library/folder) in place,
+ * leaving media and card sections untouched. Used by the view's vault-event
+ * debounce so editing a note no longer tears down the whole board (and the
+ * media section's <video> thumbnails with it). `shouldRefresh` narrows the
+ * pass to sections whose scan scope intersects the changed paths;
+ * `signatureScope` keys the signature cache per board file.
  */
 export function refreshScanningSections(
 	kanban: HTMLElement,
@@ -1714,19 +1954,32 @@ export function refreshScanningSections(
 	app: App,
 	settings: DashboardSettings | undefined,
 	hoverParent: HoverParent | null,
-): void {
+	shouldRefresh?: (column: DashboardColumn) => boolean,
+	signatureScope?: string,
+): number {
 	activeHoverParent = hoverParent;
+	let refreshed = 0;
 	for (const column of data.columns) {
 		if (!SCANNING_SECTION_TYPES.has(getSectionType(column))) continue;
+		if (shouldRefresh && !shouldRefresh(column)) continue;
 		const oldEl = kanban.querySelector(`:scope > [data-column="${CSS.escape(sectionRef(column))}"]`);
 		if (!oldEl) continue;
+		// Skip the swap when the section's render inputs are unchanged since the
+		// last one (out-of-scope edit, write inside an excluded folder, non-md
+		// churn under a scan folder): rebuilding would flash identical content.
+		const key = `${signatureScope ?? ''}|${data.columns.indexOf(column)}:${column.name}`;
+		const signature = scanningSectionSignature(column, app);
+		if (scanningSectionSignatures.get(key) === signature) continue;
+		scanningSectionSignatures.set(key, signature);
 		const newEl = renderSection(column, callbacks, app, data, settings);
 		// Carry the old row's scroll positions over the swap (file lists,
 		// library kanban) so a vault-event refresh doesn't yank the viewport.
 		const scrollStates = captureScrollStates(oldEl);
 		oldEl.replaceWith(newEl);
 		restoreScrollStates(newEl, scrollStates);
+		refreshed++;
 	}
+	return refreshed;
 }
 
 /**
@@ -1742,10 +1995,13 @@ export function refreshMediaSections(
 	app: App,
 	settings: DashboardSettings | undefined,
 	hoverParent: HoverParent | null,
-): void {
+	shouldRefresh?: (column: DashboardColumn) => boolean,
+): number {
 	activeHoverParent = hoverParent;
+	let refreshed = 0;
 	for (const column of data.columns) {
 		if (!MEDIA_SECTION_TYPES.has(getSectionType(column))) continue;
+		if (shouldRefresh && !shouldRefresh(column)) continue;
 		const matched = kanban.querySelector(`:scope > [data-column="${CSS.escape(sectionRef(column))}"]`);
 		if (!(matched instanceof HTMLElement)) continue;
 		const scrollStates = captureScrollStates(matched);
@@ -1753,7 +2009,9 @@ export function refreshMediaSections(
 		const newEl = renderSection(column, callbacks, app, data, settings);
 		matched.replaceWith(newEl);
 		restoreScrollStates(newEl, scrollStates);
+		refreshed++;
 	}
+	return refreshed;
 }
 
 const COLLAPSED_KEY = 'apex-dashboard-collapsed';
@@ -1783,48 +2041,41 @@ function attachSectionResizeHandle(el: HTMLElement, column: DashboardColumn, cal
 	// max-height can only clamp (shrink), never grow.
 	const isFixedHeight = getSectionType(column) === 'memo' || getSectionType(column) === 'web';
 	const handle = el.createDiv({ cls: 'dashboard-section-resize-handle' });
-	handle.addEventListener('mousedown', (e) => {
-		e.preventDefault();
-		e.stopPropagation();
+	handle.addEventListener('pointerdown', (e) => {
+		if (!el.parentElement) return;
 		const startY = e.clientY;
 		const startHeight = el.offsetHeight;
 		el.addClass('dashboard-section-row--resizing');
-		// Drag shield: an embedded frame (web section iframe/webview) swallows
-		// mouse events over its surface — the guest page receives them, the
-		// document does not — so a drag would freeze the first time the cursor
-		// crossed a frame, losing the mouseup the same way. Muting pointer
-		// events on every frame in the dashboard keeps the drag stream whole.
+		// Guarded drag (pointer capture + viewport shield, see drag-guard):
+		// keeps the move/up stream whole across embedded frames and Windows
+		// webview surface overflow. frames-muted stays for hover calm.
 		const shieldHost = el.closest('.apex-dashboard-root') ?? el.parentElement;
 		shieldHost?.addClass('dashboard-frames-muted');
 
-		const onMove = (ev: MouseEvent) => {
-			// The row can be torn down mid-drag by a re-render; resizing a
-			// detached element is stale work, so stop (and lift the shield now
-			// rather than at the next drag).
-			if (!el.isConnected) {
-				stopDrag();
-				return;
-			}
-			const delta = ev.clientY - startY;
-			const newHeight = Math.max(160, Math.min(2000, startHeight + delta));
-			el.style.maxHeight = `${newHeight}px`;
-			if (isFixedHeight) el.style.height = `${newHeight}px`;
-		};
-		const onUp = (ev: MouseEvent) => {
-			stopDrag();
-			const finalHeight = Math.max(160, Math.min(2000, startHeight + (ev.clientY - startY)));
-			if (finalHeight !== column.height) {
-				callbacks.onColumnHeightChange(sectionRef(column), finalHeight);
-			}
-		};
-		function stopDrag(): void {
-			activeDocument.removeEventListener('mousemove', onMove);
-			activeDocument.removeEventListener('mouseup', onUp);
-			el.removeClass('dashboard-section-row--resizing');
-			shieldHost?.removeClass('dashboard-frames-muted');
-		}
-		activeDocument.addEventListener('mousemove', onMove);
-		activeDocument.addEventListener('mouseup', onUp);
+		startGuardedDrag(e, {
+			cursor: 'ns-resize',
+			onMove: (ev) => {
+				// The row can be torn down mid-drag by a re-render; resizing a
+				// detached element is stale work, so stop touching it.
+				if (!el.isConnected) {
+					el.removeClass('dashboard-section-row--resizing');
+					shieldHost?.removeClass('dashboard-frames-muted');
+					return;
+				}
+				const delta = ev.clientY - startY;
+				const newHeight = Math.max(160, Math.min(2000, startHeight + delta));
+				el.style.maxHeight = `${newHeight}px`;
+				if (isFixedHeight) el.style.height = `${newHeight}px`;
+			},
+			onUp: (ev) => {
+				el.removeClass('dashboard-section-row--resizing');
+				shieldHost?.removeClass('dashboard-frames-muted');
+				const finalHeight = Math.max(160, Math.min(2000, startHeight + (ev.clientY - startY)));
+				if (finalHeight !== column.height) {
+					callbacks.onColumnHeightChange(sectionRef(column), finalHeight);
+				}
+			},
+		});
 	});
 }
 
@@ -1863,9 +2114,8 @@ export function applyPairWidth(el: HTMLElement, column: DashboardColumn, data: D
 function attachPairWidthHandle(el: HTMLElement, column: DashboardColumn, callbacks: RenderCallbacks): void {
 	const handle = el.createDiv({ cls: 'dashboard-pair-width-handle' });
 	handle.setAttribute('aria-label', t('renderer.pairWidthHint'));
-	handle.addEventListener('mousedown', (e) => {
-		e.preventDefault();
-		e.stopPropagation();
+	handle.setAttribute('aria-label', t('renderer.pairWidthHint'));
+	handle.addEventListener('pointerdown', (e) => {
 		const board = el.parentElement;
 		const partnerEl = el.nextElementSibling;
 		if (!board || !(partnerEl instanceof HTMLElement)
@@ -1880,34 +2130,41 @@ function attachPairWidthHandle(el: HTMLElement, column: DashboardColumn, callbac
 		const startPct = clampPairWidth(column.width);
 		let lastPct = startPct;
 		el.addClass('dashboard-section-row--resizing');
+		// Guarded drag (pointer capture + viewport shield, see drag-guard):
+		// the pair divider shares a gutter-adjacent strip with everything the
+		// board hosts, and on Windows a webview surface can overflow onto the
+		// strip mid-drag — capture keeps the stream on this document.
 		const shieldHost = el.closest('.apex-dashboard-root') ?? board;
 		shieldHost.addClass('dashboard-frames-muted');
-		const onMove = (ev: MouseEvent) => {
-			// The row can be torn down mid-drag by a re-render; stop rather
-			// than resize a detached element.
-			if (!el.isConnected) {
-				stopDrag();
-				return;
-			}
-			lastPct = Math.max(20, Math.min(80, startPct + ((ev.clientX - startX) / usable) * 100));
-			el.style.setProperty('--db-pair-basis', `${lastPct}%`);
-			partnerEl.style.setProperty('--db-pair-basis', `${100 - lastPct}%`);
-		};
-		const onUp = () => {
-			stopDrag();
-			const rounded = Math.round(lastPct);
-			if (rounded !== Math.round(startPct)) {
-				callbacks.onColumnWidthChange(sectionRef(column), rounded);
-			}
-		};
-		function stopDrag(): void {
-			activeDocument.removeEventListener('mousemove', onMove);
-			activeDocument.removeEventListener('mouseup', onUp);
-			el.removeClass('dashboard-section-row--resizing');
-			shieldHost.removeClass('dashboard-frames-muted');
-		}
-		activeDocument.addEventListener('mousemove', onMove);
-		activeDocument.addEventListener('mouseup', onUp);
+		startGuardedDrag(e, {
+			cursor: 'col-resize',
+			onMove: (ev) => {
+				// The row can be torn down mid-drag by a re-render; stop rather
+				// than resize a detached element.
+				if (!el.isConnected) {
+					el.removeClass('dashboard-section-row--resizing');
+					shieldHost.removeClass('dashboard-frames-muted');
+					return;
+				}
+				lastPct = Math.max(20, Math.min(80, startPct + ((ev.clientX - startX) / usable) * 100));
+				el.style.setProperty('--db-pair-basis', `${lastPct}%`);
+				partnerEl.style.setProperty('--db-pair-basis', `${100 - lastPct}%`);
+			},
+			onUp: () => {
+				el.removeClass('dashboard-section-row--resizing');
+				shieldHost.removeClass('dashboard-frames-muted');
+				const rounded = Math.round(lastPct);
+				// Snap BOTH inline bases to the rounded value: the live drag wrote
+				// un-rounded percentages, and any update path that refreshes only
+				// one half in place would otherwise leave a stale mate whose basis
+				// sums past 100% and wraps the pair.
+				el.style.setProperty('--db-pair-basis', `${rounded}%`);
+				partnerEl.style.setProperty('--db-pair-basis', `${100 - rounded}%`);
+				if (rounded !== Math.round(startPct)) {
+					callbacks.onColumnWidthChange(sectionRef(column), rounded);
+				}
+			},
+		});
 	});
 }
 
@@ -2385,6 +2642,21 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	setIcon(addCardBtn, 'plus');
 	addCardBtn.addEventListener('click', () => callbacks.onCardAdd(reference));
 
+	// Notes sections: gear opens the per-section settings (show covers, new-note
+	// template + save folder). Same dispatch the library sections' config button
+	// uses; view.ts routes it by sectionType.
+	if (sectionType === 'projects') {
+		const notesCfgBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn',
+			attr: { 'aria-label': t('notesCfg.title') },
+		});
+		setIcon(notesCfgBtn, 'settings');
+		notesCfgBtn.addEventListener('click', () => {
+			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: column.name }, bubbles: true });
+			el.dispatchEvent(event);
+		});
+	}
+
 	const deleteSectionBtn = headerActions.createEl('button', {
 		cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
 		attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
@@ -2399,7 +2671,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 
 	for (const card of column.cards) {
 		try {
-			const cardEl = renderCard(card, column.name, sectionType, callbacks, app, data, settings);
+			const cardEl = renderCard(card, column.name, sectionType, callbacks, app, data, settings, column.showCover !== false);
 			cardsContainer.appendChild(cardEl);
 		} catch (err) {
 			console.error('[Dashboard] renderCard error:', card.id, card.type, err);
@@ -2409,7 +2681,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	return el;
 }
 
-function renderCard(card: DashboardCard, columnName: string, sectionType: string, callbacks: RenderCallbacks, app: App, data?: DashboardData, settings?: DashboardSettings): HTMLElement {
+function renderCard(card: DashboardCard, columnName: string, sectionType: string, callbacks: RenderCallbacks, app: App, data?: DashboardData, settings?: DashboardSettings, sectionShowCover = true): HTMLElement {
 	const el = createDiv();
 	el.addClass('dashboard-card', `dashboard-card--${card.type}`);
 	el.dataset.cardId = card.id;
@@ -2429,7 +2701,9 @@ function renderCard(card: DashboardCard, columnName: string, sectionType: string
 	const isWidget = isWeather || isTracker;
 	const isProjectLike = !isMemo && !isTask && !isWidget;
 	const isDashboardSection = sectionType === 'dashboard';
-	const showCover = isProjectLike && !isDashboardSection && sectionType !== 'notes'
+	// Projects cards show covers unless the section's 显示封面 toggle is off
+	// (the retired standalone no-cover type); sticky picks per card instead.
+	const showCover = isProjectLike && !isDashboardSection && sectionShowCover
 		&& (sectionType !== 'sticky' || card.noteStyle !== 'plain');
 
 	if (showCover) {
@@ -2441,6 +2715,11 @@ function renderCard(card: DashboardCard, columnName: string, sectionType: string
 		if (resolved) {
 			const cover = el.createDiv({ cls: 'dashboard-project-cover' });
 			cover.style.backgroundImage = `url("${resolved}")`;
+			// Saved focal point (coverPos): background-position percentages;
+			// absent stays the CSS default `center`.
+			if (card.coverPos && !isCenterFocal(card.coverPos)) {
+				cover.style.backgroundPosition = focalToBackgroundPosition(card.coverPos);
+			}
 			cover.setAttribute('draggable', 'true');
 		} else {
 			const cover = el.createDiv({ cls: 'dashboard-project-cover dashboard-project-cover--default' });
@@ -2569,6 +2848,22 @@ function renderCard(card: DashboardCard, columnName: string, sectionType: string
 				input.remove();
 			});
 			input.click();
+		});
+	}
+
+	// Per-card "new note" (notes sections only): creates a note and attaches it
+	// to this card's doc list (view.handleCardNewNote). Rendered FIRST in the
+	// actions row so it sits left of edit + delete. The click point anchors the
+	// template menu when the section lists several templates.
+	if (isProjectLike && sectionType === 'projects') {
+		const newNoteBtn = actions.createEl('button', {
+			cls: 'dashboard-card-btn dashboard-card-btn--newnote',
+			attr: { 'aria-label': t('renderer.cardNewNote') },
+		});
+		setIcon(newNoteBtn, 'file-plus');
+		newNoteBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			callbacks.onCardNewNote(card.id, { x: e.clientX, y: e.clientY });
 		});
 	}
 
@@ -3256,6 +3551,7 @@ function renderMemoBody(container: HTMLElement, card: DashboardCard, callbacks: 
 
 function renderMemoViewContent(container: HTMLElement, text: string, app: App): void {
 	container.empty();
+	container.removeClass('dashboard-memo-view--md');
 	if (!text) {
 		container.addClass('dashboard-memo-view--empty');
 		container.setText(t('renderer.writeThoughts'));
@@ -3263,6 +3559,17 @@ function renderMemoViewContent(container: HTMLElement, text: string, app: App): 
 	}
 	container.removeClass('dashboard-memo-view--empty');
 
+	// Instant plain-lines paint so the card never flashes empty while the
+	// async markdown pass is in flight; renderMemoMarkdown swaps it out on
+	// success (and leaves this paint standing on failure).
+	renderMemoPlainLines(container, text, app);
+	const component = activeMarkdownComponent;
+	if (component) void renderMemoMarkdown(container, text, app, component);
+}
+
+/** The legacy line-per-line paint: blockquote lines + wikilink/URL lines.
+ *  Kept as the synchronous fallback under the markdown pass. */
+function renderMemoPlainLines(container: HTMLElement, text: string, app: App): void {
 	const lines = text.split('\n');
 	for (let i = 0; i < lines.length; i++) {
 		if (i > 0) container.createEl('br');
@@ -3274,6 +3581,105 @@ function renderMemoViewContent(container: HTMLElement, text: string, app: App): 
 			renderTextWithLinks(container, line, app);
 		}
 	}
+}
+
+/**
+ * Adapt memo text (written line-per-line in a plain textarea) for markdown
+ * rendering without changing how existing memos read: every plain line becomes
+ * its own paragraph (markdown would otherwise soft-wrap them together), while
+ * consecutive list-item lines stay grouped so `-`/`1.` lists and task lines
+ * render as real lists. Code-fence interiors are passed through untouched.
+ */
+export function memoMarkdownSource(text: string): string {
+	const lines = text.split('\n');
+	const out: string[] = [];
+	let listBuf: string[] = [];
+	let inFence = false;
+	const flush = (): void => {
+		if (listBuf.length > 0) {
+			out.push(...listBuf, '');
+			listBuf = [];
+		}
+	};
+	for (const line of lines) {
+		if (/^\s*(```|~~~)/.test(line)) {
+			flush();
+			inFence = !inFence;
+			out.push(line);
+			continue;
+		}
+		if (inFence) {
+			out.push(line);
+			continue;
+		}
+		const isListItem = /^(\s*)([-*+]|\d+\.)\s+/.test(line);
+		const isContinuation = listBuf.length > 0 && /^\s+\S/.test(line);
+		if (isListItem || isContinuation) {
+			listBuf.push(line);
+		} else {
+			flush();
+			out.push(line, '');
+		}
+	}
+	flush();
+	return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * Render the memo view's text as real markdown (Obsidian's renderer), then
+ * wire the produced links to the dashboard's open/hover semantics. Swaps the
+ * container's legacy plain-lines paint in one step on success; on any failure
+ * the plain paint stays. Exported for the verify scripts.
+ */
+export function renderMemoMarkdown(
+	container: HTMLElement,
+	text: string,
+	app: App,
+	component: Component,
+): Promise<void> {
+	const host = createDiv();
+	return MarkdownRenderer.render(app, memoMarkdownSource(text), host, '', component)
+		.then(() => {
+			if (!container.isConnected || !host.hasChildNodes()) return;
+			container.empty();
+			container.addClass('dashboard-memo-view--md');
+			while (host.firstChild) container.appendChild(host.firstChild);
+			wireMemoMarkdownLinks(container, app);
+		})
+		.catch(() => {
+			// Keep the plain-lines paint — a render failure must not blank the card.
+		});
+}
+
+/** Attach open/click (and desktop hover) behavior to the anchors Obsidian's
+ *  markdown pass produced — the same semantics renderWikilink/renderExternalLink
+ *  give the plain paint, so internal links open through the note opener and
+ *  external ones open in the browser. */
+function wireMemoMarkdownLinks(container: HTMLElement, app: App): void {
+	container.querySelectorAll('a').forEach(raw => {
+		const a = raw as HTMLElement;
+		const href = a.getAttribute('href') ?? '';
+		if (a.hasClass('internal-link') || href === '' || href.startsWith('#')) {
+			const target = a.getAttribute('data-href') ?? a.getText();
+			const path = target.split('#')[0]!;
+			const file = resolveNoteFile(app, path);
+			if (file && !Platform.isMobile && activeHoverParent) {
+				attachNoteHover(app, a, file, activeHoverParent, target.includes('#') ? `#${target.split('#').pop()}` : undefined);
+			}
+			a.addEventListener('click', (e) => {
+				e.stopPropagation();
+				e.preventDefault();
+				if (!file) return;
+				activeNoteOpener?.(file, target.includes('#') ? `#${target.split('#').pop()}` : undefined);
+			});
+		} else if (/^https?:/i.test(href)) {
+			a.addEventListener('click', (e) => {
+				e.stopPropagation();
+				e.preventDefault();
+				window.open(href, '_blank');
+			});
+		}
+	});
 }
 
 	function renderProjectBody(container: HTMLElement, card: DashboardCard, callbacks: RenderCallbacks, app: App): void {
@@ -3506,7 +3912,6 @@ function getSectionType(column: DashboardColumn): string {
 	if (lower === 'todo') return 'todo';
 	if (lower === 'sticky') return 'sticky';
 	if (lower === 'projects') return 'projects';
-	if (lower === 'notes') return 'notes';
 	if (lower === 'dashboard') return 'dashboard';
 	if (lower === 'library') return 'library';
 	if (lower === 'folder') return 'folder';

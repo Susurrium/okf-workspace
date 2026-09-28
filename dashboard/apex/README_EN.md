@@ -125,6 +125,50 @@ If Apex Dashboard makes your daily Obsidian workflow smoother, consider buying m
 
 ## What's New
 
+### 3.6.5
+- **Delete cards in place** — Grid, gallery and kanban cards in database/folder sections show a corner trash button on hover (always visible on mobile) — no more menu digging
+- **New note from multiple templates** — The "new note template" setting now takes multiple templates; pick one per click on the toolbar "+", and the note comes pre-filled with the section's filters. Single-template settings migrate automatically
+- **Table view column control** — A toolbar eye button lists every property field: hide what you don't need and drag to reorder, remembered per section; legacy column settings migrate automatically
+- **Big-vault render protection** — Grouped and kanban views render progressively (50 per group/column with a show-more pill) and cap at 2000 items with a notice — sections with thousands of files no longer freeze the dashboard
+- **Lunar anniversaries** — Anniversary dates can be lunar (stored as solar dates losslessly); reminders map to lunar anniversaries
+- **Cover & banner focal points** — Project covers and banner backgrounds let you drag-pick the focal position, remembered per rotating image
+- **Calendar task times & destinations** — Tasks support start/due/scheduled date fields with optional times across days (`[start::]`/`[due::]`/`[scheduled::]`); a "one note per task" destination mode creates/appends a dated note automatically
+- **No-cover sections merged into Notes** — The "no-cover notes" type merges into "Notes" with a "show covers" toggle per section; old configs migrate automatically
+- **Property filters for folder sections** — Folder sections gain the same property-filter editor as database sections (equals/contains/notEquals)
+
+### 3.6.3
+- **Grouping for library/folder views** — Grid, gallery, list and table views gain a "Group" toolbar button: no grouping, by folder (top-level folders under the scan folders), or by any frontmatter property; the choice persists per section in the board file; the kanban view keeps its existing config-dialog grouping
+- **Expand/collapse all groups** — With grouping on, library/folder sections gain a toolbar button that expands or collapses every group in one click; the icon and tooltip follow the current state
+- **Resizable widget area** — Side layout: drag the sidebar's edge to resize its width (180–420px, remembered); stacked layout: drag the widget strip to set its height (240–560px); habit & reading widget height tiers (full / two-thirds / half / one-third) are selectable in settings
+- **Music widget playback fix** — Intermittent NetEase -110 entitlement flakes now get spaced retries before giving up, so entitled tracks stop being skipped; genuinely unplayable tracks name themselves and the reason (membership, purchase or regional rights) in a notice before advancing — no more silent hops
+- **One-click archive to today's daily note** — A new "Archive destination" setting: the fixed file (as before) or today's daily note (auto-created from the core Daily notes template when missing); archiving aborts with a notice if the daily note can't be resolved
+- **Custom template for memo-save** — Saving a memo/sticky card as a note now supports a custom template
+- **Refresh performance fix** — Vault changes rebuild only the sections whose scan scope covers the changed path: editing notes elsewhere, RSS drops and image churn no longer flash every library/folder section; a section whose query results are unchanged skips the rebuild entirely (out-of-scope edits: 3 sections per pass → 0)
+- **Scroll position kept everywhere** — Full re-renders snapshot the whole page's scroll state (the stacked widget deck's horizontal scroll, the scroll region, card decks, task lists, widget-internal lists) and replay it exactly afterwards; anchor-based keys survive section/widget reorders — where you were working is where you stay, no more jumping back to the top
+
+### 3.6.2
+- **Theme Studio color schemes & presets** — Every color area gains a scheme dropdown (follow theme / light / dark / custom, the widget-background foreground recipe) with per-field presets for quick picking
+- **Notes-section new-note** — Cover and no-cover notes sections gain a per-card "new note" button, plus section settings for the new-note template and save folder (vault root when unset)
+- **Memo cards render markdown** — Memo and sticky cards render their body through Obsidian's renderer (line-preserving adaptation, existing memos keep their look)
+- **Fix** — The folder-section new-note template was silently dropped on settings save; template frontmatter now merges under the filter props with raw lines preserved
+
+### 3.6.1
+- **Section toolbars collapse to dropdown buttons** — The view switcher and card-size (S/M/L) controls in library/folder/images/videos sections each collapse into a single button showing the current choice; clicking opens the native menu to pick — a much quieter toolbar
+- **Images/videos display scope** — A new "Display scope" setting: multi-select vault folders (with picker); when set, only files under them show (exclusions still apply within the scope); empty = whole vault
+- **New-note template per section** — Folder/library config dialogs gain a "New-note template": notes created from the toolbar "+" start from the template body ({{title}} and {{date:…}} substituted) with the section's filter props still pre-filled; a missing template degrades to a bare note
+- **Calendar task destination** — Calendar settings gain a "Task destination": keep the default chain (day's daily note → dashboard todo list), or pin a specific file (insert top/bottom) or a folder (one YYYY-MM-DD note per day, auto-created)
+- **Quick-action buttons go glass in every theme** — Earth/Nordic/Island/Tundra/Matcha/Lilac/Vermilion/Aurora button fills and borders are now accent-tinted translucent glass, matching the five themes that already had it — all twelve feel the same
+- **Theme Studio alpha + page background fixed** — Every color row gains an opacity slider (0–100%); the custom page background now actually applies (wash-theme gradients are replaced too) and alpha 0 reveals the Obsidian background
+- **Frosted inner pane on background-image cards** — With a background image set, a distinct frosted-glass pane floats over the photo (real blur + theme card fill + lit top edge); the pomodoro widget joins the background-image club (gear in its top-row cluster)
+- **Many refinements** — Collapsed-banner bookmark telescopes away until hover; quick-actions palette button removed (images + foreground colors supersede it); habit header buttons always visible; custom foreground color now flips inherited text too (quick-action labels fixed); fixed the lunar widget losing drag-reorder after async refresh (event delegation); fixed Windows pair-width drag breaking (stale partner value wrap-around + subpixel wrapping + webview-swallowed events, all three roots)
+
+### 3.6.0
+- **All-new stacked layout** — Settings → General → Layout gains illustrated picking: side-by-side (classic) or stacked — widgets arrange into a height-proportional card deck (full / two-thirds / half / one-third) under the banner, the quick-notes bar stays pinned, widgets and sections scroll as one page, pin/collapse unchanged; phones unaffected
+- **Widget backgrounds & foreground schemes** — Anniversary, countdown, year-progress, music, habit and quick actions support custom backgrounds (image picker lists images only, network image URLs welcome) with opacity / dim / blur sliders and light / dark / custom-picker foreground colors; the card's corner gear changes them without leaving the dashboard
+- **New Anniversary widget** — Elapsed time since a historical date (years-months-days / total days / days+hours precision), optional same-day-every-year reminder, native date picker
+- **Multi-instance album widget** — Add any number of albums, each with its own folder and card size
+- **Fix: pair-width drag broken on Windows** — All three root causes fixed (stale partner value wrapping rows, subpixel rounding, embedded pages swallowing mouse events via a pointer-capture drag guard)
+
 ### 2.5.3
 - **Category reordering & primary groups** — The "Manage categories" dialog now drag-sorts (presets included; the entry dropdown and ledger filters follow; up/down buttons cover touch). A new primary-group layer: create groups, assign categories, and the ledger gains a "Primary" column plus a group filter (with an Ungrouped bucket); the stats donut and ranking toggle between per-category and per-group aggregation. Grouping is stored separately, so re-grouping re-buckets the whole history without touching any record
 - **History by week & month** — The stats "History" range gains a week/month/year sub-toggle with ‹ › paging: view any past week (labeled with its date span), month or year; KPI deltas compare against the previous like period, and trends plot daily for weeks/months and monthly for years; paging stops at the current period and the oldest year with data

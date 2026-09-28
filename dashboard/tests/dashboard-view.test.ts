@@ -70,6 +70,103 @@ it("keeps a failed generation handoff actionable in the real Inbox card", async 
   expect(watchDocumentConversion).toHaveBeenCalledWith("conv-handoff");
 });
 
+it("walks mixed active, publishing, failed, cancelled, and conversion fallback states in the task center", () => {
+  const now = new Date().toISOString();
+  const queued = { ...operation("queued", "queued"), operation_id: "op-queued", updated_at: now };
+  const generating = { ...operation("generating"), operation_id: "op-generating", updated_at: now };
+  const publishing = { ...operation("publishing"), operation_id: "op-publishing", updated_at: now };
+  const failed = { ...operation("failed", "failed"), operation_id: "op-failed", updated_at: now };
+  const cancelled = { ...operation("cancelled", "cancelled"), operation_id: "op-cancelled", updated_at: now };
+  const queuedConversion: ConversionRecord = {
+    conversion_id: "conv-queued", status: "queued", source_filename: "queued.pdf",
+    intent: "learn", quality: "quick", parser: "mineru", outputs: {},
+  };
+  const failedPublish: ConversionRecord = {
+    conversion_id: "conv-publish", status: "failed", source_filename: "publish.pdf",
+    intent: "learn", quality: "quick", parser: "mineru",
+    stages: { conversion: "completed", routing: "failed" }, error: "fixture publish failure",
+    outputs: { source_text: "sources/text/publish.md" },
+  };
+  const failedHandoff: ConversionRecord = {
+    conversion_id: "conv-handoff", status: "imported", source_filename: "handoff.pdf",
+    intent: "learn", quality: "quick", parser: "mineru",
+    stages: { conversion: "completed", routing: "completed", semantic: "failed" },
+    error: "fixture generation handoff failure",
+    outputs: { source_text: "sources/text/handoff.md", routed_target: "learning/guides/handoff.md" },
+  };
+  const cancelOperation = vi.fn(async () => undefined);
+  const retryOperation = vi.fn(async (operationId: string) => ({
+    ...failed,
+    operation_id: `${operationId}-retry`,
+    status: "queued" as const,
+    stage: "queued" as const,
+  }));
+  const retryConversion = vi.fn(async (conversionId: string) => conversionId === failedPublish.conversion_id
+    ? { ...failedPublish, status: "ready" as const }
+    : { ...failedHandoff, stages: { ...failedHandoff.stages, semantic: "pending" } });
+  const watchSemanticOperation = vi.fn();
+  const watchDocumentConversion = vi.fn();
+  const plugin = {
+    getDashboardUiState: () => normalizeDashboardUiState(undefined),
+    ensureLocalServiceAvailable: vi.fn(async () => undefined),
+    semanticOperationsSnapshot: () => [queued, generating, publishing, failed, cancelled],
+    conversionSnapshot: () => [queuedConversion, failedPublish, failedHandoff],
+    watchSemanticOperation,
+    watchDocumentConversion,
+  };
+  const view = new OkfDashboardView(
+    new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App),
+    plugin as never,
+  );
+  const runtime = view as unknown as {
+    taskCenterOpen: boolean;
+    renderBackgroundTasks(parent: HTMLElement): void;
+  };
+  vi.spyOn(view as never, "render").mockResolvedValue(undefined);
+  vi.spyOn(view as never, "api").mockReturnValue({
+    cancelSemanticOperation: cancelOperation,
+    retrySemanticOperation: retryOperation,
+    retryConversion,
+  } as never);
+  runtime.taskCenterOpen = true;
+  const container = new TestElement();
+  runtime.renderBackgroundTasks(container as unknown as HTMLElement);
+
+  const text = container.descendants().map((item) => item.textContent).join("\n");
+  expect(text).toContain("排队中 · learning/guides/example.md");
+  expect(text).toContain("正在生成内容");
+  expect(text).toContain("正在写入目标笔记");
+  expect(text).toContain("失败");
+  expect(text).toContain("已取消");
+  expect(text).toContain("转换已完成，待继续保存");
+  expect(container.descendants().some((item) => item.textContent === "继续保存")).toBe(true);
+  expect(container.descendants().some((item) => item.textContent === "重试生成入队")).toBe(true);
+  expect(container.descendants().filter((item) => item.textContent === "取消后台任务")).toHaveLength(2);
+
+  const actions = (label: string) => container.descendants().filter((item) => item.textContent === label);
+  const cancelButtons = actions("取消后台任务");
+  const retryButtons = actions("重新生成");
+  const resumeButton = actions("继续保存")[0]!;
+  const retryHandoffButton = actions("重试生成入队")[0]!;
+  cancelButtons[0]!.click();
+  cancelButtons[1]!.click();
+  retryButtons[0]!.click();
+  retryButtons[1]!.click();
+  resumeButton.click();
+  retryHandoffButton.click();
+  return vi.waitFor(() => {
+    expect(cancelOperation).toHaveBeenCalledTimes(2);
+    expect(cancelOperation).toHaveBeenCalledWith(queued.operation_id);
+    expect(cancelOperation).toHaveBeenCalledWith(generating.operation_id);
+    expect(retryOperation).toHaveBeenCalledTimes(2);
+    expect(retryConversion).toHaveBeenCalledWith(failedPublish.conversion_id);
+    expect(retryConversion).toHaveBeenCalledWith(failedHandoff.conversion_id);
+    expect(watchSemanticOperation).toHaveBeenCalledTimes(2);
+    expect(watchDocumentConversion).toHaveBeenCalledWith(failedPublish.conversion_id);
+    expect(watchDocumentConversion).toHaveBeenCalledWith(failedHandoff.conversion_id);
+  });
+});
+
 function project(status: "active" | "paused" | "completed" = "active"): ProjectSummary {
   return {
     ...note({
@@ -2366,6 +2463,31 @@ describe("real Dashboard View source handoff", () => {
     expect(openPluginSettings).toHaveBeenCalledTimes(1);
     root.descendants().find((entry) => entry.textContent === "重新读取")!.click();
     await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(3));
+  });
+
+  it("restores the AI Papers scroll position when the dashboard view is recreated", () => {
+    const edition = feedEdition("papers", "papers-3", "2026-09-08");
+    const digest = { ai_daily: [], ai_papers: edition, treehole: null };
+    const state = normalizeDashboardUiState({
+      feeds: { "ai-daily-papers": { scrollTop: 220, editionId: "papers-3" } },
+    });
+    const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+    const view = new OkfDashboardView(leaf, {
+      getDashboardUiState: () => state,
+      feedDashboardDigestSnapshot: () => digest,
+      loadFeedDashboardDigest: async () => digest,
+      feedDecisionSnapshot: () => undefined,
+      feedReadingPosition: () => undefined,
+      updateDashboardFeedUiState: () => undefined,
+      openFeedItem: async () => undefined,
+      openFeedDigest: async () => undefined,
+    } as never);
+    const runtime = view as unknown as { renderReadingPapers: (parent: HTMLElement) => void };
+    const root = new TestElement();
+
+    runtime.renderReadingPapers(root as unknown as HTMLElement);
+
+    expect(root.descendants("okf-feed-project__scroll")[0]?.scrollTop).toBe(220);
   });
 
   it("updates Papers health even when the digest identity has not changed", async () => {
