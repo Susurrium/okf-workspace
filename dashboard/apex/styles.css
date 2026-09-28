@@ -35,8 +35,8 @@
 	--db-bg-card-hover: rgba(255, 255, 255, 0.10);
 	--db-bg-sidebar: rgba(255, 255, 255, 0.04);
 	--db-bg-input: rgba(255, 255, 255, 0.05);
-	--db-bg-btn: rgba(255, 255, 255, 0.07);
-	--db-bg-btn-hover: rgba(255, 255, 255, 0.12);
+	--db-bg-btn: rgba(53, 195, 255, 0.06);
+	--db-bg-btn-hover: rgba(53, 195, 255, 0.12);
 	--db-bg-banner: rgba(53, 195, 255, 0.10);
 	--db-bg-overlay: linear-gradient(135deg, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.3) 100%);
 	--db-bg-hover: rgba(255, 255, 255, 0.05);
@@ -50,7 +50,7 @@
 	--db-border-sidebar: rgba(255, 255, 255, 0.07);
 	--db-border-input: rgba(255, 255, 255, 0.08);
 	--db-border-input-focus: rgba(53, 195, 255, 0.6);
-	--db-border-btn: rgba(255, 255, 255, 0.10);
+	--db-border-btn: rgba(53, 195, 255, 0.16);
 	--db-border-add-section: rgba(53, 195, 255, 0.18);
 
 	--db-text: #eaf2ff;
@@ -116,8 +116,8 @@
 	--db-bg-card-hover: rgba(255, 255, 255, 0.85);
 	--db-bg-sidebar: rgba(255, 255, 255, 0.50);
 	--db-bg-input: rgba(255, 255, 255, 0.65);
-	--db-bg-btn: rgba(255, 255, 255, 0.70);
-	--db-bg-btn-hover: rgba(255, 255, 255, 0.92);
+	--db-bg-btn: rgba(2, 132, 199, 0.08);
+	--db-bg-btn-hover: rgba(2, 132, 199, 0.14);
 	--db-bg-banner: rgba(2, 132, 199, 0.08);
 	--db-bg-hover: rgba(42, 60, 105, 0.06);
 	--db-bg-hover-strong: rgba(42, 60, 105, 0.11);
@@ -129,7 +129,7 @@
 	--db-border-sidebar: rgba(42, 60, 105, 0.08);
 	--db-border-input: rgba(42, 60, 105, 0.12);
 	--db-border-input-focus: rgba(2, 132, 199, 0.5);
-	--db-border-btn: rgba(42, 60, 105, 0.12);
+	--db-border-btn: rgba(2, 132, 199, 0.16);
 	--db-text: #1e2a4a;
 	--db-text-muted: #47597e;
 	--db-text-faint: #8a99b8;
@@ -156,12 +156,11 @@
 }
 
 /* --- Per-section pony hues (dark): each section type gets its own Mane-Six
-   color. memo=Pinkie, sticky=Rarity lavender, todo=Applejack, notes=Fluttershy,
+   color. memo=Pinkie, sticky=Rarity lavender, todo=Applejack,
    projects=Rainbow Dash, library=Twilight; the rest round out the rainbow. --- */
 .apex-dashboard-root[data-theme="aurora"] .dashboard-section-row[data-section-type="memo"] { --db-sec-hue: #ff5fb0; --db-sec-glow: rgba(255, 95, 176, 0.16); }
 .apex-dashboard-root[data-theme="aurora"] .dashboard-section-row[data-section-type="sticky"] { --db-sec-hue: #c084fc; --db-sec-glow: rgba(192, 132, 252, 0.16); }
 .apex-dashboard-root[data-theme="aurora"] .dashboard-section-row[data-section-type="todo"] { --db-sec-hue: #ffb03a; --db-sec-glow: rgba(255, 176, 58, 0.16); }
-.apex-dashboard-root[data-theme="aurora"] .dashboard-section-row[data-section-type="notes"] { --db-sec-hue: #ffdf5e; --db-sec-glow: rgba(255, 223, 94, 0.15); }
 .apex-dashboard-root[data-theme="aurora"] .dashboard-section-row[data-section-type="projects"] { --db-sec-hue: #40b5ff; --db-sec-glow: rgba(64, 181, 255, 0.16); }
 .apex-dashboard-root[data-theme="aurora"] .dashboard-section-row[data-section-type="library"] { --db-sec-hue: #a06bff; --db-sec-glow: rgba(160, 107, 255, 0.16); }
 .apex-dashboard-root[data-theme="aurora"] .dashboard-section-row[data-section-type="weread"] { --db-sec-hue: #2fd6b5; --db-sec-glow: rgba(47, 214, 181, 0.16); }
@@ -178,7 +177,6 @@
 .theme-light .apex-dashboard-root[data-theme="aurora"] .dashboard-section-row[data-section-type="memo"] { --db-sec-hue: #e0218a; --db-sec-glow: rgba(224, 33, 138, 0.14); }
 .theme-light .apex-dashboard-root[data-theme="aurora"] .dashboard-section-row[data-section-type="sticky"] { --db-sec-hue: #a21caf; --db-sec-glow: rgba(162, 28, 175, 0.14); }
 .theme-light .apex-dashboard-root[data-theme="aurora"] .dashboard-section-row[data-section-type="todo"] { --db-sec-hue: #d97706; --db-sec-glow: rgba(217, 119, 6, 0.14); }
-.theme-light .apex-dashboard-root[data-theme="aurora"] .dashboard-section-row[data-section-type="notes"] { --db-sec-hue: #ca8a04; --db-sec-glow: rgba(202, 138, 4, 0.14); }
 .theme-light .apex-dashboard-root[data-theme="aurora"] .dashboard-section-row[data-section-type="projects"] { --db-sec-hue: #0369a1; --db-sec-glow: rgba(3, 105, 161, 0.14); }
 .theme-light .apex-dashboard-root[data-theme="aurora"] .dashboard-section-row[data-section-type="library"] { --db-sec-hue: #7c3aed; --db-sec-glow: rgba(124, 58, 237, 0.14); }
 .theme-light .apex-dashboard-root[data-theme="aurora"] .dashboard-section-row[data-section-type="weread"] { --db-sec-hue: #0d9488; --db-sec-glow: rgba(13, 148, 136, 0.14); }
@@ -215,8 +213,8 @@
 	--db-bg-card-hover: #FFFDF7;
 	--db-bg-sidebar: rgba(250, 244, 232, 0.45);
 	--db-bg-input: rgba(188, 90, 52, 0.05);
-	--db-bg-btn: #efe5d2;
-	--db-bg-btn-hover: #e8dbc4;
+	--db-bg-btn: rgba(188, 90, 52, 0.08);
+	--db-bg-btn-hover: rgba(188, 90, 52, 0.14);
 	--db-bg-banner: rgba(217, 119, 6, 0.10);
 	--db-bg-overlay: linear-gradient(135deg, rgba(60,30,10,0.5) 0%, rgba(60,30,10,0.2) 100%);
 	--db-bg-hover: rgba(188, 90, 52, 0.06);
@@ -283,8 +281,8 @@
 	--db-bg-card-hover: #362c1a;
 	--db-bg-sidebar: rgba(48, 39, 25, 0.45);
 	--db-bg-input: rgba(232, 160, 104, 0.06);
-	--db-bg-btn: #3a2f1d;
-	--db-bg-btn-hover: #473a24;
+	--db-bg-btn: rgba(232, 160, 104, 0.06);
+	--db-bg-btn-hover: rgba(232, 160, 104, 0.12);
 	--db-bg-banner: rgba(232, 160, 104, 0.06);
 	--db-bg-overlay: linear-gradient(135deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.3) 100%);
 	--db-bg-hover: rgba(255, 255, 255, 0.04);
@@ -336,8 +334,8 @@
 	--db-bg-card-hover: #fdfeff;
 	--db-bg-sidebar: rgba(255, 255, 255, 0.50);
 	--db-bg-input: rgba(43, 187, 215, 0.05);
-	--db-bg-btn: #e8eef6;
-	--db-bg-btn-hover: #dbe6f3;
+	--db-bg-btn: rgba(23, 125, 149, 0.08);
+	--db-bg-btn-hover: rgba(23, 125, 149, 0.14);
 	--db-bg-banner: rgba(43, 187, 215, 0.10);
 	--db-bg-overlay: linear-gradient(135deg, rgba(30,58,95,0.5) 0%, rgba(30,58,95,0.2) 100%);
 	--db-bg-hover: rgba(43, 187, 215, 0.06);
@@ -404,8 +402,8 @@
 	--db-bg-card-hover: #223049;
 	--db-bg-sidebar: rgba(30, 41, 59, 0.45);
 	--db-bg-input: rgba(43, 187, 215, 0.06);
-	--db-bg-btn: #2a3850;
-	--db-bg-btn-hover: #34445f;
+	--db-bg-btn: rgba(43, 187, 215, 0.06);
+	--db-bg-btn-hover: rgba(43, 187, 215, 0.12);
 	--db-bg-banner: rgba(43, 187, 215, 0.10);
 	--db-bg-overlay: linear-gradient(135deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.3) 100%);
 	--db-bg-hover: rgba(43, 187, 215, 0.06);
@@ -468,8 +466,8 @@
 	--db-bg-card-hover: #fefefa;
 	--db-bg-sidebar: #e8f6ea;
 	--db-bg-input: rgba(25, 200, 185, 0.04);
-	--db-bg-btn: #f8f8f0;
-	--db-bg-btn-hover: #e6f9f6;
+	--db-bg-btn: rgba(25, 200, 185, 0.08);
+	--db-bg-btn-hover: rgba(25, 200, 185, 0.14);
 	--db-bg-banner: rgba(111, 186, 44, 0.08);
 	--db-bg-overlay: linear-gradient(135deg, rgba(30,60,40,0.40) 0%, rgba(40,80,60,0.15) 100%);
 	--db-bg-hover: rgba(25, 200, 185, 0.06);
@@ -484,7 +482,7 @@
 	--db-border-sidebar: #b0d0ac;
 	--db-border-input: #b5d4b0;
 	--db-border-input-focus: #ffcc00;
-	--db-border-btn: #b5d4b0;
+	--db-border-btn: rgba(25, 200, 185, 0.22);
 	--db-border-add-section: #19c8b9;
 
 	/* 文字：森林棕绿（非纯棕） */
@@ -526,8 +524,8 @@
 	--db-bg-card-hover: #2e4438;
 	--db-bg-sidebar: #1e3024;
 	--db-bg-input: rgba(255, 255, 255, 0.04);
-	--db-bg-btn: #2e4438;
-	--db-bg-btn-hover: rgba(25, 200, 185, 0.12);
+	--db-bg-btn: rgba(61, 212, 198, 0.06);
+	--db-bg-btn-hover: rgba(61, 212, 198, 0.12);
 	--db-bg-banner: rgba(25, 200, 185, 0.06);
 	--db-bg-overlay: linear-gradient(135deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.3) 100%);
 	--db-bg-hover: rgba(25, 200, 185, 0.06);
@@ -562,8 +560,8 @@
 	--db-bg-card-hover: #FFFFFF;
 	--db-bg-sidebar: transparent;
 	--db-bg-input: rgba(120, 80, 40, 0.04);
-	--db-bg-btn: #E0D5C5;
-	--db-bg-btn-hover: #D5C8B5;
+	--db-bg-btn: rgba(217, 119, 6, 0.08);
+	--db-bg-btn-hover: rgba(217, 119, 6, 0.14);
 	--db-bg-banner: rgba(217, 119, 6, 0.1);
 	--db-bg-overlay: linear-gradient(135deg, rgba(60,30,10,0.5) 0%, rgba(60,30,10,0.2) 100%);
 	--db-bg-hover: rgba(120, 80, 40, 0.06);
@@ -577,7 +575,7 @@
 	--db-border-sidebar: transparent;
 	--db-border-input: #D5C8B5;
 	--db-border-input-focus: #d97706;
-	--db-border-btn: #D5C8B5;
+	--db-border-btn: rgba(217, 119, 6, 0.22);
 	--db-border-add-section: #d97706;
 
 	--db-text: #3D2B1F;
@@ -843,8 +841,8 @@
 	--db-bg-card-hover: rgba(248, 245, 235, 0.96);
 	--db-bg-sidebar: transparent;
 	--db-bg-input: rgba(79, 112, 40, 0.06);
-	--db-bg-btn: #d9d2ba;
-	--db-bg-btn-hover: #cfc7ac;
+	--db-bg-btn: rgba(74, 106, 36, 0.08);
+	--db-bg-btn-hover: rgba(74, 106, 36, 0.14);
 	--db-bg-banner: rgba(200, 169, 106, 0.12);
 	--db-bg-overlay: linear-gradient(135deg, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.3) 100%);
 	--db-bg-hover: rgba(79, 112, 40, 0.06);
@@ -913,8 +911,8 @@
 	--db-bg-card-hover: rgba(255, 255, 252, 0.95);
 	--db-bg-sidebar: transparent;
 	--db-bg-input: rgba(79, 112, 40, 0.05);
-	--db-bg-btn: #e6e2cf;
-	--db-bg-btn-hover: #ddd7bf;
+	--db-bg-btn: rgba(74, 106, 36, 0.08);
+	--db-bg-btn-hover: rgba(74, 106, 36, 0.14);
 	--db-bg-banner: rgba(110, 148, 52, 0.08);
 	--db-bg-overlay: linear-gradient(135deg, rgba(30,40,30,0.4) 0%, rgba(30,40,30,0.15) 100%);
 	--db-bg-hover: rgba(79, 112, 40, 0.05);
@@ -982,8 +980,8 @@
 	--db-bg-card-hover: rgba(252, 248, 254, 0.86);
 	--db-bg-sidebar: transparent;
 	--db-bg-input: rgba(122, 88, 168, 0.08);
-	--db-bg-btn: #e7ddf1;
-	--db-bg-btn-hover: #ddd0ea;
+	--db-bg-btn: rgba(157, 78, 221, 0.08);
+	--db-bg-btn-hover: rgba(157, 78, 221, 0.14);
 	--db-bg-banner: rgba(255, 143, 171, 0.10);
 	--db-bg-overlay: linear-gradient(135deg, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.3) 100%);
 	--db-bg-hover: rgba(122, 88, 168, 0.08);
@@ -1052,8 +1050,8 @@
 	--db-bg-card-hover: rgba(255, 255, 255, 0.86);
 	--db-bg-sidebar: transparent;
 	--db-bg-input: rgba(125, 44, 191, 0.06);
-	--db-bg-btn: #ece4f4;
-	--db-bg-btn-hover: #e2d5ee;
+	--db-bg-btn: rgba(123, 44, 191, 0.08);
+	--db-bg-btn-hover: rgba(123, 44, 191, 0.14);
 	--db-bg-banner: rgba(125, 44, 191, 0.05);
 	--db-bg-overlay: linear-gradient(135deg, rgba(40,20,40,0.4) 0%, rgba(40,20,40,0.15) 100%);
 	--db-bg-hover: rgba(125, 44, 191, 0.06);
@@ -1368,8 +1366,8 @@
 	--db-bg-card-hover: #f5f3ea;
 	--db-bg-sidebar: transparent;
 	--db-bg-input: #f3f1e8;
-	--db-bg-btn: #f3f1e8;
-	--db-bg-btn-hover: #ebe8dc;
+	--db-bg-btn: rgba(192, 68, 46, 0.08);
+	--db-bg-btn-hover: rgba(192, 68, 46, 0.14);
 	--db-bg-banner: #f1efe6;
 	--db-bg-overlay: linear-gradient(135deg, rgba(20,24,28,0.55) 0%, rgba(20,24,28,0.25) 100%);
 	--db-bg-hover: #f2f0e7;
@@ -1383,7 +1381,7 @@
 	--db-border-sidebar: transparent;
 	--db-border-input: #dedcd2;
 	--db-border-input-focus: #c0442e;
-	--db-border-btn: #dedcd2;
+	--db-border-btn: rgba(192, 68, 46, 0.22);
 	--db-border-add-section: #cfcdc2;
 
 	--db-text: #1d2126;
@@ -1436,8 +1434,8 @@
 	--db-bg-card-hover: #1f2429;
 	--db-bg-sidebar: transparent;
 	--db-bg-input: #1a1f24;
-	--db-bg-btn: #1a1f24;
-	--db-bg-btn-hover: #232930;
+	--db-bg-btn: rgba(224, 91, 69, 0.06);
+	--db-bg-btn-hover: rgba(224, 91, 69, 0.12);
 	--db-bg-banner: #16191d;
 	--db-bg-overlay: linear-gradient(135deg, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.35) 100%);
 	--db-bg-hover: #1c2126;
@@ -1451,7 +1449,7 @@
 	--db-border-sidebar: transparent;
 	--db-border-input: #262b30;
 	--db-border-input-focus: #e05b45;
-	--db-border-btn: #262b30;
+	--db-border-btn: rgba(224, 91, 69, 0.22);
 	--db-border-add-section: #2e343a;
 
 	--db-text: #f4f2ea;
@@ -2281,7 +2279,9 @@
 
 	/* Bookmark tab: anchors at top edge, extends downward. The bottom point
 	   is a border-triangle ::after instead of a polygon cut, which the
-	   marketplace checker flags as only partially supported on 1.7.4. */
+	   marketplace checker flags as only partially supported on 1.7.4.
+	   Half-hidden at rest (fades in on banner hover, full on its own hover)
+	   so the collapsed strip stays visually quiet. */
 	.dashboard-banner--collapsed .dashboard-banner-pin-btn {
 		top: 0;
 		left: auto;
@@ -2289,13 +2289,22 @@
 		width: 28px;
 		height: 25px;
 		padding: 0;
-		opacity: 1;
+		opacity: 0.35;
+		/* Telescoping: at rest the tab retracts upward over the strip edge
+		   (about half its height), like a bookmark slipped back into the book;
+		   banner hover lets it extend down naturally. */
+		transform: translateY(-13px);
 		--dashboard-pin-tail: var(--db-bg-card);
 		background: var(--db-bg-card) !important;
 		border: none !important;
 		border-radius: 4px 4px 6px 6px;
 		color: var(--db-text-faint);
-		transition: opacity 0.2s ease, color 0.2s ease, transform 0.15s ease;
+		transition: opacity 0.25s ease, color 0.2s ease, transform 0.3s cubic-bezier(0.34, 1.3, 0.64, 1);
+	}
+
+	.dashboard-banner--collapsed:hover .dashboard-banner-pin-btn {
+		opacity: 0.75;
+		transform: translateY(0);
 	}
 
 	.dashboard-banner--collapsed .dashboard-banner-pin-btn::after {
@@ -2316,7 +2325,7 @@
 		color: var(--db-text);
 		--dashboard-pin-tail: var(--db-bg-hover);
 		background: var(--db-bg-hover) !important;
-		transform: scaleY(1.06);
+		transform: translateY(0) scaleY(1.06);
 	}
 }
 
@@ -2420,12 +2429,79 @@
 
 /* ===== Sidebar ===== */
 .dashboard-sidebar {
-	width: 220px;
+	/* Width is user-draggable (side layout): the render applies the persisted
+	   value as an inline --db-sidebar-w on this element, the stylesheet
+	   default below keeps hand-built DOM and pre-feature data at 220. The
+	   variable is UNITLESS so one value drives both the width (× 1px) and the
+	   proportional content scale (÷ 220, see .dashboard-sidebar-widgets) with
+	   no twin to keep in sync. The collapsed state overrides the width with a
+	   literal 15px (source order wins). */
+	--db-sidebar-w: 220;
+	width: calc(var(--db-sidebar-w, 220) * 1px);
 	flex-shrink: 0;
 	display: flex;
 	flex-direction: column;
 	position: relative;
 	transition: width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease;
+}
+
+/* While a resize drag is live: kill the width/max-height transitions (the
+   rail's 0.4s spring would lag every pointer frame) and stop text selection
+   from painting across the board. Added/removed by the drag handlers. */
+.dashboard-sidebar--resizing {
+	transition: none !important;
+	user-select: none;
+}
+
+/* Side-layout width drag handle: a slim col-resize strip riding the sidebar's
+   right edge. INSIDE the box (right: 0, not -5px): the expanded state is
+   overflow-y: auto, which computes overflow-x to auto too and would clip a
+   negative offset. As a direct sidebar child it is auto-hidden in the
+   collapsed state by the `> *:not(.slim-indicator)` rule, so the 15px rail
+   stays click-to-expand. */
+.dashboard-sidebar-width-handle {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	right: 0;
+	width: 8px;
+	cursor: col-resize;
+	z-index: 6;
+	touch-action: none;
+}
+
+.dashboard-sidebar-width-handle::before {
+	content: '';
+	position: absolute;
+	top: 50%;
+	/* Flush with the sidebar's right edge (into the widgets-area's 4px dead
+	   zone), NOT further in: the cards' right borders sit 4px from the edge
+	   (padding 0 4px on .dashboard-sidebar-widgets), so a 2px offset landed
+	   the pill ON TOP of them. At right:0 the pill clears the border band and
+	   reads as the pane divider. It cannot go past the edge — the expanded
+	   sidebar's overflow-y:auto computes overflow-x to auto, which clips
+	   anything beyond the padding box. */
+	right: 0;
+	transform: translateY(-50%);
+	width: 3px;
+	height: 40px;
+	border-radius: 2px;
+	background: var(--db-text-faint);
+	opacity: 0;
+	transition: opacity 0.2s ease, background 0.2s ease;
+	pointer-events: none;
+}
+
+.dashboard-sidebar-width-handle:hover::before,
+.dashboard-sidebar--resizing .dashboard-sidebar-width-handle::before {
+	opacity: 0.65;
+	background: var(--db-accent, var(--interactive-accent));
+}
+
+@media (max-width: 640px) {
+	.dashboard-sidebar-width-handle {
+		display: none;
+	}
 }
 
 .dashboard-sidebar-scroll {
@@ -2450,6 +2526,19 @@
 	padding: 0 4px;
 }
 
+/* Proportional content scaling (side layout): widget internals are em-based,
+   so tying the area's root font-size to the dragged sidebar width scales
+   every card's type together — 220 (the default width) is exactly the 1.0
+   baseline, so the stock render is pixel-identical. The clamp keeps the
+   smallest labels (0.65em tiers) legible at the 180 floor and stops
+   headlines ballooning at the 420 ceiling. Fixed-px internals (book covers,
+   the pomodoro ring, paddings) deliberately stay put — only type breathes.
+   The stacked strip ignores this: its columns are a fixed 240px and the
+   ratio input (--db-sidebar-w) only moves in the side layout. */
+.dashboard-sidebar-widgets[data-layout="side"] {
+	font-size: calc(1em * clamp(0.92, var(--db-sidebar-w, 220) / 220, 1.12));
+}
+
 .dashboard-sidebar-widget {
 	background: var(--db-bg-card);
 	border: 1px solid var(--db-border-card);
@@ -2472,6 +2561,30 @@
 	border-bottom: 2px solid var(--db-accent) !important;
 }
 
+/* Single-button toolbar dropdown (view switcher / card size): pill shows the
+ * current selection (icon or letter) plus a tiny caret hinting the menu. */
+.dashboard-toolbar-dropdown {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+}
+
+.dashboard-toolbar-dropdown {
+	/* Both dropdown flavors share one box: the icon glyphs render 16px tall
+	   (setIcon default), so the button gets that fixed content height — the
+	   S/M/L letter button then matches the view button's size exactly. */
+	min-height: 16px;
+}
+
+.dashboard-toolbar-dropdown-text {
+	font-size: 0.82em;
+	font-weight: 700;
+	height: 16px;
+	line-height: 16px;
+	min-width: 16px;
+	text-align: center;
+}
+
 /* ===== Widget card backgrounds (per-widget decorative images) ===== */
 /* The layer is absolutely positioned with z-index:-1 inside an isolation
    context on the card: it paints above the card's own background (which
@@ -2491,6 +2604,11 @@
 	--db-text-muted: color-mix(in srgb, var(--wbg-fg, var(--db-text)) 72%, transparent);
 	--db-text-faint: color-mix(in srgb, var(--wbg-fg, var(--db-text)) 50%, transparent);
 	--db-accent: var(--wbg-fg, var(--db-accent));
+	/* Re-anchor INHERITED text color on the card: descendants without their
+	   own color rule (quick-action labels, titles) inherit the ancestor's
+	   already-resolved color, which bypasses the token overrides above —
+	   setting `color` here makes the flip reach them too. */
+	color: var(--db-text);
 }
 
 .dashboard-widget-bg {
@@ -2519,6 +2637,32 @@
 	position: absolute;
 	inset: 0;
 	background: rgb(0 0 0 / var(--wbg-dim, 0));
+}
+
+/* Glass inner frame on background-image cards (not the quick-actions card —
+   its buttons already wear that treatment). The pane must read as a SEPARATE
+   sheet of glass PRESSED ONTO the photo ("glass is glass, image is image"),
+   not a tint fused with it, so unlike the buttons it carries:
+   - its own frost (blur+saturate) instead of the theme's button blur (mostly
+     none) — the photo visibly refracts under the pane;
+   - a substantial fill: the theme's CARD surface token (much more present
+     than the ~6% button tint), softened to 65% so the photo still shows;
+   - a lit top edge + soft drop shadow — the classic glass-sheet highlight.
+   Theme tokens keep every theme adapted; the phone CSS block disables
+   backdrop-filter wholesale, where this degrades to the tinted fill. */
+.dashboard-widget-frame {
+	position: absolute;
+	inset: 6px;
+	z-index: -1;
+	pointer-events: none;
+	border-radius: calc(var(--db-radius-md, 10px) - 4px);
+	background: color-mix(in srgb, var(--db-bg-card, rgba(127, 127, 127, 0.25)) 65%, transparent);
+	border: 1px solid color-mix(in srgb, var(--db-accent, var(--interactive-accent)) 28%, transparent);
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.16),
+		0 2px 10px rgba(0, 0, 0, 0.14);
+	backdrop-filter: blur(7px) saturate(1.15);
+	-webkit-backdrop-filter: blur(7px) saturate(1.15);
 }
 
 /* Half-hidden gear button at a card's top-right corner (the countdown
@@ -2622,6 +2766,14 @@
 	color: var(--db-accent);
 }
 
+/* Habit card exception: its header keeps buttons ALWAYS visible — the left
+   title + list leave the top-right corner empty otherwise. Covers the icon
+   buttons AND the background-settings gear that joins their cluster. */
+.dashboard-sidebar-habit .dashboard-sidebar-habit-icon-btn,
+.dashboard-sidebar-habit .dashboard-widget-inline-cfg-btn {
+	opacity: 0.55;
+}
+
 /* Inline gear that joins a header row's existing icon-button cluster (habit,
    music, quick actions) instead of a corner button that would overlap them.
    Ghost at rest like its siblings, accent on hover. */
@@ -2702,11 +2854,58 @@
 		max-height: 2000px;
 		overflow: hidden;
 		transition: max-height 0.3s cubic-bezier(0.34, 1.2, 0.64, 1), opacity 0.25s ease;
+		/* Widget strip unit height (the 6-row grid unit). Declared HERE, not on
+		   the strip row: a custom property declared on the row itself would
+		   shadow the value the drag handle / render writes inline on the
+		   sidebar, and the row's grid-template-rows reads it through
+		   inheritance. The renderer (view.applySidebarSizing) and the strip
+		   height drag both write this same property on this same element.
+		   Below ~300px the calendar card grows an internal scrollbar (cards
+		   scroll internally by design); the drag floor is 240px. */
+		--db-widget-unit-h: 300px;
 	}
 
 	[data-layout="stacked"] .dashboard-sidebar-scroll {
 		overflow: visible;
 		padding: 0;
+	}
+
+	/* Strip height drag handle: a centered pill riding the strip's bottom
+	   edge. INSIDE the sidebar box (bottom: 0, not -5px) because the stacked
+	   sidebar is overflow: hidden — a negative offset would be clipped. As a
+	   direct sidebar child it is auto-hidden in the collapsed state by the
+	   rail's `> *:not(.slim-indicator)` rule. The 72px center zone overlaps a
+	   sliver of the strip's hover scrollbar — an accepted trade for keeping
+	   the grip out of the cards' click area. */
+	[data-layout="stacked"] .dashboard-sidebar-strip-handle {
+		position: absolute;
+		left: 50%;
+		transform: translateX(-50%);
+		bottom: 0;
+		width: 72px;
+		height: 10px;
+		cursor: ns-resize;
+		z-index: 6;
+		touch-action: none;
+	}
+
+	[data-layout="stacked"] .dashboard-sidebar-strip-handle::before {
+		content: '';
+		position: absolute;
+		left: 50%;
+		bottom: 2px;
+		transform: translateX(-50%);
+		width: 40px;
+		height: 3px;
+		border-radius: 2px;
+		background: var(--db-text-faint);
+		opacity: 0.45;
+		transition: opacity 0.2s ease, background 0.2s ease;
+	}
+
+	[data-layout="stacked"] .dashboard-sidebar-strip-handle:hover::before {
+		opacity: 0.95;
+		background: var(--db-accent, var(--interactive-accent));
 	}
 
 	/* The board unrolls to natural height inside the region — the kanban's
@@ -2768,17 +2967,26 @@
 	   in-place data-widget refresh (view.refreshDataWidget) re-mounts
 	   lunar/pomodoro/reading inside a bare wrapper that inherits the key, so
 	   class-keyed child selectors would silently lose their span after a
-	   refresh and collapse the card to one row. */
+	   refresh and collapse the card to one row.
+
+	   TIERED cards (habit / reading / album-*) read their span from the
+	   inline --db-widget-span variable the renderer writes after adaptive
+	   column packing ("preferred tier, downshift to exactly fill a column
+	   when it would otherwise misfit" — see src/widget-span.ts). The fallback
+	   in each var() is the card's historical default tier, so a missing
+	   variable reproduces the pre-feature layout. FIXED cards keep the
+	   hardcoded spans below, mirrored by STACKED_FIXED_SPANS in
+	   src/widget-span.ts — update both together. */
 	[data-layout="stacked"] .dashboard-sidebar-widgets-row {
 		--db-widget-unit: 240px;
-		/* Keep >= ~300px: the calendar card's natural height is ~297px — any
-		   lower and it (and every full-height card) grows an internal
-		   scrollbar. 300 is the floor, 320 the previous "roomy" value. */
-		--db-widget-unit-h: 300px;
 		display: grid;
 		grid-auto-flow: column;
 		grid-auto-columns: var(--db-widget-unit);
-		grid-template-rows: repeat(6, calc((var(--db-widget-unit-h) - 30px) / 6));
+		/* --db-widget-unit-h is declared on the stacked sidebar (see the
+		   comment there): the drag handle and render write it inline on the
+		   sidebar and the row inherits it. The 300px fallback covers a missing
+		   variable (e.g. hand-built DOM in tests). */
+		grid-template-rows: repeat(6, calc((var(--db-widget-unit-h, 300px) - 30px) / 6));
 		grid-row-gap: 6px;
 		grid-column-gap: 6px;
 		overflow-x: auto;
@@ -2814,6 +3022,13 @@
 		grid-row: span 6;
 		overflow-y: auto;
 		overflow-x: hidden;
+		/* Fully invisible card scrollbar (hover/wheel still scrolls): the
+		   standard property both hides the bar and frees its gutter on
+		   Chromium 121+, and — the reason this beats a ::-webkit override —
+		   neutralizes theme-level scrollbar hijacks (the project recipe, see
+		   the quicknote bar). Inner scrollers (reading scroll) already hide
+		   their own. */
+		scrollbar-width: none;
 	}
 
 	/* Descendant (not child) so a refresh mount's inner widget keeps the
@@ -2828,17 +3043,26 @@
 	}
 
 	/* Two-thirds height: pairs with a third below to tile one column. */
-	[data-layout="stacked"] .dashboard-sidebar-widgets-row > [data-widget-key="weather"],
-	[data-layout="stacked"] .dashboard-sidebar-widgets-row > [data-widget-key="habit"] {
+	[data-layout="stacked"] .dashboard-sidebar-widgets-row > [data-widget-key="weather"] {
 		grid-row: span 4;
+	}
+
+	/* Tiered: the renderer writes the packed span inline; the fallback is the
+	   historical default tier (two-thirds pairs with a third to tile a column). */
+	[data-layout="stacked"] .dashboard-sidebar-widgets-row > [data-widget-key="habit"] {
+		grid-row: span var(--db-widget-span, 4);
 	}
 
 	/* Half height: two stack to fill one column. */
 	[data-layout="stacked"] .dashboard-sidebar-widgets-row > [data-widget-key="pomodoro"],
 	[data-layout="stacked"] .dashboard-sidebar-widgets-row > [data-widget-key="expense"],
-	[data-layout="stacked"] .dashboard-sidebar-widgets-row > [data-widget-key="reading"],
 	[data-layout="stacked"] .dashboard-sidebar-widgets-row > [data-widget-key="music"] {
 		grid-row: span 3;
+	}
+
+	/* Tiered: fallback = the historical half-height default. */
+	[data-layout="stacked"] .dashboard-sidebar-widgets-row > [data-widget-key="reading"] {
+		grid-row: span var(--db-widget-span, 3);
 	}
 
 	/* Third height: three stack to fill one column. */
@@ -2965,7 +3189,13 @@
 .dashboard-sidebar-habit-top {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	/* Never wrap (the four icon buttons stay right-peeking on one line);
+	   instead the row COMPRESSES as the sidebar narrows: the gap ramps
+	   6px -> 2px across the 220 -> 180px drag range (one linear calc off the
+	   same unitless --db-sidebar-w that drives the width and the content
+	   scale; 220 is the default and the stacked/mobile fallback, where the
+	   full 6px applies). */
+	gap: clamp(2px, calc((var(--db-sidebar-w, 220) - 180) / 10 * 1px + 2px), 6px);
 	width: 100%;
 	margin-bottom: 6px;
 }
@@ -2980,6 +3210,17 @@
 	color: var(--db-accent);
 	user-select: none;
 	white-space: nowrap;
+	/* Yield first in the compression chain: the row's fixed furniture (count
+	   + four buttons) is protected, the title gives back width and its text
+	   ellipsizes (icon never clips — flex-shrink:0 below). */
+	min-width: 0;
+	overflow: hidden;
+}
+
+.dashboard-sidebar-habit-title-text {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .dashboard-sidebar-habit-title-icon {
@@ -3395,6 +3636,10 @@
 	flex: 0 1 auto;
 	max-width: 42%;
 	min-width: 0;
+	/* Clip long category names inside the box: a styled <select> cannot
+	   ellipsize its selected option, so hidden overflow is the safe stop when
+	   the sidebar is dragged narrow. */
+	overflow: hidden;
 	text-overflow: ellipsis;
 	cursor: pointer;
 }
@@ -3591,6 +3836,32 @@
 .dashboard-sidebar-anniversary-date {
 	font-size: 0.68em;
 	color: var(--db-text-muted);
+}
+
+/* Anniversary modal — lunar date entry: year input + month/day selects in one
+   tight row inside the Setting's control area. Only one of the solar / lunar
+   date rows is visible at a time (toggled with .is-hidden). */
+.dashboard-anniversary-solar-setting.is-hidden,
+.dashboard-anniversary-lunar-setting.is-hidden {
+	display: none;
+}
+
+.dashboard-anniversary-lunar-setting .setting-item-control {
+	justify-content: flex-end;
+}
+
+.dashboard-anniversary-lunar-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.dashboard-anniversary-lunar-year {
+	width: 72px;
+}
+
+.dashboard-anniversary-lunar-select {
+	min-width: 0;
 }
 
 .dashboard-sidebar-countdown-until {
@@ -3905,17 +4176,30 @@
 	justify-content: space-between;
 	align-items: center;
 	margin-top: 4px;
+	/* Both children shrink-to-ellipsis instead of overflowing the card when
+	   the user drags the sidebar narrow (min-width:0 lifts the flex
+	   min-content floor). */
+	min-width: 0;
+	gap: 6px;
 }
 
 .dashboard-sidebar-weather-city {
 	font-size: 0.85em;
 	font-weight: 600;
 	color: var(--db-text);
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .dashboard-sidebar-weather-desc {
 	font-size: 0.75em;
 	color: var(--db-text-faint);
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .dashboard-sidebar-weather-details {
@@ -3928,6 +4212,9 @@
 	font-size: 0.7em;
 	color: var(--db-text-muted);
 	flex: 1;
+	/* Let the three columns shrink below their longest word at narrow sidebar
+	   widths; the labels wrap (CJK per-character) instead of overflowing. */
+	min-width: 0;
 	text-align: center;
 	padding: 3px 0;
 	background: var(--db-bg-hover);
@@ -8524,6 +8811,11 @@
 
 .dashboard-sidebar-calendar .dashboard-calendar-nav-label {
 	flex: 1;
+	/* flex:1 alone floors at min-content — with nowrap the month label ("2026
+	   年 9 月") refuses to shrink below its text and pushes the nav 20px past
+	   the card at the 180px sidebar floor. min-width:0 lets the ellipsis do
+	   its job. */
+	min-width: 0;
 	text-align: center;
 	font-size: 0.85em;
 	font-weight: 600;
@@ -9295,7 +9587,7 @@
 
 /* --- Expanded --- */
 .dashboard-sidebar--expanded {
-	width: 220px;
+	width: calc(var(--db-sidebar-w, 220) * 1px);
 	opacity: 1;
 	cursor: default;
 	overflow-y: auto;
@@ -9303,7 +9595,7 @@
 
 /* --- Pinned: permanent sidebar --- */
 .dashboard-sidebar--pinned {
-	width: 220px;
+	width: calc(var(--db-sidebar-w, 220) * 1px);
 	opacity: 1;
 }
 
@@ -9571,6 +9863,8 @@
 .is-tablet button.dashboard-quicknote-cfg-icon-btn,
 .is-tablet button.dashboard-quicknote-cfg-del,
 .is-tablet button.dashboard-library-table-delete,
+.is-tablet button.dashboard-library-card-delete,
+.is-tablet button.dashboard-focal-picker-reset,
 .is-tablet button.dashboard-media-delete,
 .is-tablet button.dashboard-media-icon-btn,
 .is-tablet button.dashboard-weread-cfg-op,
@@ -10036,7 +10330,6 @@
 	}
 }
 
-.dashboard-section-row[data-section-type="notes"],
 .dashboard-section-row[data-section-type="projects"] {
 	max-height: none;
 }
@@ -10118,10 +10411,6 @@
 
 .dashboard-section-row[data-section-type="projects"] .dashboard-section-toggle::before {
 	border-top-color: #10b981;
-}
-
-.dashboard-section-row[data-section-type="notes"] .dashboard-section-toggle::before {
-	border-top-color: #8b5cf6;
 }
 
 .dashboard-section-row--collapsed > .dashboard-section-header .dashboard-section-toggle {
@@ -10359,7 +10648,6 @@
 }
 
 /* Notes, Memo, Todo, Sticky & Projects: horizontal scroll, no wrap */
-.dashboard-section-row[data-section-type="notes"] .dashboard-section-cards,
 .dashboard-section-row[data-section-type="memo"] .dashboard-section-cards,
 .dashboard-section-row[data-section-type="todo"] .dashboard-section-cards,
 .dashboard-section-row[data-section-type="sticky"] .dashboard-section-cards,
@@ -10369,8 +10657,7 @@
 	scrollbar-width: thin;
 }
 
-/* Notes (no cover) & Projects: fixed card width, overflow scrolls horizontally */
-.dashboard-section-row[data-section-type="notes"] .dashboard-section-cards > .dashboard-card,
+/* Notes & Projects: fixed card width, overflow scrolls horizontally */
 .dashboard-section-row[data-section-type="projects"] .dashboard-section-cards > .dashboard-card {
 	flex: 0 0 280px;
 	min-width: 200px;
@@ -10857,6 +11144,12 @@
 	color: var(--db-danger) !important;
 }
 
+/* Per-card "new note" (notes/projects sections): accent tint on hover so it
+   reads as a create action next to neutral edit and danger delete. */
+.dashboard-card-btn--newnote:hover {
+	color: var(--db-accent) !important;
+}
+
 .dashboard-card-body {
 	font-size: 0.95em;
 	color: var(--db-text-muted);
@@ -11190,6 +11483,56 @@
 	color: var(--db-text-faint);
 	opacity: 0.5;
 }
+
+/* Markdown-rendered memo view. Obsidian's renderer emits bare document-level
+   elements with full margins; compact them to memo-card scale. pre-wrap must
+   come off or the renderer's own newlines would double-space every block. */
+.dashboard-memo-view--md {
+	white-space: normal;
+	cursor: default;
+}
+.dashboard-memo-view--md > *:first-child { margin-top: 0; }
+.dashboard-memo-view--md > *:last-child { margin-bottom: 0; }
+.dashboard-memo-view--md p { margin: 0 0 0.35em; }
+.dashboard-memo-view--md h1, .dashboard-memo-view--md h2, .dashboard-memo-view--md h3,
+.dashboard-memo-view--md h4, .dashboard-memo-view--md h5, .dashboard-memo-view--md h6 {
+	margin: 0.45em 0 0.2em;
+	font-size: 1em;
+	font-weight: 600;
+	color: var(--db-text);
+}
+.dashboard-memo-view--md ul, .dashboard-memo-view--md ol {
+	margin: 0.2em 0 0.35em;
+	padding-left: 1.35em;
+}
+.dashboard-memo-view--md li { margin: 0.1em 0; }
+.dashboard-memo-view--md blockquote {
+	margin: 0.25em 0;
+	padding: 2px 0 2px 10px;
+	border-left: 3px solid var(--db-quote-border, var(--db-accent, var(--interactive-accent)));
+	color: var(--db-text-muted, var(--text-muted));
+}
+.dashboard-memo-view--md code {
+	font-size: 0.88em;
+	padding: 1px 4px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--db-text, var(--text-normal)) 10%, transparent);
+}
+.dashboard-memo-view--md pre {
+	margin: 0.25em 0;
+	padding: 6px 8px;
+	font-size: 0.85em;
+	overflow-x: auto;
+	border-radius: var(--db-radius-sm, 6px);
+	background: color-mix(in srgb, var(--db-text, var(--text-normal)) 8%, transparent);
+}
+.dashboard-memo-view--md pre code { padding: 0; background: none; }
+.dashboard-memo-view--md a { color: var(--db-link, var(--db-accent, var(--interactive-accent))); cursor: pointer; }
+.dashboard-memo-view--md img { max-width: 100%; border-radius: var(--db-radius-sm, 6px); }
+/* Task checkboxes stay display-only: clicks pass through to the card, whose
+   whole-view click still switches into edit mode. */
+.dashboard-memo-view--md input[type="checkbox"] { pointer-events: none; }
+.dashboard-memo-view--md hr { margin: 0.5em 0; border-color: var(--db-border, var(--background-modifier-border)); }
 
 .theme-light .dashboard-memo-textarea {
 	color: var(--db-text);
@@ -11799,6 +12142,13 @@
 	display: flex;
 	align-items: center;
 	gap: 6px;
+	/* The focal-point picker wraps onto its own full-width line below. */
+	flex-wrap: wrap;
+}
+
+.dashboard-modal-image-focal {
+	flex-basis: 100%;
+	min-width: 0;
 }
 
 .dashboard-modal-image-input {
@@ -11828,6 +12178,87 @@
 
 .dashboard-modal-image-delete:hover {
 	color: var(--db-danger, #ef4444) !important;
+}
+
+/* ===== Focal-point picker (banner + card-cover config modals, 方案 B) =====
+   A cover-cropped preview at the target's approximate aspect ratio; the
+   crosshair marks the focal point (where the image's picked point lands in
+   the crop). Drag anywhere inside via pointer events — touch included, with
+   touch-action: none so the drag never scrolls the modal. */
+.dashboard-focal-picker {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+	margin: 2px 0 4px;
+}
+
+.dashboard-focal-picker-box {
+	flex: 1;
+	min-width: 0;
+	position: relative;
+	border-radius: var(--db-radius-sm, 6px);
+	border: 1px solid var(--db-border-card, rgba(127, 127, 127, 0.15));
+	background-color: var(--db-bg-card-hover, rgba(127, 127, 127, 0.1));
+	background-size: cover;
+	background-position: center;
+	cursor: crosshair;
+	overflow: hidden;
+	touch-action: none;
+}
+
+.dashboard-focal-picker-box--dragging {
+	cursor: grabbing;
+	border-color: var(--db-accent, var(--interactive-accent));
+}
+
+/* No/invalid path: a quiet disabled strip instead of an image. */
+.dashboard-focal-picker-box--empty {
+	cursor: default;
+	opacity: 0.55;
+}
+
+.dashboard-focal-picker-marker {
+	position: absolute;
+	width: 14px;
+	height: 14px;
+	transform: translate(-50%, -50%);
+	border-radius: 50%;
+	border: 2px solid #fff;
+	box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.5);
+	pointer-events: none;
+}
+
+.dashboard-focal-picker-marker::after {
+	content: '';
+	position: absolute;
+	inset: 4px;
+	border-radius: 50%;
+	background: var(--db-accent, #8b5cf6);
+}
+
+.dashboard-focal-picker-reset {
+	flex-shrink: 0;
+	background: none !important;
+	border: none !important;
+	box-shadow: none !important;
+	color: var(--db-text-faint, rgba(255, 255, 255, 0.35));
+	cursor: pointer;
+	padding: 3px;
+	min-height: 0;
+	line-height: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: var(--db-radius-sm, 6px);
+}
+
+.dashboard-focal-picker-reset:hover {
+	color: var(--db-accent, var(--interactive-accent));
+}
+
+.dashboard-focal-picker-reset svg {
+	width: 15px;
+	height: 15px;
 }
 
 .dashboard-modal-image-delete svg {
@@ -14646,6 +15077,97 @@
 	overflow-y: hidden;
 }
 
+/* Toolbar grouping (grid/gallery/list/table): one collapsible header + body
+   per folder/property bucket, mirroring the media section's grouped mode. */
+.dashboard-library-group-header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 4px;
+	margin: 10px 0 6px 0;
+	border-bottom: 1px solid var(--db-border, var(--background-modifier-border));
+	cursor: pointer;
+	user-select: none;
+	border-radius: var(--db-radius-sm, 4px);
+	transition: background 0.15s ease;
+}
+.dashboard-library-group-header:hover { background: var(--db-bg-hover, rgba(255, 255, 255, 0.05)); }
+.dashboard-library-group-chevron {
+	display: flex;
+	color: var(--db-text-faint, var(--text-faint));
+	flex-shrink: 0;
+}
+.dashboard-library-group-chevron svg { width: 12px; height: 12px; }
+.dashboard-library-group-name {
+	font-size: 0.75em;
+	font-weight: 600;
+	color: var(--db-text, var(--text-normal));
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.dashboard-library-group-header.is-nogroup .dashboard-library-group-name {
+	color: var(--db-text-muted, var(--text-muted));
+	font-style: italic;
+}
+.dashboard-library-group-count {
+	margin-left: auto;
+	flex-shrink: 0;
+	font-size: 0.625em;
+	color: var(--db-text-muted, var(--text-muted));
+	background: var(--db-bg-hover, rgba(255, 255, 255, 0.06));
+	padding: 0 7px;
+	border-radius: 999px;
+}
+.dashboard-library-group-header.is-collapsed { opacity: 0.75; }
+.dashboard-library-group-body.is-hidden { display: none; }
+.dashboard-library-files .dashboard-library-group-header:first-child { margin-top: 0; }
+
+/* Progressive load-more pill (in-group and per-kanban-column) — borrows the
+   pagination button's capsule recipe so it reads as the same control family. */
+.dashboard-library-load-more {
+	cursor: pointer;
+	padding: 4px 10px;
+	border-radius: var(--db-radius-sm, 6px);
+	font-size: 0.75em;
+	font-weight: 500;
+	color: var(--db-text, var(--text-normal));
+	background: var(--db-bg-btn, rgba(139, 92, 246, 0.10));
+	transition: background 0.1s ease;
+	user-select: none;
+}
+.dashboard-library-load-more:hover {
+	background: var(--db-bg-btn-hover, rgba(139, 92, 246, 0.18));
+}
+/* Group bodies are block flow: center the pill under the grid/list/table. */
+.dashboard-library-group-body .dashboard-library-load-more {
+	width: fit-content;
+	margin: 8px auto 2px;
+}
+/* Kanban columns are flex columns: a full-width footer button instead. */
+.dashboard-library-kanban-col .dashboard-library-load-more {
+	width: 100%;
+	text-align: center;
+	margin-top: 2px;
+	flex-shrink: 0;
+}
+
+/* Render-ceiling notice (grouped + kanban paths only; see RENDER_CEILING). */
+.dashboard-library-render-cap {
+	font-size: 0.75em;
+	color: var(--db-text-muted, var(--text-muted));
+	background: var(--db-bg-hover, rgba(255, 255, 255, 0.05));
+	border: 1px solid var(--db-border, var(--background-modifier-border));
+	border-radius: var(--db-radius-sm, 6px);
+	padding: 6px 10px;
+	margin: 0 0 8px 0;
+}
+/* Kanban + cap: the board normally fills its overflow-hidden host, so the
+   sibling notice needs its height reserved or the column bottoms get clipped. */
+.dashboard-library-files.is-capped .dashboard-library-kanban {
+	max-height: calc(100% - 40px);
+}
+
 /* Toolbar */
 .dashboard-library-toolbar {
 	display: flex;
@@ -15092,6 +15614,8 @@
 	display: flex;
 	flex-direction: column;
 	gap: 4px;
+	/* Anchor for the hover-reveal delete button (top-right). */
+	position: relative;
 }
 
 /* ===== Gallery view (card grid with frontmatter-driven covers) ===== */
@@ -15119,6 +15643,79 @@
 .dashboard-library-size-toggle.is-hidden {
 	display: none;
 }
+
+/* Group pill is meaningless in kanban (it has its own config-modal grouping);
+   page-size is meaningless while grouped (pagination is skipped). */
+.dashboard-library-group-toggle.is-hidden,
+.dashboard-library-collapse-toggle.is-hidden,
+.dashboard-media-collapse-toggle.is-hidden,
+.dashboard-library-page-size.is-hidden,
+.dashboard-library-cols-btn.is-hidden {
+	display: none;
+}
+
+/* Table-columns picker (eye button): vertical list, one row per property —
+   drag handle to reorder, eye toggle to show/hide. */
+.dashboard-table-cols-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	max-height: 46vh;
+	overflow-y: auto;
+	padding-right: 2px;
+}
+.dashboard-table-cols-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 8px;
+	border-radius: var(--db-radius-sm, 6px);
+	background: var(--db-bg-input, rgba(255, 255, 255, 0.05));
+}
+.dashboard-table-cols-row.is-dragging {
+	opacity: 0.6;
+	outline: 1px dashed var(--db-accent, var(--interactive-accent));
+}
+.dashboard-table-cols-row.is-off .dashboard-table-cols-name {
+	color: var(--db-text-muted, var(--text-muted));
+	text-decoration: line-through;
+	text-decoration-color: var(--db-text-faint, var(--text-faint));
+}
+.dashboard-table-cols-handle {
+	cursor: grab;
+	color: var(--db-text-faint, var(--text-faint));
+	display: flex;
+	align-items: center;
+	touch-action: none; /* pointer drag owns the gesture on touch */
+	flex-shrink: 0;
+}
+.dashboard-table-cols-handle:active { cursor: grabbing; }
+.dashboard-table-cols-handle svg { width: 14px; height: 14px; }
+.dashboard-table-cols-name {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 0.8125em;
+}
+.dashboard-table-cols-eye {
+	cursor: pointer;
+	color: var(--db-text-muted, var(--text-muted));
+	display: flex;
+	align-items: center;
+	padding: 3px;
+	border-radius: 4px;
+	flex-shrink: 0;
+	transition: color 0.15s ease, background 0.15s ease;
+}
+.dashboard-table-cols-eye:hover {
+	color: var(--db-text, var(--text-normal));
+	background: var(--db-bg-hover, rgba(255, 255, 255, 0.05));
+}
+.dashboard-table-cols-eye svg { width: 15px; height: 15px; }
+.dashboard-table-cols-eye.is-off { color: var(--db-text-faint, var(--text-faint)); }
+
 
 .dashboard-library-card-cover {
 	aspect-ratio: 16 / 10;
@@ -15453,6 +16050,56 @@
 	color: #fff;
 }
 
+/* Card delete (grid / gallery / kanban): pinned to the card's top-right
+   corner, fully hidden — and click-through — until the card is hovered, the
+   media grid's hover-reveal affordance. Dark scrim + white icon reads over
+   both covers and title rows in light and dark themes alike. */
+.dashboard-library-card-delete {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	width: 22px;
+	height: 22px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+	background: rgba(0, 0, 0, 0.55);
+	color: #fff;
+	padding: 0;
+	min-height: 0;
+	opacity: 0;
+	pointer-events: none;
+	cursor: pointer;
+	z-index: 2;
+	transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.dashboard-library-card-delete svg {
+	width: 12px;
+	height: 12px;
+}
+
+.dashboard-library-card:hover .dashboard-library-card-delete,
+.dashboard-library-kanban-card:hover .dashboard-library-card-delete,
+.dashboard-library-card-delete:focus-visible {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.dashboard-library-card-delete:hover {
+	background: rgba(220, 50, 50, 0.85);
+	color: #fff;
+}
+
+/* Phones have no hover: keep the affordance visible (and reachable) instead
+   of stranding it at opacity 0 — same call as the qa-edit/qa-remove buttons.
+   Tablets drive a pointer and keep the hover reveal. */
+.is-mobile:not(.is-tablet) .dashboard-library-card-delete {
+	opacity: 1;
+	pointer-events: auto;
+}
+
 .dashboard-library-table-edit-input {
 	width: 100%;
 	padding: 2px 4px;
@@ -15566,6 +16213,8 @@
 	padding: 8px 10px;
 	cursor: pointer;
 	transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, color 0.15s ease, transform 0.15s ease;
+	/* Anchor for the hover-reveal delete button (top-right). */
+	position: relative;
 }
 
 .dashboard-library-kanban-card:hover {
@@ -17336,20 +17985,37 @@ body.is-mobile .dashboard-media-item .dashboard-media-tagbtn { opacity: 1; }
 .dashboard-calendar.is-full .dashboard-calendar-event-time { font-size: 0.8125em; }
 .dashboard-alltasks-row .dashboard-calendar-event-time { font-size: 0.6875em; }
 
-/* Add-task row in the day agenda modal (time + title + Add -> daily note) */
-.dashboard-cal-day-add { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; }
+/* Add-task row in the day agenda modal (title + Add -> note destination) */
+.dashboard-cal-day-add { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
 /* Equal heights for the add-task row: Chromium renders input[type=time]
    intrinsically taller than the sibling text input; pin both to the button
    height so the row lines up. */
-.dashboard-cal-day-add-time,
 .dashboard-cal-day-add-title {
 	height: 34px;
 	padding: 0 10px;
 	box-sizing: border-box;
 }
-.dashboard-cal-day-add-time { width: 92px; flex-shrink: 0; }
 .dashboard-cal-day-add-title { flex: 1; min-width: 0; }
 .dashboard-cal-day-add-btn { flex-shrink: 0; }
+
+/* Optional time groups under the add row: start / deadline / scheduled, each
+   date + time. Wraps on narrow panes; every input stays short enough that the
+   three groups share one line on desktop. */
+.dashboard-cal-day-times { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 10px; }
+.dashboard-cal-day-times-group { display: flex; align-items: center; gap: 4px; }
+.dashboard-cal-day-times-label {
+	font-size: 0.75em;
+	color: var(--db-text-muted, var(--text-muted));
+	flex-shrink: 0;
+}
+.dashboard-cal-day-times-date,
+.dashboard-cal-day-times-time {
+	height: 30px;
+	padding: 0 6px;
+	box-sizing: border-box;
+}
+.dashboard-cal-day-times-date { width: 132px; }
+.dashboard-cal-day-times-time { width: 86px; }
 
 /* Google-style week time grid (full-screen modal). Hour rows are 48px; day
    column height is 24*48 = 1152px — keep in sync with TIMEGRID_HOUR_PX. */
@@ -19222,6 +19888,62 @@ body.is-mobile .dashboard-media-item .dashboard-media-tagbtn { opacity: 1; }
 .dashboard-theme-studio-color-label {
 	flex: 1;
 	font-size: 0.88em;
+}
+
+/* Color rows carry an extra mode dropdown (follow theme / light / dark /
+   custom); let the controls wrap under the label when the compact modal
+   gets too narrow instead of overflowing. */
+.dashboard-theme-studio-color-row {
+	flex-wrap: wrap;
+}
+
+/* Mode dropdown per color row: same recipe as .dashboard-theme-studio-size —
+   auto width so the closed state never clips, explicit height + line-height +
+   appearance:menulist so raw <select> renders fully under Obsidian/Electron —
+   but sized to the picker/slider row (28px). */
+.dashboard-theme-studio-color-mode {
+	flex: 0 0 auto;
+	width: auto;
+	min-width: 84px;
+	height: 28px;
+	padding: 0 8px;
+	line-height: 26px;
+	box-sizing: border-box;
+	font-size: 0.82em;
+	-webkit-appearance: menulist;
+	appearance: menulist;
+}
+
+/* Follow-theme / light / dark modes drive the value, so the picker + alpha
+   slider sit disabled-but-visible as a preview of the resulting color. */
+.dashboard-theme-studio-color-row input:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+
+/* Alpha slider rides between the swatch and the clear button: slim, accent-
+   tinted, with a small fixed span so eight rows align. */
+.dashboard-theme-studio-alpha-slider {
+	width: 90px;
+	height: 4px;
+	appearance: none;
+	-webkit-appearance: none;
+	background: color-mix(in srgb, var(--db-text, var(--text-normal)) 18%, transparent);
+	border-radius: 2px;
+	outline: none;
+	cursor: pointer;
+	flex-shrink: 0;
+}
+
+.dashboard-theme-studio-alpha-slider::-webkit-slider-thumb {
+	appearance: none;
+	-webkit-appearance: none;
+	width: 12px;
+	height: 12px;
+	border-radius: 50%;
+	background: var(--db-accent, var(--interactive-accent));
+	border: none;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
 .dashboard-modal-color-input {
 	width: 38px;

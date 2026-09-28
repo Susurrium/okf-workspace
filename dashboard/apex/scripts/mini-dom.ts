@@ -75,8 +75,20 @@ export class El {
 		return this.children[0] ?? null;
 	}
 
+	/** Real-DOM parity for the collapse-all sweep (library-section groups). */
+	get nextElementSibling(): El | null {
+		if (!this.parent) return null;
+		const idx = this.parent.children.indexOf(this);
+		return idx >= 0 ? this.parent.children[idx + 1] ?? null : null;
+	}
+
 	get childElementCount(): number {
 		return this.children.length;
+	}
+
+	/** Real-DOM parity for the swap guards (renderMemoMarkdown et al.). */
+	hasChildNodes(): boolean {
+		return this.children.length > 0;
 	}
 
 	setAttribute(name: string, value: string): void {
@@ -131,6 +143,10 @@ export class El {
 	}
 
 	appendChild(child: El): El {
+		// Real-DOM semantics: appending an already-parented node MOVES it
+		// (detaches first — including from THIS parent, where the spec moves
+		// the node to the end rather than duplicating it).
+		if (child.parent) child.parent.removeChild(child);
 		child.parent = this;
 		this.children.push(child);
 		return child;
@@ -217,6 +233,13 @@ export class El {
 		this.listeners.set(type, list);
 	}
 
+	removeEventListener(type: string, fn: (ev: unknown) => void): void {
+		const list = this.listeners.get(type);
+		if (!list) return;
+		const idx = list.indexOf(fn);
+		if (idx !== -1) list.splice(idx, 1);
+	}
+
 	dispatchEvent(ev: { type: string; target?: El; key?: string; [extra: string]: unknown }): boolean {
 		// Listeners written against the real DOM commonly call
 		// stopPropagation/preventDefault; stopPropagation halts the walk (as in
@@ -244,11 +267,14 @@ export class El {
 
 	// ---- Obsidian HTMLElement helpers ----
 
-	createEl(tag: string, o?: { cls?: string; text?: string; attr?: Record<string, string> }): El {
+	createEl(tag: string, o?: { cls?: string; text?: string; value?: string; attr?: Record<string, string> }): El {
 		const el = new El(tag);
 		this.appendChild(el);
 		if (o?.cls) el.addClass(...o.cls.split(/\s+/));
 		if (o?.text !== undefined) el.textContent = o.text;
+		// Obsidian's createEl maps a `value` option onto the value attribute
+		// (how <option> rows pass their mode to the select).
+		if (o?.value !== undefined) el.setAttribute('value', o.value);
 		for (const [k, v] of Object.entries(o?.attr ?? {})) el.setAttribute(k, v);
 		return el;
 	}
@@ -270,6 +296,18 @@ export class El {
 	remove(): El {
 		if (this.parent) this.parent.removeChild(this);
 		return this;
+	}
+
+	/** Real-DOM parity: detach `node` from its current parent and place it
+	 *  before `ref` (or at the end when ref is null / not a child). Moving a
+	 *  node already inside this element works, like the real insertBefore. */
+	insertBefore(node: El, ref: El | null): El {
+		if (node.parent) node.parent.removeChild(node);
+		const idx = ref ? this.children.indexOf(ref) : -1;
+		if (idx === -1) this.children.push(node);
+		else this.children.splice(idx, 0, node);
+		node.parent = this;
+		return node;
 	}
 }
 

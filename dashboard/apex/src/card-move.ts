@@ -39,7 +39,9 @@ export function convertMovedCard(card: DashboardCard, source: DashboardColumn, t
 	const moved = { ...card, column: target.name };
 	if (source === target) return moved;
 	if (targetType === 'sticky' && (sourceType === 'projects' || sourceType === 'notes')) {
-		return { ...moved, noteStyle: sourceType === 'notes' ? 'plain' : 'cover' };
+		// Sticky picks the look per card: a card displayed without a cover in
+		// its source section (the retired 无封面 type) keeps that look.
+		return { ...moved, noteStyle: sourceType === 'notes' || source.showCover === false ? 'plain' : 'cover' };
 	}
 	if (targetType === 'memo' || (targetType === 'sticky' && sourceType === 'memo')) {
 		return { ...moved, type: 'generic' };

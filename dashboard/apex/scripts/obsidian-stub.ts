@@ -13,6 +13,9 @@ export class Modal {
 	app: unknown;
 	contentEl: El;
 	containerEl: El;
+	/** Most recently OPENED modal instance (same pattern as Menu.last) — lets
+	 *  verification scripts capture modals a UI under test spawns internally. */
+	static last: Modal | null = null;
 
 	constructor(app: unknown) {
 		this.app = app;
@@ -20,7 +23,7 @@ export class Modal {
 		this.containerEl = new El('div');
 	}
 
-	open(): void {}
+	open(): void { Modal.last = this; }
 	close(): void {}
 }
 
@@ -29,7 +32,10 @@ export class TFolder {}
 export class App {}
 export class TFile {}
 export class Notice {
-	constructor(_message: string) {}
+	/** Every message ever shown, in order — lets verification scripts assert
+	 *  on notice text without a real toast. */
+	static messages: string[] = [];
+	constructor(message: string) { Notice.messages.push(message); }
 	show() {}
 	hide() {}
 }
@@ -56,6 +62,9 @@ export class Menu {
 			title: '',
 			setTitle(t: string) { this.title = t; return this; },
 			setIcon(_icon: string) { return this; },
+			setChecked(_checked: boolean) { return this; },
+			setDisabled(_disabled: boolean) { return this; },
+			setWarning(_warning: boolean) { return this; },
 			onClick(fn: () => void) { clickFn = fn; return this; },
 			click: () => { clickFn?.(); },
 		};
@@ -63,6 +72,8 @@ export class Menu {
 		this.items.push(item);
 		return this;
 	}
+
+	addSeparator(): this { return this; }
 
 	showAtMouseEvent(_e: unknown): this { return this; }
 	showAtPosition(_pos: unknown): this { return this; }
@@ -72,6 +83,34 @@ export class Menu {
 export function normalizePath(path: string): string { return path; }
 export const Platform = { isMobile: false, isMobileApp: false };
 export function setIcon(_el: unknown, _icon: string): void {}
+
+// Component base for MarkdownRenderer.render's lifecycle argument (the real
+// one is the ItemView). Trivial here — nothing in the scripts loads children.
+export class Component {}
+
+// MarkdownRenderer stand-in: records the exact markdown source it was handed
+// as a CHILD ELEMENT (appendText's text slot would be invisible to
+// textContent once the container has element children), so verify scripts can
+// assert what the memo view would render and that the swap moved real nodes.
+export const MarkdownRenderer = {
+	render: async (_app: unknown, markdown: string, el: unknown): Promise<void> => {
+		(el as unknown as { createDiv(o?: { text?: string }): void }).createDiv({ text: `[md]${markdown}` });
+	},
+};
+
+// FuzzySuggestModal base for modules that import it: the verify scripts never
+// open one (the studio's image browser only mounts on a browse click), so a
+// bare class with the Modal surface is enough for the bundle to resolve.
+export class FuzzySuggestModal<T> {
+	app: unknown;
+	constructor(app: unknown) { this.app = app; }
+	open(): void {}
+	close(): void {}
+	// Narrow the unused-generic warning; the stand-in never items items.
+	getItems(): T[] { return []; }
+	getItemText(_item: T): string { return ''; }
+	onChooseItem(_item: T): void {}
+}
 
 // Minimal moment() for date-only code paths (daily-notes computes note paths
 // and "today" via momentOf/nowMoment + .format('YYYY-MM-DD')). Only the
