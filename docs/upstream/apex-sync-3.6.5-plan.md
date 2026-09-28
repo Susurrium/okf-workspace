@@ -67,7 +67,8 @@ complete root-script run passed.
    newer `workbench_schema`, and free prose. Verify IDs, configuration and prose survive save, restart and
    reload, and verify two panes share writes without duplicate state.
 3. Exercise new-note templates, table-column edits, card deletion, focal points, calendar task start/end
-   times, same-day reminder-only tasks, and progressive rendering in Obsidian.
+   times, same-day reminder-only tasks, and progressive rendering in Obsidian. Templates, columns, card
+   deletion, focal points, calendar times, and progressive rendering passed in the isolated run.
 4. Verify the unified plugin remains the only enabled Dashboard plugin. Upgrade, restart, rollback to the
    prior package, and verify plugin settings plus native Apex JSON remain intact.
 5. Confirm managed Project/Source operations still obey OKF artifact edit rules, native Apex data remains
@@ -79,8 +80,10 @@ Schema-99 preservation, duplicate sections, two-pane updates, plugin hot reload,
 and unavailable-Engine behavior were exercised. A temporary Engine with a generated local token synced the
 checked-in synthetic Feed fixtures before and after an Obsidian process restart. That run found and fixed a
 missing AI Papers scroll-state initialization; the rebuilt plugin restored its scroll offset across workbench
-switches. Calendar week view rendered scheduled, reminder, and due-only task times as expected. The prior
-3.6.0 package loaded during rollback, but settings and native-takeover audit byte hashes changed, so rollback
-preservation remains unverified. Live producer sync, subscription pagination, the full upstream-control
-walkthrough, and byte-preserving UI rollback still need completion before changing the candidate status or
-advancing the locked baseline.
+switches. Calendar week view rendered scheduled, reminder, and due-only task times as expected. The UI also
+verified multiple note templates and variable replacement, table-column hide/restore, card deletion, and
+50-item progressive rendering. The banner editor persisted and cleared a 30%,70% focal point in the synthetic
+board. P08 passed. The prior 3.6.0 package loaded during rollback, but settings and native-takeover audit byte
+hashes changed, so rollback preservation remains unverified. Live producer sync, subscription pagination, and
+byte-preserving UI rollback still need completion before changing the candidate status or advancing the
+locked baseline.

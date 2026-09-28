@@ -3,8 +3,9 @@
 > **2026-09-21 functional-parity correction:** the original completion statement was too broad. The
 > recorded data-safety and lifecycle scenarios remain valid, but the new Apex sections do not yet preserve
 > the full reachable behavior of the former OKF Dashboard. The subsequent shared-Surface implementation
-> restored M4–M6 and the desktop runtime portion of M8. M7 awaits one authenticated real-Feed rerun, and
-> M9/P08 remain open. See `APEX-OKF-FUNCTIONAL-PARITY-IMPLEMENTATION-2026-09-21.md`.
+> restored M4–M6 and the desktop runtime portion of M8. M7 has authenticated fixture-sync evidence; live
+> producer sync and subscription pagination remain. M9 remains open. P08 passed its reachable-surface
+> inventory in the isolated run. See `APEX-OKF-FUNCTIONAL-PARITY-IMPLEMENTATION-2026-09-21.md`.
 
 This ledger is the implementation authority for the staged work described in
 `APEX-DASHBOARD-DEVELOPMENT-PLAN-2026-09-21.md`. A row is complete only when its named automated evidence
@@ -62,7 +63,7 @@ claim of complete Dashboard replacement. The following additional release gate i
 | P05 | Today/Life feature parity | Registered Apex sections expose continuation, attention, Feed, reflection/review, calendar, and capture organization | **Passed:** nonempty Today task/continuation run and real Life navigation |
 | P06 | System/global controls | Registered surface exposes diagnostics, task center, failed-operation recovery, settings, search, quick create, and Ask Notes | **Passed:** registered System Surface, embedded navigation and existing recovery tests |
 | P07 | Reading controller parity | Registered Apex section passes full-load, pagination, cache, stale-response, scroll, refresh-failure, and sync scenarios | **Conditional:** automated scenarios pass; isolated Obsidian authenticated to a temporary Engine with a generated local token, synced checked-in Feed fixtures before and after a real process restart, rendered 12 synthetic papers, and restored a 220 px reading offset across workbench switches. Live producer sync and subscription pagination remain pending |
-| P08 | Reachable-surface acceptance | Nonempty real Obsidian run verifies every inventory action through the registered Apex surfaces | **Partial:** synthetic task-center walkthrough covers queued, generating, publishing, failed, cancelled, conversion fallback, cancel/retry/continue actions. Isolated Obsidian verified newer-schema preservation, duplicate sections, two-pane synchronization, authenticated synthetic Feed sync, repaired papers-scroll restoration, and Calendar week-view rendering for scheduled, reminder-only, and due-only task times. New-note templates, table-column edits, card deletion, focal points, and progressive rendering remain pending |
+| P08 | Reachable-surface acceptance | Nonempty real Obsidian run verifies every inventory action through the registered Apex surfaces | **Passed:** synthetic task-center walkthrough covers queued, generating, publishing, failed, cancelled, conversion fallback, cancel/retry/continue actions. Isolated Obsidian verified newer-schema preservation, duplicate sections, two-pane synchronization, authenticated synthetic Feed sync, repaired papers-scroll restoration, Calendar task times, multiple new-note templates and variable substitution, table-column hide/restore, card deletion, focal-point persistence, and 50-item progressive group rendering |
 
 | ID | Scenario | Required evidence | Status |
 | --- | --- | --- | --- |
@@ -125,6 +126,18 @@ profile was not used. The isolated Vault contained only synthetic notes.
 - Created three synthetic formal tasks for 2026-09-28, opened the Calendar section in Week view, and verified
   `10:00–18:00` for a scheduled same-day task, `08:00–14:30` for a reminder task, and `09:15` for a due-only
   task. Deleted the temporary section through its UI confirmation and trashed the synthetic note afterward.
+- Configured two temporary new-note templates through the folder UI, selected the second template, and verified
+  its frontmatter, `{{title}}`, and `{{date:YYYY-MM-DD}}` substitutions in the created note. Removed both
+  templates and trashed the note/template files afterward.
+- Switched the synthetic Notes section to Table, hid and restored its `status` column through the column
+  picker, then returned it to the original Kanban view. Created and deleted a temporary card through the UI
+  confirmation and verified its note was removed.
+- Created 55 temporary notes grouped by `status`; the Kanban column initially rendered 50 and showed a
+  “show more (5 remaining)” control. Activating it rendered all 55. Removed the notes and folder and restored
+  the original grouping setting afterward.
+- In the banner editor, used a temporary local image and moved the focal point to `30%,70%`. Saving persisted
+  the matching `imagePos` entry while retaining the banner quote/author and schema-99 metadata. Cleared the
+  image through the same UI, verified `imagePos` was removed, and trashed the temporary image.
 - Closed and relaunched the isolated Obsidian process with the same isolated profile and CDP port. The
   candidate loaded with only `okf-workspace-dashboard` enabled, restored the schema-99 board warning and
   workbench, and successfully authenticated to the temporary Engine for another two-feed sync. The token
@@ -136,6 +149,6 @@ profile was not used. The isolated Vault contained only synthetic notes.
   available, but byte-preserving rollback is not proven and M9 remains open.
 - The temporary Engine uses checked-in synthetic Feed fixtures, not an external producer account. Actual
   producer-backed sync and subscription-page pagination remain open.
-- This run did not exercise every upstream 3.6.5 control. Those release gates remain open; the run is evidence
-  for P07 authenticated fixture handling and scroll restoration, P08 surface integrity and Calendar task-time
-  rendering, and part of M9 only.
+- The listed P08 reachable-surface inventory passed in this isolated run. Live producer-backed Feed sync,
+  subscription pagination, and byte-preserving UI rollback remain release gates; the run is evidence for P07
+  authenticated fixture handling and scroll restoration, P08, and part of M9 only.
