@@ -110,6 +110,8 @@ profile was not used. The isolated Vault contained only synthetic notes.
 - Disabled and re-enabled the plugin in Obsidian. The plugin reloaded, one dashboard plugin ID remained
   enabled, and the installed plugin `data.json` SHA-256 stayed
   `8C64634DF56415A2392F2F74172729360D4BFF6859BE7CCFA03163AAA12AAD17`.
+- Ran Obsidian's `app:reload` command. The isolated Vault reopened with the candidate plugin loaded, the
+  single dashboard identity enabled, the `dashboard` workbench active, and the schema-99 warning visible.
 - Opened Reading and clicked “同步最新内容”. The UI returned the expected local-service-unavailable state
   without affecting local note access. `127.0.0.1:8765/health` was unavailable, and this disposable install
   had no Engine token; authenticated Feed behavior could not be exercised.
