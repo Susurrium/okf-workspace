@@ -62,7 +62,7 @@ claim of complete Dashboard replacement. The following additional release gate i
 | P05 | Today/Life feature parity | Registered Apex sections expose continuation, attention, Feed, reflection/review, calendar, and capture organization | **Passed:** nonempty Today task/continuation run and real Life navigation |
 | P06 | System/global controls | Registered surface exposes diagnostics, task center, failed-operation recovery, settings, search, quick create, and Ask Notes | **Passed:** registered System Surface, embedded navigation and existing recovery tests |
 | P07 | Reading controller parity | Registered Apex section passes full-load, pagination, cache, stale-response, scroll, refresh-failure, and sync scenarios | **Conditional:** all automated scenarios pass and real offline/401 behavior is correct; authenticated sync rerun pending |
-| P08 | Reachable-surface acceptance | Nonempty real Obsidian run verifies every inventory action through the registered Apex surfaces | **Partial:** synthetic task-center UI now covers queued, generating, publishing, failed, cancelled, and conversion fallback states; live Feed and real Obsidian walkthrough remain |
+| P08 | Reachable-surface acceptance | Nonempty real Obsidian run verifies every inventory action through the registered Apex surfaces | **Partial:** synthetic task-center walkthrough now covers queued, generating, publishing, failed, cancelled, conversion fallback, cancel/retry/continue actions; live Feed and real Obsidian walkthrough remain |
 
 | ID | Scenario | Required evidence | Status |
 | --- | --- | --- | --- |

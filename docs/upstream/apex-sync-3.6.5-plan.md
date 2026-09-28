@@ -44,7 +44,8 @@ Completed in the candidate worktree:
 - The follow-up fixes to the five initially failing Apex checks were verified individually, then included in
   the 44-script rerun.
 - Focused P07 Reading and identity regressions: 76 Dashboard tests passed. P08 mixed operation/conversion
-  task-center scenario: passed in `dashboard-view.test.ts`.
+  task-center scenario: passed in `dashboard-view.test.ts`, including cancel, retry and conversion-recovery
+  callbacks.
 - Atomic upgrade/rollback fixture restores the prior plugin artifacts while preserving `data.json`; the
   deployment migration test passes.
 - Apex `npm audit --omit=dev` reports zero production dependency advisories. The full development tree reports

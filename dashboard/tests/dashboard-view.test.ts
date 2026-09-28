@@ -94,10 +94,25 @@ it("walks mixed active, publishing, failed, cancelled, and conversion fallback s
     error: "fixture generation handoff failure",
     outputs: { source_text: "sources/text/handoff.md", routed_target: "learning/guides/handoff.md" },
   };
+  const cancelOperation = vi.fn(async () => undefined);
+  const retryOperation = vi.fn(async (operationId: string) => ({
+    ...failed,
+    operation_id: `${operationId}-retry`,
+    status: "queued" as const,
+    stage: "queued" as const,
+  }));
+  const retryConversion = vi.fn(async (conversionId: string) => conversionId === failedPublish.conversion_id
+    ? { ...failedPublish, status: "ready" as const }
+    : { ...failedHandoff, stages: { ...failedHandoff.stages, semantic: "pending" } });
+  const watchSemanticOperation = vi.fn();
+  const watchDocumentConversion = vi.fn();
   const plugin = {
     getDashboardUiState: () => normalizeDashboardUiState(undefined),
+    ensureLocalServiceAvailable: vi.fn(async () => undefined),
     semanticOperationsSnapshot: () => [queued, generating, publishing, failed, cancelled],
     conversionSnapshot: () => [queuedConversion, failedPublish, failedHandoff],
+    watchSemanticOperation,
+    watchDocumentConversion,
   };
   const view = new OkfDashboardView(
     new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App),
@@ -107,6 +122,12 @@ it("walks mixed active, publishing, failed, cancelled, and conversion fallback s
     taskCenterOpen: boolean;
     renderBackgroundTasks(parent: HTMLElement): void;
   };
+  vi.spyOn(view as never, "render").mockResolvedValue(undefined);
+  vi.spyOn(view as never, "api").mockReturnValue({
+    cancelSemanticOperation: cancelOperation,
+    retrySemanticOperation: retryOperation,
+    retryConversion,
+  } as never);
   runtime.taskCenterOpen = true;
   const container = new TestElement();
   runtime.renderBackgroundTasks(container as unknown as HTMLElement);
@@ -120,6 +141,30 @@ it("walks mixed active, publishing, failed, cancelled, and conversion fallback s
   expect(text).toContain("转换已完成，待继续保存");
   expect(container.descendants().some((item) => item.textContent === "继续保存")).toBe(true);
   expect(container.descendants().some((item) => item.textContent === "重试生成入队")).toBe(true);
+  expect(container.descendants().filter((item) => item.textContent === "取消后台任务")).toHaveLength(2);
+
+  const actions = (label: string) => container.descendants().filter((item) => item.textContent === label);
+  const cancelButtons = actions("取消后台任务");
+  const retryButtons = actions("重新生成");
+  const resumeButton = actions("继续保存")[0]!;
+  const retryHandoffButton = actions("重试生成入队")[0]!;
+  cancelButtons[0]!.click();
+  cancelButtons[1]!.click();
+  retryButtons[0]!.click();
+  retryButtons[1]!.click();
+  resumeButton.click();
+  retryHandoffButton.click();
+  return vi.waitFor(() => {
+    expect(cancelOperation).toHaveBeenCalledTimes(2);
+    expect(cancelOperation).toHaveBeenCalledWith(queued.operation_id);
+    expect(cancelOperation).toHaveBeenCalledWith(generating.operation_id);
+    expect(retryOperation).toHaveBeenCalledTimes(2);
+    expect(retryConversion).toHaveBeenCalledWith(failedPublish.conversion_id);
+    expect(retryConversion).toHaveBeenCalledWith(failedHandoff.conversion_id);
+    expect(watchSemanticOperation).toHaveBeenCalledTimes(2);
+    expect(watchDocumentConversion).toHaveBeenCalledWith(failedPublish.conversion_id);
+    expect(watchDocumentConversion).toHaveBeenCalledWith(failedHandoff.conversion_id);
+  });
 });
 
 function project(status: "active" | "paused" | "completed" = "active"): ProjectSummary {
