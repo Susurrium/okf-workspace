@@ -46,6 +46,11 @@ Completed in the candidate worktree:
 - Focused P07 Reading and identity regressions: 76 Dashboard tests passed. P08 mixed operation/conversion
   task-center scenario: passed in `dashboard-view.test.ts`, including cancel, retry and conversion-recovery
   callbacks.
+- Reading-section cursor-pagination UI component test now traverses source and edition pages, checks cursor
+  forwarding, deduplicates an overlapping source, and verifies the load-more controls disappear at exhaustion.
+- Native takeover receipt regression confirms that raw receipt bytes change on each startup because
+  `completedAt` and `copied`/`already-copied` status evolve, while normalized entries and copied target data
+  remain stable.
 - Atomic upgrade/rollback fixture restores the prior plugin artifacts while preserving `data.json`; the
   deployment migration test passes.
 - Apex `npm audit --omit=dev` reports zero production dependency advisories. The full development tree reports
@@ -69,8 +74,11 @@ complete root-script run passed.
 3. Exercise new-note templates, table-column edits, card deletion, focal points, calendar task start/end
    times, same-day reminder-only tasks, and progressive rendering in Obsidian. Templates, columns, card
    deletion, focal points, calendar times, and progressive rendering passed in the isolated run.
-4. Verify the unified plugin remains the only enabled Dashboard plugin. Upgrade, restart, rollback to the
-   prior package, and verify plugin settings plus native Apex JSON remain intact.
+4. Verify the unified plugin remains the only enabled Dashboard plugin. Immediately before rollback, capture
+   the settings JSON semantic snapshot and SHA-256 for the five native Apex JSON files. After loading the prior
+   package, compare settings after excluding only the transient `token` field, compare native JSON hashes, and
+   compare the takeover receipt after normalizing `completedAt` and `copied`/`already-copied` status. Retest
+   the settings comparison if any semantic fields differ.
 5. Confirm managed Project/Source operations still obey OKF artifact edit rules, native Apex data remains
    readable, and no path creates or infers `studied_at`.
 
@@ -85,7 +93,9 @@ verified multiple note templates and variable replacement, table-column hide/res
 50-item progressive rendering. The banner editor persisted and cleared a 30%,70% focal point in the synthetic
 board. P08 passed. A Reading-section component regression now traverses source and edition cursor pages through
 the visible load-more controls, checking cursor arguments, overlapping-source deduplication, and exhaustion;
-Engine pagination integration tests cover the backend pages. The prior 3.6.0 package loaded during rollback,
-but settings and native-takeover audit byte hashes changed, so rollback preservation remains unverified. Live
-producer sync and byte-preserving UI rollback still need completion before changing the candidate status or
+Engine pagination integration tests cover the backend pages. The prior 3.6.0 package loaded during rollback.
+Its raw takeover-receipt hash changes by design when `completedAt` and copy status are refreshed, and the new
+test verifies the stable receipt projection and target data. The plugin `data.json` hash also changed, but no
+fresh pre-swap semantic snapshot was captured, so settings preservation remains unverified. Live producer sync
+and the focused settings snapshot comparison still need completion before changing the candidate status or
 advancing the locked baseline.

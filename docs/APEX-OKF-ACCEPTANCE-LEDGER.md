@@ -48,7 +48,7 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 | M6 | Learning/Knowledge/Inbox/Import sections and details | **Complete after parity repair:** registered Apex types mount the complete shared Surfaces; scope/context, operation states, filters, verification, decisions, recovery and Claudian paths are reachable; nonempty real run passed |
 | M7 | Feed/Reading and default workbench presets | **Conditional:** complete Reading controller, presets, cache/scroll/request lifecycle and sync UI are mounted and automated tests pass; authenticated isolated fixture sync and source/history cursor pagination passed, while live producer sync remains |
 | M8 | Native-data takeover, UX, capability, and performance work | **Complete for desktop implementation:** native takeover remains intact; eight shared Surfaces, Life/System access, custom-section cleanup and 9-to-9 rerender stability passed in real Obsidian |
-| M9 | Full release, rollback, real Obsidian, and upstream-update exercise | **Reopened:** the recorded 19 scenarios and upstream exercise are valid but insufficient; release remains blocked until the functional-parity gate passes |
+| M9 | Full release, rollback, real Obsidian, and upstream-update exercise | **Reopened:** P08 passed, but a fresh pre-rollback settings baseline is still needed to prove the observed `data.json` change is harmless; release remains blocked until that comparison and the full release gate pass |
 
 ## Final acceptance matrix
 
@@ -145,9 +145,12 @@ profile was not used. The isolated Vault contained only synthetic notes.
   remained in memory only; the external token-file path and Engine URL persisted, and `data.json` had no
   `token` property.
 - Loaded the prior 3.6.0 package under the same unified plugin identity, then restored and loaded the 3.6.5
-  candidate. The rollback package loaded, but the plugin settings and native-takeover audit file hashes
-  changed during the exercise. Their JSON remained readable and key workbench/settings state remained
-  available, but byte-preserving rollback is not proven and M9 remains open.
+  candidate. The rollback package loaded and the unified plugin identity remained. The plugin `data.json`
+  hash changed, but the run did not capture a fresh semantic baseline immediately before the package swap, so
+  settings preservation is not proven and M9 remains open. The takeover receipt hash is not a stable rollback
+  invariant: plugin startup rewrites `completedAt`, and copied entries legitimately change to
+  `already-copied`; the new regression verifies that the normalized receipt entries and copied native data
+  remain stable across a rerun.
 - The temporary Engine uses checked-in synthetic Feed fixtures, not an external producer account. Actual
   producer-backed sync remains open. Source and history pagination are covered by Engine integration and
   Reading-section UI-component tests.
