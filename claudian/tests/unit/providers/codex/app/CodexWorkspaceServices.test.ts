@@ -1,5 +1,4 @@
 const mockDiscoverModels = jest.fn();
-const mockLoadAgents = jest.fn().mockResolvedValue(undefined);
 const mockNormalizeAllModelVariants = jest.fn().mockReturnValue(false);
 const mockSkillBeginTransition = jest.fn();
 const mockSkillQuiesce = jest.fn().mockResolvedValue(undefined);
@@ -18,12 +17,6 @@ jest.mock('@/providers/codex/runtime/CodexModelDiscoveryService', () => ({
   })),
 }));
 
-jest.mock('@/providers/codex/agents/CodexAgentMentionProvider', () => ({
-  CodexAgentMentionProvider: jest.fn().mockImplementation(() => ({
-    loadAgents: mockLoadAgents,
-  })),
-}));
-
 jest.mock('@/providers/codex/commands/CodexSkillCatalog', () => ({
   CodexSkillCatalog: jest.fn(),
 }));
@@ -37,9 +30,7 @@ jest.mock('@/providers/codex/skills/CodexSkillListingService', () => ({
   })),
 }));
 
-jest.mock('@/providers/codex/storage/CodexSubagentStorage', () => ({
-  CodexSubagentStorage: jest.fn(),
-}));
+import { testClock } from '@test/helpers/testClock';
 
 import { createCodexWorkspaceServices } from '@/providers/codex/app/CodexWorkspaceServices';
 import { CodexModelCatalogCoordinator } from '@/providers/codex/runtime/CodexModelCatalogCoordinator';
@@ -121,12 +112,13 @@ describe('CodexWorkspaceServices', () => {
     const sol = makeDiscoveredModel('gpt-5.6-sol');
     mockDiscoverModels.mockResolvedValue({ kind: 'completed', models: [sol] });
 
-    const services = await createCodexWorkspaceServices(plugin, {} as any);
+    const services = await createCodexWorkspaceServices(plugin);
 
     expect(mockDiscoverModels).not.toHaveBeenCalled();
     expect(plugin.saveSettings).not.toHaveBeenCalled();
+    expect(plugin.app.workspace.onLayoutReady).not.toHaveBeenCalled();
 
-    await services.refreshModelCatalog!();
+    await services.modelCatalog!.refresh({ force: true });
 
     expect(mockDiscoverModels).toHaveBeenCalledTimes(1);
     expect(getCodexProviderSettings(plugin.settings).discoveredModels).toEqual([sol]);
@@ -134,54 +126,53 @@ describe('CodexWorkspaceServices', () => {
     expect(plugin.saveSettings).toHaveBeenCalledTimes(1);
   });
 
-  it('persists a selection normalization caused by startup discovery', async () => {
-    const plugin = createPlugin(true);
-    mockDiscoverModels.mockResolvedValue({
-      kind: 'completed',
-      models: [makeDiscoveredModel('gpt-5.6-sol')],
-    });
-    mockNormalizeAllModelVariants.mockReturnValueOnce(true);
-
-    const services = await createCodexWorkspaceServices(plugin, {} as any);
-    await services.refreshModelCatalog!();
-
-    expect(plugin.saveSettings).toHaveBeenCalledTimes(1);
-  });
-
-  it('publishes a deferred layout-ready catalog to mounted model selectors', async () => {
-    const plugin = createPlugin(true);
+  it('persists and publishes selection normalization when the catalog is unchanged', async () => {
     const sol = makeDiscoveredModel('gpt-5.6-sol');
+    const plugin = createPlugin(true, [sol]);
     mockDiscoverModels.mockResolvedValue({ kind: 'completed', models: [sol] });
-    await createCodexWorkspaceServices(plugin, {} as any);
-    const layoutReadyCallback = plugin.app.workspace.onLayoutReady.mock.calls[0][0];
+    mockNormalizeAllModelVariants.mockReturnValue(false);
+    const services = await createCodexWorkspaceServices(plugin);
+    const now = testClock();
+    const dateNow = jest.spyOn(Date, 'now').mockImplementation(() => now().getTime());
 
-    layoutReadyCallback();
-    await new Promise(resolve => setImmediate(resolve));
+    try {
+      await services.modelCatalog!.refresh({ force: true });
+      expect(getCodexProviderSettings(plugin.settings).discoveredModels).toEqual([sol]);
+      plugin.saveSettings.mockClear();
+      plugin.notifyProviderChatOptionsChanged.mockClear();
+      mockNormalizeAllModelVariants.mockClear();
 
-    expect(getCodexProviderSettings(plugin.settings).discoveredModels).toEqual([sol]);
-    expect(plugin.notifyProviderChatOptionsChanged).toHaveBeenCalledWith('codex');
+      await expect(services.modelCatalog!.refresh({ force: true })).resolves.toEqual({ changed: false });
+      expect(plugin.saveSettings).not.toHaveBeenCalled();
+      expect(plugin.notifyProviderChatOptionsChanged).not.toHaveBeenCalled();
+
+      mockNormalizeAllModelVariants.mockReturnValueOnce(true);
+      await expect(services.modelCatalog!.refresh({ force: true })).resolves.toEqual({ changed: true });
+      expect(mockNormalizeAllModelVariants).toHaveBeenCalledTimes(2);
+      expect(mockNormalizeAllModelVariants).toHaveBeenCalledWith(plugin.settings);
+      expect(plugin.saveSettings).toHaveBeenCalledTimes(1);
+      expect(plugin.notifyProviderChatOptionsChanged).toHaveBeenCalledTimes(1);
+      expect(plugin.notifyProviderChatOptionsChanged).toHaveBeenCalledWith('codex');
+      expect(getCodexProviderSettings(plugin.settings).discoveredModels).toEqual([sol]);
+    } finally {
+      try {
+        await services.dispose();
+      } finally {
+        dateNow.mockRestore();
+      }
+    }
   });
 
-  it('does not start app-server for a disabled provider', async () => {
-    const plugin = createPlugin(false);
-
-    await createCodexWorkspaceServices(plugin, {} as any);
-
-    expect(mockDiscoverModels).not.toHaveBeenCalled();
-    expect(plugin.saveSettings).not.toHaveBeenCalled();
-  });
-
-  it('does not run deferred layout discovery after workspace disposal', async () => {
+  it('does not discover or persist when the catalog is refreshed after workspace disposal', async () => {
     const plugin = createPlugin(true);
     mockDiscoverModels.mockResolvedValue({
       kind: 'completed',
       models: [makeDiscoveredModel('gpt-5.6-sol')],
     });
-    const services = await createCodexWorkspaceServices(plugin, {} as any);
-    const layoutReadyCallback = plugin.app.workspace.onLayoutReady.mock.calls[0][0];
+    const services = await createCodexWorkspaceServices(plugin);
 
     await services.dispose?.();
-    layoutReadyCallback();
+    await services.modelCatalog!.refresh();
     await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(mockDiscoverModels).not.toHaveBeenCalled();
@@ -195,40 +186,44 @@ describe('CodexWorkspaceServices', () => {
       kind: 'skipped',
       reason: 'provider-disabled',
     });
-    const services = await createCodexWorkspaceServices(plugin, {} as any);
+    const services = await createCodexWorkspaceServices(plugin);
 
-    await expect(services.refreshModelCatalog!()).resolves.toEqual({ changed: false });
+    expect(mockDiscoverModels).not.toHaveBeenCalled();
+    expect(plugin.saveSettings).not.toHaveBeenCalled();
+
+    await expect(services.modelCatalog!.refresh({ force: true })).resolves.toEqual({ changed: false });
     expect(getCodexProviderSettings(plugin.settings).discoveredModels).toEqual([cached]);
+    expect(mockDiscoverModels).not.toHaveBeenCalled();
     expect(plugin.saveSettings).not.toHaveBeenCalled();
   });
 
   it('keeps the last successful catalog when a refresh fails', async () => {
     const cached = makeDiscoveredModel('gpt-5.5');
-    const plugin = createPlugin(false, [cached]);
+    const plugin = createPlugin(true, [cached]);
     mockDiscoverModels.mockResolvedValue({
       diagnostics: 'Method not found',
       kind: 'completed',
       models: [],
     });
-    const services = await createCodexWorkspaceServices(plugin, {} as any);
+    const services = await createCodexWorkspaceServices(plugin);
 
-    await expect(services.refreshModelCatalog!()).resolves.toEqual({
+    await expect(services.modelCatalog!.refresh({ force: true })).resolves.toEqual({
       changed: false,
       diagnostics: 'Method not found',
     });
     expect(getCodexProviderSettings(plugin.settings).discoveredModels).toEqual([cached]);
   });
 
-  it('prunes an explicit visibility filter when the catalog changes', async () => {
+  it('preserves an explicit visibility filter when the catalog changes', async () => {
     const oldModel = makeDiscoveredModel('gpt-5.4');
     const currentModel = makeDiscoveredModel('gpt-5.5');
-    const plugin = createPlugin(false, [oldModel, currentModel], ['gpt-5.4', 'gpt-5.5']);
+    const plugin = createPlugin(true, [oldModel, currentModel], ['gpt-5.4', 'gpt-5.5']);
     mockDiscoverModels.mockResolvedValue({ kind: 'completed', models: [currentModel] });
-    const services = await createCodexWorkspaceServices(plugin, {} as any);
+    const services = await createCodexWorkspaceServices(plugin);
 
-    await services.refreshModelCatalog!();
+    await services.modelCatalog!.refresh({ force: true });
 
-    expect(getCodexProviderSettings(plugin.settings).visibleModels).toEqual(['gpt-5.5']);
+    expect(getCodexProviderSettings(plugin.settings).visibleModels).toEqual(['gpt-5.4', 'gpt-5.5']);
   });
 
   it('registers one transition hook that awaits model and skill metadata quiescence', async () => {
@@ -249,7 +244,7 @@ describe('CodexWorkspaceServices', () => {
       endEnvironmentTransition: jest.fn(),
       quiesceForEnvironmentChange: jest.fn(() => skillQuiescence),
     };
-    await createCodexWorkspaceServices(plugin, {} as any, {
+    await createCodexWorkspaceServices(plugin, {
       modelCatalogCoordinator: modelCatalogCoordinator as any,
       skillListingService: skillListingService as any,
     });
@@ -318,13 +313,13 @@ describe('CodexWorkspaceServices', () => {
         enabled: true,
       }];
     });
-    const services = await createCodexWorkspaceServices(plugin, {} as any, {
+    const services = await createCodexWorkspaceServices(plugin, {
       modelCatalogCoordinator,
       skillListingService,
     });
 
     await plugin.transitionHook.beforeTransition();
-    const modelRefresh = modelCatalogCoordinator.ensureFresh('transition-waiter');
+    const modelRefresh = modelCatalogCoordinator.refresh();
     const skillListing = skillListingService.listSkills();
     let modelRefreshSettled = false;
     let skillListingSettled = false;
@@ -351,7 +346,7 @@ describe('CodexWorkspaceServices', () => {
       await services.dispose();
     }
 
-    expect(observedModelEnvironments).toEqual(['NEW_API_KEY=new']);
+    expect(observedModelEnvironments).toEqual(['NEW_API_KEY=new', 'NEW_API_KEY=new']);
     expect(observedSkillEnvironments).toEqual(['NEW_API_KEY=new']);
   });
 
@@ -373,7 +368,7 @@ describe('CodexWorkspaceServices', () => {
       endEnvironmentTransition: jest.fn(),
       quiesceForEnvironmentChange: jest.fn().mockResolvedValue(undefined),
     };
-    const services = await createCodexWorkspaceServices(plugin, {} as any, {
+    const services = await createCodexWorkspaceServices(plugin, {
       modelCatalogCoordinator: modelCatalogCoordinator as any,
       skillListingService: skillListingService as any,
     });

@@ -20,7 +20,7 @@ export class DocumentImportPageModel {
     options: {
       intent: "source",
       quality: "quick",
-      parser: "markitdown",
+      parser: "mineru",
       generate: false,
     },
     running: false,
@@ -73,7 +73,7 @@ export class DocumentImportPageModel {
 
   public async submit(): Promise<DocumentImportResult> {
     const file = this.state.file;
-    if (!file) throw new Error("请先选择 PDF、Word 或 PowerPoint 文件");
+    if (!file) throw new Error("请先选择 PDF、Word、PowerPoint 或图片文件");
     const options = this.state.options;
     this.state = { file, options, running: true };
     try {

@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import quote
 
+from okf_workspace.okf.file_io import atomic_write_bytes, document_lock
+
 from .models import OriginalRecord
 from .routing import SUPPORTED_EXTENSIONS
 
@@ -44,57 +46,61 @@ class OriginalStore:
         directory = self.root / "sha256" / digest[:2] / digest
         stored = directory / f"original{extension}"
         directory.mkdir(parents=True, exist_ok=True)
-        if not stored.exists():
-            descriptor, temporary_name = tempfile.mkstemp(
-                prefix=".original.",
-                suffix=extension,
-                dir=directory,
-            )
-            os.close(descriptor)
-            temporary = Path(temporary_name)
-            try:
-                shutil.copyfile(source, temporary)
-                if sha256_file(temporary) != digest:
-                    raise OSError("Original copy hash mismatch")
-                os.replace(temporary, stored)
-            finally:
-                temporary.unlink(missing_ok=True)
         metadata = directory / "manifest.json"
-        names: set[str] = set()
-        if metadata.exists():
-            loaded_object = cast(
-                object,
-                json.loads(metadata.read_text(encoding="utf-8")),
-            )
-            if isinstance(loaded_object, dict):
-                loaded = cast(Mapping[str, object], loaded_object)
-                filenames = loaded.get("filenames")
-                if isinstance(filenames, list):
-                    names.update(
-                        value for value in cast(list[object], filenames) if isinstance(value, str)
+        with document_lock(metadata):
+            if not stored.exists():
+                descriptor, temporary_name = tempfile.mkstemp(
+                    prefix=".original.",
+                    suffix=extension,
+                    dir=directory,
+                )
+                os.close(descriptor)
+                temporary = Path(temporary_name)
+                try:
+                    shutil.copyfile(source, temporary)
+                    if sha256_file(temporary) != digest:
+                        raise OSError("Original copy hash mismatch")
+                    os.replace(temporary, stored)
+                finally:
+                    temporary.unlink(missing_ok=True)
+            names: set[str] = set()
+            if metadata.exists():
+                loaded_object = cast(
+                    object,
+                    json.loads(metadata.read_text(encoding="utf-8")),
+                )
+                if isinstance(loaded_object, dict):
+                    loaded = cast(Mapping[str, object], loaded_object)
+                    filenames = loaded.get("filenames")
+                    if isinstance(filenames, list):
+                        names.update(
+                            value
+                            for value in cast(list[object], filenames)
+                            if isinstance(value, str)
+                        )
+            names.add(original_name)
+            atomic_write_bytes(
+                metadata,
+                (
+                    json.dumps(
+                        {
+                            "sha256": digest,
+                            "extension": extension,
+                            "size_bytes": stored.stat().st_size,
+                            "filenames": sorted(names),
+                        },
+                        ensure_ascii=False,
+                        indent=2,
                     )
-        names.add(original_name)
-        metadata.write_text(
-            json.dumps(
-                {
-                    "sha256": digest,
-                    "extension": extension,
-                    "size_bytes": source.stat().st_size,
-                    "filenames": sorted(names),
-                },
-                ensure_ascii=False,
-                indent=2,
+                    + "\n"
+                ).encode("utf-8"),
             )
-            + "\n",
-            encoding="utf-8",
-            newline="\n",
-        )
         resource = f"okf-original://sha256/{digest}/{quote(original_name, safe='-._~')}"
         return OriginalRecord(
             sha256=digest,
             filename=original_name,
             extension=extension,
-            size_bytes=source.stat().st_size,
+            size_bytes=stored.stat().st_size,
             stored_path=stored,
             resource=resource,
         )

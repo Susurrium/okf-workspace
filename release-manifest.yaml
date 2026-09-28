@@ -1,7 +1,6 @@
-release: 0.7.0
+release: 0.8.0
 workspace_schema: 3
 components:
   engine: 1.11.0
-  dashboard: 1.15.0
-  claudian: 2.1.4-okf.3
-  markitdown_service: 1.4.0
+  dashboard: 1.16.0
+  claudian: 2.3.6-okf.4

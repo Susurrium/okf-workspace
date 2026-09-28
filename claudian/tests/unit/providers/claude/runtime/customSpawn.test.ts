@@ -1,10 +1,13 @@
 import type { SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
-import { spawn } from 'child_process';
+import { spawn as nativeSpawn } from 'child_process';
+import spawn from 'cross-spawn';
 
 import { createCustomSpawnFunction } from '@/providers/claude/runtime/customSpawn';
 import * as env from '@/utils/env';
 
+jest.mock('cross-spawn', () => jest.fn());
 jest.mock('child_process', () => ({
+  ...jest.requireActual('child_process'),
   spawn: jest.fn(),
 }));
 
@@ -12,10 +15,15 @@ describe('createCustomSpawnFunction', () => {
   const originalPlatform = process.platform;
   const spawnMock = spawn as jest.MockedFunction<typeof spawn>;
 
+  beforeEach(() => {
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+  });
+
   afterEach(() => {
     Object.defineProperty(process, 'platform', { value: originalPlatform });
     jest.restoreAllMocks();
     spawnMock.mockReset();
+    jest.mocked(nativeSpawn).mockReset();
   });
 
   const createMockProcess = () => {
@@ -59,6 +67,7 @@ describe('createCustomSpawnFunction', () => {
       cwd: '/tmp',
     }));
     expect(result).toBe(mockProcess);
+    expect(spawnMock.mock.calls[0][2]).not.toHaveProperty('signal');
   });
 
   it('launches Node-backed script commands through node when SDK passes them directly', () => {
@@ -108,6 +117,27 @@ describe('createCustomSpawnFunction', () => {
     );
   });
 
+  it.each([null, 'C:\\nodejs\\node.exe'])('uses direct spawning on Windows with Node discovery returning %s', (nodePath) => {
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    const mockProcess = createMockProcess();
+    jest.mocked(nativeSpawn).mockReturnValue(mockProcess as unknown as ReturnType<typeof nativeSpawn>);
+    spawnMock.mockReturnValue(mockProcess as unknown as ReturnType<typeof spawn>);
+    jest.spyOn(env, 'findNodeExecutable').mockReturnValue(nodePath);
+
+    const spawnFn = createCustomSpawnFunction('/enhanced/path');
+    spawnFn({
+      command: '/npm/claude/cli-wrapper.cjs',
+      args: ['--system-prompt', 'First line\nSecond line'],
+      cwd: '/tmp',
+      env: {},
+    } as SpawnOptions);
+
+    expect(nativeSpawn).toHaveBeenCalledWith(
+      nodePath ?? 'node', ['/npm/claude/cli-wrapper.cjs', '--system-prompt', 'First line\nSecond line'], expect.any(Object),
+    );
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it('pipes stderr only when DEBUG_CLAUDE_AGENT_SDK is set', () => {
     const mockProcess = createMockProcess();
     spawnMock.mockReturnValue(mockProcess as unknown as ReturnType<typeof spawn>);
@@ -123,7 +153,7 @@ describe('createCustomSpawnFunction', () => {
     });
 
     const spawnOptions = spawnMock.mock.calls[0][2];
-    expect(spawnOptions.stdio).toEqual(['pipe', 'pipe', 'pipe']);
+    expect(spawnOptions?.stdio).toEqual(['pipe', 'pipe', 'pipe']);
     expect(mockProcess.stderr?.on).toHaveBeenCalledWith('data', expect.any(Function));
   });
 
@@ -142,7 +172,7 @@ describe('createCustomSpawnFunction', () => {
     });
 
     const spawnOptions = spawnMock.mock.calls[0][2];
-    expect(spawnOptions.stdio).toEqual(['pipe', 'pipe', 'ignore']);
+    expect(spawnOptions?.stdio).toEqual(['pipe', 'pipe', 'ignore']);
     expect(mockProcess.stderr?.on).not.toHaveBeenCalled();
   });
 
@@ -212,33 +242,6 @@ describe('createCustomSpawnFunction', () => {
     expect(spawnMock).toHaveBeenCalledWith('python', ['script.py'], expect.any(Object));
   });
 
-  it('wraps manually configured Windows .cmd commands through cmd.exe', () => {
-    Object.defineProperty(process, 'platform', { value: 'win32' });
-    const mockProcess = createMockProcess();
-    spawnMock.mockReturnValue(mockProcess as unknown as ReturnType<typeof spawn>);
-
-    const findNodeExecutable = jest.spyOn(env, 'findNodeExecutable');
-
-    const spawnFn = createCustomSpawnFunction('/enhanced/path');
-    spawnFn({
-      command: 'C:\\Users\\R&D\\AppData\\Roaming\\npm\\claude.cmd',
-      args: ['--output-format', 'stream-json'],
-      cwd: 'C:\\Vault',
-      env: {},
-    } as SpawnOptions);
-
-    expect(findNodeExecutable).not.toHaveBeenCalled();
-    expect(spawnMock).toHaveBeenCalledWith(
-      process.env.ComSpec || process.env.comspec || 'cmd.exe',
-      ['/d', '/s', '/c', '""C:\\Users\\R&D\\AppData\\Roaming\\npm\\claude.cmd" --output-format stream-json"'],
-      expect.objectContaining({
-        cwd: 'C:\\Vault',
-        windowsHide: true,
-        windowsVerbatimArguments: true,
-      }),
-    );
-  });
-
   it('kills the process tree when aborting manually configured Windows .cmd commands', () => {
     Object.defineProperty(process, 'platform', { value: 'win32' });
     const mockProcess = createMockProcess();
@@ -272,6 +275,7 @@ describe('createCustomSpawnFunction', () => {
     Object.defineProperty(process, 'platform', { value: 'win32' });
     const mockProcess = createMockProcess();
     const originalKill = mockProcess.kill;
+    const findNodeExecutable = jest.spyOn(env, 'findNodeExecutable');
     spawnMock.mockReturnValue(mockProcess as unknown as ReturnType<typeof spawn>);
 
     const spawnFn = createCustomSpawnFunction('/enhanced/path');
@@ -281,6 +285,16 @@ describe('createCustomSpawnFunction', () => {
       cwd: 'C:\\Vault',
       env: {},
     } as SpawnOptions);
+
+    expect(findNodeExecutable).not.toHaveBeenCalled();
+    expect(spawnMock).toHaveBeenCalledWith(
+      'C:\\Users\\R&D\\AppData\\Roaming\\npm\\claude.cmd',
+      ['--output-format', 'stream-json'],
+      expect.objectContaining({
+        cwd: 'C:\\Vault',
+        windowsHide: true,
+      }),
+    );
 
     expect(result).toBe(mockProcess);
     expect(result.kill).not.toBe(originalKill);
@@ -296,24 +310,6 @@ describe('createCustomSpawnFunction', () => {
       }),
     );
     expect(originalKill).not.toHaveBeenCalled();
-  });
-
-  it('does not pass signal to spawn options', () => {
-    const mockProcess = createMockProcess();
-    spawnMock.mockReturnValue(mockProcess as unknown as ReturnType<typeof spawn>);
-
-    const spawnFn = createCustomSpawnFunction('/enhanced/path');
-    const signal = new AbortController().signal;
-    spawnFn({
-      command: 'node',
-      args: ['cli.js'],
-      cwd: '/tmp',
-      env: {},
-      signal,
-    });
-
-    const spawnOptions = spawnMock.mock.calls[0][2];
-    expect(spawnOptions).not.toHaveProperty('signal');
   });
 
   it('kills child immediately when signal is already aborted', () => {

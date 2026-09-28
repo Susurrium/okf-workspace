@@ -15,8 +15,10 @@ from okf_workspace.notes.web_captures import (
     canonical_web_url,
     web_source_write_lock,
 )
+from okf_workspace.okf.file_io import atomic_write_bytes, document_lock
 from okf_workspace.okf.frontmatter import OkfDocument
 from okf_workspace.okf.paths import slugify
+from okf_workspace.okf.relations import explicit_context_fields
 from okf_workspace.sources import SourcePublisher
 
 from .editions import materialize_media_references, render_treehole_comments
@@ -123,6 +125,13 @@ class FeedDecisionStore:
     def path_for(self, item: FeedItem) -> Path:
         return self.root / item.feed.value / f"{_identity(item)}.json"
 
+    @staticmethod
+    def _write(path: Path, payload: dict[str, object]) -> None:
+        atomic_write_bytes(
+            path,
+            (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+        )
+
     def save(
         self,
         item: FeedItem,
@@ -141,11 +150,8 @@ class FeedDecisionStore:
             "decided_at": _now(),
             "outputs": asdict(result),
         }
-        target.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-            newline="\n",
-        )
+        with document_lock(target):
+            self._write(target, payload)
         return target
 
     def load(self, item: FeedItem) -> dict[str, object] | None:
@@ -156,15 +162,13 @@ class FeedDecisionStore:
         return cast(dict[str, object], loaded) if isinstance(loaded, dict) else None
 
     def attach_semantic_operation(self, item: FeedItem, operation_id: str) -> None:
-        payload = self.load(item)
-        if payload is None:
-            raise FileNotFoundError(self.path_for(item))
-        payload["semantic_operation_id"] = operation_id
-        self.path_for(item).write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-            newline="\n",
-        )
+        target = self.path_for(item)
+        with document_lock(target):
+            payload = self.load(item)
+            if payload is None:
+                raise FileNotFoundError(target)
+            payload["semantic_operation_id"] = operation_id
+            self._write(target, payload)
 
 
 class FeedDecisionService:
@@ -185,14 +189,20 @@ class FeedDecisionService:
         self,
         item: FeedItem,
         action: DecisionAction,
+        *,
+        course: str | None = None,
+        project: str | None = None,
     ) -> tuple[Path, Path]:
         with web_source_write_lock(self.vault):
-            return self._create_source_locked(item, action)
+            return self._create_source_locked(item, action, course=course, project=project)
 
     def _create_source_locked(
         self,
         item: FeedItem,
         action: DecisionAction,
+        *,
+        course: str | None = None,
+        project: str | None = None,
     ) -> tuple[Path, Path]:
         publisher = SourcePublisher(self.vault)
         source_relative, text_relative = self._source_paths(item)
@@ -230,6 +240,8 @@ class FeedDecisionService:
                 publisher.resolve_use(
                     source_document,
                     purpose=_purpose(action),
+                    course=course,
+                    project=project,
                 )
                 publisher.publish_pair(
                     reused_source,
@@ -277,6 +289,8 @@ class FeedDecisionService:
         publisher.resolve_use(
             source_document,
             purpose=_purpose(action),
+            course=course,
+            project=project,
         )
         text_document.frontmatter.update(
             {
@@ -319,12 +333,28 @@ class FeedDecisionService:
     def _learning_target(
         self,
         item: FeedItem,
+        *,
+        course: str | None = None,
+        project: str | None = None,
     ) -> Path:
-        target = self.vault / "learning" / "guides" / f"{_slug(item)}.md"
+        context = explicit_context_fields(self.vault, course=course, project=project)
+        root = self.vault / "learning"
+        if "course" in context:
+            root = self.vault / context["course"].lstrip("/")
+            root = root.parent
+        suffix = f"-{Path(context['project']).parent.name}" if "project" in context else ""
+        target = root / "guides" / f"{_slug(item)}{suffix}.md"
         return target
 
-    def _wiki_target(self, item: FeedItem) -> Path:
-        target = self.vault / "knowledge" / "wiki" / f"{_slug(item)}.md"
+    def _wiki_target(
+        self, item: FeedItem, *, course: str | None = None, project: str | None = None,
+    ) -> Path:
+        context = explicit_context_fields(self.vault, course=course, project=project)
+        suffix = (
+            "-" + hashlib.sha256(json.dumps(context, sort_keys=True).encode()).hexdigest()[:10]
+            if context else ""
+        )
+        target = self.vault / "knowledge" / "wiki" / f"{_slug(item)}{suffix}.md"
         return target
 
     def decide(
@@ -333,6 +363,8 @@ class FeedDecisionService:
         action: DecisionAction,
         *,
         checkpoint: bool = True,
+        course: str | None = None,
+        project: str | None = None,
     ) -> DecisionResult:
         """Apply one user-selected outcome; AI never chooses this action."""
         source: Path | None = None
@@ -357,11 +389,16 @@ class FeedDecisionService:
             except GitCheckpointError as exc:
                 warnings.append(f"写入前 Git 检查点失败：{exc}")
         if creates_artifacts:
-            source, source_text = self._create_source(item, action)
+            source, source_text = self._create_source(
+                item,
+                action,
+                course=course,
+                project=project,
+            )
             if action is DecisionAction.LEARN_NOW:
-                study_guide = self._learning_target(item)
+                study_guide = self._learning_target(item, course=course, project=project)
             elif action is DecisionAction.WIKI_NOW:
-                wiki = self._wiki_target(item)
+                wiki = self._wiki_target(item, course=course, project=project)
             if checkpoint:
                 try:
                     create_checkpoint(self.vault, f"feed: {action.value} {item.item_id}")

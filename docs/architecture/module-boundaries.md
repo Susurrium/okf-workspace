@@ -21,5 +21,8 @@ Foundation -> no upper module
 - Sources is the only owner of Source and Source Text publication, lookup, canonical identity, and pair transactions.
 - Intake and Feeds do not import one another's implementation.
 - Dashboard does not implement conversion, publication, or semantic-operation state machines.
+- Dashboard may host Apex-native widget services for habits, expenses, reading, focus, media, and other
+  workbench utilities. Those services retain their existing data models and do not become Engine or Vault
+  artifact authorities.
 - Claudian contains provider and UI behavior, not copies of Workspace business prompts.
 - Cross-module flows are composed in application workflows, not hidden in adapters or API routes.

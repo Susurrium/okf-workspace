@@ -55,9 +55,12 @@ Dashboard 分为“读取面”和“命令面”：
 | `POST /projects/{slug}/log` | 追加项目进展 |
 | `POST /ai/ask` | 检索、读取真实章节并返回 `actual_reads` |
 | `POST /ai/organize` | 把普通人工 Capture 的正文写入一个长期目标，成功后删除 Capture；Web Capture 必须走发布接口 |
-| `POST /ai/class/organize` | 只更新课堂 AI 受管区域 |
+| `POST /ai/lessons/organize` | 读取 Lesson，只更新 `organized-lesson` 区域；目标在生成期间变化时返回 409 |
 | `POST /ai/projects/{slug}/summarize` | 读取 project/log 并刷新项目概览 |
-| `POST /ai/learning/plan`、`POST /ai/self-test` | 显式学习动作 |
+| `POST /ai/learning/plan` | 从指定笔记生成 Study Guide，AI 内容写入 `study-material`；输入为 Source 时跟随读取 Source Text |
+| `POST /ai/self-test` | 根据指定笔记返回自测题，不写入 Vault |
+| `POST /ai/knowledge/create` | 从明确选择的材料创建 `status: draft` 的 Wiki；同名目标返回 409 |
+| `POST /ai/section/rewrite` | 只改写指定章节；目标在生成期间变化时返回 409 |
 | `POST /documents/import` | 上传并执行 Original → 转换 → Source 发布 |
 | `GET /documents/conversions?status=failed` | 列出转换失败任务 |
 | `POST /documents/conversions/{id}/retry` | 指定转换器重试 |

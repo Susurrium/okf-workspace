@@ -17,3 +17,14 @@ Contract；Dashboard、Templater、Codex Skills、后台服务和验证器共同
 - `generated` 只在内容真正生成成功后写入，不能表示排队或占位。
 - 未知 YAML 字段必须保留；新增状态必须先修改 Contract 和验证器，再写入笔记。
 - 临时扩展字段可以被保留，但只要 Dashboard、Skill 或程序开始读取某个字段，它就必须进入对应 Contract 并声明类型；不能让隐藏的代码约定长期游离在规范之外。
+
+## Embedded task format
+
+Task 是权威 Markdown 中的嵌入内容，不是独立 Artifact，也不新增第二份状态文件。
+
+- 正式任务使用 `- [ ] #task <text>`；普通清单只有在界面明确选择“全部清单”时才参与聚合。
+- 新建正式任务在行尾附加唯一 block ID，例如 `^task-abc123`。修改时优先按 block ID 定位；旧行只能在原行或唯一全文匹配成功时修改，歧义必须拒绝写入。
+- `[scheduled:: YYYY-MM-DD HH:MM]` 表示计划执行时间，`[due:: YYYY-MM-DD HH:MM]` 表示截止时间，`⏰ YYYY-MM-DD HH:MM` 表示提醒时间。三者是独立事实，任何一个都不能覆盖另一个。
+- YAML frontmatter、代码围栏、`Source` 和 `Digest` 正文中的清单不构成正式任务；普通清单过滤仍可显式显示其中的清单。
+- 任务完成只修改同一原文 checkbox，不自动改变 Project 状态、兴趣判断或 `studied_at`。
+- TypeScript 与 Python 消费者共同使用仓库根目录的 `tests/fixtures/tasks/task-cases.json` 验证筛选语义。

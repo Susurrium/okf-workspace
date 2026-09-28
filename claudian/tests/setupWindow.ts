@@ -1,9 +1,24 @@
+import { TextDecoder, TextEncoder } from 'node:util';
+
+import type * as JestAxe from 'jest-axe';
+
+// Node-only suites do not need to load the accessibility engine.
+if (typeof document !== 'undefined') {
+  const { toHaveNoViolations } = jest.requireActual<typeof JestAxe>('jest-axe');
+  expect.extend(toHaveNoViolations);
+}
+
 type TestWindow = typeof globalThis & {
   cancelAnimationFrame?: (handle: number) => void;
+  localStorage?: Storage;
   requestAnimationFrame?: (callback: FrameRequestCallback) => number;
 };
 
 const testWindow = globalThis as TestWindow;
+
+if (!globalThis.TextEncoder) {
+  Object.assign(globalThis, { TextDecoder, TextEncoder });
+}
 
 if (!testWindow.requestAnimationFrame) {
   testWindow.requestAnimationFrame = (callback: FrameRequestCallback): number => (
@@ -17,6 +32,13 @@ if (!testWindow.cancelAnimationFrame) {
   };
 }
 
+if (globalThis.Range && !Reflect.has(globalThis.Range.prototype, 'getClientRects')) {
+  Object.defineProperty(globalThis.Range.prototype, 'getClientRects', {
+    configurable: true,
+    value: () => [],
+  });
+}
+
 if (!('window' in globalThis)) {
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
@@ -25,10 +47,27 @@ if (!('window' in globalThis)) {
   });
 }
 
+if (!testWindow.localStorage) {
+  const values = new Map<string, string>();
+  Object.defineProperty(testWindow, 'localStorage', {
+    configurable: true,
+    value: {
+      get length() {
+        return values.size;
+      },
+      clear: () => values.clear(),
+      getItem: (key: string) => values.get(key) ?? null,
+      key: (index: number) => [...values.keys()][index] ?? null,
+      removeItem: (key: string) => values.delete(key),
+      setItem: (key: string, value: string) => values.set(key, value),
+    } satisfies Storage,
+  });
+}
+
 // Polyfill Obsidian DOM helpers for jsdom-based tests.
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-function applyDomElementInfo(el: Element, info: unknown): void {
+function applyDOMElementInfo(el: Element, info: unknown): void {
   if (!info) return;
   if (typeof info === 'string') {
     el.classList.add(...info.split(/\s+/).filter(Boolean));
@@ -58,7 +97,7 @@ function applyDomElementInfo(el: Element, info: unknown): void {
   callback?: (el: HTMLDivElement) => void,
 ): HTMLDivElement {
   const el = document.createElement('div');
-  applyDomElementInfo(el, info);
+  applyDOMElementInfo(el, info);
   if (callback) callback(el);
   return el;
 };
@@ -69,7 +108,7 @@ function applyDomElementInfo(el: Element, info: unknown): void {
   callback?: (el: HTMLElementTagNameMap[K]) => void,
 ): HTMLElementTagNameMap[K] {
   const el = document.createElement(tag);
-  applyDomElementInfo(el, info);
+  applyDOMElementInfo(el, info);
   if (callback) callback(el);
   return el;
 };
@@ -79,7 +118,7 @@ function applyDomElementInfo(el: Element, info: unknown): void {
   callback?: (el: HTMLSpanElement) => void,
 ): HTMLSpanElement {
   const el = document.createElement('span');
-  applyDomElementInfo(el, info);
+  applyDOMElementInfo(el, info);
   if (callback) callback(el);
   return el;
 };
@@ -90,7 +129,7 @@ function applyDomElementInfo(el: Element, info: unknown): void {
   callback?: (el: SVGElementTagNameMap[K]) => void,
 ): SVGElementTagNameMap[K] {
   const el = document.createElementNS(SVG_NS, tag) as SVGElementTagNameMap[K];
-  applyDomElementInfo(el, info);
+  applyDOMElementInfo(el, info);
   if (callback) callback(el);
   return el;
 };
@@ -102,6 +141,18 @@ function applyDomElementInfo(el: Element, info: unknown): void {
   if (callback) callback(el);
   return el;
 };
+
+if (globalThis.Node && !Reflect.has(globalThis.Node.prototype, 'win')) {
+  Object.defineProperty(globalThis.Node.prototype, 'win', {
+    configurable: true,
+    get(this: Node): Window {
+      const owner = this.nodeType === Node.DOCUMENT_NODE
+        ? this as Document
+        : this.ownerDocument;
+      return owner?.defaultView ?? globalThis.window;
+    },
+  });
+}
 
 if (globalThis.HTMLElement && !Reflect.has(globalThis.HTMLElement.prototype, 'createDiv')) {
   globalThis.HTMLElement.prototype.createDiv = function (this: HTMLElement, info?, callback?) {
@@ -123,6 +174,12 @@ if (globalThis.HTMLElement && !Reflect.has(globalThis.HTMLElement.prototype, 'cr
     const el = createSvg(tag, info, callback);
     this.appendChild(el);
     return el;
+  };
+}
+
+if (globalThis.HTMLElement && !Reflect.has(globalThis.HTMLElement.prototype, 'setText')) {
+  globalThis.HTMLElement.prototype.setText = function (this: HTMLElement, value: string) {
+    this.textContent = value;
   };
 }
 

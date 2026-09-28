@@ -14,6 +14,6 @@ export function semanticCompletionTitle(
   title: string,
 ): string {
   return kind === "generate-wiki"
-    ? `Wiki 已生成：${title}`
+    ? `知识笔记已生成：${title}`
     : `学习材料已生成：${title}`;
 }

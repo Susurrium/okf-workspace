@@ -1,0 +1,1682 @@
+import { appendChild, getTaskByPath } from './task-tree';
+import type {
+	BannerData,
+	BannerLeftStat,
+	BannerCenterStat,
+	BannerRightStat,
+	BannerStatsConfig,
+	CardType,
+	CardSize,
+	DashboardCard,
+	DashboardColumn,
+	DashboardData,
+	QuickAction,
+	TaskItem,
+	DocNode,
+	WeatherConfig,
+	TrackerConfig,
+	LibraryConfig,
+	WereadConfig,
+	TickTickConfig,
+	DataviewConfig,
+	WebEmbedConfig,
+} from './types';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { t } from './i18n';
+import { parseFocalPoint, formatFocalPoint, isCenterFocal } from './focal-point-picker';
+import { normalizeColumnPairs } from './column-pairs';
+import { isRegisteredSection } from './section-registry';
+
+const KNOWN_METADATA_KEYS = new Set(['id', 'link', 'progress', 'due', 'streak', 'type', 'color', 'cover', 'coverPos', 'width', 'size', 'lat', 'lon', 'city', 'track', 'days', 'cols', 'rows', 'gcol', 'grow', 'noteStyle']);
+// 'notes' is the retired standalone no-cover section type: it parses (old
+// dashboard files still carry `type: notes`) but immediately migrates to
+// projects + showCover:false in parseColumns, so it never survives a load.
+const SECTION_TYPES = new Set(['memo', 'todo', 'projects', 'notes', 'dashboard', 'library', 'folder', 'images', 'videos', 'alltasks', 'calendar', 'dataview', 'weread', 'ticktick', 'sticky', 'web']);
+const SECTION_ANCHOR = /^\s*<!--\s*okf-section:([A-Za-z0-9._-]+)\s*-->\s*$/;
+export const WORKBENCH_SCHEMA = 1;
+
+export function workbenchCompatibilityMessage(schema: number | undefined): string | undefined {
+	if ((schema ?? WORKBENCH_SCHEMA) <= WORKBENCH_SCHEMA) return undefined;
+	return `此工作台使用更高格式版本 ${schema}；当前版本只会修改已识别字段，并保留未知配置与正文。`;
+}
+const ROOT_MANAGED_KEYS = new Set([
+	'dashboard', 'workbench_schema', 'banner', 'quickActions', 'quickActionOrder', 'hiddenPresets', 'columns',
+]);
+const COLUMN_MANAGED_KEYS = new Set([
+	'id', 'name', 'color', 'type', 'showCover', 'library', 'weread', 'ticktick', 'dataview', 'web', 'config', 'height', 'half', 'width',
+]);
+const BANNER_MANAGED_KEYS = new Set([
+	'quote', 'author', 'image', 'quoteColor', 'quoteFont', 'quotes', 'images', 'imagePos', 'mode', 'statsConfig',
+]);
+const BANNER_STATS_MANAGED_KEYS = new Set([
+	'dailyFolder', 'dailyFormat', 'streakFromDaily', 'excludeFolders', 'accent', 'blur', 'darkness',
+	'showDetails', 'showLeft', 'showCenter', 'showRight', 'leftStat', 'centerStat', 'rightStats',
+	'heatmapSource', 'heatmapHabitId',
+]);
+const CONFIG_MANAGED_KEYS: Record<string, Set<string>> = {
+	library: new Set([
+		'viewMode', 'sortBy', 'sortDesc', 'folders', 'folderFilter', 'excludeFolders', 'taskGroupBy',
+		'kanbanGroupBy', 'groupMode', 'viewGroupMode', 'viewGroupBy', 'kanbanShowCovers', 'pageSize', 'showProperties', 'propertyLimit',
+		'visibleProperties', 'cardSize', 'quickDateFilter', 'filters', 'tableProperties', 'tableOrder', 'tableHidden', 'templatePaths', 'templatePath',
+	]),
+	weread: new Set(['widgets']),
+	ticktick: new Set(['view', 'hiddenProjects', 'projectWidths']),
+	dataview: new Set(['query', 'title', 'excludeFolders', 'pageSize', 'viewMode', 'showSource', 'density', 'striped', 'rowNumbers']),
+	web: new Set(['url', 'zoom']),
+};
+
+interface ColumnDef {
+	id?: string;
+	name: string;
+	color: string;
+	sectionType?: string;
+	libraryConfig?: LibraryConfig;
+	wereadConfig?: WereadConfig;
+	ticktickConfig?: TickTickConfig;
+	dataviewConfig?: DataviewConfig;
+	webConfig?: WebEmbedConfig;
+	extensionConfig?: Record<string, unknown>;
+	showCover?: boolean;
+	height?: number;
+	half?: boolean;
+	width?: number;
+}
+
+// Card colors are persisted without the leading '#' (see serialize) so Obsidian
+// does not register them as tags. Restore the '#' here; legacy '#xxxxxx' values
+// are still accepted.
+function normalizeHexColor(value?: string): string {
+	if (!value) return '';
+	const trimmed = value.trim();
+	return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+}
+
+const REMINDER_REGEX = /\s*⏰\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/;
+const COLLAPSED_REGEX = /\s*<!--collapsed-->\s*$/;
+// Doc lines are `- [[path]]` / `[[path]]` (optionally indented for nesting).
+// The path may itself contain single brackets (z-library books carry `[美]`
+// etc.), so a lone `]` is allowed — the link only terminates on `]]`. Paths
+// ending IN a bracket (`book].pdf`) still can't round-trip, matching the
+// Obsidian core wikilink parser, which also stops at the first `]]`.
+const DOC_LINE_REGEX = /^(\s*)(?:- )?\[\[((?:[^\]\n]|\](?!\]))+?)]](\s*<!--collapsed-->\s*)?$/;
+
+const DEFAULT_BANNER: BannerData = {
+	quote: 'The mind is everything. What you think you become.',
+	author: 'Buddha',
+	// Didot (cross-platform stack, same value the font dropdown stores) as the
+	// out-of-box quote face — matches the author's own vault.
+	quoteFont: 'Didot,"Bodoni MT",Georgia,serif',
+	image: 'https://images.pexels.com/photos/2307638/pexels-photo-2307638.jpeg',
+	images: [
+		'https://images.pexels.com/photos/2307638/pexels-photo-2307638.jpeg',
+		'https://images.pexels.com/photos/10664504/pexels-photo-10664504.jpeg',
+	],
+};
+
+const DEFAULT_COLUMNS = [
+	{ name: 'Memo', color: '#f59e0b', sectionType: 'memo' },
+	{ name: 'Todo', color: '#6366f1', sectionType: 'todo' },
+	{ name: 'Projects', color: '#10b981', sectionType: 'projects' },
+	{ name: 'Library', color: '#8b5cf6', sectionType: 'projects' },
+];
+
+export function parse(markdown: string): DashboardData {
+	const { frontmatter, body } = splitFrontmatter(markdown);
+	const banner = parseBanner(frontmatter);
+	const quickActions = parseQuickActions(frontmatter);
+	const quickActionOrder = parseQuickActionOrder(frontmatter);
+	const columnDefs = parseColumnDefs(frontmatter);
+	const parsedBody = splitByH2(body);
+	const columns = parseColumns(parsedBody.sections, columnDefs);
+
+	const data: DashboardData = {
+		workbenchSchema: typeof frontmatter.workbench_schema === 'number' ? frontmatter.workbench_schema : WORKBENCH_SCHEMA,
+		banner,
+		quickActions,
+		columns,
+		bodyPreamble: parsedBody.preamble || undefined,
+		sourceFrontmatter: frontmatter,
+	};
+	if (quickActionOrder) data.quickActionOrder = quickActionOrder;
+	const hiddenPresets = parseHiddenPresets(frontmatter);
+	if (hiddenPresets) data.hiddenPresets = hiddenPresets;
+	return data;
+}
+
+export function serialize(data: DashboardData): string {
+	const usedSectionIds = new Set<string>();
+	for (let index = 0; index < data.columns.length; index++) {
+		const column = data.columns[index]!;
+		column.id = uniqueSectionId(column.id, column.name, index, usedSectionIds);
+	}
+	const lines: string[] = [];
+
+	lines.push('---');
+	lines.push('dashboard: true');
+	lines.push(`workbench_schema: ${data.workbenchSchema ?? WORKBENCH_SCHEMA}`);
+
+	lines.push('banner:');
+	lines.push(`  quote: "${escapeYamlString(data.banner.quote)}"`);
+	lines.push(`  author: "${escapeYamlString(data.banner.author)}"`);
+	if (data.banner.image) {
+		lines.push(`  image: "${data.banner.image}"`);
+	}
+	if (data.banner.quoteColor) {
+		lines.push(`  quoteColor: "${data.banner.quoteColor}"`);
+	}
+	if (data.banner.quoteFont) {
+		lines.push(`  quoteFont: "${escapeYamlString(data.banner.quoteFont)}"`);
+	}
+	if (data.banner.quotes && data.banner.quotes.length > 0) {
+		lines.push('  quotes:');
+		for (const q of data.banner.quotes) {
+			lines.push(`    - quote: "${escapeYamlString(q.quote)}"`);
+			lines.push(`      author: "${escapeYamlString(q.author)}"`);
+		}
+	}
+	if (data.banner.images && data.banner.images.length > 0) {
+		lines.push('  images:');
+		for (const img of data.banner.images) {
+			lines.push(`    - "${escapeYamlString(img)}"`);
+		}
+	}
+	// Per-image focal points, keyed by image path (see BannerData.imagePos).
+	// Center entries are pruned like the card coverPos line — the whole map
+	// drops when nothing non-center remains.
+	if (data.banner.imagePos) {
+		const entries = Object.entries(data.banner.imagePos).filter(([, pos]) => !isCenterFocal(pos));
+		if (entries.length > 0) {
+			lines.push('  imagePos:');
+			for (const [path, pos] of entries) {
+				lines.push(`    "${escapeYamlString(path)}": "${formatFocalPoint(pos)}"`);
+			}
+		}
+	}
+	if (data.banner.mode === 'stats') {
+		lines.push('  mode: stats');
+	}
+	if (data.banner.statsConfig) {
+		lines.push('  statsConfig:');
+		const sc = data.banner.statsConfig;
+		if (sc.dailyFolder) lines.push(`    dailyFolder: "${escapeYamlString(sc.dailyFolder)}"`);
+		if (sc.dailyFormat) lines.push(`    dailyFormat: "${escapeYamlString(sc.dailyFormat)}"`);
+		if (typeof sc.streakFromDaily === 'boolean') lines.push(`    streakFromDaily: ${sc.streakFromDaily}`);
+		if (sc.excludeFolders && sc.excludeFolders.length > 0) {
+			lines.push('    excludeFolders:');
+			for (const folder of sc.excludeFolders) lines.push(`      - "${escapeYamlString(folder)}"`);
+		}
+		if (sc.accent) lines.push(`    accent: "${sc.accent}"`); // quoted: '#' starts a YAML comment
+		if (sc.blur !== undefined) lines.push(`    blur: ${sc.blur}`);
+		if (sc.darkness !== undefined) lines.push(`    darkness: ${sc.darkness}`);
+		if (sc.showDetails !== undefined) lines.push(`    showDetails: ${sc.showDetails}`);
+		if (sc.showLeft !== undefined) lines.push(`    showLeft: ${sc.showLeft}`);
+		if (sc.showCenter !== undefined) lines.push(`    showCenter: ${sc.showCenter}`);
+		if (sc.showRight !== undefined) lines.push(`    showRight: ${sc.showRight}`);
+		if (sc.leftStat) lines.push(`    leftStat: ${sc.leftStat}`);
+		if (sc.centerStat) lines.push(`    centerStat: ${sc.centerStat}`);
+		if (sc.heatmapSource) lines.push(`    heatmapSource: ${sc.heatmapSource}`);
+		if (sc.heatmapHabitId) lines.push(`    heatmapHabitId: "${escapeYamlString(sc.heatmapHabitId)}"`);
+		if (sc.rightStats && sc.rightStats.length > 0) {
+			lines.push('    rightStats:');
+			for (const rs of sc.rightStats) lines.push(`      - ${rs}`);
+		}
+	}
+
+	if (data.quickActions.length > 0) {
+		lines.push('quickActions:');
+		for (const action of data.quickActions) {
+			lines.push(`  - name: "${escapeYamlString(action.name)}"`);
+			lines.push(`    icon: "${escapeYamlString(action.icon)}"`);
+			lines.push(`    type: ${action.type}`);
+			lines.push(`    target: "${escapeYamlString(action.target)}"`);
+		}
+	}
+
+	if (data.quickActionOrder && data.quickActionOrder.length > 0) {
+		lines.push('quickActionOrder:');
+		for (const key of data.quickActionOrder) {
+			lines.push(`  - "${escapeYamlString(key)}"`);
+		}
+	}
+
+	if (data.hiddenPresets && data.hiddenPresets.length > 0) {
+		lines.push('hiddenPresets:');
+		for (const key of data.hiddenPresets) {
+			lines.push(`  - "${escapeYamlString(key)}"`);
+		}
+	}
+
+	lines.push('columns:');
+	for (const col of data.columns) {
+		lines.push(`  - id: "${escapeYamlString(col.id ?? '')}"`);
+		lines.push(`    name: ${JSON.stringify(col.name)}`);
+		lines.push(`    color: "${col.color}"`);
+		if (col.sectionType) {
+			lines.push(`    type: ${col.sectionType}`);
+		}
+		// Only the cover opt-out is persisted (true is the default).
+		if (col.showCover === false) {
+			lines.push(`    showCover: false`);
+		}
+		if (col.libraryConfig) {
+			lines.push('    library:');
+			const lc = col.libraryConfig;
+			lines.push(`      viewMode: ${lc.viewMode}`);
+			lines.push(`      sortBy: "${lc.sortBy}"`);
+			lines.push(`      sortDesc: ${lc.sortDesc}`);
+			if (lc.folders && lc.folders.length > 0) {
+				lines.push('      folders:');
+				for (const f of lc.folders) {
+					lines.push(`        - "${escapeYamlString(f)}"`);
+				}
+			}
+			if (lc.folderFilter && lc.folderFilter.length > 0) {
+				lines.push('      folderFilter:');
+				for (const f of lc.folderFilter) {
+					lines.push(`        - "${escapeYamlString(f)}"`);
+				}
+			}
+			if (lc.excludeFolders && lc.excludeFolders.length > 0) {
+				lines.push('      excludeFolders:');
+				for (const f of lc.excludeFolders) {
+					lines.push(`        - "${escapeYamlString(f)}"`);
+				}
+			}
+			if (lc.includeFolders && lc.includeFolders.length > 0) {
+				lines.push('      includeFolders:');
+				for (const f of lc.includeFolders) {
+					lines.push(`        - "${escapeYamlString(f)}"`);
+				}
+			}
+			// Multi-template list (the authoritative form). The first entry also
+			// lands in the legacy single `templatePath` key so pre-multi-template
+			// plugin versions reading this file keep a working template.
+			if (lc.templatePaths && lc.templatePaths.length > 0) {
+				lines.push('      templatePaths:');
+				for (const tpl of lc.templatePaths) {
+					lines.push(`        - "${escapeYamlString(tpl)}"`);
+				}
+				lines.push(`      templatePath: "${escapeYamlString(lc.templatePaths[0]!)}"`);
+			} else if (lc.templatePath) {
+				lines.push(`      templatePath: "${escapeYamlString(lc.templatePath)}"`);
+			}
+			if (lc.taskGroupBy) {
+				lines.push(`      taskGroupBy: ${lc.taskGroupBy}`);
+			}
+			if (lc.kanbanGroupBy) {
+				lines.push(`      kanbanGroupBy: "${escapeYamlString(lc.kanbanGroupBy)}"`);
+			}
+			// 'property' is the default group mode — only persist the opt-in.
+			if (lc.groupMode === 'folder') {
+				lines.push(`      groupMode: folder`);
+			}
+			// 'none'/undefined is the default view grouping — only persist the opt-ins.
+			if (lc.viewGroupMode === 'folder' || lc.viewGroupMode === 'property') {
+				lines.push(`      viewGroupMode: ${lc.viewGroupMode}`);
+				if (lc.viewGroupMode === 'property' && lc.viewGroupBy) {
+					lines.push(`      viewGroupBy: "${escapeYamlString(lc.viewGroupBy)}"`);
+				}
+			}
+			if (lc.kanbanShowCovers) {
+				lines.push(`      kanbanShowCovers: true`);
+			}
+			if (lc.pageSize) {
+				lines.push(`      pageSize: ${lc.pageSize}`);
+			}
+			if (lc.showProperties === false) {
+				lines.push(`      showProperties: false`);
+			}
+			if (lc.propertyLimit != null) {
+				lines.push(`      propertyLimit: ${lc.propertyLimit}`);
+			}
+			if (lc.visibleProperties && lc.visibleProperties.length > 0) {
+				lines.push(`      visibleProperties:`);
+				for (const p of lc.visibleProperties) {
+					lines.push(`        - "${escapeYamlString(p)}"`);
+				}
+			}
+			if (lc.tableProperties && lc.tableProperties.length > 0) {
+				lines.push(`      tableProperties:`);
+				for (const p of lc.tableProperties) {
+					lines.push(`        - "${escapeYamlString(p)}"`);
+				}
+			}
+			// Picker model: full row order + hidden keys (the authoritative
+			// form; tableProperties above is the legacy chip mirror).
+			if (lc.tableOrder && lc.tableOrder.length > 0) {
+				lines.push(`      tableOrder:`);
+				for (const p of lc.tableOrder) {
+					lines.push(`        - "${escapeYamlString(p)}"`);
+				}
+			}
+			if (lc.tableHidden && lc.tableHidden.length > 0) {
+				lines.push(`      tableHidden:`);
+				for (const p of lc.tableHidden) {
+					lines.push(`        - "${escapeYamlString(p)}"`);
+				}
+			}
+			// 'medium' is the default card size — only persist the opt-outs.
+			if (lc.cardSize === 'small' || lc.cardSize === 'large') {
+				lines.push(`      cardSize: ${lc.cardSize}`);
+			}
+				if (lc.quickDateFilter) {
+					lines.push(`      quickDateFilter:`);
+					lines.push(`        property: "${lc.quickDateFilter.property}"`);
+					lines.push(`        start: "${lc.quickDateFilter.start}"`);
+					lines.push(`        end: "${lc.quickDateFilter.end}"`);
+					if (lc.quickDateFilter.days != null) {
+						lines.push(`        days: ${lc.quickDateFilter.days}`);
+					}
+				}
+			if (lc.filters.length > 0) {
+				lines.push('      filters:');
+				for (const filter of lc.filters) {
+					lines.push(`        - property: "${escapeYamlString(filter.property)}"`);
+					if (filter.operator && filter.operator !== 'equals') {
+						lines.push(`          operator: "${filter.operator}"`);
+					}
+					if (filter.values.length > 0) {
+						lines.push(`          values: [${filter.values.map(v => `"${escapeYamlString(v)}"`).join(', ')}]`);
+					} else {
+						lines.push('          values: []');
+					}
+					if (filter.dateRange) {
+						if (filter.dateRange.start) lines.push(`          dateStart: "${filter.dateRange.start}"`);
+						if (filter.dateRange.end) lines.push(`          dateEnd: "${filter.dateRange.end}"`);
+					}
+				}
+			}
+		}
+		if (col.height != null) {
+			lines.push(`    height: ${col.height}`);
+		}
+		// Pair split (left member's share %): only meaningful beside `half`.
+		if (col.half && col.width != null) {
+			lines.push(`    width: ${col.width}`);
+		}
+		if (col.half) {
+			lines.push('    half: true');
+		}
+		if (col.wereadConfig) {
+			const wc = col.wereadConfig;
+			lines.push('    weread:');
+			lines.push('      widgets:');
+			for (const w of wc.widgets) {
+				lines.push(`        - id: "${escapeYamlString(w.id)}"`);
+				lines.push(`          view: ${w.view}`);
+				if (w.progressFilters?.length) {
+					lines.push('          progressFilters:');
+					for (const p of w.progressFilters) lines.push(`            - ${p}`);
+				}
+				if (w.contentTypeFilters?.length) {
+					lines.push('          contentTypeFilters:');
+					for (const type of w.contentTypeFilters) lines.push(`            - ${type}`);
+				}
+				if (w.recencyFilters?.length) {
+					lines.push('          recencyFilters:');
+					for (const recency of w.recencyFilters) lines.push(`            - ${recency}`);
+				}
+				if (w.noteFilters?.length) {
+					lines.push('          noteFilters:');
+					for (const note of w.noteFilters) lines.push(`            - ${note}`);
+				}
+				if (w.statsItems?.length) {
+					lines.push('          statsItems:');
+					for (const item of w.statsItems) lines.push(`            - ${item}`);
+				}
+				if (w.groupBy && w.groupBy !== 'readingState') lines.push(`          groupBy: ${w.groupBy}`);
+				if (w.categoryFilters?.length) {
+					lines.push('          categoryFilters:');
+					for (const c of w.categoryFilters) lines.push(`            - "${escapeYamlString(c)}"`);
+				}
+				if (w.title) lines.push(`          title: "${escapeYamlString(w.title)}"`);
+			}
+		}
+		if (col.ticktickConfig) {
+			const tc = col.ticktickConfig;
+			lines.push('    ticktick:');
+			lines.push(`      view: ${tc.view === 'lists' ? 'lists' : 'today'}`);
+			if (tc.hiddenProjects?.length) {
+				lines.push('      hiddenProjects:');
+				for (const pid of tc.hiddenProjects) lines.push(`        - "${escapeYamlString(pid)}"`);
+			}
+		}
+		if (col.dataviewConfig) {
+			const dc = col.dataviewConfig;
+			lines.push('    dataview:');
+			// JSON.stringify yields a valid double-quoted YAML scalar and safely
+			// escapes embedded newlines/quotes in the multi-line query.
+			lines.push(`      query: ${JSON.stringify(dc.query)}`);
+			if (dc.title) lines.push(`      title: ${JSON.stringify(dc.title)}`);
+			if (dc.excludeFolders && dc.excludeFolders.length > 0) {
+				lines.push('      excludeFolders:');
+				for (const f of dc.excludeFolders) {
+					lines.push(`        - "${escapeYamlString(f)}"`);
+				}
+			}
+		}
+		if (col.webConfig) {
+			const wc = col.webConfig;
+			lines.push('    web:');
+			// JSON.stringify yields a valid double-quoted YAML scalar and safely
+			// escapes embedded quotes/backslashes (same trick as the dataview
+			// query; a URL's :, #, ? and & need no escaping inside quotes).
+			lines.push(`      url: ${JSON.stringify(wc.url)}`);
+			if (typeof wc.zoom === 'number' && wc.zoom !== 1) {
+				lines.push(`      zoom: ${wc.zoom}`);
+			}
+		}
+		if (col.extensionConfig && Object.keys(col.extensionConfig).length > 0) {
+			const configLines = stringifyYaml({ config: col.extensionConfig }, { lineWidth: 0 }).trimEnd().split('\n');
+			for (const line of configLines) lines.push(`    ${line}`);
+		}
+	}
+
+	lines.push('---');
+	lines.push('');
+	if (data.bodyPreamble?.trim()) {
+		lines.push(data.bodyPreamble.trim());
+		lines.push('');
+	}
+
+	for (const column of data.columns) {
+		lines.push(`## ${column.name}`);
+		lines.push(`<!-- okf-section:${column.id ?? ''} -->`);
+		lines.push('');
+		if (column.rawContent !== undefined && column.sectionType
+			&& !SECTION_TYPES.has(column.sectionType) && !isRegisteredSection(column.sectionType)) {
+			if (column.rawContent) lines.push(column.rawContent);
+			lines.push('');
+			continue;
+		}
+		if (column.leadingContent?.trim()) {
+			lines.push(column.leadingContent.trim());
+			lines.push('');
+		}
+
+		if (column.sectionType === 'library' || column.sectionType === 'folder' || column.sectionType === 'images' || column.sectionType === 'videos' || column.sectionType === 'alltasks' || column.sectionType === 'calendar' || column.sectionType === 'dataview' || column.sectionType === 'web') continue;
+
+		for (const card of column.cards) {
+			lines.push(`### ${card.title}`);
+
+			if (card.id) {
+				lines.push(`id: ${card.id}`);
+			}
+
+			if (card.noteStyle) lines.push(`noteStyle: ${card.noteStyle}`);
+
+			if (card.type === 'generic') lines.push('type: generic');
+
+			if (card.type === 'task') {
+				lines.push(`type: task`);
+			}
+
+			if (card.type === 'project') {
+				lines.push(`type: project`);
+			}
+
+			if (card.wikiLink) {
+				lines.push(`link: [[${card.wikiLink}]]`);
+			} else if (card.url) {
+				lines.push(`link: ${card.url}`);
+			}
+
+			if (card.progress >= 0) {
+				lines.push(`progress: ${card.progress}%`);
+			}
+
+			if (card.dueDate) {
+				lines.push(`due: ${card.dueDate}`);
+			}
+
+			if (card.streak > 0) {
+				lines.push(`streak: ${card.streak}`);
+			}
+
+			if (card.color) {
+				// Store without the leading '#': a bare '#f59e0b' in the card body
+				// would be picked up by Obsidian as a tag. Normalize back on read.
+				lines.push(`color: ${card.color.replace(/^#/, '')}`);
+			}
+
+			if (card.coverImage) {
+				lines.push(`cover: ${card.coverImage}`);
+			}
+
+			// Cover focal point ("35,80"); center is the default and stays unpersisted.
+			if (card.coverPos && !isCenterFocal(card.coverPos)) {
+				lines.push(`coverPos: ${formatFocalPoint(card.coverPos)}`);
+			}
+
+			if (card.width > 0) {
+				lines.push(`width: ${card.width}`);
+			}
+			if (card.size && card.size !== 'M') {
+				lines.push(`size: ${card.size}`);
+			}
+			if (card.gridCols > 0) {
+				lines.push(`cols: ${card.gridCols}`);
+			}
+			if (card.gridRows > 0) {
+				lines.push(`rows: ${card.gridRows}`);
+			}
+			if (card.gridCol > 0) {
+				lines.push(`gcol: ${card.gridCol}`);
+			}
+			if (card.gridRow > 0) {
+				lines.push(`grow: ${card.gridRow}`);
+			}
+		if (card.weatherConfig) {
+			const wc = card.weatherConfig;
+			lines.push(`lat: ${wc.latitude}`);
+			lines.push(`lon: ${wc.longitude}`);
+			lines.push(`city: "${escapeYamlString(wc.cityName)}"`);
+		}
+
+		if (card.trackerConfig) {
+			const tc = card.trackerConfig;
+			lines.push(`track: ${tc.key}`);
+			lines.push(`days: ${tc.days}`);
+		}
+
+			if (card.blockquote) {
+				lines.push(`> ${card.blockquote}`);
+			}
+
+			if (card.tasks.length > 0) {
+				const writeTask = (task: TaskItem, indent: number) => {
+					const prefix = indent > 0 ? '    '.repeat(indent) : '';
+					let taskLine = `${prefix}- [${task.checked ? 'x' : ' '}] ${task.text}`;
+					if (task.reminder) taskLine += ` ⏰ ${task.reminder}`;
+					if (task.collapsed) taskLine += ` <!--collapsed-->`;
+					lines.push(taskLine);
+					for (const child of task.children ?? []) writeTask(child, indent + 1);
+				};
+				for (const task of card.tasks) writeTask(task, 0);
+			}
+
+			if (card.docs.length > 0) {
+				for (const docLine of serializeDocTree(card.docs)) lines.push(docLine);
+			}
+
+			const bodyLines = card.body.trim();
+			if (bodyLines) {
+				if (card.tasks.length > 0 || card.docs.length > 0 || card.blockquote || card.url || card.wikiLink) {
+					lines.push('');
+				}
+				lines.push(bodyLines);
+			}
+
+			lines.push('');
+		}
+	}
+
+	return mergeUnknownFrontmatter(lines.join('\n'), data.sourceFrontmatter);
+}
+
+function mergeUnknownFrontmatter(
+	generatedMarkdown: string,
+	sourceFrontmatter: Record<string, unknown> | undefined,
+): string {
+	if (!sourceFrontmatter || Object.keys(sourceFrontmatter).length === 0) return generatedMarkdown;
+	if (!hasUnknownFrontmatter(sourceFrontmatter)) return generatedMarkdown;
+	const generated = splitFrontmatter(generatedMarkdown);
+	const merged = mergeManagedObject(sourceFrontmatter, generated.frontmatter, ROOT_MANAGED_KEYS);
+
+	const rawBanner = sourceFrontmatter.banner;
+	const nextBanner = generated.frontmatter.banner;
+	if (isRecord(rawBanner) && isRecord(nextBanner)) {
+		merged.banner = mergeManagedObject(rawBanner, nextBanner, BANNER_MANAGED_KEYS);
+		const mergedBanner = merged.banner as Record<string, unknown>;
+		if (isRecord(rawBanner.statsConfig) && isRecord(nextBanner.statsConfig)) {
+			mergedBanner.statsConfig = mergeManagedObject(
+				rawBanner.statsConfig,
+				nextBanner.statsConfig,
+				BANNER_STATS_MANAGED_KEYS,
+			);
+		}
+	}
+
+	const rawColumns: unknown[] = Array.isArray(sourceFrontmatter.columns) ? sourceFrontmatter.columns : [];
+	const nextColumns: unknown[] = Array.isArray(generated.frontmatter.columns) ? generated.frontmatter.columns : [];
+	merged.columns = nextColumns.map((value, index) => {
+		if (!isRecord(value)) return value;
+		const id = typeof value.id === 'string' ? value.id : '';
+		const raw = rawColumns.find((candidate) => isRecord(candidate) && id && candidate.id === id)
+			?? rawColumns[index];
+		if (!isRecord(raw)) return value;
+		const column = mergeManagedObject(raw, value, COLUMN_MANAGED_KEYS);
+		for (const [key, managed] of Object.entries(CONFIG_MANAGED_KEYS)) {
+			if (isRecord(raw[key]) && isRecord(value[key])) {
+				column[key] = mergeManagedObject(raw[key], value[key], managed);
+			}
+		}
+		return column;
+	});
+
+	const yaml = stringifyYaml(merged, { lineWidth: 0 }).trimEnd();
+	return `---\n${yaml}\n---\n${generated.body ? `\n${generated.body}` : ''}`;
+}
+
+function mergeManagedObject(
+	raw: Record<string, unknown>,
+	next: Record<string, unknown>,
+	managedKeys: Set<string>,
+): Record<string, unknown> {
+	const merged: Record<string, unknown> = { ...raw };
+	for (const key of managedKeys) delete merged[key];
+	return { ...merged, ...next };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasUnknownKeys(value: unknown, managed: Set<string>): boolean {
+	return isRecord(value) && Object.keys(value).some((key) => !managed.has(key));
+}
+
+function hasUnknownFrontmatter(frontmatter: Record<string, unknown>): boolean {
+	if (hasUnknownKeys(frontmatter, ROOT_MANAGED_KEYS)) return true;
+	if (hasUnknownKeys(frontmatter.banner, BANNER_MANAGED_KEYS)) return true;
+	if (isRecord(frontmatter.banner)
+		&& hasUnknownKeys(frontmatter.banner.statsConfig, BANNER_STATS_MANAGED_KEYS)) return true;
+	if (!Array.isArray(frontmatter.columns)) return false;
+	return frontmatter.columns.some((column) => {
+		if (hasUnknownKeys(column, COLUMN_MANAGED_KEYS)) return true;
+		if (!isRecord(column)) return false;
+		return Object.entries(CONFIG_MANAGED_KEYS).some(([key, managed]) =>
+			hasUnknownKeys(column[key], managed));
+	});
+}
+
+export function generateDefaultMarkdown(): string {
+	const today = new Date();
+	const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+	return serialize({
+		banner: DEFAULT_BANNER,
+		quickActions: [],
+		columns: [
+			{
+				name: 'Memo',
+				color: '#f59e0b',
+				sectionType: 'memo',
+				cards: [
+					{
+						id: 'demo-memo-1',
+						title: t('default.memoTitle', { date: dateStr }),
+						type: 'generic',
+						column: 'Memo',
+						body: t('default.memoBody'),
+						tasks: [],
+						docs: [],
+						url: '',
+						wikiLink: '',
+						progress: -1,
+						streak: 0,
+						dueDate: '',
+						blockquote: '',
+						color: '',
+						coverImage: '',
+						width: 0,
+					size: 'M',
+					gridCols: 0,
+					gridRows: 0,
+					gridCol: 0,
+					gridRow: 0,
+					},
+					{
+						id: 'demo-memo-path',
+						title: t('default.memoPathTitle'),
+						type: 'generic',
+						column: 'Memo',
+						body: t('default.memoPathBody'),
+						tasks: [],
+						docs: [],
+						url: '',
+						wikiLink: '',
+						progress: -1,
+						streak: 0,
+						dueDate: '',
+						blockquote: '',
+						color: '',
+						coverImage: '',
+						width: 0,
+					size: 'M',
+					gridCols: 0,
+					gridRows: 0,
+					gridCol: 0,
+					gridRow: 0,
+					},
+					{
+						id: 'demo-memo-rename',
+						title: t('default.memoRenameTitle'),
+						type: 'generic',
+						column: 'Memo',
+						body: t('default.memoRenameBody'),
+						tasks: [],
+						docs: [],
+						url: '',
+						wikiLink: '',
+						progress: -1,
+						streak: 0,
+						dueDate: '',
+						blockquote: '',
+						color: '',
+						coverImage: '',
+						width: 0,
+					size: 'M',
+					gridCols: 0,
+					gridRows: 0,
+					gridCol: 0,
+					gridRow: 0,
+					},
+				],
+			},
+			{
+				name: 'Todo',
+				color: '#6366f1',
+				sectionType: 'todo',
+				cards: [
+					{
+						id: 'demo-todo-1',
+						title: t('default.todoTitle1'),
+						type: 'task',
+						column: 'Todo',
+						body: '',
+						tasks: [
+							{ text: t('default.todo1'), checked: false },
+							{ text: t('default.todo2'), checked: false },
+							{ text: t('default.todo3'), checked: false },
+							{ text: t('default.todo4'), checked: false },
+						],
+						docs: [],
+						url: '',
+						wikiLink: '',
+						progress: -1,
+						streak: 0,
+						dueDate: '',
+						blockquote: '',
+						color: '',
+						coverImage: '',
+						width: 0,
+					size: 'M',
+					gridCols: 0,
+					gridRows: 0,
+					gridCol: 0,
+					gridRow: 0,
+					},
+					{
+						id: 'demo-todo-2',
+						title: t('default.todoTitle2'),
+						type: 'task',
+						column: 'Todo',
+						body: '',
+						tasks: [
+							{ text: t('default.guide1'), checked: false },
+							{ text: t('default.guide2'), checked: false },
+							{ text: t('default.guide3'), checked: false },
+							{ text: t('default.guide4'), checked: false },
+						],
+						docs: [],
+						url: '',
+						wikiLink: '',
+						progress: -1,
+						streak: 0,
+						dueDate: '',
+						blockquote: '',
+						color: '',
+						coverImage: '',
+						width: 0,
+					size: 'M',
+					gridCols: 0,
+					gridRows: 0,
+					gridCol: 0,
+					gridRow: 0,
+					},
+				],
+			},
+			{
+				name: 'Projects',
+				color: '#10b981',
+				sectionType: 'projects',
+				cards: [
+					{
+						id: 'demo-project-1',
+						title: t('default.projectTitle'),
+						type: 'project',
+						column: 'Projects',
+						body: '',
+						tasks: [],
+						docs: [],
+						url: '',
+						wikiLink: '',
+						progress: -1,
+						streak: 0,
+						dueDate: '',
+						blockquote: '',
+						color: '',
+						coverImage: '',
+						width: 0,
+					size: 'M',
+					gridCols: 0,
+					gridRows: 0,
+					gridCol: 0,
+					gridRow: 0,
+					},
+				],
+			},
+			{
+				name: 'Library',
+				color: '#8b5cf6',
+				sectionType: 'projects',
+				cards: [
+					{
+						id: 'demo-lib-reading',
+						title: 'Reading',
+						type: 'project',
+						column: 'Library',
+						body: '',
+						tasks: [],
+						docs: [],
+						url: '',
+						wikiLink: '',
+						progress: -1,
+						streak: 0,
+						dueDate: '',
+						blockquote: '',
+						color: '',
+						coverImage: '',
+						width: 0,
+					size: 'M',
+					gridCols: 0,
+					gridRows: 0,
+					gridCol: 0,
+					gridRow: 0,
+					},
+					{
+						id: 'demo-lib-toread',
+						title: 'To Read',
+						type: 'project',
+						column: 'Library',
+						body: '',
+						tasks: [],
+						docs: [],
+						url: '',
+						wikiLink: '',
+						progress: -1,
+						streak: 0,
+						dueDate: '',
+						blockquote: '',
+						color: '',
+						coverImage: '',
+						width: 0,
+					size: 'M',
+					gridCols: 0,
+					gridRows: 0,
+					gridCol: 0,
+					gridRow: 0,
+					},
+					{
+						id: 'demo-lib-done',
+						title: 'Done',
+						type: 'project',
+						column: 'Library',
+						body: '',
+						tasks: [],
+						docs: [],
+						url: '',
+						wikiLink: '',
+						progress: -1,
+						streak: 0,
+						dueDate: '',
+						blockquote: '',
+						color: '',
+						coverImage: '',
+						width: 0,
+					size: 'M',
+					gridCols: 0,
+					gridRows: 0,
+					gridCol: 0,
+					gridRow: 0,
+					},
+				],
+			},
+		],
+	});
+}
+
+function splitFrontmatter(markdown: string): { frontmatter: Record<string, unknown>; body: string } {
+	const trimmed = markdown.trimStart();
+	if (!trimmed.startsWith('---')) {
+		return { frontmatter: {}, body: trimmed };
+	}
+
+	const end = trimmed.indexOf('---', 3);
+	if (end === -1) {
+		return { frontmatter: {}, body: trimmed };
+	}
+
+	const yaml = trimmed.slice(3, end).trim();
+	const body = trimmed.slice(end + 3).trim();
+
+	return { frontmatter: (parseYaml(yaml) ?? {}) as Record<string, unknown>, body };
+}
+
+function parseBanner(fm: Record<string, unknown>): BannerData {
+	const raw = fm.banner as Record<string, unknown> | undefined;
+	if (!raw) return { ...DEFAULT_BANNER, images: DEFAULT_BANNER.images ? [...DEFAULT_BANNER.images] : undefined };
+
+	const quotesRaw = raw.quotes;
+	let quotes: Array<{ quote: string; author: string }> | undefined;
+	if (Array.isArray(quotesRaw)) {
+		quotes = quotesRaw.map((item: Record<string, string>) => ({
+			quote: item.quote ?? '',
+			author: item.author ?? '',
+		}));
+	}
+
+	const imagesRaw = raw.images;
+	let images: string[] | undefined;
+	if (Array.isArray(imagesRaw)) {
+		images = (imagesRaw as unknown[]).map((item: unknown) => String(item)).filter((s: string) => s.trim());
+	}
+
+	// Per-image focal points: map of path → "x,y". Entries for images no
+	// longer in the list are kept (harmless, and survive undos); invalid
+	// values drop silently.
+	const imagePosRaw = raw.imagePos;
+	let imagePos: Record<string, { x: number; y: number }> | undefined;
+	if (imagePosRaw && typeof imagePosRaw === 'object' && !Array.isArray(imagePosRaw)) {
+		const entries = Object.entries(imagePosRaw as Record<string, unknown>)
+			.map(([path, value]) => [path, parseFocalPoint(typeof value === 'string' ? value : undefined)] as const)
+			.filter((entry): entry is readonly [string, { x: number; y: number }] => entry[1] !== undefined);
+		if (entries.length > 0) {
+			imagePos = Object.fromEntries(entries);
+		}
+	}
+
+	return {
+		quote: (raw.quote as string) ?? DEFAULT_BANNER.quote,
+		author: (raw.author as string) ?? DEFAULT_BANNER.author,
+		image: (raw.image as string) ?? '',
+		quoteColor: (raw.quoteColor as string) || undefined,
+		quoteFont: (raw.quoteFont as string) || undefined,
+		quotes,
+		images,
+		imagePos,
+		mode: raw.mode === 'stats' ? 'stats' : 'quote',
+		statsConfig: parseStatsConfig(raw.statsConfig),
+	};
+}
+
+/** Reconstruct the stats-banner config from frontmatter; undefined when absent
+ *  (so resolveStatsConfig supplies defaults at render time). */
+function parseStatsConfig(raw: unknown): BannerStatsConfig | undefined {
+	if (!raw || typeof raw !== 'object') return undefined;
+	const r = raw as Record<string, unknown>;
+	const cfg: BannerStatsConfig = {};
+	if (typeof r.dailyFolder === 'string' && r.dailyFolder) cfg.dailyFolder = r.dailyFolder;
+	if (typeof r.dailyFormat === 'string' && r.dailyFormat) cfg.dailyFormat = r.dailyFormat;
+	if (typeof r.streakFromDaily === 'boolean') cfg.streakFromDaily = r.streakFromDaily;
+	if (Array.isArray(r.excludeFolders)) {
+		const folders = r.excludeFolders.filter((f): f is string => typeof f === 'string' && f.trim() !== '');
+		if (folders.length > 0) cfg.excludeFolders = folders;
+	}
+	if (typeof r.accent === 'string' && r.accent) cfg.accent = r.accent;
+	if (typeof r.blur === 'number') cfg.blur = r.blur;
+	if (typeof r.darkness === 'number') cfg.darkness = r.darkness;
+	if (typeof r.showDetails === 'boolean') cfg.showDetails = r.showDetails;
+	if (typeof r.showLeft === 'boolean') cfg.showLeft = r.showLeft;
+	if (typeof r.showCenter === 'boolean') cfg.showCenter = r.showCenter;
+	if (typeof r.showRight === 'boolean') cfg.showRight = r.showRight;
+	if (typeof r.leftStat === 'string') cfg.leftStat = r.leftStat as BannerLeftStat;
+	if (typeof r.centerStat === 'string') cfg.centerStat = r.centerStat as BannerCenterStat;
+	if (r.heatmapSource === 'notes' || r.heatmapSource === 'habit') cfg.heatmapSource = r.heatmapSource;
+	if (typeof r.heatmapHabitId === 'string' && r.heatmapHabitId) cfg.heatmapHabitId = r.heatmapHabitId;
+	if (Array.isArray(r.rightStats)) {
+		const stats = r.rightStats.filter((s): s is BannerRightStat => typeof s === 'string');
+		if (stats.length > 0) cfg.rightStats = stats;
+	}
+	return Object.keys(cfg).length > 0 ? cfg : undefined;
+}
+
+function parseQuickActions(fm: Record<string, unknown>): QuickAction[] {
+	const rawActions = fm.quickActions;
+	if (Array.isArray(rawActions)) {
+		return rawActions.map((item: Record<string, string>) => ({
+			name: item.name ?? '',
+			icon: item.icon ?? (item.type === 'command' ? 'terminal' : 'file-text'),
+			type: item.type === 'command' ? 'command' as const : 'file' as const,
+			target: item.target ?? '',
+		})).filter(a => a.name && a.target);
+	}
+
+	// Backward compat: migrate old quickLinks
+	const rawLinks = fm.quickLinks;
+	if (Array.isArray(rawLinks)) {
+		return rawLinks.map((item: Record<string, string>) => ({
+			name: item.name ?? '',
+			icon: 'file-text',
+			type: 'file' as const,
+			target: item.path ?? '',
+		})).filter(a => a.name && a.target);
+	}
+
+	return [];
+}
+
+function parseQuickActionOrder(fm: Record<string, unknown>): string[] | undefined {
+	const raw = fm.quickActionOrder;
+	if (Array.isArray(raw) && raw.length > 0) {
+		return raw.map((v: unknown) => String(v));
+	}
+	return undefined;
+}
+
+function parseHiddenPresets(fm: Record<string, unknown>): string[] | undefined {
+	const raw = fm.hiddenPresets;
+	if (Array.isArray(raw) && raw.length > 0) {
+		return raw.map((v: unknown) => String(v));
+	}
+	return undefined;
+}
+
+function parseColumnDefs(fm: Record<string, unknown>): ColumnDef[] {
+	const raw = fm.columns;
+	if (!Array.isArray(raw)) return DEFAULT_COLUMNS;
+
+	return (raw as Array<Record<string, unknown>>).map(item => ({
+		id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : undefined,
+		name: String((item.name ?? 'Unnamed') as string | number | boolean),
+		color: String((item.color ?? '#6366f1') as string | number | boolean),
+		sectionType: item.type ? String(item.type as string | number | boolean) : undefined,
+		libraryConfig: item.library ? parseLibraryConfig(item.library as Record<string, unknown>) : undefined,
+		wereadConfig: item.weread ? parseWereadConfig(item.weread as Record<string, unknown>) : undefined,
+		ticktickConfig: item.ticktick ? parseTickTickConfig(item.ticktick as Record<string, unknown>) : undefined,
+		dataviewConfig: item.dataview ? parseDataviewConfig(item.dataview as Record<string, unknown>) : undefined,
+		webConfig: item.web ? parseWebConfig(item.web as Record<string, unknown>) : undefined,
+		extensionConfig: isRecord(item.config) ? item.config : undefined,
+		showCover: item.showCover === false ? false : undefined,
+		height: typeof item.height === 'number' ? item.height : undefined,
+		half: item.half === true ? true : undefined,
+		width: typeof item.width === 'number' && item.width >= 20 && item.width <= 80 ? Math.round(item.width) : undefined,
+	}));
+}
+
+function parseColumns(
+	sections: Array<{ heading: string; content: string; id?: string }>,
+	defs: ColumnDef[],
+): DashboardColumn[] {
+	const usedDefIndices = new Set<number>();
+	const usedIds = new Set<string>();
+
+	const mapped = sections.map((section, sectionIdx) => {
+		let defIdx = section.id ? defs.findIndex((candidate) => candidate.id === section.id) : -1;
+		if (defIdx < 0) {
+			defIdx = defs.findIndex((candidate, index) =>
+				!usedDefIndices.has(index) && candidate.name === section.heading);
+		}
+		if (defIdx < 0 && sectionIdx < defs.length && !usedDefIndices.has(sectionIdx)) defIdx = sectionIdx;
+		const def = defIdx >= 0 ? defs[defIdx] : undefined;
+		if (def) {
+			usedDefIndices.add(defIdx);
+		}
+		const id = uniqueSectionId(section.id || def?.id, section.heading, sectionIdx, usedIds);
+		const leadingContent = contentBeforeFirstCard(section.content);
+		const cards = parseCards(section.content, section.heading);
+		const resolvedType = resolveSectionType(section.heading, cards, def?.sectionType);
+		// Legacy 'notes' (无封面) sections render as the projects type with the
+		// cover toggle off, so old dashboards look identical after the type was
+		// folded into projects; the next write persists the migrated form.
+		const isLegacyNotes = resolvedType === 'notes';
+		return {
+			id,
+			name: section.heading,
+			color: def?.color ?? '#6366f1',
+			sectionType: isLegacyNotes ? 'projects' : resolvedType,
+			showCover: isLegacyNotes ? false : def?.showCover,
+			// Memo rendering includes task/doc trees; retain their structure on reload.
+			cards,
+			libraryConfig: def?.libraryConfig,
+			wereadConfig: def?.wereadConfig,
+			ticktickConfig: def?.ticktickConfig,
+			dataviewConfig: def?.dataviewConfig,
+			webConfig: def?.webConfig,
+			height: def?.height,
+			half: def?.half,
+			width: def?.half ? def?.width : undefined,
+			leadingContent: leadingContent || undefined,
+			extensionConfig: def?.extensionConfig,
+			rawContent: resolvedType && !SECTION_TYPES.has(resolvedType) && !isRegisteredSection(resolvedType)
+				? section.content
+				: undefined,
+		};
+	});
+	// Self-heal hand-edited frontmatter: a lone `half: true` (or an odd run)
+	// pairs with no one and would render as an orphan half-width row.
+	return normalizeColumnPairs(mapped);
+}
+
+function resolveSectionType(
+	name: string,
+	cards: DashboardCard[],
+	fallback?: string,
+): string {
+	if (fallback) return fallback;
+
+	const lower = name.toLowerCase();
+	if (SECTION_TYPES.has(lower)) return lower;
+
+	if (cards.length > 0) {
+		const types = new Set(cards.map(c => c.type));
+		const dashboardTypes = new Set(['weather', 'tracker']);
+		if ([...types].every(t => dashboardTypes.has(t)) && types.size > 0) return 'dashboard';
+		if (types.has('task') && types.size === 1) return 'todo';
+		if (types.has('task') && !types.has('project')) return 'todo';
+		if (types.has('project') && types.size === 1) return 'projects';
+		if (types.has('generic') && !types.has('project') && !types.has('task')) return 'memo';
+	}
+
+	return 'projects';
+}
+
+function str(v: unknown): string {
+	if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return String(v);
+	return '';
+}
+
+function parseLibraryConfig(raw: Record<string, unknown>): LibraryConfig {
+	const filters: import('./types').PropertyFilter[] = [];
+	const rawFilters = raw.filters;
+	if (Array.isArray(rawFilters)) {
+		for (const item of rawFilters) {
+			const rec = item as Record<string, unknown>;
+			const property = str(rec.property ?? '');
+			const rawValues = rec.values;
+			const values = Array.isArray(rawValues) ? rawValues.map((v: unknown) => String(v)) : [];
+			const dateStart = rec.dateStart ? str(rec.dateStart) : '';
+			const dateEnd = rec.dateEnd ? str(rec.dateEnd) : '';
+			const dateRange = (dateStart || dateEnd) ? { start: dateStart, end: dateEnd } : undefined;
+			const rawOperator = str(rec.operator ?? '');
+			const operator = rawOperator === 'contains' || rawOperator === 'notEquals' ? rawOperator : undefined;
+			filters.push({ property, values, dateRange, operator });
+		}
+	}
+
+	return {
+		filters,
+		viewMode: (['grid', 'gallery', 'list', 'table', 'kanban'].includes(str(raw.viewMode ?? '')) ? raw.viewMode : 'grid') as import('./types').LibraryViewMode,
+		sortBy: str(raw.sortBy ?? 'modified'),
+		sortDesc: raw.sortDesc !== false,
+		kanbanGroupBy: raw.kanbanGroupBy ? str(raw.kanbanGroupBy) : undefined,
+		groupMode: ['property', 'folder'].includes(str(raw.groupMode ?? '')) ? (raw.groupMode as import('./types').LibraryConfig['groupMode']) : undefined,
+		viewGroupMode: ['none', 'folder', 'property'].includes(str(raw.viewGroupMode ?? ''))
+			? (raw.viewGroupMode as import('./types').LibraryConfig['viewGroupMode']) : undefined,
+		viewGroupBy: raw.viewGroupBy && str(raw.viewGroupMode ?? '') === 'property' ? str(raw.viewGroupBy) : undefined,
+		kanbanShowCovers: raw.kanbanShowCovers === true ? true : undefined,
+		pageSize: typeof raw.pageSize === 'number' ? raw.pageSize : undefined,
+		showProperties: raw.showProperties === false ? false : undefined,
+		propertyLimit: typeof raw.propertyLimit === 'number' ? raw.propertyLimit : undefined,
+		visibleProperties: (() => {
+			const list = Array.isArray(raw.visibleProperties)
+				? raw.visibleProperties.map((v: unknown) => str(v)).filter(s => s.length > 0)
+				: [];
+			return list.length > 0 ? [...new Set(list)] : undefined;
+		})(),
+		tableProperties: (() => {
+			const list = Array.isArray(raw.tableProperties)
+				? raw.tableProperties.map((v: unknown) => str(v)).filter(s => s.length > 0)
+				: [];
+			return list.length > 0 ? [...new Set(list)] : undefined;
+		})(),
+		tableOrder: (() => {
+			const list = Array.isArray(raw.tableOrder)
+				? raw.tableOrder.map((v: unknown) => str(v)).filter(s => s.length > 0)
+				: [];
+			return list.length > 0 ? [...new Set(list)] : undefined;
+		})(),
+		tableHidden: (() => {
+			const list = Array.isArray(raw.tableHidden)
+				? raw.tableHidden.map((v: unknown) => str(v)).filter(s => s.length > 0)
+				: [];
+			return list.length > 0 ? [...new Set(list)] : undefined;
+		})(),
+		cardSize: ['small', 'medium', 'large'].includes(str(raw.cardSize ?? ''))
+			? (raw.cardSize as import('./types').LibraryConfig['cardSize'])
+			: undefined,
+		folders: Array.isArray(raw.folders) ? raw.folders.map((v: unknown) => String(v)) : (typeof raw.folder === 'string' ? [raw.folder] : undefined),
+		folderFilter: Array.isArray(raw.folderFilter) ? raw.folderFilter.map((v: unknown) => String(v)) : undefined,
+		excludeFolders: Array.isArray(raw.excludeFolders) ? raw.excludeFolders.map((v: unknown) => String(v)) : undefined,
+		includeFolders: Array.isArray(raw.includeFolders) ? raw.includeFolders.map((v: unknown) => String(v)) : undefined,
+		// Multi-template list wins; the legacy single key upgrades into it.
+		templatePaths: (() => {
+			const list = Array.isArray(raw.templatePaths)
+				? raw.templatePaths.map((v: unknown) => str(v)).filter(s => s.length > 0)
+				: [];
+			if (list.length > 0) return [...new Set(list)];
+			return typeof raw.templatePath === 'string' && raw.templatePath.length > 0
+				? [raw.templatePath] : undefined;
+		})(),
+		templatePath: typeof raw.templatePath === 'string' ? raw.templatePath : undefined,
+		taskGroupBy: ['date', 'priority', 'none'].includes(str(raw.taskGroupBy ?? '')) ? (raw.taskGroupBy as import('./types').LibraryConfig['taskGroupBy']) : undefined,
+			quickDateFilter: raw.quickDateFilter && typeof raw.quickDateFilter === 'object' ? {
+				property: (raw.quickDateFilter as Record<string, unknown>).property === 'modified' ? 'modified' as const : 'created' as const,
+				start: str((raw.quickDateFilter as Record<string, unknown>).start ?? ''),
+				end: str((raw.quickDateFilter as Record<string, unknown>).end ?? ''),
+				days: (() => {
+					const d = (raw.quickDateFilter as Record<string, unknown>).days;
+					return typeof d === 'number' && d > 0 ? d : undefined;
+				})(),
+			} : undefined,
+		};
+	}
+
+function parseWereadConfig(raw: Record<string, unknown>): WereadConfig {
+	const validView = (v: unknown): WereadConfig['widgets'][number]['view'] =>
+		['shelf', 'stats', 'notes'].includes(str(v ?? '')) ? str(v) as WereadConfig['widgets'][number]['view'] : 'shelf';
+	const validList = <T extends string>(value: unknown, allowed: readonly T[]): T[] | undefined => {
+		if (!Array.isArray(value)) return undefined;
+		const accepted = value.map(item => str(item)).filter((item): item is T => allowed.includes(item as T));
+		return accepted.length > 0 ? [...new Set(accepted)] : undefined;
+	};
+	const validGroupBy = (value: unknown): WereadConfig['widgets'][number]['groupBy'] => {
+		const groupBy = str(value ?? 'readingState');
+		return ['none', 'readingState', 'contentType', 'recency', 'notes'].includes(groupBy)
+			? groupBy as WereadConfig['widgets'][number]['groupBy']
+			: 'readingState';
+	};
+
+	// New shape: widgets[]
+	if (Array.isArray(raw.widgets)) {
+		const widgets = (raw.widgets as Array<Record<string, unknown>>)
+			.filter(w => w && typeof w === 'object')
+			.map((w, i) => ({
+				id: String((w.id ?? `w${i + 1}`) as string | number | boolean),
+				view: validView(w.view),
+				progressFilters: validList(w.progressFilters, ['notStarted', 'reading', 'finished'] as const),
+				contentTypeFilters: validList(w.contentTypeFilters, ['book', 'audio', 'article'] as const),
+				recencyFilters: validList(w.recencyFilters, ['recent7', 'recent30', 'older', 'never'] as const),
+				noteFilters: validList(w.noteFilters, ['highlights', 'ideas', 'none'] as const),
+				// Conditional spread: absent statsItems stays an absent key, so
+				// round-trip equality with the pre-field shape holds.
+				...(validList(w.statsItems, ['kpi', 'trend', 'topRead', 'preferCategory'] as const)
+					? { statsItems: validList(w.statsItems, ['kpi', 'trend', 'topRead', 'preferCategory'] as const) }
+					: {}),
+				groupBy: validGroupBy(w.groupBy),
+				categoryFilters: Array.isArray(w.categoryFilters) ? (w.categoryFilters as Array<unknown>).map(c => String(c as string | number | boolean)) : undefined,
+				title: w.title ? String(w.title as string | number | boolean) : undefined,
+			}));
+		if (widgets.length > 0) return { widgets };
+	}
+	// Legacy shape: single view (+ bookFilter) → migrate to a category filter.
+	const legacyFilter = typeof raw.bookFilter === 'string' ? raw.bookFilter : undefined;
+	return {
+		widgets: [{
+			id: 'w1',
+			view: validView(raw.view),
+			categoryFilters: legacyFilter && legacyFilter !== 'all' ? [legacyFilter] : undefined,
+		}],
+	};
+}
+
+function parseTickTickConfig(raw: Record<string, unknown>): TickTickConfig {
+	const view: TickTickConfig['view'] = raw['view'] === 'lists' ? 'lists' : 'today';
+	const hiddenProjects = Array.isArray(raw['hiddenProjects'])
+		? (raw['hiddenProjects'] as Array<unknown>).map(v => String(v as string | number | boolean)).filter(v => v.length > 0)
+		: undefined;
+	return { view, hiddenProjects: hiddenProjects?.length ? hiddenProjects : undefined };
+}
+
+function parseDataviewConfig(raw: Record<string, unknown>): DataviewConfig {
+	const query = str(raw.query ?? '');
+	const title = raw.title ? str(raw.title) : undefined;
+	return {
+		query,
+		title: title && title.length > 0 ? title : undefined,
+		excludeFolders: Array.isArray(raw.excludeFolders) ? raw.excludeFolders.map((v: unknown) => String(v)) : undefined,
+	};
+}
+
+function parseWebConfig(raw: Record<string, unknown>): WebEmbedConfig {
+	const url = str(raw.url ?? '');
+	// Legacy `mode:` lines (the engine became fully automatic) are read-and-
+	// dropped: a pre-2.3.1 pinned iframe/webview mode falls away on the next
+	// save and the section follows the automatic route from then on.
+	const zoomRaw = typeof raw.zoom === 'number' ? raw.zoom : undefined;
+	// Out-of-range and 1 values drop to undefined: 1 is the default zoom, and
+	// dropping it keeps serialize(parse(serialize(x))) === serialize(x).
+	const zoom = zoomRaw != null && zoomRaw >= 0.5 && zoomRaw <= 2 && zoomRaw !== 1 ? zoomRaw : undefined;
+	return { url, zoom };
+}
+
+function splitByH2(body: string): {
+	preamble: string;
+	sections: Array<{ heading: string; content: string; id?: string }>;
+} {
+	const lines = body.split('\n');
+	const preamble: string[] = [];
+	const sections: Array<{ heading: string; content: string; id?: string }> = [];
+	let current: { heading: string; lines: string[]; id?: string } | null = null;
+
+	for (const line of lines) {
+		if (line.startsWith('## ')) {
+			if (current) {
+				sections.push({ heading: current.heading, content: current.lines.join('\n').trim(), id: current.id });
+			}
+			current = { heading: line.slice(3).trim(), lines: [] };
+		} else if (current) {
+			const anchor = line.match(SECTION_ANCHOR);
+			if (anchor?.[1] && current.lines.every((candidate) => candidate.trim() === '')) {
+				current.id = anchor[1];
+				continue;
+			}
+			current.lines.push(line);
+		} else {
+			preamble.push(line);
+		}
+	}
+
+	if (current) {
+		sections.push({ heading: current.heading, content: current.lines.join('\n').trim(), id: current.id });
+	}
+
+	return { preamble: preamble.join('\n').trim(), sections };
+}
+
+function contentBeforeFirstCard(content: string): string {
+	const index = content.split('\n').findIndex((line) => line.startsWith('### '));
+	if (index < 0) return content.trim();
+	return content.split('\n').slice(0, index).join('\n').trim();
+}
+
+function uniqueSectionId(
+	requested: string | undefined,
+	name: string,
+	index: number,
+	used: Set<string>,
+): string {
+	const slug = name.toLowerCase()
+		.normalize('NFKD')
+		.replace(/[^a-z0-9_-]+/g, '-')
+		.replace(/^-+|-+$/g, '') || 'section';
+	const base = requested?.trim() || `${slug}-${index + 1}`;
+	let candidate = base;
+	let suffix = 2;
+	while (used.has(candidate)) candidate = `${base}-${suffix++}`;
+	used.add(candidate);
+	return candidate;
+}
+
+function parseCards(content: string, columnName: string): DashboardCard[] {
+	const blocks = splitByH3(content);
+	return blocks.map(block => parseCard(block, columnName));
+}
+
+function splitByH3(content: string): Array<{ title: string; body: string }> {
+	const lines = content.split('\n');
+	const blocks: Array<{ title: string; body: string }> = [];
+	let current: { title: string; lines: string[] } | null = null;
+
+	for (const line of lines) {
+		if (line.startsWith('### ')) {
+			if (current) {
+				blocks.push({ title: current.title, body: current.lines.join('\n').trim() });
+			}
+			current = { title: line.slice(4).trim(), lines: [] };
+		} else if (current) {
+			current.lines.push(line);
+		}
+	}
+
+	if (current) {
+		blocks.push({ title: current.title, body: current.lines.join('\n').trim() });
+	}
+
+	return blocks;
+}
+
+function parseCard(block: { title: string; body: string }, columnName: string): DashboardCard {
+	const { metadata, tasks, docs, blockquote, cleanBody } = extractCardParts(block.body);
+	const cardType = detectCardType(tasks, blockquote, metadata);
+	const weatherConfig = cardType === 'weather' ? parseWeatherConfig(metadata) : undefined;
+	const trackerConfig = cardType === 'tracker' ? parseTrackerConfig(metadata) : undefined;
+
+	return {
+		id: metadata.id ?? generateId(block.title, columnName),
+		title: block.title,
+		type: cardType,
+		noteStyle: metadata.noteStyle === 'cover' || metadata.noteStyle === 'plain' ? metadata.noteStyle : undefined,
+		column: columnName,
+		body: cleanBody,
+		tasks,
+		docs,
+		url: extractUrl(metadata),
+		wikiLink: extractWikiLink(metadata),
+		progress: extractProgress(metadata),
+		streak: extractStreak(metadata),
+		dueDate: extractDue(metadata),
+		blockquote,
+		color: normalizeHexColor(metadata.color),
+		coverImage: metadata.cover ?? '',
+		coverPos: parseFocalPoint(metadata.coverPos),
+		width: parseInt(metadata.width ?? '0', 10) || 0,
+			size: parseCardSize(metadata.size),
+		gridCols: parseInt(metadata.cols ?? '0', 10) || 0,
+		gridRows: parseInt(metadata.rows ?? '0', 10) || 0,
+		gridCol: parseInt(metadata.gcol ?? '0', 10) || 0,
+		gridRow: parseInt(metadata.grow ?? '0', 10) || 0,
+			weatherConfig,
+			trackerConfig,
+	};
+}
+
+export function extractCardParts(body: string): {
+	metadata: Record<string, string>;
+	tasks: TaskItem[];
+	docs: DocNode[];
+	blockquote: string;
+	cleanBody: string;
+} {
+	const lines = body.split('\n');
+	const metadata: Record<string, string> = {};
+	let tasks: TaskItem[] = [];
+	const docLines: string[] = [];
+	const bodyLines: string[] = [];
+	let blockquote = '';
+	let ancestors: { indent: number; path: number[] }[] = [];
+
+	for (const line of lines) {
+		const trimmed = line.trim();
+		const indent = (line.match(/^[\t ]*/)?.[0] ?? '').replace(/\t/g, '    ').length;
+
+		const kvMatch = trimmed.match(/^(\w+):\s*(.+)$/);
+		if (kvMatch && kvMatch[1] && kvMatch[2] && KNOWN_METADATA_KEYS.has(kvMatch[1])) {
+			metadata[kvMatch[1]] = kvMatch[2];
+			ancestors = [];
+			continue;
+		}
+
+		const taskMatch = trimmed.match(/^- \[([ xX])\]\s*(.+)$/);
+		if (taskMatch && taskMatch[1] && taskMatch[2]) {
+			let taskText = taskMatch[2];
+			let taskReminder: string | undefined;
+			let taskCollapsed = false;
+			const collapsedMatch = taskText.match(COLLAPSED_REGEX);
+			if (collapsedMatch) {
+				taskText = taskText.replace(COLLAPSED_REGEX, '');
+				taskCollapsed = true;
+			}
+			const reminderMatch = taskText.match(REMINDER_REGEX);
+			if (reminderMatch) {
+				taskText = taskText.replace(REMINDER_REGEX, '');
+				taskReminder = reminderMatch[1];
+			}
+			const node: TaskItem = { checked: taskMatch[1] !== ' ', text: taskText, reminder: taskReminder, collapsed: taskCollapsed };
+			ancestors = ancestors.filter(parent => parent.indent < indent);
+			const parent = ancestors[ancestors.length - 1];
+			const path = parent
+				? [...parent.path, getTaskByPath(tasks, parent.path)?.children?.length ?? 0]
+				: [tasks.length];
+			tasks = parent ? appendChild(tasks, parent.path, node) : [...tasks, node];
+			ancestors = [...ancestors, { indent, path }];
+			continue;
+		}
+
+		const docMatch = line.match(DOC_LINE_REGEX);
+		if (docMatch) {
+			docLines.push(line);
+			continue;
+		}
+
+		ancestors = [];
+
+		if (trimmed.startsWith('> ')) {
+			blockquote += (blockquote ? '\n' : '') + trimmed.slice(2);
+			continue;
+		}
+
+		if (trimmed) {
+			bodyLines.push(trimmed);
+		}
+	}
+
+	return { metadata, tasks, docs: parseDocTree(docLines), blockquote, cleanBody: bodyLines.join('\n') };
+}
+
+const DOC_TREE_INDENT = 4;
+
+// Parse document-link lines (optionally nested list / indented) into a tree.
+// Stack-based so arbitrary nesting depth is supported (unlike tasks' single parent).
+function parseDocTree(rawLines: string[]): DocNode[] {
+	const root: DocNode[] = [];
+	const stack: { depth: number; node: DocNode }[] = [];
+	for (const line of rawLines) {
+		const m = line.match(DOC_LINE_REGEX);
+		if (!m) continue;
+		const indentSpaces = (m[1] ?? '').replace(/\t/g, '    ');
+		const depth = Math.floor(indentSpaces.length / DOC_TREE_INDENT);
+		const node: DocNode = { path: m[2]! };
+		if (m[3]) node.collapsed = true;
+		while (stack.length && stack[stack.length - 1]!.depth >= depth) stack.pop();
+		if (stack.length === 0) {
+			root.push(node);
+		} else {
+			const parent = stack[stack.length - 1]!.node;
+			parent.children = [...(parent.children ?? []), node];
+		}
+		stack.push({ depth, node });
+	}
+	return root;
+}
+
+function serializeDocTree(docs: DocNode[]): string[] {
+	const lines: string[] = [];
+	const write = (node: DocNode, indent: number) => {
+		const prefix = indent > 0 ? '    '.repeat(indent) : '';
+		let line = `${prefix}- [[${node.path}]]`;
+		if (node.collapsed) line += ` <!--collapsed-->`;
+		lines.push(line);
+		for (const child of node.children ?? []) write(child, indent + 1);
+	};
+	for (const doc of docs) write(doc, 0);
+	return lines;
+}
+
+function detectCardType(
+	tasks: TaskItem[],
+	blockquote: string,
+	metadata: Record<string, string>,
+): CardType {
+	if (metadata.type === 'generic') return 'generic';
+	if (metadata.type === 'task') return 'task';
+	if (metadata.type === 'project') return 'project';
+	if (metadata.type === 'weather') return 'weather';
+	if (metadata.type === 'tracker') return 'tracker';
+
+	const link = metadata.link ?? '';
+
+	if (tasks.length > 0) return 'task';
+	if (blockquote) return 'note';
+	if (metadata.streak) return 'habit';
+	if (link.startsWith('[[')) return 'project';
+	if (link.startsWith('http')) return 'link';
+	if (metadata.progress) return 'project';
+	return 'generic';
+}
+
+function parseCardSize(raw: string | undefined): CardSize {
+	const v = (raw ?? '').toUpperCase().trim();
+	if (v === 'S' || v === 'L') return v;
+	return 'M';
+}
+
+function extractUrl(metadata: Record<string, string>): string {
+	const link = metadata.link ?? '';
+	return link.startsWith('http') ? link : '';
+}
+
+function extractWikiLink(metadata: Record<string, string>): string {
+	const link = metadata.link ?? '';
+	const match = link.match(/^\[\[(.+)]]$/);
+	return match && match[1] ? match[1] : '';
+}
+
+function extractProgress(metadata: Record<string, string>): number {
+	if (!metadata.progress) return -1;
+	const num = parseInt(metadata.progress.replace('%', ''), 10);
+	return isNaN(num) ? -1 : Math.min(100, Math.max(0, num));
+}
+
+function extractStreak(metadata: Record<string, string>): number {
+	if (!metadata.streak) return 0;
+	const num = parseInt(metadata.streak, 10);
+	return isNaN(num) ? 0 : num;
+}
+
+function extractDue(metadata: Record<string, string>): string {
+	return metadata.due ?? '';
+}
+
+function generateId(title: string, column: string): string {
+	const raw = `${title}::${column}`;
+	let hash = 0;
+	for (let i = 0; i < raw.length; i++) {
+		const ch = raw.charCodeAt(i);
+		hash = ((hash << 5) - hash) + ch;
+		hash |= 0;
+	}
+	return `card-${Math.abs(hash).toString(36)}`;
+}
+
+function escapeYamlString(str: string): string {
+	return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ');
+}
+
+function dequote(value: string): string {
+	if (value.startsWith('"') && value.endsWith('"')) {
+		return value.slice(1, -1).replace(/\\\\/g, '\\').replace(/\\"/g, '"');
+	}
+	if (value.startsWith("'") && value.endsWith("'")) {
+		return value.slice(1, -1);
+	}
+	return value;
+}
+
+function parseWeatherConfig(metadata: Record<string, string>): WeatherConfig {
+	return {
+		latitude: parseFloat(metadata.lat ?? '0') || 0,
+		longitude: parseFloat(metadata.lon ?? '0') || 0,
+		cityName: dequote(metadata.city ?? ''),
+	};
+}
+
+function parseTrackerConfig(metadata: Record<string, string>): TrackerConfig {
+	const style = metadata.style ?? 'line';
+	return {
+		key: metadata.track ?? '',
+		days: parseInt(metadata.days ?? '14', 10) || 14,
+		style: style === 'heatmap' || style === 'bar' ? style : 'line',
+	};
+}

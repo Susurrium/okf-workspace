@@ -2,6 +2,7 @@ import * as sdkModule from '@anthropic-ai/claude-agent-sdk';
 
 import type { ProviderHost } from '@/core/providers/ProviderHost';
 import { probeRuntimeCommands } from '@/providers/claude/commands/probeRuntimeCommands';
+import { parseEnvironmentVariables } from '@/utils/env';
 
 const sdkMock = sdkModule as unknown as {
   getLastResponse: () => {
@@ -53,7 +54,7 @@ describe('probeRuntimeCommands', () => {
     ]);
 
     const commands = await probeRuntimeCommands(createMockPlugin({
-      loadUserClaudeSettings: false,
+      providerConfigs: { claude: { loadUserSettings: false } },
     }));
 
     expect(commands).toEqual([{
@@ -74,8 +75,7 @@ describe('probeRuntimeCommands', () => {
     sdkMock.setMockSupportedCommands([]);
 
     await probeRuntimeCommands(createMockPlugin({
-      loadUserClaudeSettings: true,
-      enableChrome: true,
+      providerConfigs: { claude: { loadUserSettings: true, enableChrome: true } },
     }));
 
     const options = sdkMock.getLastOptions();
@@ -155,5 +155,43 @@ describe('probeRuntimeCommands', () => {
       message: 'Claude command discovery aborted',
       cause: 'caller cancelled',
     });
+  });
+
+  it('rejects when the CLI stream ends before initialization', async () => {
+    sdkMock.setMockMessages([], { appendResult: false });
+
+    await expect(probeRuntimeCommands(createMockPlugin())).rejects.toThrow(
+      'Claude command discovery ended before initialization',
+    );
+  });
+
+  it('rejects when the CLI cannot list its commands', async () => {
+    sdkMock.setMockMessages([
+      { type: 'system', subtype: 'init', session_id: 'probe-session' },
+    ], { appendResult: false });
+    sdkMock.setMockSupportedCommandsImplementation(
+      () => Promise.reject(new Error('control request failed')),
+    );
+
+    await expect(probeRuntimeCommands(createMockPlugin())).rejects.toThrow(
+      'control request failed',
+    );
+  });
+
+  it('bounds MCP server startup during the probe unless MCP_TIMEOUT is configured', async () => {
+    sdkMock.setMockMessages([
+      { type: 'system', subtype: 'init', session_id: 'probe-session' },
+    ], { appendResult: false });
+    sdkMock.setMockSupportedCommands([]);
+
+    await probeRuntimeCommands(createMockPlugin());
+    expect(sdkMock.getLastOptions()?.env?.MCP_TIMEOUT).toBe('5000');
+
+    jest.mocked(parseEnvironmentVariables).mockReturnValueOnce({
+      MCP_TIMEOUT: '20000',
+      PATH: '/usr/bin',
+    });
+    await probeRuntimeCommands(createMockPlugin());
+    expect(sdkMock.getLastOptions()?.env?.MCP_TIMEOUT).toBe('20000');
   });
 });

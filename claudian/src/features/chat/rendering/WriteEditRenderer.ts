@@ -18,6 +18,7 @@ export interface WriteEditState {
   toolCall: ToolCallInfo;
   isExpanded: boolean;
   diffLines?: DiffLine[];
+  diffDirty?: boolean;
 }
 
 export interface WriteEditRenderOptions {
@@ -105,6 +106,7 @@ export function createWriteEditBlock(
   setupCollapsible(wrapperEl, headerEl, contentEl, state, {
     initiallyExpanded: options.initiallyExpanded ?? false,
     baseAriaLabel,
+    onToggle: expanded => { if (expanded) renderCurrentDiff(state); },
   });
 
   return state;
@@ -112,18 +114,23 @@ export function createWriteEditBlock(
 
 export function updateWriteEditWithDiff(state: WriteEditState, diffData: ToolDiffData): void {
   state.statsEl.empty();
-  state.contentEl.empty();
-
   const { diffLines, stats } = diffData;
   state.diffLines = diffLines;
 
   // Update stats
   renderDiffStats(state.statsEl, stats);
 
-  // Render diff content
+  state.diffDirty = true;
+  if (state.isExpanded) renderCurrentDiff(state);
+}
+
+function renderCurrentDiff(state: WriteEditState): void {
+  if (!state.diffDirty || !state.diffLines) return;
+  state.contentEl.empty();
   const row = state.contentEl.createDiv({ cls: 'claudian-write-edit-diff-row' });
   const diffEl = row.createDiv({ cls: 'claudian-write-edit-diff' });
-  renderDiffContent(diffEl, diffLines);
+  renderDiffContent(diffEl, state.diffLines);
+  state.diffDirty = false;
 }
 
 export function finalizeWriteEditBlock(state: WriteEditState, isError: boolean): void {
@@ -207,24 +214,32 @@ export function renderStoredWriteEdit(
   // Content
   const contentEl = wrapperEl.createDiv({ cls: 'claudian-write-edit-content' });
 
-  // Render diff if available
-  const row = contentEl.createDiv({ cls: 'claudian-write-edit-diff-row' });
+  let contentRendered = false;
+  const renderContentOnce = () => {
+    if (contentRendered) return;
+    const row = contentEl.createDiv({ cls: 'claudian-write-edit-diff-row' });
 
-  if (toolCall.diffData && toolCall.diffData.diffLines.length > 0) {
-    const diffEl = row.createDiv({ cls: 'claudian-write-edit-diff' });
-    renderDiffContent(diffEl, toolCall.diffData.diffLines);
-  } else if (isError && toolCall.result) {
-    const errorEl = row.createDiv({ cls: 'claudian-write-edit-error' });
-    errorEl.setText(toolCall.result);
-  } else {
-    const doneEl = row.createDiv({ cls: 'claudian-write-edit-done-text' });
-    doneEl.setText(isError ? 'ERROR' : 'DONE');
-  }
+    if (toolCall.diffData && toolCall.diffData.diffLines.length > 0) {
+      const diffEl = row.createDiv({ cls: 'claudian-write-edit-diff' });
+      renderDiffContent(diffEl, toolCall.diffData.diffLines);
+    } else if (isError && toolCall.result) {
+      const errorEl = row.createDiv({ cls: 'claudian-write-edit-error' });
+      errorEl.setText(toolCall.result);
+    } else {
+      const doneEl = row.createDiv({ cls: 'claudian-write-edit-done-text' });
+      doneEl.setText(isError ? 'ERROR' : 'DONE');
+    }
+    contentRendered = true;
+  };
+  if (toolCall.status === 'running' || options.initiallyExpanded) renderContentOnce();
 
   // Setup collapsible behavior (handles click, keyboard, ARIA, CSS)
   const state = { isExpanded: false };
   setupCollapsible(wrapperEl, headerEl, contentEl, state, {
     initiallyExpanded: options.initiallyExpanded ?? false,
+    onToggle: (expanded) => {
+      if (expanded) renderContentOnce();
+    },
     baseAriaLabel,
   });
 

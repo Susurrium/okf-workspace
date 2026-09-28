@@ -1,0 +1,610 @@
+# Changelog
+
+## 2.0.2 (2026-08-30)
+
+### Changed
+- **Sidebar widget compaction** — the pomodoro card's ring-to-button and button-to-floor gaps are tighter (~10px shorter overall). The expense entry form went single-line: the expense/income labels now lead their amount fields (the old separate label lines doubled the widget's height), the per-type daily totals were dropped from the rows (they squeezed the line and misaligned the category selects between rows; the title row keeps the day's net), and the note row sits closer to the card floor — the card is roughly 30% shorter than before.
+- **Card titles one step smaller than section titles** — card headers render at 0.875em (was 1.0em, the same size as the section title) across the memo / todo / sticky / notes / projects sections, and the title-to-content gap tightened uniformly from 10px to 6px.
+
+## 2.0.1 (2026-08-30)
+
+### Fixed
+- **Sticky / memo / todo / projects sections scroll horizontally again** — the pairing rework (1.9.13) turned section rows into row-axis flex items, whose default `min-width: auto` let a nowrap card deck inflate its row past the 100% basis: the cards area stopped overflowing (its scrollbar vanished) and the whole board stretched wide. Rows are clamped back with `min-width: 0`. (The kanban sticky-title fix listed under 2.0.0 actually ships in this release — the 2.0.0 tag was cut before that styles.css change landed.)
+
+### Added
+- **Widget data files join the periodic backups** — the habits / expense / pomodoro / reading json snapshots are now taken alongside the dashboard file on the same cadence (`data-<stamp>-<name>.json` beside each board snapshot) and pruned as complete per-timestamp groups. Their live copies in the plugin folder were previously the only copies — a truncated sync or a plugin reinstall lost the histories with no rollback point. Restore remains board-only; the data snapshots are there for manual recovery.
+
+### Changed
+- **Startup and view-open data loads run in parallel** — habits/expense (plugin start) and pomodoro/reading (view open) each awaited their file read serially; on mobile any of them can block on an iCloud download, stacking every wait into startup latency. Both pairs now load concurrently (worst-case wait = the slowest single file).
+- **Tighter gap between the banner and the sidebars/board** — the main area's 16px top padding plus the banner's 4px bottom margin read as one wide ~20px band; the padding is now 8px (~12px total).
+
+## 2.0.0 (2026-08-30)
+
+### Changed
+- **Grouped-view (kanban) gutters tightened** — the space between group columns in the Library/folder sections' grouped kanban — and in the all-tasks kanban, which shares the same columns — is noticeably finer: board gap 10px → 5px, column padding 8px → 6px, taking the perceived card-to-card distance across two groups from ~26px to ~17px. The columns' translucent background barely reads as a box in most themes, so both paddings contributed to the inter-group distance that was previously too wide.
+
+### Fixed
+- **Toolbar right cluster stays right-aligned when it wraps** — in Library/folder and media sections, narrowing the section used to push the file-count / page-size / settings cluster onto the toolbar's second row, left-aligned. The count (first element of the cluster) now carries `margin-left: auto`, pinning the cluster to the right edge of whichever line it lands on; single-line layout is unchanged.
+- **Kanban column titles pin again while scrolling** — the board is capped to its bounded-height host (`max-height: 100%`), so columns resume scrolling internally and their sticky group titles engage; previously the board grew to its tallest column, the host scrolled the whole board, and the titles scrolled away with it.
+
+### Housekeeping
+- New WeChat community group QR code in the announcement modal (new invite; the old one had expired).
+
+## 1.9.13 (2026-08-30)
+
+### Added
+- **Side-by-side section pairing (分区双排)** — Drag a section (grip handle) onto the left or right edge strip (25%) of another section to pair them into one row at half width each; the familiar top/bottom drop zones keep the vertical reorder. Pairing is persisted per section in the dashboard frontmatter (`half: true`) and survives reloads. Drop a section beside an already-paired one and the old partner automatically falls back to a full-width row (eviction); dragging a paired section vertically — including onto its partner — or deleting it frees the partner the same way, and intra-pair swaps just exchange the two. No wrapper elements are introduced (DOM order still mirrors the section order), the four tight-gap themes keep an exact 50/50 fill via a `--db-kanban-gap` token, narrow panes (<620px) fall back to stacked full-width rows via a container query, and mobile keeps vertical stacking untouched (the pairing class is desktop-gated).
+
+### Fixed
+- **Books whose filename contains `]` no longer vanish after being dropped onto a project card** — the doc-line regex terminated the path at the first `]`, so a wikilink to e.g. z-library's `…[美]….pdf` flashed briefly and was dropped on the next save/re-parse cycle. A single `]` is now allowed inside the path; the link only terminates on `]]` (matching the Obsidian core parser). Filenames ending in `]` remain unrepresentable, same as Obsidian itself.
+
+## 1.9.12 (2026-08-29)
+
+### Added
+- **Library/folder sections: drag-to-move files in the folder-grouped kanban** — In kanban view with folder grouping (desktop), dragging a card onto another column now moves the underlying file into that group's folder via `fileManager.renameFile`, so internal links update per your vault's "auto-update links" setting. The move is optimistic (the card hops columns immediately) with a rollback + notice on failure; a same-name file in the target folder blocks the move with a clear message. The "not set" column rejects drops but its cards can be dragged out to file loose notes. Memo-card and section-reorder drags elsewhere on the board are unaffected. Folder grouping also stops showing a parent folder as its own column next to its children — files sitting directly in the parent (e.g. the scan root itself) now land in the not-set column. The quick-note config modal's insert-position control is also reworked: the dropdown (whose closed-state text clipped in the narrow modal) is replaced by two mutually exclusive checkbox options.
+
+## 1.9.11 (2026-08-29)
+
+### Fixed
+- **TickTick section: habits card title showed the raw i18n key** — The habit check-in card in the TickTick "Today" view displayed "ticktick.viewHabits" because that label key was missing from both translation dictionaries, so `t()` fell back to echoing the key. Both dictionaries now carry the entry: 习惯打卡 in Chinese, "Habits" in English.
+
+## 1.9.10 (2026-08-29)
+
+### Fixed
+- **Timer sound reminders now actually play — and ring as a "ding"** — Both the pomodoro and the reading timer have had a "sound notification" setting since v1.1.5, but the chime was a `new AudioContext()` built at completion time with no `resume()`. On mobile WebViews (iOS/Android) that context is created suspended outside a user gesture and never self-resumes, so phones stayed permanently silent; desktop depended on Electron's lenient autoplay default. Sound now lives in a shared `src/chime.ts`: one cached AudioContext, a capture-phase gesture listener armed when a timer view loads (your first tap/keystroke unlocks audio), and a best-effort `resume()` at play time so a chime interrupted by a phone call or Siri heals on the next tap.
+
+### Changed
+- **Beep → bell** — The flat 0.8s sine "beep" is replaced by a synthesized small-bell "ding": four partials (fundamental + 2.0× + 3.01× + 4.47×) with independent exponential decays and a 2ms attack, so it has the metallic strike-and-ring shape of a real bell instead of a test tone. The pomodoro rings at C6 (1046.5 Hz), the reading timer a touch lower at A5 (880 Hz), both at a gentler master level. Fully synthesized — no audio assets shipped.
+
+## 1.9.9 (2026-08-28)
+
+### Added
+- **Pomodoro mini panel: an idle "silent" fold** — After 10 seconds without pointer or keyboard activity on the panel, it collapses to just the tomato and its progress ring (the ring keeps ticking every second). Hovering, tapping, dragging or tab-focusing it unfolds the full pill again and re-arms the countdown. The fold animates only widths, gaps and surface chrome, so the mount-time frozen info width survives underneath and the pill re-expands to the exact same size; the collapsed ring stays draggable, and the timer is cleaned up on unmount.
+
+### Changed
+- **Calendar: readable text in the day hover preview** — The popup listing a day's todos when you hover a date now renders rows at a readable size instead of the compact grid-cell font it inherited (~9px → ~15px), and the card is slightly wider (max 360px) so the bigger single-line rows show more text before truncating. Scoped to the popup only — sidebar grid and full-screen calendar rows are untouched.
+
+## 1.9.8 (2026-08-28)
+
+### Added
+- **Quick capture: choose where thoughts land in the note** — The Common Actions bar's capture box now has an "Insert position" option in its config dialog: top of the note (the new default, placed right after any YAML frontmatter so metadata stays intact) or the end (the previous behavior, byte-for-byte). The setting applies to new fleeting notes too — the captured line goes top or bottom of the note's template content, and the top placement keeps a blank line between the entry and the body so Markdown never swallows the first paragraph as a list continuation.
+- **Calendar: new tasks can go to the top or the bottom of the daily note** — A "New task position" dropdown in the calendar widget settings controls where tasks added from the day agenda are written. The historical top placement (below frontmatter) stays the default; the end placement appends after the last line and reports the correct jump-to line number. Fallback destinations (the dashboard file's first checkbox list, template-seeded note creation) are unchanged.
+- **Expense panel: a Log button next to the note field** — Commits the last-focused row (the same rule as the note's Enter key); an empty amount flashes the amount field so the click never feels dead, while Enter keeps its silent skip.
+
+### Changed
+- **Expense widget controls now match the plugin's themes** — The category dropdown is borderless, shadowless and background-free, with a hand-drawn SVG chevron (iOS keeps the native menulist look so the arrow survives WKWebView), and the Log button is a flat accent-text button with a subtle hover fill. Obsidian's native button styling used to override theme tokens on the widget's `<button>` elements — both now use the forced-off defensive declarations the quick-action chips have always carried.
+
+### Removed
+- **Dead code: the deprecated calendar section module** — `src/calendar-section.ts` (the removed right-column calendar) is deleted. The parser still accepts legacy `calendar` entries in existing dashboard files, so old boards keep loading.
+
+## 1.9.7 (2026-08-27)
+
+### Fixed
+- **Pomodoro stats zones overlapped on phones and in narrow desktop panes** — The stats modal's desktop layout is a three-column grid with a single `minmax(0, 1fr)` row; the mobile collapse only rewrote the columns, so once the three sections stacked, the two implicit auto rows consumed all free space, the KPI row collapsed to zero height, and its content painted over the mid column. The collapse now also sets every row to `auto` (sections stack at their content height, the body scrolls as a whole), and it is driven by a container query on the modal itself with a viewport media-query fallback for old engines — narrow desktop panes (sidebar, split view), where a viewport query never fired, get the same single-column treatment instead of crammed 230+300px fixed columns.
+
+### Changed
+- **Stats header: the range toggle drops below the title on narrow layouts** — Below 900px of modal width the header wraps: the title (with the close button) keeps the first line, and the day/week/month/year/all pills plus the settings button move to a full-width row of their own underneath, no longer squeezing the title to one side. Desktop keeps the one-line header. The close button moved out of the toggle group in the DOM, with desktop spacing preserved.
+- **Pomodoro mini panel: clearer phase labels** — The work phase now reads "Focusing / 专注中", and a paused pill shows just "Paused / 已暂停" (the old "Focus · Paused" compound overflowed the pill).
+
+## 1.9.6 (2026-08-27)
+
+### Added
+- **Expense ledger — every record in one Excel-style table** — The stats modal's record list now caps at the 20 latest entries and gains a "View all" link that opens a full ledger overlay: every income/expense record in a bordered, zebra-striped grid with a sticky header. Columns: date / amount / type / category / note, with fixed column widths (only the note column flexes). Filter by type, category, date range, or free-text over notes and category names; click any column header to sort (date defaults to newest-first, with an arrow indicator); edit a row through the same themed dialog as backfill (title switches to "Edit record", every field prefilled); select rows (page-level select-all, indeterminate state) for a confirmed batch delete; import CSV (Chinese or English headers, `支出/收入` type words, unknown category names auto-register as custom categories, invalid rows skipped and counted) and export the current filter as an Excel-friendly UTF-8 BOM CSV written into the vault root; 50 rows per page with a filtered-totals footer (count / expense / income). Everything live-updates through the data service's change fan-out.
+- **Custom expense categories** — Every category dropdown (widget rows, backfill/edit dialog) ends with "+ New category…" and "Manage categories…". New names are validated (1–12 chars, no preset key/label collisions, max 30 per direction) and immediately selectable; the manager lists both directions with per-category usage counts and delete-with-confirm (records keep their label). Custom categories persist in `expense.json`, sync-merge like records, and get a deterministic color (name-hash HSL) in the donut and ranking instead of gray. A deleted custom category still displays on old records; the ledger's category filter offers every known key plus any legacy keys still present in data.
+- **Widget data syncs across devices (habits / pomodoro / reading / expense)** — The four standalone data files now survive multi-device file sync (iCloud, Obsidian Sync, Syncthing…). On window focus / mobile foreground each service re-reads its file and merges external records into memory (union by habit id and check-in, by session timestamp, by record id), refreshing open widgets without disturbing a running timer. Before every save the service compares the on-disk content against its own last write and merges first when another writer intervened — blind full-file saves (which silently reverted the other device's check-ins) no longer happen, and deletions are never resurrected because the union only runs on genuine external changes.
+
+### Changed
+- **Expense stats modal rebuilt as an aligned two-column layout** — The body grid is now two named areas: KPI cards + record list on the left, and all four chart sections (category share, ranking, daily trend, income-vs-expense) stacked down the right, so every zone shares one straight edge. The layout is driven by a container query on the modal itself (pane-width-aware, not viewport-aware): below ~700px of modal width it collapses to a single column with the charts dropping below the records. The donut SVG shrinks with its column; the record list's category column fits 4–7 character category names (date column now shrink-to-content); the amount inputs in the widget sit on a ledger-style underline that tints to the accent while typing.
+- **The version announcement now introduces the expense ledger + cross-device sync** — The once-per-version popup presents the ledger table, custom categories, the sync behavior and the reading-cover/pomodoro-panel additions, keeping the community-group card verbatim; it fires again for every user on update to 1.9.6.
+- **Reading: book covers accept vault and local image paths** — A cover reference now resolves from an http(s) link (fetched to a blob), a `data:` URI, a vault-internal path (read through the vault API), or an absolute local path / `file://` URI on desktop (via the `app://local` protocol, probed before use). Wrong paths keep the placeholder instead of painting an empty cover box.
+- **Floating mini panels are draggable and the pomodoro pill is optional** — The body-level pomodoro pill and reading timer share one drag/position implementation (pointer drag with a tap threshold, positions clamped to the viewport and persisted per panel), and a new setting toggles the pomodoro mini panel off entirely.
+- **Calendar: the full-screen modal remembers its task filter** — The active/all/completed filter choice in the full-screen month view persists across sessions (memory only; the sidebar widget stays unfiltered).
+
+### Fixed
+- **Expense stats zones overlapped in medium-width windows** — The old grid collapsed only on a viewport media query while its side columns were fixed at 300/320px: between ~900–965px of window width the middle column was squeezed under its 200px donut SVG, which overflowed into both neighbours; the first container-query attempt then never showed three columns at all (the breakpoint compared against the modal's content-box, which never reaches it) and its `minmax(0,1fr)` row let zones paint over each other. The named-area layout above fixes both: rows size to their content and collapse thresholds follow the modal's own width.
+- **Pomodoro and reading data could be wiped by a failed first read** — Both services started from an empty in-memory state on any load error and had no guard before saving: on mobile a not-yet-downloaded iCloud file or a transient file lock meant the next session save overwrote real history with the empty state (and sync spread the wipe). Both now follow the expense/habit pattern — an IO failure blocks saving until the read is retried and merged, a parse failure starts fresh by design — and their saves go through a serialized write queue instead of interleaving per-call awaits.
+- **The stats modal's KPI area lost its "Records" count card, the record-list total hint, and its edge scrollbar** — The record count card is gone (the ledger footer shows filtered totals when they matter), the list header is just the title plus the "View all" link, and the always-scrollable body no longer draws a scrollbar along the modal edge.
+
+## 1.9.5 (2026-08-26)
+
+### Added
+- **Expense tracker widget** — A bookkeeping widget on the desktop sidebar and the phone widget bar: two quick-entry rows (expense / income) with amount + preset category, Enter to save, optional note, and a backfill date for entries made late (future dates rejected, with a one-tap back-to-today reset). Every entry shows today's expense / income totals and the running net. All records live in `expense.json` (append-only, never pruned), the last-picked category per direction reopens preselected, and the currency symbol is configurable in settings. A statistics overlay covers week / month / year / all-time ranges: KPI cards (totals, net, daily average, record count), category-share donuts, daily/monthly trends, a category ranking, a year heatmap, and a deletable record list; a backfill modal rounds out record management.
+- **Mobile: the calendar widget is on the phone** — The banner's widget strip gains a Calendar tab (shown when the sidebar calendar widget is enabled in settings). Tapping it loads the month grid directly — the tap itself is explicit intent, so the phone's usual deferred-scan placeholder is skipped — with month/week switching, day agendas (view / add / toggle tasks), the full-screen modal, and task-note jump-to-line all working like desktop. The mobile tab order is now: Lunar, Calendar, Pomodoro, Habits, Expense, Reading.
+- **Calendar: scheduled & completion dates are first-class** — Tasks carrying a scheduled date (`⏳` / `[scheduled::]`) or a completion date (`✅` / `[completion::]`) now anchor to those days in every calendar surface (sidebar widget, full-screen month, week view, day agenda, hover preview), with their own time labels and a small ⏳ / ✅ origin marker on the row. Day lists sort active tasks before completed ones, then by that day's time. The plugin's own `⏰` reminder marker also accepts a date-only form (time optional).
+- **Calendar: multi-day spans render as continuous bars** — In the full-screen month view, a task with a start/end window renders as one bar crossing the day cells of its week (up to four stacked lanes) instead of a duplicated row in every cell; continuation edges are marked, and clicking a bar opens the day agenda of its first visible day.
+- **Library/Folder sections: group by subfolder** — The folder section's kanban "group by" selector gains a subfolder mode: cards group under the top-level subfolder of each configured scan folder (groups sort alphabetically, numeric-aware; files directly inside a scan folder group under the folder's own name). The config modal gets a property/subfolder toggle, and the choice persists in the section config (only the non-default mode is written).
+- **Images/Videos sections: group by folder or tag** — Both media sections gain a toolbar "group by" selector: top-level vault folder, or tag (a file with several tags fans out into each bucket). Grouped rendering shows everything with collapsible group headers and hides the paginator; the lightbox order follows the grouped display order.
+
+### Changed
+- **The version announcement now introduces the habit & expense widgets** — The once-per-version popup (which previously introduced the Dataview section) now presents the habit check-in and expense tracker widgets with a six-point feature list, while keeping the community-group card verbatim (QR code, group title and the expired-invite fallback line). Its i18n keys moved to a neutral `announce.*` prefix so future releases only need to refresh the copy, and it fires again for every user on update to 1.9.5.
+
+## 1.9.4 (2026-08-26)
+
+### Changed
+- **Pomodoro stats: the heatmap is a wrapping cell strip that fills the column** — The 12-week heatmap was drawn on a fixed 168px SVG canvas that sat centered in the ~300px right column, huddled in the middle with wide empty margins (and a width:100% SVG inside the scrollable body could still collapse to zero height on the first paint, blanking the section until a range switch re-rendered). Both this heatmap and the habit stats one are now the same wrapping div grid the statistics banner uses: cells flow oldest→today at a fixed 12px pitch and fill the full column width, with date tooltips preserved.
+- **Pomodoro stats: the goal pencil moved to the goal card's top-right corner** — The goal editor button used to sit inline right after the "x / y" numbers, oversized and pushing them off-center. It is now a small 20px pencil pinned to the top-right corner of the goal card.
+- **Pomodoro stats: the Today Timeline section explains itself** — The section header now carries a hint ("completed focus + break rhythm") and the empty state says finished sessions will appear there in order, instead of a bare "no records" that read like a data bug. (The section also genuinely rendered empty before the heatmap fix — the crashing heatmap aborted the render pass before the timeline could draw.)
+
+### Fixed
+- **Neon / Volt / Magma / Onyx: dialogs rendered as white sheets with white text** — These four dark themes set their card surface to transparent (the dashboard itself paints the near-black backdrop), but Obsidian renders dialogs outside the dashboard where that backdrop doesn't exist: the standard config dialogs floated on the dim scrim alone, and a family of self-drawn dialogs — reading pick / end / stats, pomodoro stats, activity panel and day drill-down, habit stats, delete confirmations, the countdown date picker and the calendar's hover day preview — hardcoded Obsidian's native background, which is pure white in light mode, under the theme's white text. These themes now define an opaque dialog surface (`--db-bg-modal`, plus a raised variant for inner cards, inputs and active pills) that every dialog resolves; body-level popups that were missing it (the reading dialogs and the calendar day preview) now mirror the live theme variables onto themselves the way the config dialogs already did, and the banner editor's mode/stats text follows the theme too. All other themes keep their exact previous surfaces via the fallback chain.
+- **Phone: sticky sections were clamped to a desktop-tuned height** — A section height you once dragged on desktop is saved and re-applied as an inline style on every render, and on a phone that pixel value clamped the row far below its mobile sizing — a sticky note's todo card ended up showing about one task. Drag-saved heights are now desktop-only; phone rows follow the mobile layout entirely, with sticky sections getting a dedicated 45vh.
+- **Phone: the add-task input wore a rounded box desktop never showed** — iOS draws a native rounded background on text inputs from `-webkit-appearance`, which `background`/`border: none` doesn't remove (desktop Chromium never draws it). The borderless input recipe now disables the native appearance as well, so the add-task field looks exactly like it does on desktop.
+
+## 1.9.3 (2026-08-25)
+
+### Added
+- **Quick-capture field width now follows the pane, not the viewport** — The common actions bar's capture input is sized by a container query against the bar itself (`cqw`), with the old viewport-relative width kept as a fallback for engines without container support. In a tablet split pane or a narrow dashboard sidebar the field now scales down with the space it actually has (full 160px from ~890px of pane width, 96px floor below that) instead of holding a viewport-wide box and starving the chip strip. When the bar gets truly narrow, a pure-flex yielding chain kicks in — the chip strip keeps a 104px floor, and the input shrinks down to a bare pencil icon that expands again on focus — so no width makes the buttons disappear.
+- **Drag to reorder habits in the stats overlay** — Every habit card in the stats overlay now has a leading grip handle: grab it and drop on the top or bottom half of another card to reorder (desktop drag & drop; on touch, press-and-hold a card's header row then drag — a short press stays a tap, and moving before the hold arms is read as scrolling). The new order persists in `habits.json` and drives the sidebar widget's list everywhere, live, the moment you drop.
+
+### Fixed
+- **Habit stats overlay showed only the first habit once anything was checked** — A checked-in day rendered its heatmap cell with a space-joined class string (`"…heatmap-cell …heatmap-cell--done"`), and Obsidian's `createSvg` passes `cls` to `classList.add` as a single token — which throws `InvalidCharacterError` on the space. The throw aborted the overlay's render loop mid-card, so with every habit unchecked (no `--done` cell anywhere) all cards rendered, but the moment any habit had a check-in, rendering died inside the first card's heatmap and every habit after it vanished. The cell now takes its base class at creation and adds the modifier via `addClass`; the pomodoro stats overlay's trend bars (`--clickable`) and heatmap cells (`--active`) carried the identical latent bug and are fixed the same way.
+- **Phone: the quick-capture input floated at the bar's upper-right instead of sitting level with the chips** — The common actions bar anchored its content to the top edge so the auto-growing capture field could only extend downward. On phones the bar's minimum height scales with the font size while the input pill is a fixed 26px, so the pill — the only opaque box in the bar — visibly hugged the top edge while the transparent chip row read as centered. The bar now vertically centers its single-line content (input pill, chips and cog share one midline), and re-anchors to the top only while the capture field is expanded past one line, preserving the grow-downward behavior.
+- **Habits could silently vanish after a reload when several changes landed close together** — Every habit mutation fired an unserialized, fire-and-forget write of `habits.json`. Two of those writes racing on the same file could complete out of order, and an earlier write (serialized when only the first habit existed) landing last cleanly replaced the newer file. Saves now go through a serialized write queue (same pattern as the dashboard file's sync engine), so at most one write is ever in flight and each write persists the freshest state; a transient read failure at startup (iCloud file not yet downloaded, mobile file lock) no longer disables saving for the whole session either — the service retries the read and merges disk + in-session state before writing.
+- **A transient read failure at startup disabled habit saving for the whole session** — When `habits.json` could not be read at load (iCloud file not yet downloaded, a mobile file lock), saving stayed silently skipped until the next restart, so every habit added or checked that session was lost on reload. Before writing, the service now retries the read; on success the disk state and the in-session state merge (union by habit id and by check-in id), so neither side is lost — and a still-unreadable file is still never blindly overwritten.
+
+## 1.9.1 (2026-08-25)
+
+### Fixed
+- **Full-screen calendar rendered unthemed (no cell borders or colors)** — The expanded calendar and the day-agenda popup live in Obsidian's modal layer, outside the dashboard's theme root, so every `--db-*` variable fell back to its near-invisible generic default: day cells had no visible border or background, and today's cell had no accent. The modals now copy the live theme variables from the dashboard root onto the modal box (same mechanism as the reminder popup and the library/media popovers), so the whole grid picks up the real theme. The full-screen month view additionally gives every day cell a light theme-adaptive border (mixed from the theme's text color, so it reads light-on-dark and dark-on-light) and today's cell an accent-tinted background with an accent-colored, bolder date number.
+- **Dataview text sat a size below every other section** — Table cells inherited the library table's 0.75em with headers compounding down to ~8px, and list/free/task text sat at 0.8125em. All four views now render their primary text at the dashboard's common 0.85em row-text size, with table headers and source metadata (path/created columns, list source lines) scaled up proportionally. The library section's own table is unchanged.
+
+## 1.9.2 (2026-08-25)
+
+### Added
+- **Excluded folders, everywhere scans happen** — A shared "Excluded folders" setting (type a path or browse; subfolders included, case-insensitive) is now available in the config of every section that scans the vault: Library, Folder, Dataview, All Tasks, Calendar (section + sidebar widget), and the Images/Videos sections — the latter gaining their first config modal for the purpose. Files inside excluded folders never reach a section's data, DQL queries never see them, and the Statistics banner's note counts, streak and connectivity metrics skip them entirely (links touching an excluded folder on either end don't count either). One shared editor component and one matching helper keep the behavior identical everywhere.
+- **Unified themed dialog system for every section & widget config modal** — All sixteen configuration dialogs now share one layout skeleton (header / body / footer card groups) and one action-bar convention (cancel-style button left, solid-accent confirm right, destructive red via the theme's danger color). The weather, tracker, countdown, card edit, task-template, media-tag, quick-notes, banner editor, appearance studio, reminder and guide dialogs were rebuilt onto it; the tracker's style/days selectors reuse the library segmented control; and the TickTick project filter — previously a native unthemed settings list — is now a themed dialog like the rest.
+
+### Fixed
+- **Custom colors, radius and glass blur never reached settings dialogs** — The Appearance Studio overrides are set as inline `--db-*` variables on the dashboard root, and Obsidian renders dialogs in the modal layer outside that root, so every config dialog kept showing the stock theme colors no matter what you customized. All dialogs now mirror the live resolved theme variables (theme + light/dark mode + every user override) onto the dialog container when they open (`applyModalTheme`, replacing five ad-hoc wiring styles that had drifted across 26 files), so custom accent colors, the corner-radius slider and the glass-blur setting finally apply everywhere. The countdown date-picker popup gets the same treatment, and the Fortune Stick overlay joins the mobile blur-kill list (iOS GPU safety).
+- **Mono theme dialogs rendered transparent; the confirm dialog's primary button was invisible** — The Mono theme's dialog overrides and several shared rules referenced `--db-*` variables with no fallback, which resolve to nothing in the body-level modal layer — a fully transparent dialog background and a white-on-transparent Confirm button. With variables now mirrored onto dialogs these resolve correctly, and the fallback-less rules gained native-variable fallbacks for contexts where no dashboard is open.
+- **Dialog scrollbars and destructive buttons now follow the theme** — The hardcoded white scrollbar thumbs (invisible in light mode) are replaced by the theme's accent tint, the four different destructive reds (`#f43f5e`/`#e74c3c`/`#ef4444`/`rgb(220,50,50)`) converge on `--db-danger`, and ~950 lines of per-theme dialog overrides are deleted now that every dialog resolves the real theme variables — adding a future theme no longer requires a modal companion block, and the Appearance Studio radius slider controls dialog corners too.
+
+## 1.9.0 (2026-08-25)
+
+### Added
+- **Habit tracker sidebar widget** — A new sidebar widget shows your check-in habits as tap-to-toggle rows: one tap marks today done (tap again to undo), with a live "x/y" done counter and a per-habit streak badge. The header has a `+` button to add habits (names are validated: no duplicates, 1–50 chars) and a stats button. Enabled from Settings → Widgets (on by default on fresh installs; existing installs keep their current sidebar untouched). The widget joins the drag-to-reorder system and survives day rollover automatically.
+- **Habit stats overlay** — The stats button opens an overlay with one card per habit: current streak, last-30-days completion rate (denominator capped at the habit's age so a new habit shows 100%, not 3%), all-time total, and a 12-week check-in heatmap with date tooltips. Renaming and deleting habits live here, keeping the widget itself a pure one-tap surface; deleting sweeps the habit's history and every view updates live.
+- **Stats banner: heatmap source** — The banner's stats settings gained a "Heatmap source" option: note activity (default) or habit check-ins. Habit mode plots either one chosen habit (two-tone grid) or the all-habits rollup (daily completion count on the existing gradient scale), and the center sub-label switches to habit copy ("2/3 done today" / "85% last 30 days") so the text always matches the chart. If the referenced habit is deleted or none exist, the heatmap silently falls back to note activity instead of blanking.
+- Habit data is stored in the plugin folder as `habits.json` (pomodoro.json pattern): versioned, validated on load, records pruned after 730 days, and shared across every open dashboard view — a check-in in one view refreshes the widget and banner in all of them.
+- **Three new dark themes: Neon (霓虹), Volt (电光), Magma (熔岩)** — A family of near-black themes built on the Onyx pattern: one high-impact accent color over a dark background with light text, and deliberately zero light/dark-mode overrides so the dashboard looks identical whether Obsidian is in light or dark mode. Neon pairs near-black with neon magenta, Volt with electric cyan, Magma with a warm near-black and lava orange. Each theme ships the full set of companion overrides: banner scrim, modal styling, and solid-accent Pomodoro buttons, with the button text color chosen per accent brightness for legibility (black on the bright cyan/orange, white on magenta).
+- **Theme picker slims from 14 to 13** — Haze (薄雾), Jade (翡翠), and Eclipse (日食) are removed; existing installs migrate automatically to the closest surviving theme (Haze → Volt, Jade → Matcha, Eclipse → Mono; the legacy Ember preset now maps to Magma), so no one falls back to the default after updating.
+
+## 1.8.10 (2026-08-25)
+
+### Fixed
+- **Common Actions bar on phones: chips scroll instead of wrapping** — With many buttons the bar used to wrap onto several lines (a deliberate phone-only layout from when the capture field had a fixed width). The bar now stays a single row everywhere and crowded buttons scroll sideways inside the chip zone.
+- **Common Actions bar on tablets: buttons squeezed to ~2 visible** — Two stacked causes, both fixed: Obsidian's own tablet stylesheet (`.is-tablet button:not(.clickable-icon) { padding: 4px 20px }`) out-specified the plugin's chip/cog padding, inflating every chip into a ~40px-wider pill; and the Fleeting Capture field had a hard-coded 160px width. The chips/cog now reset the tablet padding inflation (same qualification trick as the earlier scroll-top fix), and the capture field's width is responsive — full 160px from ~890px viewport up, scaling down to a 108px floor on phones, so the field can no longer starve the button zone on any screen.
+
+## 1.8.9 (2026-08-25)
+
+### Added
+- **Calendar: click a task to jump to its source** — Tasks in the day-agenda popup (whole row, not just the file chip), the full-screen month grid, the week time grid (timed events and all-day chips) now open the containing note and scroll straight to the task's line. Works in both the in-dashboard note popover and the tab path (when the popover is disabled): the line is revealed and the cursor placed on it. Checkbox, source-chip, and inline-link clicks are never hijacked.
+- **Calendar: new tasks land where you'd expect** — Adding a task from the day agenda inserts it at the top of that day's daily note (right below frontmatter) instead of appending to the bottom. When the day has no daily note yet, the task goes to the dashboard file's first checkbox list (appended at its end, matching the list's indentation; end-of-file when the dashboard has no list yet). Only when neither exists does it fall back to creating the daily note — so the core Daily Notes plugin being disabled is no longer a dead end. The success Notice says where the task landed.
+
+### Fixed
+- **Lint: unsafe `any` from `loadData()`** — The settings loader's `loadData()` result (typed `any` in the Obsidian API) is now held as `unknown` before the settings cast, restoring a clean `eslint .` run.
+
+## 1.8.8 (2026-08-24)
+
+### Fixed
+- **Community-plugin review compliance (re-submission)** — Style and DOM helper usages flagged by the Obsidian linter are resolved: the quick-note capture box's auto-grow assigns height through `setCssStyles` instead of direct `element.style` writes; the detached weather city-suggest dropdown is built with the global `createDiv()` helper instead of `ownerDocument.createElement`; plain-text rendering goes through `appendText()` instead of `appendChild(createTextNode(...))`
+- **Deleting one section deleted every same-named section** — Deletion and rename matched columns purely by name, so two sections sharing a title (easy to hit now that a blank name falls back to the type name) meant the trash button removed all of them at once and rename edited all of them together. Delete and rename now carry the exact section's identity (index with a name guard) from the UI into the data layer, so only the section you clicked is affected; creating or renaming into an existing name auto-suffixes it ("名称 2", "名称 3") so duplicates can no longer be created in the first place.
+- **Calendar excluded-folders: manual add row vanished after removing a chip** — The chip re-render emptied the container that also held the input/browse controls, so the add row disappeared after any chip removal or multi-select confirm. The add row is now a sibling of the chip list and survives every update.
+
+### Added
+- **Stats banner: streak source toggle** — A checkbox under the daily-notes folder setting chooses whether the center streak counts daily notes (default) or any note creation across the vault. When counting notes the metric label switches to "Active days", keeping the number's meaning unambiguous.
+- **Stats banner: excluded folders** — Folders chosen in the stats settings (searchable multi-select tree with parent-covers-children, or manual path entry for folders outside the vault tree) are excluded from every statistic — totals, heatmap, activity streak, tasks, tags — and link stats are filtered on both ends so connectivity, orphan rate, and average links per note stay consistent with the filtered file set.
+
+### Changed
+- **Section name is now optional** — Leaving the name blank in the "Add section" modal uses the localized type name as the section title; the confirm button no longer stays disabled on an empty input
+- **First install opens discoverable** — A brand-new install (no settings data yet) starts with the sidebar pinned open and the Common Actions bar enabled, and the sample guide card reads "unpin the sidebar" accordingly. Existing installs keep their current state untouched.
+- **Default guide card teaches renaming instead of file editing** — The memo-section tip card no longer tells users to edit dashboard.md to delete sections (the section menu already covers that); it now demonstrates double-clicking a section title to rename it.
+
+## 1.8.7 (2026-08-24)
+
+### Added
+- **Sticky Notes ("便利贴") section — memos and todos in one section** — A new section type that mixes free-form memo cards and checkable todo cards in the same horizontal row. Clicking the add button opens a type chooser (icon + label + description) before the card is created. Memo cards behave exactly like memo-section cards (inline textarea editing, palette color, save-as-note, drag-to-resize); todo cards behave exactly like todo-section cards (task list with progress, save-to-daily). The section header keeps the one-click archive button for completed tasks but drops the task-template button — each card is chosen explicitly. Section layout follows the todo section (scrollable row, 260px cards); the type persists as `type: sticky` in the dashboard file and round-trips with mixed card types
+- **Global text size** — A Small / Medium / Large segmented control in Theme Studio scales the whole dashboard proportionally (titles, body, banner, sidebar, widgets) through one root font-size multiplier; Medium keeps the inherited default
+- **Library quick date filter** — "Within N days" rolling-window chips next to the fixed date range, evaluated relative to today (by created or modified date)
+- **Calendar excluded folders: multi-select picker** — Manage the whole exclusion set from a searchable folder tree in one place; selecting a parent folder covers all of its subfolders (rows show "via parent"). Manual path input remains for paths outside the vault tree
+- **Dataview `WITHOUT ID` + Free view** — `LIST WITHOUT ID ...` drops the file-link column. A third "Free view" mode (sparkles icon) renders each query type in its native Dataview shape — TABLE → compact table, LIST → bullet list, TASK → checkbox list — instead of forcing one layout across all queries
+
+### Changed
+- **Sidebar widgets survive dashboard edits** — Widgets (calendar, countdown, weather, pomodoro, reading) are detached and re-attached by signature instead of rebuilt on every dashboard data mutation: month navigation stays on the opened month, countdowns keep ticking, no re-scans — cards re-render around them. The sidebar week calendar also refreshes in place (debounced) on vault task changes instead of triggering a full dashboard rebuild
+- **Calendar / all-tasks typography** — Calendar grids, event times, and all-tasks list labels move to em-based sizes so they follow the new text-size setting
+
+## 1.8.6 (2026-08-17)
+
+### Fixed
+- **"New section: Dataview" popup on every Obsidian launch** — The announcement had its version gate removed during 1.8.2 verification and never got it back, so it appeared (and wrote settings) on every startup. The gate is restored: it now shows once per plugin version — on install/update or a plugin reload, not on each vault launch.
+- **Quick commands lost after restart** — Commands added in the Common Actions config modal only reached disk when "Save" was clicked; closing the modal via Esc or the X silently discarded them. Adding, deleting, or drag-reordering a command now persists immediately (label/icon tweaks still ride on Save).
+- **Sidebar collapsing when switching the calendar widget between week/month** — The toggle rebuilt its own buttons inside the click handler, detaching the clicked button from the DOM before the click bubbled out; the sidebar's "click outside to collapse" check no longer recognized the detached target and folded an unpinned sidebar. The toggle's clicks now stay inside the sidebar (same for the expand button).
+- **Calendar expand button pushed out of view** — The two-segment week/month control is now a single toggle button (icon shows the view you'd switch to), leaving room for the expand button. The expand button is also restyled as a bare icon — no background or border — matching the toggle and nav arrows (hover still tints it).
+
+## 1.8.5 (2026-08-17)
+
+### Added
+- **Quick commands in the Common Actions bar** — A fourth chip type on the pinned top bar: one-click execution of any Obsidian command (core or plugin). In the bar's config modal, a new "Quick commands" section lets you add commands via a live-filtered search over the vault's entire command registry (match by name or id), then rename, re-icon (fuzzy icon picker), and drag-reorder each row. Clicking a command chip runs it through Obsidian's command system; a stale id (plugin disabled or removed) shows a notice instead of failing silently. Commands persist in global plugin settings, and the bar's chip order is Today → create buttons → pinned notes → commands.
+
+## 1.8.4 (2026-08-16)
+
+### Fixed
+- **Settings tab layout broken on Obsidian 1.13+** — The declarative settings bridge exposed each module as a navigable sub-page, so the new Obsidian settings UI scattered the modules into separate pages and squeezed dozens of setting rows sideways inside horizontal flex rows. The tab is now a single vertical page: every module (General / Widgets / Lunar / Year Progress / Calendar / Backup) renders inline under its own heading, searchable in the unified settings search, identical to the pre-1.13 layout. Also removes a double-render that drew all modules twice on both old and new Obsidian, and fixes `version-bump.mjs` so `versions.json` actually records each new version (a bad `Object.values` check meant entries were silently skipped).
+
+## 1.8.2 (2026-08-15)
+
+### Added
+- **Dataview announcement + WeChat community group** — A one-time popup shown on plugin update (once per version, after layout ready) introduces the Dataview section's capabilities and invites users to the WeChat exchange group. The QR code is base64-bundled into the plugin (works offline, no vault file dependency); clicking it opens the full-size image for scanning. A fallback line tells users to add WeChat contact `PandoraReads` when the group invite has expired. Staggered against the Quick Notes guide so the two modals never overlap.
+
+### Fixed
+- **Wikilinks with heading/block subpaths only opened the note** — `[[note#heading]]` / `[[note#^block]]` in memo cards and Dataview sections parsed the `#fragment` but dropped it on click. The fragment now flows through the whole open-note chain: opening in a tab resolves the anchor via native `openLinkText`, the in-dashboard note popover scrolls to it with `setEphemeralState`, and hover previews include the subpath so they preview at the anchor.
+
+## 1.8.1 (2026-08-15)
+
+### Fixed
+- **Stats overlay rendered blank** — All `--db-*` theme variables live on `.apex-dashboard-root[data-theme]`, but the stats and tag-manager overlays were appended to `document.body` — outside that scope — so every `var()` reference (chart fills, text colors, card backgrounds, the `color-mix()` heatmap gradient) resolved to nothing. Both overlays now mount under the themed root (falling back to body when no dashboard view exists).
+- **Stats range "All" wrapped to two lines** — Range toggle buttons now keep their label on one line (`white-space: nowrap`), matching Day/Week/Month/Year.
+- **Right column blank until a range click** — The heatmap SVG carried `width: 100%` with no height inside an overflow-auto grid; the percentage width fed the grid row-height cycle and collapsed to 0 on first paint. The SVG gets an explicit height, the container a fixed aspect-ratio, and the grid track `minmax(0, 1fr)`.
+- **Daily goal had no visible entry point** — New inline editor: the pencil next to the hero goal number opens a `− N +` stepper (1–16) that persists immediately; previously only reachable in plugin settings.
+- **Stats header/range text too small** — Title 1em → 1.3em, insight line 0.68em → 0.8em, range buttons 0.65em → 0.82em with a shadow on the active pill.
+- **Tag manager actions were anonymous icon buttons** — Tags now render as bubble chips (color dot + name; pinned chips tinted with a pin glyph). Clicking a chip expands labeled pill buttons (Pin/Unpin, Rename, Merge, Delete — red on hover), with tooltips explaining pinning and merging, plus a header hint line.
+
+## 1.8.0 (2026-08-15)
+
+### Added
+- **Focus statistics landscape dashboard** — The pomodoro stats popup is redesigned as a ~1040px three-column view. Left: grouped KPIs — Today (hero goal card with progress bar, focus time, efficiency score, interruptions, break adherence, streak with encouragement) and History (range total with period-over-period delta, 7-day average, total, best day). Middle: interactive donut (hover expands a segment; center switches to that tag's time) that becomes a daily-goal gauge when there's a single activity, plus an adaptive trend chart (day = 24 hour bars, week/month = days, year/all = months) with a dashed daily-goal baseline and click-to-drill day panels, and a 24-hour time-of-day distribution strip with a peak-hour badge. Right: activity ranking bars (click filters the trend to one activity, with a removable filter chip), a 12-week 4-step gradient heatmap with less→more legend, and a today timeline showing each work record with its break-rhythm sub-line (break minutes taken / skipped, interruptions). Day/Week/Month/Year/All natural-period ranges; collapses to one column under 900px.
+- **Daily pomodoro goal** — New `pomodoroDailyGoal` setting (default 8, slider 1–16 in settings, inline stepper on the stats hero card). Drives the hero progress card, the single-activity gauge, the trend baseline, and efficiency score.
+- **Pomodoro tag management** — Rename / delete (history falls into the default activity) / merge / pin tags via the stats header gear. Tag metadata persists in `pomodoro.json`; pinned tags always lead the widget's recent-activity chips.
+- **Pomodoro data v2** — `pomodoro.json` upgrades to `{ version, currentActivity, tags, sessions }`; bare-array v1 files migrate transparently. The current activity persists across restarts. Records log actual focused minutes (pauses excluded via wall-clock accounting), interruption counts, and break outcomes (minutes taken or skipped; legacy records read as unknown, not zero). The `pomodoroAutoStartBreak` setting is now honored — phases park in standby with a "Start Break"/"Resume Focus" button instead of auto-running.
+- **Insight line** — The stats header shows a one-line, state-aware summary (goal hit / streak alive / gentle restart nudge).
+- **Media tags for images & videos sections** — Tag individual images and videos directly in the dashboard and filter the section by tag. Tags live in plugin data (no vault files touched), follow files across rename/move, and are pruned when a file is deleted. Three ways to edit: a tag button on each grid/list tile, a Tags column in table view, and a tag bar inside the lightbox (saving there never restarts a playing video). The filter popup gains a tag-chips row (OR within tags, AND with search/date/folder filters, matching the library section's semantics). Tag writes are debounced so batch tagging produces a single settings write, and tag edits only re-render the affected section — never the whole board.
+
+## 1.8.0 (2026-08-15)
+
+### Added
+- **Media tags for images & videos sections** — Tag individual images and videos directly in the dashboard and filter the section by tag. Tags live in plugin data (no vault files touched), follow files across rename/move, and are pruned when a file is deleted. Three ways to edit: a tag button on each grid/list tile, a Tags column in table view, and a tag bar inside the lightbox (saving there never restarts a playing video). The filter popup gains a tag-chips row (OR within tags, AND with search/date/folder filters, matching the library section's semantics). Tag writes are debounced so batch tagging produces a single settings write, and tag edits only re-render the affected section — never the whole board.
+
+## 1.7.1 (2026-08-14)
+
+### Fixed
+- **Tablet: Quick Notes toolbar split into two rows** — Obsidian sets `.is-mobile` on phones *and* tablets, so the phone-only rule that wraps the Quick Notes bar (capture input on its own row, chips above) was hijacking the tablet layout too. The wrap rules are now scoped to `.is-phone`; tablets keep the desktop single-row toolbar.
+- **Tablet: scroll-to-top button distorted with no visible icon** — Obsidian's tablet stylesheet ships `.is-tablet button:not(.clickable-icon) { padding: 4px 20px }` (specificity 0,2,1), which overrode the plugin's `padding: 0` and inflated the 36px round button into a wide pill, pushing the arrow glyph out of view. The plugin now re-asserts zero padding at matching specificity for its fixed-size icon buttons (scroll-to-top, calendar expand, calendar refresh).
+- **Tablet: todo delete & reminder buttons squeezing task text** — The same Obsidian tablet button-padding rule added 40px of horizontal padding to *each* of the todo row's two action buttons, eating ~80px of task-text width on every row. Both buttons are back to their intended 2px footprint (icon size unchanged — only the occupied width).
+- **Tablet: sidebar calendar stuck on "tap refresh to load" with no refresh button** — The widget used `Platform.isMobile` to pick the phone's deferred manual-load branch; tablets also match, so they showed the manual-load hint forever with no way to load. Tablets now auto-load the grid like desktop, and the phone branch gained an actual refresh button under the hint text.
+
+## 1.7.0 (2026-08-12)
+
+### Added
+- **Dataview section — query your vault with DQL** — A brand-new section type that runs Dataview-style queries directly inside the dashboard, no external plugin required. Write a self-contained DQL engine covering `TABLE`, `LIST`, `TASK`, `CALENDAR`, and `HEATMAP` query types with the full clause set (`FROM` folders/tags/links with `AND`/`OR`/`NOT`, `WHERE`, `SORT`, `GROUP BY`, `FLATTEN`, `LIMIT`), ~40 built-in functions, all `file.*` implicit fields, YAML frontmatter, and inline fields (`[key:: value]`). The config modal offers live syntax validation and one-click sample queries; `TASK` rows toggle back to the source note, `CALENDAR` plots a month grid, and `HEATMAP` plots a year contribution grid from any numeric field. Results reuse the dashboard's glassmorphism theme and refresh on demand (manual refresh button).
+- **Dataview heatmap queries** — `HEATMAP <value> [USING <date>]` aggregates a numeric field by day into a year heatmap; `USING` may sit before or after `FROM`.
+- **Scroll-to-top button** — A small floating button in the bottom-right corner smoothly scrolls the dashboard back to the top once you've scrolled down, with safe-area inset on mobile so it clears the native bottom bar.
+
+### Changed
+- **Calendar DQL date fields** — `CALENDAR <field>` now uses the requested date field instead of silently falling back to file creation dates.
+
+### Fixed
+- **Subtask collapse/expand lag** — Tapping the chevron to expand or collapse a parent task's subtasks (or a project's nested docs) could take several seconds to respond. The "quiet" collapse path was still echoing through the full-board re-render: the deferred disk write unconditionally notified the view, rebuilding the entire dashboard a second after every toggle. The write is now silent, and the chevron handler tracks collapse state locally instead of reading a stale closed-over snapshot (which could only ever fold once after the re-render was removed). Toggling is now instant.
+- **Collapsed parent could not be expanded after a sibling change** — If a parent task (or nested doc) was collapsed and then anything triggered a full re-render of the card — e.g. checking off a sibling task, which moves the completed task to the bottom — the collapsed parent's children were never re-created in the DOM, so the in-place expand had nothing to unhide and the chevron appeared dead. The renderer now always builds the child DOM (hidden via a class when collapsed) and recomputes visibility from a DOM-readable `aria-expanded` flag, so collapse/expand stays correct across full re-renders, including nested collapse.
+- **Memo card drag lag and afterimage** — Dragging a memo card to a new spot felt sluggish and left a brief visual ghost. The move triggered a full-board re-render (every section, every card, with each memo line re-parsing links), which is what the user waited on, and it landed during the dragged card's `transform` settle transition — tearing the half-rotated card into a double image. Card moves are now zero-rebuild: the dragged card's DOM node is physically relocated (keeping its already-parsed links and hover bindings intact) while the data persists in the background, so the drop is instant and no re-render interrupts the transition.
+
+### Performance
+- **Wikilink resolution on large vaults** — Every `[[link]]` in a memo or project card that didn't match by exact path used to fall back to scanning the entire vault for a matching basename — once per link, per render. On a vault with thousands of notes this added hundreds of ms to each render and scaled with the number of links. Links now resolve against a cached basename index (built once, kept in sync on file create/delete/rename), turning the per-link cost from a full vault scan into a hash lookup.
+
+### Removed
+- **Standalone heatmap section** — The old heatmap section type has been removed. Use a Dataview section with `HEATMAP rating FROM "Books" USING finished`, or the existing tracker card heatmap style, depending on the use case. Existing `type: heatmap` sections safely fall back to regular project-style sections on load.
+- **Legacy sidebar heatmap widget settings** — Dropped the unused `widgetHeatmap*` settings strings left over from the removed sidebar widget.
+
+## 1.6.3 (2026-08-10)
+
+### Fixed
+- **iOS tap crash** — Tapping the dashboard just after it finished rendering could crash the Obsidian render process on iOS (the app would restart and you'd lose your place). The mobile backdrop-filter pass now disables *all* blur, not just the variable-driven panels: hardcoded blur layers (file-suggest dropdown, heatmap popup) and modal blur were still active and, combined with iOS's sticky-`:hover` repaint on the first tap, pushed the WKWebView past its GPU/memory limit
+
+### Changed
+- **Banner statistics on phones** — The three-column statistics banner now shows only the center (Activity) column on phone-width screens; the left and right columns were being clipped and forced horizontal scrolling
+
+## 1.6.2 (2026-08-09)
+
+### Added
+- **Banner Statistics view** — A second banner mode alongside Poster & Quotes, switched via a new segmented control at the top of the wand (edit) modal. Renders a three-column, role-differentiated dashboard (1:3:1): **Scale** (total-notes hero + a small stat strip), **Activity** (day-streak hero + a horizontal contribution heatmap), and **Productivity** (task-completion / links-per-note / connectivity rows with progress bars). New `banner-stats.ts` module; `BannerMode`, `BannerStatsConfig`, and `mode`/`statsConfig` fields on `BannerData`
+- **Live vault statistics** — Every metric computes in a single metadata-cache + `resolvedLinks` pass with no file reads: total notes, tag count, total & average links, new this month & week, task totals (done/pending) + completion rate, day streak (core Daily-notes-aware with an any-note fallback), connectivity & orphan rate, plus a ~14-week activity series for the heatmap
+- **Configurable stats banner** — Per-column show/hide, left/center hero-stat pickers, right-column progress-metric checkboxes, background **blur** & **darkness** sliders, accent color, and a daily-notes folder override for the streak — all in the wand modal
+- **Blurred background in stats mode** — The poster image stays visible behind the stats panel through an adjustable `backdrop-filter` blur + dark scrim (defaults: blur 2, darkness 20, accent `#bff038`)
+
+### Changed
+- **Default UI language is now 中文** — `DEFAULT_SETTINGS.language` and the i18n fallback default flipped to `zh`. Users who explicitly chose English keep it
+- **Banner layout polish** — Left/center hero labels sit inline to the right of the big number; the left stat strip stacks vertically with icons; the heatmap is a wide horizontal strip that fills the center column
+
+### Fixed
+- **Banner view reset on reload** — `mode` and `statsConfig` are now serialized into the dashboard frontmatter (previously only the legacy quote/image fields were written), so the selected view and its config survive a plugin reload/update instead of snapping back to Poster
+- **Stats not refreshing** — The debounced vault-change refresh was silently skipped whenever a stats config hadn't been saved (a `config !== undefined` guard); it now always refreshes in stats mode, so totals and the heatmap update as you edit
+
+## 1.6.1 (2026-08-09)
+
+### Added
+- **Capture template** — Fleeting notes created via the capture box's folder flow can now be seeded from a template. New `quickCaptureTemplate` setting (vault path to a template file) in the Common Actions config modal; the template's `{{date}}`/`{{time}}` vars are substituted and the captured line is appended below. Shared `readTemplateContent` helper extracted so preset creation and capture share one template-loading path
+
+### Changed
+- **Capture timestamp** — Captured lines are now stamped `[[YYYY-MM-DD]] HH:mm` (a wiki-link to the daily note plus time) instead of time-only `HH:mm`, enabling cross-vault date filtering and daily-note backlink integration
+- **Capture section label** — The "Capture" section in the Common Actions config modal is now "Fleeting Capture" / "收集闪念"
+- **Weather cards refresh in place** — The periodic weather refresh now updates only weather cards (`refreshWeatherCards`) instead of rebuilding the whole dashboard, removing the main source of periodic jank on mobile
+- **Lighter mobile blur** — Removed `backdrop-filter` blur from buttons/cards and capped modal blur to 6px on mobile, cutting GPU load when opening modals
+
+### Fixed
+- **Capture-to-file created a stray file** — When the capture target was a note path without a `.md` suffix (the natural Obsidian way to reference a note), capture failed to find the existing note and created an extensionless file instead of appending. `getOrCreateNote` now resolves the `.md` fallback via `resolveFile` and normalizes the extension when creating
+
+## 1.6.0 (2026-08-07)
+
+### Added
+- **Quick Notes first-run guide** — A centered welcome popup on startup walks you through the new Common Actions toolbar and can turn it on in one click. Shows once per plugin version (`quick-note-guide-modal.ts`)
+- **Drag-to-reorder Quick Notes buttons** — Rearrange create/pinned buttons by dragging in the config modal; the toolbar layout is refined (Today leads the strip, action zone grouped)
+
+### Changed
+- **Weread shelf & key validation** — Shelf pagination and progress-bar rendering refined; the API key is validated upfront (must start with `wrk-`)
+
+### Fixed
+- **Daily Notes template** — `{{date}}` and other template variables are now substituted when the Today button creates a note, and the Daily Notes lookup is more resilient across Obsidian versions
+
+## 1.5.0 (2026-08-07)
+
+### Added
+- **Appearance Studio** — New "Customize appearance" entry in settings opens a modal to override the active theme's colors, set a global dashboard background image (dim / blur / fill controls), and fine-tune card opacity, glass blur, and corner radius. Changes apply live to all open dashboards. New `appearance.ts` + `theme-studio-modal.ts`
+- **Quick Notes** — Sidebar capture-thought input, note presets, pinned notes, and an "open today's note" action, with a config modal. New `quick-note-section.ts` + `quick-note-config-modal.ts`
+- **Reusable icon picker** — New `icon-picker-modal.ts`
+- **Dashboard backup & restore** — Periodic snapshots of the dashboard file into the plugin folder (`<vault>/.obsidian/plugins/apex-dashboard/backups/`): enable toggle + hourly/daily/weekly/monthly cadence + retention count, plus one-click "Back up now" and "Restore latest backup" (handles both overwrite and deleted-file cases, live reloads open dashboards). New `backup-service.ts`
+- **Year-progress sidebar widget** — Shows how much % of the current year has elapsed, with a themed progress bar and day-of-year count; toggle in settings, reorderable like other widgets
+- **More file formats** — Canvas whiteboards, Base databases, PDF, and audio now open in their native Obsidian view (no longer forced into the markdown popover) and show per-type icons in doc lists and search results. New central `file-types.ts` helper
+
+### Changed
+- **Folder section kanban: Trello-style scrolling** — Each group column now scrolls its own cards internally (sticky column header) and the board row is bounded to the section height, so the horizontal scrollbar always stays in view instead of being pushed to the very bottom by long lists. Layout refactor scopes the change to kanban view only (`data-view-mode`); grid/list/table keep their scroll, with the toolbar now staying pinned
+- **Kanban scrollbars** — Folder/library and all-tasks kanban horizontal scrollbar is now thin (3px), always-visible, theme-accented; per-column vertical scrollbar hidden (wheel/trackpad still scroll)
+- **Sidebar collapse indicator** — The expand grip bar is always visible now (was hover-only)
+- **Confirm dialog** — Opaque theme-aware background so text is readable in every theme; the dialog now also supports a non-destructive accent confirm button (used by Restore)
+
+### Fixed
+- **Moving a parent todo/doc with sub-items to another card** — Sub-items are no longer deleted; the whole subtree is preserved on before/after drops (`moveTaskToCard` / `moveDocToCard`)
+- **Mobile todo row** — Task text gets priority width (`min-width:0` + wrapping) and the action buttons are compacted so they no longer dominate the row
+- **Tablet quick-action edit/delete buttons** — Render as proper circular icon buttons (sized up, always shown on touch via `.is-mobile`) instead of deformed blobs
+- **Table view scrollbar** — Themed to match the dashboard
+
+## 1.4.4 (2026-07-04)
+
+### Added
+- **TickTick timezone setting** — Configurable IANA timezone (default `Asia/Shanghai`) used to render TickTick dates. Fixes today's todos, recently-completed window, and habit checkin stamp being computed in the runtime's local timezone, which was wrong whenever the device timezone differed from the user's TickTick account. All wall-clock derivations — today filter, day-diff, time display, and the edit-modal date/time inputs plus save output — now go through the configured zone via `Intl.DateTimeFormat` (no new dependency). Invalid input falls back to `Asia/Shanghai` with a notice. New shared helper module `ticktick-tz.ts`
+- **Open notes directly in a tab** — New `disableNotePopover` setting (defaults off) and a command-palette command `Toggle: open notes directly in a tab` that skips the in-dashboard note popover: clicking a document card opens the note in a tab immediately. The popover remains the default behavior
+
+## 1.4.2 (2026-07-02)
+
+### Fixed
+- **Weread "upgrade required" load failure** — Pinned `skill_version` raised from `1.0.3` to `1.0.4` to match the official Weread Agent Skill; the gateway was returning `upgrade_info` for the old version, surfacing as a "skill needs upgrade" / load-failed state. The official `upgrade_info.message` is now forwarded to the UI, and a non-zero gateway `errcode` is now treated as an error (previously only mentioned in a comment)
+- **Weread highlight import failure** — Highlight import no longer fails on fresh vaults: the import folder is now created recursively. Obsidian's `vault.createFolder` only creates a single level, so the default two-level `Weread/划线` path silently failed when neither level existed. Import errors are now logged to the console instead of being swallowed
+
+### Changed
+- **Weread notebook import button** — Moved the per-book import button out of the centered slot to the top-right of the row (immediately left of the collapse chevron), and stripped its background/shadow so it reads as a bare icon like the chevron
+
+## 1.4.1 (2026-07-01)
+
+### Changed
+- **TickTick lists view redesign** — Replaced the widget-stack config with two header toggle buttons: "Today" (three cards: today's tasks + completed + habits) and "Lists" (project cards with horizontal scroll + drag-to-resize width). Project filter to show/hide specific lists. Old widget config auto-migrates
+- **Heatmap stats button** — Statistics (streak / total / rate) moved from inline to a header button popup, keeping the grid visually clean. Cell colors now follow the theme accent with `brightness` + `saturate` for vivid, non-glowing cells
+- **Folder section property settings** — Folder config modal now has card property display controls (show/hide toggle + property limit), matching the library section
+- **Library kanban view** — Kanban view mode no longer paginates; all items show with horizontal scroll instead
+- **Reduced GPU load** — Backdrop blur radius halved (24px → 12px); all 31 `transition: all` replaced with explicit property lists
+
+### Fixed
+- **Todo subtask nesting** — Dragging a task onto another to nest now targets the correct task (was always nesting into the first)
+- **Section drag-after-refresh** — Library/folder/calendar sections that get re-rendered on vault changes now re-wire their DnD handlers (dedicated `dndCleanupFns`)
+- **Section overlap on resize** — `flex-shrink: 0` on section rows prevents growing one section from squishing others
+- **Heatmap layout** — Single-column strip fixed to a proper GitHub-style matrix via CSS class `grid-auto-flow: column`
+- **Heatmap accent color** — Now correctly reads `--db-accent` from `.apex-dashboard-root` instead of `body`
+- **Card property display** — `formatBadgeValue` now handles `Date` objects (previously all date-type frontmatter was silently dropped)
+- **TickTick view/filter persistence** — `suppressNextRender` now updates `this.data` before skipping, so in-place refresh sees the new config
+- **Countdown setInterval leak** — Timer registered in a module-level `Set` and cleared on every render cycle; self-cleans when DOM detaches
+- **Database/folder view switch** — No longer jumps to other sections (uses `suppressNextRender` + `refreshSectionInPlace`)
+- **New-section name input** — Visible border via higher-specificity CSS override (`.dashboard-task-input`'s `!important border:none` was winning)
+- **Library config view switch** — Same scroll-jump fix as TickTick
+
+### Removed
+- **Ember theme** — Migrated to Eclipse (`carbon`) for existing users
+
+## 1.4.0 (2026-07-01)
+
+### Added
+- **Weread (微信读书) section** — New section type that connects to the official Weread Agent Skill API (wrk- key). Stack multiple widgets: bookshelf (with cover/progress/author), reading statistics (total time, days, daily average), and notes/highlights. Shelf supports pagination, dynamic progress + category multi-select filters, and one-click import of a book's highlights into Obsidian as a markdown note
+- **TickTick (滴答清单) section** — New section type using the unofficial V2 API (cookie auth). Stack multiple widgets: today's tasks, by-project (card layout), recently completed, and habits. Full interactivity: check/uncheck tasks, inline rename, edit due date/priority via modal, and drag-to-reorder — all synced back to TickTick in real time. Desktop popup login auto-captures the session token + CSRF; manual paste fallback for mobile
+- **Heatmap section** — The former sidebar heatmap is now a standalone, multi-instance section type. Renders a GitHub-style year matrix (week columns, 7 day rows, month labels on top) that fills the section width. Two ranges: past year (365/366 days) or this year (Jan 1 → Dec 31). Each heatmap independently configured (folder, tracker key). Cell accent color follows the Obsidian theme
+- **Section reordering** — Drag the grip handle on any section's header to reorder sections vertically (desktop only)
+- **Section height resize** — Drag the bottom edge of any section to set a custom max-height (desktop only, persists per section)
+- **Card view shows all properties** — Database and folder section grid cards now display all frontmatter properties as key:value badges (configurable: toggle on/off, cap the count). Reuses the existing badge CSS
+- **Folder section kanban group-by** — The folder config modal now includes a "Group by" dropdown for the kanban view
+- **Countdown multi-instance** — The sidebar countdown is no longer a single instance; manage multiple countdowns from settings (add / edit / remove). Each renders independently in the sidebar
+- **Add-section modal** — The inline add-section row is replaced by a modal with an icon+label type grid (mobile-friendly) and a named input. The type picker now includes heatmap and weread
+- **Popup login for TickTick** — Desktop users can log in to TickTick in an embedded Electron window; the plugin auto-captures both the `t` cookie and `_csrf_token` — no DevTools needed
+
+### Fixed
+- **Todo subtask nesting** — Dragging a task onto another to make it a subtask now correctly targets the specific task (previously always nested into the first task). Added `nestIntoTarget` with descendant-guard and path adjustment after removal
+- **Section overlap on resize** — Growing one section's height no longer squishes adjacent sections (added `flex-shrink: 0` to section rows)
+- **Library/folder/calendar lose drag-after-refresh** — Scanning sections that get re-rendered on vault changes now re-wire their DnD handlers (dedicated `dndCleanupFns`)
+- **Heatmap layout** — Fixed from a single-column strip to a proper GitHub-style matrix by moving the grid layout to a CSS class with `grid-auto-flow: column`
+
+### Changed
+- **New section creation** — Replaced the cramped inline name+type row with a modal (better mobile UX)
+- **Sidebar heatmap removed** — Promoted to a section type; the sidebar slot and its settings are deleted
+- **Collapse toggle position** — Moved from before the title to right of the title (inside the title group), keeping it out of the header actions
+- **Heatmap config simplified** — Removed rangeMode/days; period is now a simple pastYear/thisYear toggle. Removed the title field (section title suffices)
+
+### Removed
+- **Sidebar heatmap widget** — Replaced by the heatmap section type
+- **Email/password TickTick login** — Removed in favor of popup login (auto-captures cookie+CSRF) and manual paste
+
+## 1.2.9 (2026-06-27)
+
+### Added
+- **Calendar week view** — The Calendar section gains a Month | Week toggle. The in-column week view is a compact vertical 7-day list (tasks sorted by time-of-day with time labels). The full-screen modal's week view is a Google-Calendar-style time grid (left hour axis + 7 day columns, tasks positioned and sized by their start/end time, an all-day strip for untimed tasks, and a red "now" line). Times are read from `⏰` reminders and from `[due::]` / `[start::]` / `[end::]` when they carry `HH:MM`
+- **Add a task to any day from the calendar** — Click a day in the calendar to open its agenda, then add a task with an optional time directly; it is written into that day's daily note (created from the core Daily Notes template/folder if it doesn't exist yet). Timed tasks use `⏰`, date-only tasks use `📅`
+
+### Removed
+- **All Tasks section** — Removed. It scanned and parsed every markdown file in the vault on each render; on mobile this caused sustained CPU load and overheating (confirmed: removing it brings phone temperature back under control). The Calendar section still offers dated-task aggregation with a far lighter footprint
+
+### Fixed
+- **Video library memory leak & mobile overheating** — `<video>` thumbnails no longer leak media decoders: decoders are now released on every re-render and when the lightbox closes. Previously they accumulated indefinitely, causing runaway memory growth and phone overheating/freezing
+- **Mobile video thumbnails** — On mobile, video tiles render lightweight static placeholders (icon + file size) instead of live `<video>` elements, eliminating per-tile decoder cost entirely on phones
+- **Dashboard no longer rebuilds on every note edit** — Vault file events now refresh only the affected sections (library / folder / calendar) in place, instead of tearing down and rebuilding the whole board. The video library and other sections no longer flicker / "keep refreshing" during sync or editing
+- **Media filter popup listener leak** — The outside-click listener is now added/removed with the popup instead of accumulating one per render
+
+### Changed
+- **Desktop video thumbnails are lazy-loaded** — Only thumbnails scrolled into view mount a real `<video>` (via IntersectionObserver); off-screen tiles release their decoder. Live decoders are bounded to the visible few instead of the page size (up to 100)
+- **Faster vault-task scan** — The scan behind the Calendar section now skips files with no checkboxes (via the metadata cache) and yields to the UI thread every ~50 files, so large vaults no longer freeze the app or spike CPU
+- **Mobile glass blur disabled** — The per-card `backdrop-filter` blur is turned off on mobile (≤640px) to cut GPU load and heat; desktop glassmorphism is unchanged
+
+## 1.2.8 (2026-06-26)
+
+### Added
+- **All Tasks section** — New section type that aggregates every checkbox task (`- [ ]` / `- [x]`) across the entire vault, like a dataview `TASK` query. Search, status filter (open/all/done), and sort (file/due/priority/modified)
+- **Task grouping** — Group aggregated tasks by date (Overdue / Today / This week / Later / No due) or by priority (High / Medium / Low / None). List view shows collapsible group headers; kanban view lays groups out as columns
+- **Kanban view** — All Tasks section gains a board view with one column per group (date or priority bucket)
+- **Task write-back** — Checking a task off in the All Tasks or Calendar view flips the checkbox in its source note (atomic, line-precise edit)
+- **Due date & priority parsing** — Tasks read due dates from `⏰` reminders, `[due::]` fields, and `📅` emoji; priority from `[priority:: high|medium|low]`
+- **Exclude folders** — All Tasks and Calendar sections can be configured to skip given vault folders (e.g. Archive/Templates) when aggregating
+- **Calendar section** — New section type showing a native month grid of every dated task across the vault (no dataview or external plugin needed)
+- **Compact + fullscreen calendar** — In-column compact grid (each day lists its tasks; click a day for its agenda) plus a full-screen month grid modal with inline toggle and month navigation
+- **Multi-day events** — Tasks with `[start::]` / `[end::]` (or `🛫` / `🛬`) span across days on the calendar
+
+## 1.2.7 (2026-06-26)
+
+### Added
+- Images/videos sections: thumbnail size toggle (S/M/L) in the toolbar — small/medium/large grid thumbnails (medium = previous default)
+- Images/videos sections: list and table views now show backlinks (notes that link to/embed each file) as clickable chips; click to open the note in the in-place editor popover (same as the database section)
+- Images/videos sections: per-page count selector (20/50/100)
+- Mobile: clicking document links (project docs) and wikilinks (in memos/todos) now opens the in-place note editor popover, matching desktop (previously mobile opened a new tab)
+
+### Changed
+- Images/videos sections are taller by default (more room for the thumbnail wall)
+- Images/videos sections: file count and per-page selector moved to the far right of the toolbar (count left of the selector)
+
+### Fixed
+- Images/videos sections no longer overlap the sections / "add section" bar below after the height increase (section max-height was capping content)
+
+## 1.2.6 (2026-06-26)
+
+### Changed
+- Images/videos sections: pagination now matches the database section style — centered, with multiple page numbers (first/last + ellipsis), instead of a single prev/next
+- Images/videos filter funnel: the folder field now has a "Browse" button that opens a fuzzy folder search (same as the folder section config), instead of typing the path manually
+
+## 1.2.5 (2026-06-26)
+
+### Removed
+- Tag filter removed from the database/folder section toolbar filter (funnel) popup — it was redundant there; the funnel now does date filtering only. (Folder section's tag filter in its gear config dialog is unchanged.)
+
+## 1.2.4 (2026-06-26)
+
+### Added
+- Images/videos sections: a filter funnel in the toolbar to filter by created/modified date range and by folder path (subfolders included); active filters show as removable chips
+
+### Changed
+- Images/videos table view: the Name column is now a fixed width with ellipsis, instead of growing with long filenames
+
+## 1.2.3 (2026-06-26)
+
+### Added
+- Images/videos sections now support list and table views (in addition to the grid thumbnail wall), with a view toggle in the toolbar
+- Rename a media file by double-clicking its name in the table view — backlinks (`![[embeds]]`, `[[links]]`) update automatically
+- Delete a media file from any view (grid/list/table) via a trash button with a confirmation dialog; deleted files go to the Obsidian trash (recoverable)
+
+### Fixed
+- Pomodoro week/month stats now use calendar boundaries (week = Monday→Sunday, month = 1st→end) instead of a rolling 7/30-day window, so this week/month no longer leaks last week/month's data
+- Media lightbox: images and videos now fill and center correctly in the viewport (previously constrained/offset by the default modal sizing)
+
+## 1.2.2 (2026-06-26)
+
+### Changed
+- Tag filter moved out of the database config dialog into the toolbar filter (funnel) popup — it now sits alongside the date filter; the config dialog no longer has a Tags section
+- Database config: the property value search box now sits to the right of the property dropdown (same row) instead of below it
+- Folder section grid cards show at most 2 tags (+N badge for the rest) on a single non-wrapping line, so cards no longer grow taller when a file has many tags
+
+## 1.2.1 (2026-06-26)
+
+### Added
+- Images section — a new section type that scans the whole vault for image files (png/jpg/jpeg/gif/svg/webp/bmp) and shows them as a thumbnail wall; click any thumbnail to open a full-screen lightbox (←/→ to browse, Esc to close)
+- Videos section — same idea for video files (mp4/mov/mkv/avi/webm/m4v); grid shows the first frame with a play badge, click to play inline in the lightbox
+- Both sections support search, sort (modified/created/name) and pagination, reusing the database section's toolbar styling
+
+## 1.2.0 (2026-06-26)
+
+### Added
+- Edit quick actions — hover a custom quick link/command chip to reveal an edit button (top-left), click to rename it and pick a new icon. Desktop only
+- Delete section — every section header now has a trash button (right of the add-card button) that removes the whole section after a confirmation dialog
+
+### Fixed
+- "New Journal" quick action now goes through Obsidian's command system (`executeCommandById('daily-notes')`), so the created daily note honors the core Daily notes plugin's folder, date format, and template settings. Previously it created a root-level `YYYY-MM-DD.md` that ignored all of those.
+
+## 1.1.9 (2026-06-26)
+
+### Changed
+- Folder section grid cards now show the file's tags (as small chips) instead of the folder path on the meta row
+- Database section config: each property value picker now has a search box to filter the chip list, so you can quickly locate a value among many
+
+### Added
+- Database section config: "Group by" now defaults to tags (with an explanatory hint); the kanban view groups by tags unless you choose another property
+
+## 1.1.8 (2026-06-26)
+
+### Added
+- Tag filter for folder and database sections — both config dialogs now have a dedicated Tags section listing every tag in the vault as toggleable chips. Select tags to show only files carrying any of them (OR); folder section combines folder path + tags, database section combines property filters + tags. All views (grid/list/table/kanban) honor it.
+
+## 1.1.7 (2026-06-26)
+
+### Added
+- Folder section — a new section type that lists every document under a chosen vault folder (including subfolders). Pick a folder by typing the path or browsing with a fuzzy folder picker; the display reuses the database section's grid/list/table/kanban views with sort, search, and pagination. Whereas the database section filters by frontmatter properties, the folder section filters by folder path.
+
+## 1.1.6 (2026-06-26)
+
+### Added
+- Save todo card to today's daily note — a new save button on each todo card (left of the delete button) writes all of the card's tasks, with completion state and nesting preserved, to the top of today's daily note (located automatically via the core "Daily notes" plugin settings)
+- Archive completed tasks — a new archive button on the todo section header (left of the template button) moves every checked task off the board into a single accumulating archive file as a timestamped log, e.g. `- 2026-06-26 14:30 ✓ 完成「task」(card)`
+- New setting: task archive file path (defaults to `归档/已完成.md`)
+
+## 1.1.5 (2026-06-16)
+
+### Added
+- Hover preview for document links and `[[wikilinks]]` (Ctrl/Cmd + hover) across project/note card doc lists, inline wikilinks in memos and todos, and the database (library) section — native page-preview popover, no need to leave the dashboard
+- In-place note editor popup — click a link to open a centered popup embedding a full Obsidian Markdown editor (Live Preview, reading/source toggle that remembers your last choice, and an "Open in tab" escape hatch)
+- Database (library) section support for hover preview and the in-place edit popup across grid, list, table, and kanban views
+
+### Changed
+- Desktop-only feature; on mobile, links keep their original open-in-tab behavior
+
+## 1.1.1 (2025-05-29)
+
+### Fixed
+- Library section config (filters, view mode, sort, page size) lost after restart — replaced custom YAML parser with `yaml` package to correctly handle nested objects in frontmatter
+- Card grid position (gcol/grow) never serialized to file — empty `lines.push()` calls replaced with proper key-value output
+- Write race condition — `lastWrittenHash` now set after file write completes instead of before, preventing stale data overwrite during rapid updates
+
+## 1.0.9 (2025-05-26)
+
+### Improved
+- Pomodoro ring stroke width increased from 3px to 6px for better visibility
+- Pomodoro dots moved inside the ring, positioned below the time display
+- Stats hint (today count) moved to the top-left corner of the pomodoro widget, on the same line as the title
+- Reduced pomodoro widget gap from 6px to 4px for a more compact layout
+- All slider settings now show current value in the title (recent edits count, pomodoro work/break/interval)
+- Weather API now has fallback: primary `api.open-meteo.com` with backup `archive-api.open-meteo.com`
+
+### Fixed
+- Stats hint now always visible (shows "Today 0" even when no sessions completed)
+- Stats hint no longer displays total count, only today count
+- Title "Pomodoro" stays centered with stats hint on the left
+
+## 1.0.8 (2025-05-25)
+
+### Added
+- Sidebar widget: Pomodoro timer with ring progress, activity tracking, and stats
+- Sidebar widget: Countdown timer with reminder notifications
+- Sidebar widget: Lunar calendar with holiday support
+- Todo card templates and mobile touch-friendly UI
+- Banner quote color picker
+
+### Fixed
+- Preset quick actions reappear after deletion
+- Blossom button hover flicker
+- Removed bottom padding from banner

@@ -1,16 +1,15 @@
 ---
 name: maintain-wiki-map
-description: Create or update a Workspace Wiki Map that helps people navigate a real cluster of related Wiki notes. Use when the user asks for a knowledge map, topic overview, or durable navigation page. Do not use for a single concept or source summary.
+description: 基于实际阅读的一组相关 Wiki 创建或更新 Workspace Wiki Map，帮助浏览概念关系和阅读路径。用于主题概览或长期导航；单个概念的解释使用 distill-wiki。
 ---
 
-# Maintain Wiki Map
+# 维护 Wiki 导航图
 
-Build navigation from the actual Wiki collection, not from titles alone.
+让读者看清一组知识之间的关系、边界和进入路径。Wiki Map 是导航，不是把每篇 Wiki 再摘要一次，也不是链接清单的装饰性排版。
 
-1. Resolve the intended subject and read the relevant Wiki notes. Use `retrieve-vault-context` when the set is not already explicit.
-2. Read `system/contracts/base.yaml` and `system/contracts/wiki-map.yaml`. Create the note only under `knowledge/maps/` with type `Wiki Map` and a useful `description`.
-3. Organize links by concepts, dependencies, choices, or usage paths. Add a short explanation for each group so the map is more useful than a flat backlink list.
-4. Link only notes that were actually inspected. Identify important gaps explicitly; do not create placeholder Wiki notes or infer that a title proves relevance.
-5. Preserve unknown frontmatter, user sections, and manual ordering when updating an existing map. Use the `wiki-content` managed region when the note has one.
+1. 根据用户指定的主题和现有链接确定候选 Wiki；范围不明确时检索相关笔记并阅读正文。只选真正属于该主题的笔记，不能凭标题或搜索摘要建立关系。
+2. 判断各笔记之间的前提、组成、分歧、选择或应用关系，并据此设计读者实际会用的入口和阅读路径。结构由知识簇决定；没有实质差异时不强行填满模板中的每个栏目。
+3. 为每组链接写简短的关系说明，让读者知道从何处开始、何时转向其他概念。重要缺口可以如实指出，但不创建空白 Wiki，也不把尚未读过的笔记写成已确认关系。
+4. 创建或结构性修改前读取 `system/contracts/base.yaml` 和 `system/contracts/wiki-map.yaml`。新建时遵守 `knowledge/maps/` 路径、`Wiki Map` 类型和有意义的 `description`；更新时保留未知 frontmatter、人工正文和有意设置的顺序。
 
-Do not duplicate Wiki content inside the map, record study completion, or add `generated` for an interactive user-directed update. Report the Wiki Map path and the principal Wiki notes read.
+Wiki Map Contract 没有 `wiki-content` 区域要求；不要凭 Wiki 的规则向 Map 添加该标记。交互式整理不添加 `generated`，也不记录学习完成。交付前检查每条主要链接是否指向实际阅读的笔记、分组说明是否比平铺链接更有用，以及已有人工组织是否被误改。报告 Map 路径和关键读取路径。

@@ -249,7 +249,8 @@ def test_dashboard_persists_only_external_token_file_path() -> None:
         "Install-OkfDashboardPluginAtomic"
     )
     assert "Write-OkfJson -Path $pluginDataPath -Value $pluginData" in installer
-    assert "$PSBoundParameters.ContainsKey('MarkItDownUrl')" in installer
+    assert "$PSBoundParameters.ContainsKey('MinerUTokenFile')" in installer
+    assert "mineru_token_file" in installer
     assert "$PSBoundParameters.ContainsKey('SkipVectorIndex')" in installer
     assert "$PSBoundParameters.ContainsKey('EnableBackupSetup')" in installer
     assert "$SkipVectorIndex = -not [bool]$existingConfig.enable_vectors" in installer

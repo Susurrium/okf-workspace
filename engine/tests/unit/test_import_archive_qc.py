@@ -168,7 +168,8 @@ def test_markitdown_v3_rejects_asset_hash_mismatch(tmp_path: Path) -> None:
         )
 
 
-def test_legacy_markitdown_bundle_cannot_smuggle_an_svg_asset(tmp_path: Path) -> None:
+@pytest.mark.parametrize("parser", [ParserName.MARKITDOWN, ParserName.MINERU])
+def test_parser_bundle_cannot_smuggle_an_svg_asset(tmp_path: Path, parser: ParserName) -> None:
     archive = tmp_path / "legacy-svg.zip"
     with zipfile.ZipFile(archive, "w") as bundle:
         bundle.writestr(
@@ -192,7 +193,7 @@ def test_legacy_markitdown_bundle_cannot_smuggle_an_svg_asset(tmp_path: Path) ->
     with pytest.raises(ValueError, match="SVG assets"):
         normalize_zip(
             archive,
-            parser=ParserName.MARKITDOWN,
+            parser=parser,
             parser_version="0.1.6",
         )
 
@@ -216,3 +217,19 @@ def test_missing_source_image_fails_high_quality_but_warns_in_quick_mode() -> No
     assert any("omitted 1 image" in warning for warning in quick.warnings)
     assert not high.passed
     assert any("omitted 1 image" in error for error in high.errors)
+
+
+def test_image_only_page_remains_importable_without_counting_image_path_as_text() -> None:
+    export = ParserExport(
+        markdown="# 图片页\n\n![](images/long-image-filename-with-many-letters.png)\n",
+        assets={"images/long-image-filename-with-many-letters.png": b"PNG"},
+        parser=ParserName.MINERU,
+        parser_version="cloud-v4/vlm",
+    )
+
+    report = inspect_export(export)
+
+    assert report.passed
+    assert not report.checks["text_or_ocr_usable"]
+    assert report.checks["visual_fallback_available"]
+    assert any("original images remain available" in warning for warning in report.warnings)

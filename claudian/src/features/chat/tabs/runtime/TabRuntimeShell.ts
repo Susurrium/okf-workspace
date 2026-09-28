@@ -1,16 +1,15 @@
 import { Notice } from 'obsidian';
 
 import type { ProviderInteractionPort } from '../../../../core/execution';
-import { resolveNewConversationModel } from '../../../../core/providers/conversationModel';
-import { getEnabledProviderForModel } from '../../../../core/providers/modelRouting';
 import { ProviderRegistry } from '../../../../core/providers/ProviderRegistry';
-import { DEFAULT_CHAT_PROVIDER_ID } from '../../../../core/providers/types';
 import { getVaultPath } from '../../../../utils/path';
+import { ComposerEditor } from '../../composer/ComposerEditor';
 import { ChatExecutionCoordinator } from '../../execution/ChatExecutionCoordinator';
 import { cleanupThinkingBlock } from '../../rendering/ThinkingBlockRenderer';
 import { createWelcomeElement } from '../../rendering/WelcomeRenderer';
 import { ChatState } from '../../state/ChatState';
-import { restorePrePlanMode } from '../TabProviderState';
+import { createTabSessionState } from '../TabIdentity';
+import { refreshTabContextUsage } from '../TabProviderState';
 import { TabSession } from '../TabSession';
 import {
   createTabMessageId,
@@ -35,23 +34,14 @@ export function buildTabRuntimeShell(
   });
   options.registerCleanup('tab DOM root', () => contentEl.remove());
 
-  const dom = buildTabDOM(contentEl);
-  const state = new ChatState({
+  const dom = buildTabDOM(contentEl, options);
+  const state: ChatState = new ChatState({
     onStreamingStateChanged: isStreaming => {
-      const runtime = runtimeRef.requirePublished();
-      runtime.ui.stopButtonEl.toggleClass('claudian-hidden', !isStreaming);
-      runtime.ui.stopButtonEl.setAttribute('aria-hidden', String(!isStreaming));
-      runtime.ui.sendButtonEl.setAttribute(
-        'aria-label',
-        isStreaming ? 'Queue message' : 'Send message',
-      );
-      runtime.ui.sendButtonEl.setAttribute(
-        'title',
-        isStreaming ? 'Queue message' : 'Send message',
-      );
-      options.onStreamingChanged?.(runtime, isStreaming);
+      runtimeRef.requirePublished().renderer.refreshBranchButtonState();
+      options.onStreamingChanged?.(runtimeRef.requirePublished(), isStreaming);
     },
     onRewindingStateChanged: isRewinding => {
+      runtimeRef.requirePublished().renderer.refreshBranchButtonState();
       options.onRewindingChanged?.(runtimeRef.requirePublished(), isRewinding);
     },
     onAttentionChanged: attention => {
@@ -60,10 +50,9 @@ export function buildTabRuntimeShell(
     onConversationChanged: conversationId => {
       options.onConversationIdChanged?.(runtimeRef.requirePublished(), conversationId);
     },
-    onUsageChanged: usage => runtimeRef.requirePublished().ui.contextUsageMeter.update(usage),
-    onTodosChanged: todos => runtimeRef.requirePublished().ui.statusPanel.updateTodos(todos),
+    onUsageChanged: () => refreshTabContextUsage(runtimeRef.requirePublished(), plugin),
     onAutoScrollChanged: () => runtimeRef.requirePublished().ui.navigationSidebar.updateVisibility(),
-  });
+  }, { get: () => session.conversationId, set: id => session.setConversationId(id) });
   state.queueIndicatorEl = dom.queueIndicatorEl;
 
   options.registerCleanup('tab thinking state', () => {
@@ -71,35 +60,25 @@ export function buildTabRuntimeShell(
     state.currentThinkingState = null;
   });
 
-  const isBound = !!conversation?.id;
-  const restoredDraftModel = typeof options.draftModel === 'string'
-    ? options.draftModel.trim()
-    : '';
-  const newConversationModel = !isBound && !restoredDraftModel
-    ? resolveNewConversationModel(plugin.settings)
-    : null;
-  const draftModel = isBound
-    ? null
-    : (restoredDraftModel || newConversationModel?.model || null);
-  const initialProviderId = conversation?.providerId
-    ?? newConversationModel?.providerId
-    ?? (draftModel
-      ? getEnabledProviderForModel(draftModel, plugin.settings)
-      : DEFAULT_CHAT_PROVIDER_ID);
-  const sessionState = {
-    id,
-    lifecycleState: options.lifecycleState ?? 'cold',
-    draftModel,
-    providerId: initialProviderId,
-    conversationId: conversation?.id ?? null,
-  };
+  const sessionState = options.initialState
+    ? { ...options.initialState }
+    : createTabSessionState(plugin.settings, conversation, { ...options, tabId: id });
   const executionCoordinator = createTabExecutionCoordinator(
     id,
     state,
     options,
     runtimeRef,
   );
-  const session = new TabSession(sessionState, executionCoordinator);
+  const session = new TabSession(
+    sessionState,
+    executionCoordinator,
+    () => {
+      const tab = runtimeRef.requirePublished();
+      tab.renderer.refreshBranchButtonState();
+      options.onWorkChanged?.(tab);
+    },
+    () => state.isStreaming || state.isRewinding || state.isCreatingConversation || state.isSwitchingConversation,
+  );
   options.registerCleanup(
     'tab execution coordinator',
     () => session.disposeExecutionCoordinator(),
@@ -130,64 +109,55 @@ export function buildTabRuntimeShell(
     get lifecycleState() {
       return session.lifecycleState;
     },
-    set lifecycleState(value) {
-      session.lifecycleState = value;
-    },
-    hydrationState: isBound ? 'idle' : 'ready',
+    hydrationState: sessionState.conversationId ? 'idle' : 'ready',
     get draftModel() {
       return session.draftModel;
-    },
-    set draftModel(value) {
-      session.draftModel = value;
     },
     get providerId() {
       return session.providerId;
     },
-    set providerId(value) {
-      session.providerId = value;
-    },
     get conversationId() {
       return session.conversationId;
-    },
-    set conversationId(value) {
-      session.conversationId = value;
     },
     executionCoordinator,
     providerCatalogResolver: () => options.getProviderCatalogConfig(providerCatalogContext),
     captureReviewableSettlement: options.captureReviewableSettlement
-      ? () => options.captureReviewableSettlement!(runtimeRef.requirePublished())
+      ? outcome => options.captureReviewableSettlement!(runtimeRef.requirePublished(), outcome)
       : null,
     state,
     dom,
   };
 }
 
-function buildTabDOM(contentEl: HTMLElement): TabDOMElements {
+function buildTabDOM(contentEl: HTMLElement, options: TabRuntimeConstructionContext): TabDOMElements {
   const messagesWrapperEl = contentEl.createDiv({ cls: 'claudian-messages-wrapper' });
   const messagesEl = messagesWrapperEl.createDiv({ cls: 'claudian-messages' });
   const welcomeEl = createWelcomeElement(messagesEl);
-  const statusPanelContainerEl = contentEl.createDiv({ cls: 'claudian-status-panel-container' });
   const inputComposerEl = contentEl.createDiv({ cls: 'claudian-input-composer' });
   const inputContainerEl = inputComposerEl.createDiv({ cls: 'claudian-input-container' });
   const queueIndicatorEl = inputContainerEl.createDiv({ cls: 'claudian-input-queue-row' });
   const navRowEl = inputContainerEl.createDiv({ cls: 'claudian-input-nav-row' });
   const inputWrapper = inputContainerEl.createDiv({ cls: 'claudian-input-wrapper' });
   const contextRowEl = inputWrapper.createDiv({ cls: 'claudian-context-row' });
-  const inputEl = inputWrapper.createEl('textarea', {
-    cls: 'claudian-input',
-    attr: {
-      placeholder: 'Ask to make changes, @mention files, run /commands',
-      rows: '3',
-      dir: 'auto',
-    },
-  });
+  const composerEditor = new ComposerEditor(inputWrapper, options.plugin.app, options.component);
+  options.registerCleanup('tab composer editor', () => composerEditor.destroy());
+  const vault = options.plugin.app.vault;
+  const refresh = () => composerEditor.refreshLinks();
+  for (const subscribe of [
+    () => vault.on('create', refresh),
+    () => vault.on('delete', refresh),
+    () => vault.on('rename', refresh),
+  ]) {
+    const ref = subscribe();
+    options.registerCleanup('composer vault listener', () => vault.offref(ref));
+  }
+  const inputEl = composerEditor.element;
 
   return {
     contentEl,
     messagesWrapperEl,
     messagesEl,
     welcomeEl,
-    statusPanelContainerEl,
     inputComposerEl,
     inputContainerEl,
     queueIndicatorEl,
@@ -205,17 +175,13 @@ function createTabExecutionCoordinator(
   runtimeRef: PublishedTabRuntimeRef,
 ): ChatExecutionCoordinator {
   const { plugin } = options;
-  const interactionKinds = new Map<
-    string,
-    'approval' | 'question' | 'plan-decision'
-  >();
   const interactionPort: ProviderInteractionPort = {
-    requestApproval: async (request) => {
+    requestApproval: async (request, signal) => {
       const tab = runtimeRef.requirePublished();
-      interactionKinds.set(request.interactionId, request.kind);
       state.beginActionRequired(request.interactionId);
       try {
         const decision = await tab.controllers.inputController.handleApprovalRequest(
+          request.interactionId,
           request.toolName,
           { ...request.input },
           request.description,
@@ -229,59 +195,31 @@ function createTabExecutionCoordinator(
               ? { additionalPermissions: request.additionalPermissions }
               : {}),
           },
+          signal,
         );
         return { interactionId: request.interactionId, decision };
       } finally {
-        interactionKinds.delete(request.interactionId);
         state.endActionRequired(request.interactionId);
       }
     },
     askUserQuestion: async (request, signal) => {
       const tab = runtimeRef.requirePublished();
-      interactionKinds.set(request.interactionId, request.kind);
       state.beginActionRequired(request.interactionId);
       try {
         const answers = await tab.controllers.inputController.handleAskUserQuestion(
+          request.interactionId,
           { ...request.input },
           signal,
         );
         return { interactionId: request.interactionId, answers };
       } finally {
-        interactionKinds.delete(request.interactionId);
-        state.endActionRequired(request.interactionId);
-      }
-    },
-    requestPlanDecision: async (request, signal) => {
-      const tab = runtimeRef.requirePublished();
-      interactionKinds.set(request.interactionId, request.kind);
-      state.beginActionRequired(request.interactionId);
-      try {
-        const decision = await tab.controllers.inputController.handleExitPlanMode(
-          { ...request.input },
-          signal,
-          request.presentation,
-        );
-        if (decision !== null && decision.type !== 'feedback') {
-          await restorePrePlanMode(tab, plugin);
-          if (decision.type === 'approve-new-session') {
-            tab.state.pendingNewSessionPlan = decision.planContent;
-            tab.state.cancelRequested = true;
-          }
-        }
-        return { interactionId: request.interactionId, decision };
-      } finally {
-        interactionKinds.delete(request.interactionId);
         state.endActionRequired(request.interactionId);
       }
     },
     dismissInteraction: (interactionId) => {
       const tab = runtimeRef.requirePublished();
-      const kind = interactionKinds.get(interactionId);
-      if (kind) {
-        tab.controllers.inputController.dismissProviderInteraction(kind);
-        interactionKinds.delete(interactionId);
-        state.endActionRequired(interactionId);
-      }
+      tab.controllers.inputController.dismissProviderInteraction(interactionId);
+      state.endActionRequired(interactionId);
     },
   };
   return new ChatExecutionCoordinator({
@@ -297,12 +235,19 @@ function createTabExecutionCoordinator(
     onRequestedEvent: event => (
       runtimeRef.requirePublished().controllers.inputController.handleExecutionEvent(event)
     ),
-    onSessionEvent: (event, context) => enqueueTabSessionEvent(
-      runtimeRef.requirePublished(),
-      plugin,
-      event,
-      context,
-    ),
+    onSessionEvent: (event, context) => {
+      const tab = runtimeRef.requirePublished();
+      if (event.type === 'commands_changed') {
+        options.onCommandContextChanged?.(tab);
+        return;
+      }
+      return enqueueTabSessionEvent(tab, plugin, event, context);
+    },
+    onBackgroundWorkChanged: () => {
+      const tab = runtimeRef.requirePublished();
+      tab.renderer.refreshBranchButtonState();
+      options.onWorkChanged?.(tab);
+    },
     resolveMissingProviderSession: (conversationId, missingProviderSessionId) =>
       plugin.handleMissingProviderSession(conversationId, missingProviderSessionId),
     onError: error => {
@@ -316,13 +261,14 @@ function createTabExecutionCoordinator(
         return !state.isStreaming
           && !state.isRewinding
           && !state.requiresAction
-          && tab.session.activeTurn === null
+          && !tab.session.turns.isActive
           && tab.lifecycleState !== 'closing';
       },
       onWarmStateChanged: (isWarm) => {
         const tab = runtimeRef.requirePublished();
         if (tab.lifecycleState === 'closing') return;
-        tab.lifecycleState = isWarm ? 'warm' : 'cold';
+        tab.session.setExecutionWarm(isWarm);
+        if (!isWarm) options.onCommandContextChanged?.(tab);
       },
     },
   });

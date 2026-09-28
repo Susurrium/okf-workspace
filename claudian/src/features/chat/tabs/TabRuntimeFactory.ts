@@ -2,9 +2,9 @@ import type { Component } from 'obsidian';
 
 import type { ProviderId } from '@/core/providers/types';
 import type { Conversation } from '@/core/types';
-import type { TabAttention } from '@/features/chat/state/types';
-import type { FeatureHost } from '@/features/FeatureHost';
+import type { TabAttention, TabReviewOutcome } from '@/features/chat/state/types';
 
+import type { ChatFeatureHost } from '../ChatFeatureHost';
 import type {
   PublishedTabRuntimeRef,
   TabRuntimeCleanup,
@@ -23,6 +23,7 @@ import {
   applyProviderUIGating,
   refreshTabProviderUI,
 } from './TabProviderState';
+import type { TabSessionState } from './TabSession';
 import type {
   AssembledTabRuntime,
   ProviderCatalogInfo,
@@ -36,12 +37,14 @@ import type {
 } from './types';
 
 export interface TabRuntimeFactoryOptions {
-  plugin: FeatureHost;
+  plugin: ChatFeatureHost;
   containerEl: HTMLElement;
   component: Component;
   conversation?: Conversation;
   tabId?: TabId;
+  initialState?: Readonly<TabSessionState>;
   draftModel?: string | null;
+  providerId?: ProviderId | null;
   lifecycleState?: Extract<
     AssembledTabRuntime['lifecycleState'],
     'provisional' | 'cold'
@@ -53,18 +56,26 @@ export interface TabRuntimeFactoryOptions {
   forkRequestCallback?: (forkContext: ForkContext) => Promise<void>;
   openConversation?: (conversationId: string) => Promise<void>;
   onStreamingChanged?: (tab: AssembledTabRuntime, isStreaming: boolean) => void;
+  onWorkChanged?: (tab: AssembledTabRuntime) => void;
   onRewindingChanged?: (tab: AssembledTabRuntime, isRewinding: boolean) => void;
   onAttentionChanged?: (tab: AssembledTabRuntime, attention: TabAttention) => void;
   onConversationIdChanged?: (
     tab: AssembledTabRuntime,
     conversationId: string | null,
   ) => void;
+  onDraftModelChanged?: (
+    tab: AssembledTabRuntime,
+    draftModel: string | null,
+  ) => void;
   onProviderChanged?: (
     tab: AssembledTabRuntime,
     providerId: ProviderId,
   ) => void | Promise<void>;
   onCommandContextChanged?: (tab: AssembledTabRuntime) => void;
-  captureReviewableSettlement?: (tab: AssembledTabRuntime) => () => void;
+  captureReviewableSettlement?: (
+    tab: AssembledTabRuntime,
+    outcome: TabReviewOutcome,
+  ) => () => void;
 }
 
 interface CleanupEntry {
@@ -95,12 +106,12 @@ class RuntimeResourceOwner implements TabRuntimeResourceOwner {
   dispose(): Promise<readonly TabRuntimeCleanupFailure[]> {
     if (!this.disposal) {
       this.sealed = true;
-      this.disposal = this.disposeEntries();
+      this.disposal = this.#disposeEntries();
     }
     return this.disposal;
   }
 
-  private async disposeEntries(): Promise<readonly TabRuntimeCleanupFailure[]> {
+  async #disposeEntries(): Promise<readonly TabRuntimeCleanupFailure[]> {
     const failures: TabRuntimeCleanupFailure[] = [];
     const entries = this.entries.splice(0).reverse();
     for (const entry of entries) {
@@ -160,9 +171,6 @@ function composeTabRuntime(
     get lifecycleState() {
       return shell.lifecycleState;
     },
-    set lifecycleState(value) {
-      shell.lifecycleState = value;
-    },
     get hydrationState() {
       return shell.hydrationState;
     },
@@ -172,20 +180,11 @@ function composeTabRuntime(
     get draftModel() {
       return shell.draftModel;
     },
-    set draftModel(value) {
-      shell.draftModel = value;
-    },
     get providerId() {
       return shell.providerId;
     },
-    set providerId(value) {
-      shell.providerId = value;
-    },
     get conversationId() {
       return shell.conversationId;
-    },
-    set conversationId(value) {
-      shell.conversationId = value;
     },
     executionCoordinator: shell.executionCoordinator,
     providerCatalogResolver: shell.providerCatalogResolver,
@@ -237,7 +236,7 @@ function assembleTabRuntime(
   registerTabRuntimeResourceOwner(runtime, options.resourceOwner);
   runtimeRef.publish(runtime);
 
-  refreshTabProviderUI(runtime, options.plugin);
+  refreshTabProviderUI(runtime);
   applyProviderUIGating(runtime, options.plugin);
   return runtime;
 }

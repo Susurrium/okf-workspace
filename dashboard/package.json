@@ -1,12 +1,12 @@
 {
   "name": "okf-workspace-dashboard",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "private": true,
   "type": "module",
   "scripts": {
     "check": "tsc --noEmit",
     "test": "vitest run",
-    "build": "tsc --noEmit && node esbuild.mjs"
+    "build": "tsc --noEmit && node esbuild.mjs && node build-assets.mjs"
   },
   "devDependencies": {
     "@codemirror/state": "6.5.0",
@@ -16,5 +16,10 @@
     "obsidian": "1.13.1",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "chart.js": "^4.5.1",
+    "lunar-typescript": "^1.8.6",
+    "yaml": "^2.9.0"
   }
 }

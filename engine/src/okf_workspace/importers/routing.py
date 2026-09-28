@@ -6,7 +6,10 @@ from pathlib import Path
 
 from .models import ImportQuality, ParserName
 
-SUPPORTED_EXTENSIONS = {".pdf", ".doc", ".docx", ".ppt", ".pptx"}
+SUPPORTED_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".ppt", ".pptx",
+    ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif",
+}
 
 
 def choose_parser(
@@ -18,12 +21,9 @@ def choose_parser(
     if extension not in SUPPORTED_EXTENSIONS:
         raise ValueError(
             f"unsupported document type {extension or '<none>'}; "
-            "expected PDF, DOC, DOCX, PPT, or PPTX"
+            "expected PDF, DOC, DOCX, PPT, PPTX, or a supported image"
         )
     if override is not None:
-        if extension in {".doc", ".docx"} and override is ParserName.MINERU:
-            raise ValueError("DOC/DOCX uses MarkItDown after Word normalization")
         return override
-    # Quality controls verification, not an implicit remote MinerU launch.
-    # Retain the explicit override for users who deliberately opt back in.
-    return ParserName.MARKITDOWN
+    # Quality controls verification; cloud MinerU handles every supported format.
+    return ParserName.MINERU

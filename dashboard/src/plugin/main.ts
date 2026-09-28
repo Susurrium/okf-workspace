@@ -1,4 +1,5 @@
-import { Notice, Plugin, TFile } from "obsidian";
+import { noteStatusLabel } from "../ui/display-labels.js";
+import { Notice, Plugin, TFile, type WorkspaceLeaf } from "obsidian";
 import { readFileSync } from "node:fs";
 
 import { LocalApi } from "../api/client.js";
@@ -44,14 +45,30 @@ import type {
 } from "../feeds/types.js";
 import { feedItemMappings } from "../feeds/mappings.js";
 import { HttpDocumentImportApi } from "../imports/service.js";
+import { importFilesFromDrop, type ImportFile } from "../imports/drop.js";
 import type {
   DocumentImportOptions,
-  ImportIntent,
-  ImportParser,
-  ImportQuality,
 } from "../imports/types.js";
 import { renderFeedDecisionFlow } from "../ui/feed-decision-flow.js";
-import { OkfDashboardView, OKF_DASHBOARD_VIEW } from "./dashboard-view.js";
+import { DashboardSettingTab } from "../../apex/src/settings.js";
+import { DashboardView, DASHBOARD_VIEW_TYPE } from "../../apex/src/view.js";
+import { updateTaskDatesInFile, type VaultTask } from "../../apex/src/alltasks-scan.js";
+import { registerSectionDefinition } from "../../apex/src/section-registry.js";
+import { ApexHostAdapter } from "../adapters/apex-host.js";
+import { ArtifactEditPolicy } from "../application/artifact-edit-policy.js";
+import {
+  readLegacyApexSettings,
+  takeoverApexNativeData,
+} from "../adapters/apex-native-data.js";
+import {
+  generateWorkbenchPresetMarkdown,
+  WORKBENCH_PRESETS,
+} from "../features/workbench-presets.js";
+import {
+  createOkfSurfaceSectionDefinitions,
+  OKF_SECTION_TYPES,
+  okfSectionDefaultName,
+} from "../features/workbench/okf-surface-sections.js";
 import {
   DASHBOARD_COMMAND_ID,
   registerDashboardRibbon,
@@ -61,6 +78,8 @@ import { feedLivePreviewExtension } from "./live-preview.js";
 import { LocalServiceManager } from "./local-service.js";
 import { ChoiceModal, FieldsPromptModal, ProjectLogModal, TextPromptModal } from "./prompts.js";
 import { QuickCaptureModal } from "./quick-capture-modal.js";
+import { DocumentImportModal, type ImportOrigin } from "./document-import-modal.js";
+import { hasPendingGeneration } from "../domain/inbox-work-queue.js";
 import {
   FeedSubscriptionAddModal,
   FeedSubscriptionSettingsModal,
@@ -78,10 +97,13 @@ import { ORGANIZE_DAILY_PROMPT } from "./workflow-prompts.js";
 import {
   DEFAULT_SETTINGS,
   type FeedReadingPosition,
-  OkfBrainSettingTab,
+  okfServiceSettingDefinitions,
+  renderOkfServiceSettings,
   type OkfBrainSettings,
 } from "./settings.js";
+import { normalizeApexSettings } from "./apex-settings.js";
 import {
+  buildClaudianFallbackText,
   ClaudianBridgeAdapter,
   type CodexHandoffRequest,
 } from "./claudian-bridge.js";
@@ -98,9 +120,17 @@ import {
   type DashboardUiStatePatch,
   type RecentDashboardFile,
 } from "./dashboard-ui-state.js";
+import {
+  OkfDashboardItemView,
+  OkfDashboardView,
+  OKF_DASHBOARD_VIEW,
+  type DashboardSection as EmbeddedDashboardSection,
+} from "./dashboard-view.js";
 
 export default class OkfBrainPlugin extends Plugin {
   public settings: OkfBrainSettings = DEFAULT_SETTINGS;
+  private persistedSettings: Record<string, unknown> = {};
+  private apexHost: ApexHostAdapter | undefined;
   private feedDigestCache: { value: FeedDashboardDigest; loadedAt: number } | undefined;
   private feedDigestRequest: Promise<FeedDashboardDigest> | undefined;
   private feedProjectionRevision = 0;
@@ -121,13 +151,70 @@ export default class OkfBrainPlugin extends Plugin {
   private conversionLastIdlePoll = 0;
   private readonly watchedConversionIds = new Set<string>();
   private dashboardUiStateStore: DashboardUiStateStore | undefined;
+  private readonly unregisterApexSections: Array<() => void> = [];
+  private readonly embeddedDashboardSurfaces = new Set<OkfDashboardView>();
 
   public async onload(): Promise<void> {
-    // Keep the primary UI entry available even if settings or service setup fail.
-    this.registerView(OKF_DASHBOARD_VIEW, (leaf) => new OkfDashboardView(leaf, this));
-    registerDashboardRibbon(this, () => void this.openDashboard());
-
     await this.loadSettings();
+    this.vaultNotes = new VaultNoteService(this.app);
+    const takeover = await takeoverApexNativeData(this.app, this.manifest.id);
+    const copied = takeover.entries.filter((entry) => entry.status === "copied");
+    const conflicts = takeover.entries.filter((entry) => entry.status === "target-kept");
+    if (copied.length) {
+      console.info(`[okf-workspace] adopted ${copied.length} Apex native data files`);
+    }
+    if (conflicts.length) {
+      new Notice(
+        `Apex 原数据接管保留了 ${conflicts.length} 个已有目标文件；旧文件未被覆盖，可在诊断记录中核对。`,
+        10_000,
+      );
+    }
+    this.apexHost = new ApexHostAdapter({
+      owner: this,
+      settings: this.settings.apex,
+      persist: async (settings) => {
+        this.settings.apex = settings;
+        await this.saveSettings();
+      },
+      insertCalendarTask: (date, taskLine, position) =>
+        this.notes().appendDailyTask(date, taskLine, position),
+      workspacePresets: WORKBENCH_PRESETS,
+      createWorkspaceMarkdown: generateWorkbenchPresetMarkdown,
+      mutateManagedArtifact: (mutation) =>
+        new ArtifactEditPolicy(this.notes()).mutate(mutation),
+      convertMemoToCapture: (workspacePath, card) => {
+        const title = card.title?.trim() || "工作台便签";
+        const content = [card.blockquote?.trim(), card.body?.trim()]
+          .filter(Boolean)
+          .join("\n\n");
+        return this.notes().createCaptureFromWorkbench(workspacePath, card.id, title, content);
+      },
+      createManagedArtifact: async (artifactType) => {
+        if (artifactType === "Project") {
+          this.promptProject();
+          return true;
+        }
+        if (["Source", "Source Text"].includes(artifactType)) {
+          new Notice("请通过导入或保存订阅内容添加资料。", 8000);
+          return true;
+        }
+        return false;
+      },
+      openDocumentImportFromDrop: (transfer) => {
+        void importFilesFromDrop(transfer)
+          .then((files) => this.openDocumentImport(files, {}, "command"))
+          .catch((error: unknown) => new Notice(
+            error instanceof Error ? error.message : "无法读取拖入的文件夹", 8_000,
+          ));
+      },
+    });
+    await this.apexHost.initialize();
+    this.unregisterApexSections.push(
+      ...createOkfSurfaceSectionDefinitions(this).map(registerSectionDefinition),
+    );
+    this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new DashboardView(leaf, this.apexHost!));
+    this.registerView(OKF_DASHBOARD_VIEW, (leaf) => new OkfDashboardItemView(leaf, this));
+    registerDashboardRibbon(this, () => void this.openDashboard());
     this.dashboardUiStateStore = new DashboardUiStateStore(
       this.settings.dashboardUiState,
       async (state) => {
@@ -139,7 +226,6 @@ export default class OkfBrainPlugin extends Plugin {
     );
     this.registerDashboardRecentFiles();
     this.claudianBridge = new ClaudianBridgeAdapter(this.app);
-    this.vaultNotes = new VaultNoteService(this.app);
     this.localService = new LocalServiceManager(() => ({
       baseUrl: this.settings.baseUrl,
       enabled: this.settings.manageLocalService,
@@ -150,8 +236,13 @@ export default class OkfBrainPlugin extends Plugin {
     this.indexSync = new IndexSyncCoordinator(async () => {
       await this.api().syncIndex();
     });
-    this.addSettingTab(new OkfBrainSettingTab(this.app, this));
+    this.addSettingTab(new DashboardSettingTab(this.app, this.apexHost, this, {
+      heading: "连接与导入",
+      getSettingDefinitions: () => okfServiceSettingDefinitions(this),
+      renderFallback: (container) => renderOkfServiceSettings(container, this),
+    }));
     this.registerCommands();
+    this.registerApexCommands();
     this.registerReadingViewControls();
     this.registerIndexSync();
     this.registerEditorExtension(
@@ -172,7 +263,12 @@ export default class OkfBrainPlugin extends Plugin {
     if (this.indexSyncTimer !== undefined) window.clearTimeout(this.indexSyncTimer);
     if (this.dashboardRefreshTimer !== undefined) window.clearTimeout(this.dashboardRefreshTimer);
     this.watchedConversionIds.clear();
+    this.app.workspace.detachLeavesOfType(DASHBOARD_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(OKF_DASHBOARD_VIEW);
+    for (const surface of [...this.embeddedDashboardSurfaces]) void surface.onClose();
+    this.embeddedDashboardSurfaces.clear();
+    for (const unregister of this.unregisterApexSections.splice(0)) unregister();
+    this.apexHost?.destroy();
     void this.dashboardUiStateStore?.dispose().catch((error: unknown) => {
       console.error("[okf-workspace] could not flush Dashboard UI state", error);
     });
@@ -207,6 +303,7 @@ export default class OkfBrainPlugin extends Plugin {
     }
     this.settings.feedReadingPositions = feedReadingPositions;
     await this.saveData({
+      ...this.persistedSettings,
       baseUrl: this.settings.baseUrl,
       tokenFile: this.settings.tokenFile,
       manageLocalService: this.settings.manageLocalService,
@@ -216,6 +313,7 @@ export default class OkfBrainPlugin extends Plugin {
       documentParserPolicy: this.settings.documentParserPolicy,
       dashboardUiState,
       feedReadingPositions,
+      apex: this.settings.apex,
     });
   }
 
@@ -303,7 +401,7 @@ export default class OkfBrainPlugin extends Plugin {
       const result = await this.notes().createCapture(title, value, relation);
       const notice = new Notice("", 15_000);
       notice.noticeEl.empty();
-      notice.noticeEl.createEl("strong", { text: "已保存到 Inbox" });
+      notice.noticeEl.createEl("strong", { text: "已保存到待处理" });
       const context = relation.course
         ? {
             kind: "Course",
@@ -321,7 +419,7 @@ export default class OkfBrainPlugin extends Plugin {
           : undefined;
       if (context) {
         notice.noticeEl.createDiv({
-          text: `已关联 ${context.kind}${context.option ? `：${context.option.title}` : ""}，可稍后整理`,
+          text: `已关联 ${context.kind === "course" ? "课程" : "项目"}${context.option ? `：${context.option.title}` : ""}，可稍后整理`,
         });
       }
       const open = notice.noticeEl.createEl("button", { text: "打开记录" });
@@ -349,20 +447,20 @@ export default class OkfBrainPlugin extends Plugin {
     new ChoiceModal(
       this.app,
       [
-        { value: "daily", label: "继续写今日日记", description: "打开今天的 Daily" },
+        { value: "daily", label: "继续写今日日记", description: "打开今天的日记" },
         { value: "jot", label: "打开随手记录", description: "定位到今日日记的原生 Markdown 编辑区" },
         {
           value: "capture",
           label: "快速记录",
-          description: "保存到 Inbox，可选关联 Course 或 Project",
+          description: "保存到待处理，可选关联课程或项目",
         },
-        { value: "class", label: "新建 Lesson", description: "先选择已有 Course" },
-        { value: "course", label: "新建 Course", description: "创建课程主页" },
-        { value: "project", label: "新建 Project", description: "创建项目主页与日志" },
+        { value: "class", label: "新建课堂笔记", description: "先选择已有课程" },
+        { value: "course", label: "新建课程", description: "创建课程主页" },
+        { value: "project", label: "新建项目", description: "创建项目主页与日志" },
         { value: "import", label: "导入资料", description: "PDF、Word 或 PowerPoint" },
-        { value: "ask", label: "问我的笔记", description: "在 Claudian 中读取相关 OKF 笔记后回答" },
+        { value: "ask", label: "问我的笔记", description: "在 Claudian 中读取相关笔记后回答" },
       ] as const,
-      "Dashboard 快捷动作",
+      "快捷操作",
       async (choice) => {
         if (choice === "daily") {
           const result = await this.createDaily();
@@ -406,7 +504,7 @@ export default class OkfBrainPlugin extends Plugin {
       ...(pluginEnabled === undefined ? {} : { pluginEnabled }),
       afterCreate: () => new Promise((resolve) => window.setTimeout(resolve, 50)),
     }).catch((error: unknown) => {
-      new Notice(error instanceof Error ? error.message : "无法显示 Chinese Calendar", 8_000);
+      new Notice(error instanceof Error ? error.message : "无法显示日历", 8_000);
     });
   }
 
@@ -429,13 +527,33 @@ export default class OkfBrainPlugin extends Plugin {
     options: Omit<CodexHandoffRequest, "prompt"> = {},
   ): Promise<void> {
     if (!this.claudianBridge) throw new Error("Claudian Bridge 尚未初始化");
-    const result = await this.claudianBridge.handoff({
+    const request: CodexHandoffRequest = {
       prompt,
       actionMode: "read",
       autoSend: false,
       newSession: true,
       ...options,
-    });
+    };
+    if (!this.claudianBridge.isAvailable()) {
+      const fallback = buildClaudianFallbackText(request);
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(fallback);
+        copied = true;
+      } catch (error) {
+        console.warn("[okf-workspace] could not copy Claudian fallback", error);
+      }
+      const firstContext = request.contextPaths?.[0];
+      if (firstContext) await this.openVaultPath(firstContext);
+      new Notice(
+        copied
+          ? "Claudian 未启用；提示词和上下文路径已复制，并已打开首个上下文文件。"
+          : "Claudian 未启用；已打开首个上下文文件。请启用 Claudian 插件 后重试 AI 操作。",
+        10_000,
+      );
+      return;
+    }
+    const result = await this.claudianBridge.handoff(request);
     new Notice(
       result.sent
         ? "任务已在 Claudian 中提交"
@@ -502,24 +620,24 @@ export default class OkfBrainPlugin extends Plugin {
       [
         {
           value: "weekly",
-          label: "Weekly Review",
+          label: "Weekly 复盘",
           description: "打开已有或创建本周复盘",
         },
         {
           value: "monthly",
-          label: "Monthly Review",
+          label: "Monthly 复盘",
           description: "打开已有或创建本月复盘",
         },
         {
           value: "yearly",
-          label: "Yearly Review",
+          label: "Yearly 复盘",
           description: "打开已有或创建本年复盘",
         },
       ],
-      "选择 Review 周期",
+      "选择复盘周期",
       async (period) => {
         const result = await this.notes().createReview(period);
-        new Notice(result.created ? "已创建本期 Review" : "已打开已有 Review", 6_000);
+        new Notice(result.created ? "已创建本期复盘" : "已打开已有复盘", 6_000);
         await this.openVaultPath(result.path);
       },
     ).open();
@@ -559,7 +677,7 @@ export default class OkfBrainPlugin extends Plugin {
   public promptLessonForCourse(coursePath: string): void {
     const match = /^\/?learning\/courses\/([^/]+)\/course\.md$/u.exec(coursePath.trim());
     if (!match?.[1]) {
-      new Notice(`无法识别 Course：${coursePath}`);
+      new Notice(`无法识别课程：${coursePath}`);
       return;
     }
     this.openLessonPrompt(match[1]);
@@ -589,7 +707,7 @@ export default class OkfBrainPlugin extends Plugin {
       this.app,
       "新建项目",
       [
-        { key: "title", label: "项目名称", placeholder: "个人知识工作区" },
+        { key: "title", label: "项目名称", placeholder: "个人知识库" },
         { key: "slug", label: "目录名（可留空）", placeholder: "workspace", required: false },
       ],
       "创建项目",
@@ -633,7 +751,7 @@ export default class OkfBrainPlugin extends Plugin {
   public promptProjectDecision(projectPath: string): void {
     new FieldsPromptModal(
       this.app,
-      "新建正式 Decision",
+      "记录项目决策",
       [
         { key: "title", label: "标题", placeholder: "采用 Markdown 作为唯一权威" },
       ],
@@ -652,7 +770,7 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public promptNewDecision(): void {
-    this.selectProject("选择 Decision 所属 Project", (project) => {
+    this.selectProject("选择决策所属项目", (project) => {
       this.promptProjectDecision(`projects/${project}/project.md`);
     });
   }
@@ -662,21 +780,44 @@ export default class OkfBrainPlugin extends Plugin {
     current: "active" | "paused" | "completed",
   ): void {
     const options = ([
-      { value: "active", label: "Active", description: "继续推进这个 Project" },
-      { value: "paused", label: "Paused", description: "暂时停止，但保留后续入口" },
-      { value: "completed", label: "Completed", description: "Project 已达到完成条件" },
+      { value: "active", label: "进行中", description: "继续推进这个项目" },
+      { value: "paused", label: "已暂停", description: "暂时停止，但保留后续入口" },
+      { value: "completed", label: "已完成", description: "项目已达到完成条件" },
     ] as const).filter((option) => option.value !== current);
-    new ChoiceModal(this.app, options, "更改 Project 状态", async (status) => {
+    new ChoiceModal(this.app, options, "更改项目状态", async (status) => {
       await this.setProjectStatus(projectPath, status);
-      new Notice(`Project 状态已更新为 ${status}`);
+      new Notice(`项目状态已更新为${noteStatusLabel(status)}`);
     }).open();
+  }
+
+  public promptTaskDates(task: VaultTask): void {
+    new FieldsPromptModal(
+      this.app,
+      `编辑任务日期：${task.text}`,
+      [
+        { key: "reminder", label: "提醒", placeholder: "YYYY-MM-DD 或 YYYY-MM-DD HH:MM", initialValue: task.reminder ?? "", required: false },
+        { key: "scheduled", label: "计划日", placeholder: "YYYY-MM-DD", initialValue: task.scheduled ?? "", required: false },
+        { key: "due", label: "截止日", placeholder: "YYYY-MM-DD", initialValue: task.due ?? "", required: false },
+      ],
+      "保存日期",
+      async (values) => {
+        const wrote = await updateTaskDatesInFile(this.app, task, {
+          reminder: values.reminder,
+          scheduled: values.scheduled,
+          due: values.due,
+        });
+        if (!wrote) throw new Error("任务已变化或日期没有改变，请刷新后重试。");
+        new Notice("任务日期已更新");
+        this.refreshDashboardViews();
+      },
+    ).open();
   }
 
   public promptWikiFromSources(): void {
     const activePath = this.app.workspace.getActiveFile()?.path ?? "";
     new FieldsPromptModal(
       this.app,
-      "从材料生成 Wiki 草稿",
+      "从材料生成知识笔记草稿",
       [
         { key: "title", label: "知识笔记标题", placeholder: "LiveSync 不是备份" },
         {
@@ -701,8 +842,9 @@ export default class OkfBrainPlugin extends Plugin {
           .map((value) => value.trim())
           .filter(Boolean);
         await this.openCodexPrompt(
-          `目标标题：${values.title ?? "Wiki 草稿"}\n` +
-            `补充要求：${values.instruction ?? "无"}`,
+          `请读取附带的来源，围绕“${values.title ?? "知识笔记草稿"}”沉淀一篇可长期复用的知识笔记。` +
+            "先核对相关的既有知识笔记，选择创建或更新，保留来源依据与尚未解决的不确定性。" +
+            `\n\n补充要求：${values.instruction || "无"}`,
           {
             contextPaths: paths,
             actionMode: "write",
@@ -734,8 +876,9 @@ export default class OkfBrainPlugin extends Plugin {
       "只修改这一节",
       async (values) => {
         await this.openCodexPrompt(
-          `请读取并只修改 ${active.path} 的“${values.heading ?? ""}”章节。` +
-            `保留其它内容和未知 frontmatter。要求：${values.instruction ?? ""}`,
+          `请读取 ${active.path}，定位标题为“${values.heading ?? ""}”的章节，` +
+            "只按以下要求修改该章节正文，保留标题、其他章节、未知 frontmatter 和已有链接。" +
+            `若有多个同名章节，先询问目标位置。\n\n修改要求：${values.instruction ?? ""}`,
           { contextPaths: [active.path], actionMode: "write" },
         );
       },
@@ -745,7 +888,7 @@ export default class OkfBrainPlugin extends Plugin {
   public promptCaptureProject(capturePath: string): void {
     const organize = (project: string): void => {
       void this.api().organizeCapture(capturePath, "project-log", { project }).then(() => {
-        new Notice("Capture 已进入项目日志");
+        new Notice("随手记录已进入项目日志");
         this.refreshDashboardViews();
       }).catch((error: unknown) => {
         new Notice(error instanceof Error ? error.message : "写入项目日志失败", 10_000);
@@ -793,7 +936,7 @@ export default class OkfBrainPlugin extends Plugin {
     capturePath: string,
     action: WebCaptureAction,
   ): void {
-    this.promptMaterialContext("这份网页资料属于哪个上下文？", (relation) =>
+    this.promptMaterialContext("要将这份网页资料关联到课程或项目吗？", (relation) =>
       this.publishWebCapture(capturePath, { action, ...relation }),
     );
   }
@@ -816,22 +959,22 @@ export default class OkfBrainPlugin extends Plugin {
       notice.noticeEl.empty();
       notice.noticeEl.createEl("strong", {
         text: result.semantic_operation
-          ? "网页资料已发布并进入后台生成"
+          ? "网页资料已保存并进入后台生成"
           : result.semantic_error
-            ? "网页资料已发布，但后台生成未启动"
+            ? "网页资料已保存，但后台生成未启动"
             : result.reused
               ? "已合并到现有来源"
-              : "网页资料已发布",
+              : "网页资料已保存",
       });
       if (result.semantic_error) notice.noticeEl.createDiv({ text: result.semantic_error });
-      const open = notice.noticeEl.createEl("button", { text: "打开正式正文" });
+      const open = notice.noticeEl.createEl("button", { text: "打开已保存的资料正文" });
       open.addEventListener("click", () => {
         notice.hide();
         void this.openVaultPath(result.source_text);
       });
       this.refreshDashboardViews();
     } catch (error) {
-      new Notice(error instanceof Error ? error.message : "网页资料发布失败", 10_000);
+      new Notice(error instanceof Error ? error.message : "网页资料保存失败", 10_000);
     }
   }
 
@@ -840,7 +983,7 @@ export default class OkfBrainPlugin extends Plugin {
       const options = projection.courses.map((course) => ({
         value: course.path.split("/")[2] ?? "",
         label: course.title,
-        description: `${course.current_progress || "尚未填写进度"} · ${course.guide_count} 份 Study Guide`,
+        description: `${course.current_progress || "尚未填写进度"} · ${course.guide_count} 份学习笔记`,
       })).filter((option) => option.value);
       options.push({ value: "__new__", label: "新建课程…", description: "创建后自动继续当前操作" });
       new ChoiceModal(this.app, options, placeholder, async (value) => {
@@ -857,7 +1000,7 @@ export default class OkfBrainPlugin extends Plugin {
       const options = projection.projects.map((project) => ({
         value: project.path.split("/")[1] ?? "",
         label: project.title,
-        description: project.next_action || project.project_status || "暂无下一步",
+        description: project.next_action || noteStatusLabel(project.project_status) || "暂无下一步",
       })).filter((option) => option.value);
       options.push({ value: "__new__", label: "新建项目…", description: "创建后自动继续当前操作" });
       new ChoiceModal(this.app, options, placeholder, async (value) => {
@@ -883,12 +1026,12 @@ export default class OkfBrainPlugin extends Plugin {
         {
           value: "generate",
           label: "立即生成辅助学习材料",
-          description: "创建学习入口后交给后台 Codex",
+          description: "保存资料后在后台生成",
         },
         {
           value: "later",
-          label: "先创建学习入口",
-          description: "之后可在 Learning 页面主动生成",
+          label: "加入待学习列表",
+          description: "之后可在学习页面主动生成",
         },
       ] as const,
       "是否现在生成辅助学习材料？",
@@ -901,7 +1044,7 @@ export default class OkfBrainPlugin extends Plugin {
     intent: "learn" | "wiki" | "source",
     generate: boolean,
   ): void {
-    this.promptMaterialContext("这份资料属于哪个上下文？", (relation) =>
+    this.promptMaterialContext("要将这份资料关联到课程或项目吗？", (relation) =>
       this.routePendingSource(path, { intent, generate, ...relation }),
     );
   }
@@ -976,9 +1119,85 @@ export default class OkfBrainPlugin extends Plugin {
         10_000,
       );
     }
+    const existing = this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE)[0];
+    if (existing) {
+      this.app.workspace.setActiveLeaf(existing, { focus: true });
+      return;
+    }
     const leaf = this.app.workspace.getLeaf("tab");
-    await leaf.setViewState({ type: OKF_DASHBOARD_VIEW, active: true });
+    await leaf.setViewState({ type: DASHBOARD_VIEW_TYPE, active: true });
     this.app.workspace.revealLeaf(leaf);
+  }
+
+  private activeApexView(origin?: HTMLElement, workbenchPath?: string): { leaf: WorkspaceLeaf; view: DashboardView } | undefined {
+    const leaves = this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE);
+    const leaf = (origin
+      ? leaves.find((candidate) => candidate.view instanceof DashboardView && candidate.view.containerEl.contains(origin))
+      : undefined)
+      ?? (workbenchPath
+        ? leaves.find((candidate) => candidate.view instanceof DashboardView && candidate.view.currentWorkspacePath() === workbenchPath)
+        : undefined)
+      ?? leaves.find((candidate) => candidate.view === this.app.workspace.getActiveViewOfType(DashboardView))
+      ?? leaves[0];
+    return leaf?.view instanceof DashboardView ? { leaf, view: leaf.view } : undefined;
+  }
+
+  public async returnToOkfWorkbench(workbenchPath?: string): Promise<void> {
+    let target = this.activeApexView(undefined, workbenchPath);
+    if (!target) {
+      await this.openDashboard();
+      target = this.activeApexView();
+    }
+    if (!target) return;
+    if (workbenchPath && target.view.currentWorkspacePath() !== workbenchPath &&
+      this.settings.apex.workspaceFiles.includes(workbenchPath)) {
+      await target.view.switchWorkspace(workbenchPath);
+    }
+    await this.app.workspace.revealLeaf(target.leaf);
+  }
+
+  public hasOkfSectionInActiveWorkbench(section: EmbeddedDashboardSection, workbenchPath?: string): boolean {
+    const target = this.activeApexView(undefined, workbenchPath);
+    return !!target && (!workbenchPath || target.view.currentWorkspacePath() === workbenchPath) &&
+      target.view.hasSectionType(OKF_SECTION_TYPES[section]);
+  }
+
+  public async navigateToOkfSection(section: EmbeddedDashboardSection, origin?: HTMLElement, workbenchPath?: string): Promise<void> {
+    const target = this.activeApexView(origin, workbenchPath);
+    if (target && (!workbenchPath || target.view.currentWorkspacePath() === workbenchPath) &&
+      target.view.hasSectionType(OKF_SECTION_TYPES[section])) {
+      await this.app.workspace.revealLeaf(target.leaf);
+      target.view.refreshSectionType(OKF_SECTION_TYPES[section]);
+      if (target.view.revealSectionType(OKF_SECTION_TYPES[section])) return;
+    }
+    this.updateDashboardUiState({ activeSection: section });
+    const existing = this.app.workspace.getLeavesOfType(OKF_DASHBOARD_VIEW)[0];
+    const leaf = existing ?? this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({
+      type: OKF_DASHBOARD_VIEW,
+      state: { section, workbenchPath: target?.view.currentWorkspacePath() ?? workbenchPath },
+      active: true,
+    });
+    await this.app.workspace.revealLeaf(leaf);
+  }
+
+  public async addOkfSectionToActiveWorkbench(section: EmbeddedDashboardSection, workbenchPath?: string): Promise<void> {
+    if (workbenchPath && !this.settings.apex.workspaceFiles.includes(workbenchPath)) {
+      new Notice("原工作台已不存在，请返回工作台后再添加卡片。");
+      return;
+    }
+    if (!this.activeApexView()) await this.openDashboard();
+    const target = this.activeApexView(undefined, workbenchPath);
+    if (!target) {
+      new Notice("无法打开当前工作台，请重试。");
+      return;
+    }
+    if (workbenchPath && target.view.currentWorkspacePath() !== workbenchPath &&
+      this.settings.apex.workspaceFiles.includes(workbenchPath)) {
+      await target.view.switchWorkspace(workbenchPath);
+    }
+    await target.view.addSectionType(OKF_SECTION_TYPES[section], okfSectionDefaultName(section));
+    await this.app.workspace.revealLeaf(target.leaf);
   }
 
   public async openFeedDigest(feed: FeedKind, digestId: string): Promise<void> {
@@ -1004,7 +1223,11 @@ export default class OkfBrainPlugin extends Plugin {
           this.feedDigestCache = { value, loadedAt: Date.now() };
         }
         return value;
-      } catch {
+      } catch (error) {
+        // A rejected HTTP response (for example an expired token) is an API
+        // error. Starting another service cannot repair it and hides the
+        // useful response behind a misleading launch-configuration error.
+        if (!(error instanceof FeedTransportError)) throw error;
         await this.ensureLocalServiceAvailable();
         const value = await api.dashboardDigest();
         if (revision === this.feedProjectionRevision) {
@@ -1085,7 +1308,7 @@ export default class OkfBrainPlugin extends Plugin {
         this.refreshDashboardViews();
         new Notice(
           result.next_run_will_include_current
-            ? "订阅已添加；当前内容会在首次更新中进入 Reading"
+            ? "订阅已添加；当前内容会在首次更新中进入订阅阅读"
             : "订阅已添加；将从下一次新内容开始",
           8_000,
         );
@@ -1211,7 +1434,7 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   private notes(): VaultNoteService {
-    if (!this.vaultNotes) throw new Error("Vault 写入服务尚未初始化");
+    if (!this.vaultNotes) throw new Error("笔记保存功能尚未就绪，请稍后重试");
     return this.vaultNotes;
   }
 
@@ -1232,9 +1455,36 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public refreshDashboardViews(): void {
-    for (const leaf of this.app.workspace.getLeavesOfType(OKF_DASHBOARD_VIEW)) {
-      if (leaf.view instanceof OkfDashboardView) void leaf.view.refresh();
+    this.apexHost?.refreshAllDashboards();
+  }
+
+  public async mountOkfDashboardSurface(
+    container: HTMLElement,
+    section: EmbeddedDashboardSection,
+  ): Promise<() => void> {
+    const leaf = this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE)[0];
+    if (!leaf) throw new Error("请先打开一个工作台，再打开此页面");
+    const surface = new OkfDashboardView(leaf, this, {
+      container,
+      initialSection: section,
+      embedded: true,
+    });
+    this.embeddedDashboardSurfaces.add(surface);
+    try {
+      await surface.onOpen();
+    } catch (error) {
+      this.embeddedDashboardSurfaces.delete(surface);
+      await surface.onClose();
+      throw error;
     }
+
+    let disposed = false;
+    return (): void => {
+      if (disposed) return;
+      disposed = true;
+      this.embeddedDashboardSurfaces.delete(surface);
+      void surface.onClose();
+    };
   }
 
   private async initializeSemanticMonitor(): Promise<void> {
@@ -1301,11 +1551,11 @@ export default class OkfBrainPlugin extends Plugin {
       text: completed
         ? "点击下面的按钮直接打开结果。"
         : interrupted
-          ? "可在 Learning 或 System 中重新生成。"
+          ? "可在对应内容页或系统状态中重新生成。"
           : (operation.error ?? "可以打开目标笔记查看状态。"),
     });
     const open = notice.noticeEl.createEl("button", {
-      text: isWiki ? "打开 Wiki" : "打开学习材料",
+      text: isWiki ? "打开知识笔记" : "打开学习材料",
     });
     open.addEventListener("click", () => {
       notice.hide();
@@ -1325,7 +1575,7 @@ export default class OkfBrainPlugin extends Plugin {
       "waiting-for-mineru",
     ]);
     const hasActiveCached = [...this.conversionRecords.values()]
-      .some((record) => activeStatuses.has(record.status));
+      .some((record) => activeStatuses.has(record.status) || hasPendingGeneration(record));
     if (!force && !hasActiveCached && Date.now() - this.conversionLastIdlePoll < 30_000) return;
     this.conversionListPollInFlight = true;
     try {
@@ -1338,17 +1588,17 @@ export default class OkfBrainPlugin extends Plugin {
       this.conversionRecords.clear();
       for (const conversion of conversions) {
         this.conversionRecords.set(conversion.conversion_id, conversion);
-        if (activeStatuses.has(conversion.status)) {
+        if (activeStatuses.has(conversion.status) || hasPendingGeneration(conversion)) {
           this.watchedConversionIds.add(conversion.conversion_id);
         } else if (
           ["imported", "failed"].includes(conversion.status) &&
           this.watchedConversionIds.delete(conversion.conversion_id)
         ) {
           if (conversion.status === "imported") this.notifyDocumentImport(conversion);
-          else new Notice(`文档转换失败：${conversion.error ?? "请在 System 查看详情"}`, 20_000);
+          else new Notice(`文档转换失败：${conversion.error ?? "请在系统状态查看详情"}`, 20_000);
         }
       }
-      if (!conversions.some((record) => activeStatuses.has(record.status))) {
+      if (!conversions.some((record) => activeStatuses.has(record.status) || hasPendingGeneration(record))) {
         this.conversionLastIdlePoll = Date.now();
       }
       const current = conversions
@@ -1400,8 +1650,13 @@ export default class OkfBrainPlugin extends Plugin {
   private registerCommands(): void {
     this.addCommand({
       id: DASHBOARD_COMMAND_ID,
-      name: "打开 Dashboard",
+      name: "打开工作台",
       callback: () => void this.openDashboard(),
+    });
+    this.addCommand({
+      id: "open-system",
+      name: "打开系统状态",
+      callback: () => void this.navigateToOkfSection("system"),
     });
     this.addCommand({
       id: "open-today-daily",
@@ -1414,7 +1669,7 @@ export default class OkfBrainPlugin extends Plugin {
     });
     this.addCommand({
       id: "open-action-menu",
-      name: "打开快捷动作菜单（QuickAdd 入口）",
+      name: "打开快捷操作菜单",
       callback: () => this.promptActionMenu(),
     });
     this.addCommand({
@@ -1454,7 +1709,7 @@ export default class OkfBrainPlugin extends Plugin {
     });
     this.addCommand({
       id: "new-formal-decision",
-      name: "新建正式 Decision",
+      name: "记录项目决策",
       callback: () => this.promptNewDecision(),
     });
     this.addCommand({
@@ -1464,7 +1719,7 @@ export default class OkfBrainPlugin extends Plugin {
     });
     this.addCommand({
       id: "create-knowledge-from-sources",
-      name: "在 Claudian 中生成 Wiki",
+      name: "在 Claudian 中生成知识笔记",
       callback: () => this.promptWikiFromSources(),
     });
     this.addCommand({
@@ -1486,162 +1741,71 @@ export default class OkfBrainPlugin extends Plugin {
     });
   }
 
+  private registerApexCommands(): void {
+    this.addCommand({
+      id: "cycle-theme",
+      name: "切换工作台主题",
+      callback: () => void this.apexHost?.cycleTheme(),
+    });
+    this.addCommand({
+      id: "next-workspace",
+      name: "下一个工作台",
+      callback: () => this.apexHost?.cycleWorkspace(1),
+    });
+    this.addCommand({
+      id: "previous-workspace",
+      name: "上一个工作台",
+      callback: () => this.apexHost?.cycleWorkspace(-1),
+    });
+    this.addCommand({
+      id: "toggle-note-popover",
+      name: "切换笔记浮窗",
+      callback: () => {
+        if (!this.apexHost) return;
+        this.apexHost.settings = {
+          ...this.apexHost.settings,
+          disableNotePopover: !this.apexHost.settings.disableNotePopover,
+        };
+        void this.apexHost.saveSettings();
+      },
+    });
+    this.addCommand({
+      id: "add-section",
+      name: "添加工作台分区",
+      callback: () => void this.apexHost?.addSection(),
+    });
+    this.addCommand({
+      id: "toggle-banner-mode",
+      name: "切换工作台横幅模式",
+      callback: () => void this.apexHost?.toggleBannerMode(),
+    });
+  }
+
   public promptDocumentImport(
     relation: Pick<DocumentImportOptions, "course" | "project"> = {},
   ): void {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".pdf,.doc,.docx,.ppt,.pptx";
-    input.addEventListener("change", () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      new ChoiceModal(
-        this.app,
-        [
-          { value: "learn", label: "用于学习", description: "转换后创建辅助学习材料，可关联课程或项目" },
-          { value: "wiki", label: "直接生成 Wiki", description: "不进入学习流程，生成可长期检索的参考 Wiki" },
-          { value: "source", label: "仅完成转换", description: "只保存 Original、Source 与 Extract" },
-          { value: "later", label: "暂不确定", description: "先保存原件和完整正文，之后在 Inbox 归类" },
-        ] as const,
-        "这份文档导入后准备怎么使用？",
-        async (intent) => {
-          if (intent !== "learn") {
-            await this.chooseDocumentParsing(file, intent, intent === "wiki", relation);
-            return;
-          }
-          new ChoiceModal(
-            this.app,
-            [
-              {
-                value: "generate",
-                label: "转换后自动生成辅助学习材料",
-                description: "后台调用 Codex，完成后直接进入学习",
-              },
-              {
-                value: "convert-only",
-                label: "先转换，稍后学习",
-                description: "资料进入 Learning 的待生成区，需要时再创建 Study Guide",
-              },
-            ] as const,
-            "是否自动生成辅助学习材料？",
-            async (choice) => this.chooseDocumentParsing(
-              file,
-              intent,
-              choice === "generate",
-              relation,
-            ),
-          ).open();
-        },
-      ).open();
-    });
-    input.click();
+    this.openDocumentImport([], relation, relation.course ? "learning" : "command");
   }
 
-  private async chooseDocumentParsing(
-    file: File,
-    intent: ImportIntent,
-    generate: boolean,
+  public openDocumentImport(
+    files: ImportFile[] = [],
     relation: Pick<DocumentImportOptions, "course" | "project"> = {},
-  ): Promise<void> {
-    if (this.settings.documentParserPolicy === "markitdown-only") {
-      const options = {
-        intent,
-        quality: "quick",
-        parser: "markitdown",
-        generate,
-        ...relation,
-      } satisfies DocumentImportOptions;
-      if (options.course || options.project) void this.startDocumentImport(file, options);
-      else this.promptDocumentContext(file, options);
-      return;
-    }
-    new ChoiceModal(
-      this.app,
-      [
-        {
-          value: "high",
-          label: "完整解析优先（默认）",
-          description: "PDF/PPT 优先 MinerU；Word 保留原生结构",
-        },
-        {
-          value: "quick",
-          label: "快速文本",
-          description: "使用 MarkItDown 快速取得正文",
-        },
-      ] as const,
-      "选择转换方式",
-      async (choice) => {
-        const quality: ImportQuality = choice;
-        const isWord = /\.docx?$/iu.test(file.name);
-        const parser: ImportParser =
-          choice === "quick" || isWord
-            ? "markitdown"
-            : this.settings.documentParserPolicy === "mineru-required"
-              ? "mineru"
-              : "auto";
-        const options = { intent, quality, parser, generate, ...relation };
-        if (options.course || options.project) await this.startDocumentImport(file, options);
-        else this.promptDocumentContext(file, options);
-      },
-    ).open();
-  }
-
-  private promptDocumentContext(
-    file: File,
-    options: DocumentImportOptions,
+    origin: ImportOrigin = "command",
   ): void {
-    new ChoiceModal(
-      this.app,
-      [
-        { value: "independent", label: "独立资料", description: "不关联课程或项目" },
-        { value: "course", label: "关联已有课程", description: "从当前课程列表中选择" },
-        { value: "project", label: "关联已有项目", description: "从当前项目列表中选择" },
-      ] as const,
-      "这份资料属于哪个上下文？",
-      async (context) => {
-        if (context === "course") {
-          this.selectCourse("选择资料所属课程", (course) => {
-            void this.startDocumentImport(file, { ...options, course });
-          });
-        } else if (context === "project") {
-          this.selectProject("选择资料所属项目", (project) => {
-            void this.startDocumentImport(file, { ...options, project });
-          });
-        } else {
-          await this.startDocumentImport(file, options);
-        }
+    const api = new HttpDocumentImportApi(this.settings.baseUrl, this.settings.token);
+    let serviceReady: Promise<void> | undefined;
+    new DocumentImportModal(
+      this.app, files, relation, origin,
+      async (file, options) => {
+        serviceReady ??= this.ensureLocalServiceAvailable();
+        await serviceReady;
+        const result = await api.importDocument(file, options);
+        this.watchDocumentConversion(result.conversion_id);
+        if (result.semantic_operation) this.watchSemanticOperation(result.semantic_operation.operation_id);
+        this.refreshDashboardViews();
+        return result;
       },
     ).open();
-  }
-
-  private async startDocumentImport(file: File, request: DocumentImportOptions): Promise<void> {
-    const importer = new HttpDocumentImportApi(this.settings.baseUrl, this.settings.token);
-    const progress = new Notice(`正在准备并上传：${file.name}`, 0);
-    try {
-      await this.ensureLocalServiceAvailable();
-      const result = await importer.importDocument(file, request);
-      if (["queued", "converting", "waiting-for-mineru"].includes(result.status)) {
-        this.watchDocumentConversion(result.conversion_id);
-        new Notice(`已提交后台转换：${file.name}`, 10_000);
-        this.refreshDashboardViews();
-        return;
-      }
-      const path = convertedDocumentTarget(result);
-      if (result.semantic_operation) {
-        this.watchSemanticOperation(result.semantic_operation.operation_id);
-      }
-      new Notice(
-        result.semantic_operation
-          ? `转换完成；Codex 后台任务已开始：${path}`
-          : "导入完成：" + path,
-        10_000,
-      );
-      if (path) await this.openVaultPath(path);
-    } catch (error) {
-      new Notice(error instanceof Error ? error.message : "导入失败", 10_000);
-    } finally {
-      progress.hide();
-    }
   }
 
   private registerReadingViewControls(): void {
@@ -1872,7 +2036,25 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   private async loadSettings(): Promise<void> {
-    const loaded = (await this.loadData()) as Partial<OkfBrainSettings> | null;
+    const raw = await this.loadData();
+    const loaded = raw && typeof raw === "object"
+      ? raw as Record<string, unknown> & Partial<OkfBrainSettings>
+      : {};
+    this.persistedSettings = { ...loaded };
+    delete this.persistedSettings.token;
+    let apexSettings = loaded.apex;
+    let importedLegacyApexSettings = false;
+    if (!apexSettings || typeof apexSettings !== "object") {
+      try {
+        const legacy = await readLegacyApexSettings(this.app);
+        if (legacy && typeof legacy === "object") {
+          apexSettings = legacy as OkfBrainSettings["apex"];
+          importedLegacyApexSettings = true;
+        }
+      } catch (error) {
+        console.warn("[okf-workspace] could not read legacy Apex settings", error);
+      }
+    }
     this.settings = {
       ...DEFAULT_SETTINGS,
       ...loaded,
@@ -1881,8 +2063,10 @@ export default class OkfBrainPlugin extends Plugin {
         loaded?.feedReadingPositions,
       ),
       feedReadingPositions: { ...DEFAULT_SETTINGS.feedReadingPositions, ...loaded?.feedReadingPositions },
+      apex: normalizeApexSettings(apexSettings),
     };
     await this.reloadLocalToken();
+    if (importedLegacyApexSettings) await this.saveSettings();
   }
 }
 

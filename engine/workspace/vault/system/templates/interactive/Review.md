@@ -1,11 +1,11 @@
 <%*
 const period = await tp.system.suggester(
-  ["Weekly Review", "Monthly Review", "Yearly Review"],
+  ["每周复盘", "每月复盘", "每年复盘"],
   ["weekly", "monthly", "yearly"],
   false,
   "选择复盘周期",
 );
-if (!period) throw new Error("Review 创建已取消");
+if (!period) throw new Error("已取消创建复盘");
 
 const now = new Date();
 const year = now.getFullYear();
@@ -31,15 +31,15 @@ if (period === "weekly") {
   const yearStart = new Date(Date.UTC(isoYear, 0, 1));
   const week = Math.ceil((((thursday - yearStart) / 86400000) + 1) / 7);
   key = `${isoYear}-W${pad(week)}`;
-  title = `${key} Weekly Review`;
+  title = `${key} 每周复盘`;
 } else if (period === "monthly") {
   key = `${year}-${pad(month + 1)}`;
-  title = `${key} Monthly Review`;
+  title = `${key} 每月复盘`;
   start = new Date(Date.UTC(year, month, 1));
   end = new Date(Date.UTC(year, month + 1, 0));
 } else {
   key = String(year);
-  title = `${key} Yearly Review`;
+  title = `${key} 每年复盘`;
   start = new Date(Date.UTC(year, 0, 1));
   end = new Date(Date.UTC(year, 11, 31));
 }
@@ -47,7 +47,7 @@ if (period === "weekly") {
 const periodRange = `${dateText(start)} — ${dateText(end)}`;
 const target = `life/reviews/${period}/${key}`;
 if (app.vault.getAbstractFileByPath(`${target}.md`)) {
-  throw new Error(`本期 Review 已存在：${target}.md。请直接打开已有文件，或从 Dashboard 的 Life 页面进入。`);
+  throw new Error(`本期复盘已存在：${target}.md。请直接打开已有文件，或从 工作台的生活页进入。`);
 }
 await tp.file.move(target);
 -%>

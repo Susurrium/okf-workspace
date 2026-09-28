@@ -14,9 +14,9 @@ export interface CaptureContextOptions {
 }
 
 export const CAPTURE_ENTRY_ACTION_LABELS = [
-  "直接保存到 Inbox",
-  "关联 Course 后保存",
-  "关联 Project 后保存",
+  "直接保存到待处理",
+  "关联课程后保存",
+  "关联项目后保存",
 ] as const;
 
 export function filterCaptureContextOptions(
@@ -72,7 +72,7 @@ function normalizeRelationPath(value: string, kind: "course" | "project"): strin
     const expected = kind === "course"
       ? "learning/courses/<course>/course.md"
       : "projects/<project>/project.md";
-    throw new Error(`${kind === "course" ? "Course" : "Project"} 关联必须指向 ${expected}`);
+    throw new Error(`${kind === "course" ? "课程" : "项目"} 关联必须指向 ${expected}`);
   }
   return `/${path}`;
 }

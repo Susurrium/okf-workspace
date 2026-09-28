@@ -46,29 +46,10 @@ export interface ToolCallInfo {
   isExpanded?: boolean;
   diffData?: ToolDiffData;
   resolvedAnswers?: AskUserAnswers;
+  /** Live async question presentation; replay alone never opens a prompt. */
+  questionStatus?: 'pending' | 'expired';
   subagent?: SubagentInfo;
 }
-
-export type ExitPlanModeDecision =
-  | { type: 'approve' }
-  | { type: 'approve-new-session'; planContent: string }
-  | { type: 'feedback'; text: string }
-  | { type: 'abandon' };
-
-export interface ExitPlanModePresentationOptions {
-  allowAbandon?: boolean;
-  allowNewSession?: boolean;
-  approveLabel?: string;
-  dismissOnEscape?: boolean;
-  feedbackLabel?: string;
-  shiftTabDecision?: 'abandon';
-}
-
-export type ExitPlanModeCallback = (
-  input: Record<string, unknown>,
-  signal?: AbortSignal,
-  presentation?: ExitPlanModePresentationOptions,
-) => Promise<ExitPlanModeDecision | null>;
 
 /** Subagent execution mode: sync (nested tools) or async (background). */
 export type SubagentMode = 'sync' | 'async';
@@ -83,6 +64,8 @@ export type AsyncSubagentStatus =
 
 /** Subagent (Agent tool) tracking for sync and async modes. */
 export interface SubagentInfo {
+  /** Session events own this state independently of the parent tool result. */
+  lifecycleSource?: 'session';
   id: string;
   description: string;
   prompt?: string;
@@ -96,4 +79,16 @@ export interface SubagentInfo {
   outputToolId?: string;
   startedAt?: number;
   completedAt?: number;
+}
+
+/** Display-only snapshot of a running subagent; newer snapshots replace older ones and none is persisted. */
+export interface SubagentProgress {
+  /** Tool call that spawned the subagent. */
+  toolCallId: string;
+  /** One-line description of what the subagent is doing now. */
+  summary?: string;
+  lastToolName?: string;
+  toolUses?: number;
+  totalTokens?: number;
+  durationMs?: number;
 }

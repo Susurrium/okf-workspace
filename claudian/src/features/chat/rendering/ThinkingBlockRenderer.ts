@@ -27,7 +27,6 @@ export function createThinkingBlock(
   header.setAttribute('tabindex', '0');
   header.setAttribute('role', 'button');
   header.setAttribute('aria-expanded', 'false');
-  header.setAttribute('aria-label', 'Extended thinking - click to expand');
 
   // Label with timer
   const labelEl = header.createSpan({ cls: 'claudian-thinking-label' });
@@ -59,15 +58,6 @@ export function createThinkingBlock(
   });
 
   return state;
-}
-
-export async function appendThinkingContent(
-  state: ThinkingBlockState,
-  content: string,
-  renderContent: RenderContentFn
-) {
-  state.content += content;
-  await renderContent(state.contentEl, state.content);
 }
 
 export function finalizeThinkingBlock(state: ThinkingBlockState): number {
@@ -110,7 +100,6 @@ export function renderStoredThinkingBlock(
   const header = wrapperEl.createDiv({ cls: 'claudian-thinking-header' });
   header.setAttribute('tabindex', '0');
   header.setAttribute('role', 'button');
-  header.setAttribute('aria-label', 'Extended thinking - click to expand');
 
   // Label with duration
   const labelEl = header.createSpan({ cls: 'claudian-thinking-label' });

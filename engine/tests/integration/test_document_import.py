@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Generator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import NoReturn, cast
 
@@ -274,13 +272,13 @@ def test_high_quality_import_rejects_truncated_embedded_images(tmp_path: Path) -
     assert not list((vault / "sources/records/documents").glob("*.md"))
 
 
-def test_default_import_uses_markitdown_without_contacting_mineru(
+def test_default_import_uses_mineru_without_markitdown_fallback(
     tmp_path: Path,
 ) -> None:
     vault = initialize_vault(tmp_path / "vault")
     mineru = FakeParser(
         ParserName.MINERU,
-        error=RuntimeError("MinerU unavailable"),
+        useful_export(),
     )
     markitdown = FakeParser(
         ParserName.MARKITDOWN,
@@ -303,35 +301,37 @@ def test_default_import_uses_markitdown_without_contacting_mineru(
         )
     )
 
-    assert result.parser is ParserName.MARKITDOWN
+    assert result.parser is ParserName.MINERU
     assert result.qc.checks["parser_not_degraded"]
-    assert not mineru.calls
-    assert len(markitdown.calls) == 1
+    assert len(mineru.calls) == 1
+    assert not markitdown.calls
     manifest = json.loads((result.export_directory / "manifest.json").read_text(encoding="utf-8"))
     assert "degraded_from" not in manifest
 
 
-def test_default_mineru_uses_managed_ssh_session(
+def test_default_mineru_uses_cloud_token_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     vault = initialize_vault(tmp_path / "vault")
     parser = FakeParser(ParserName.MINERU, useful_export())
-    seen: list[ImportSettings] = []
+    token_file = tmp_path / "mineru.token"
+    token_file.write_text("fixture-token", encoding="utf-8")
+    seen: list[Path] = []
 
-    @contextmanager
-    def fake_managed(settings: ImportSettings) -> Generator[FakeParser]:
-        seen.append(settings)
-        yield parser
+    def fake_cloud(token: Path, *, model: str) -> FakeParser:
+        assert model == "vlm"
+        seen.append(token)
+        return parser
 
     monkeypatch.setattr(
-        "okf_workspace.importers.pipeline.managed_mineru_client",
-        fake_managed,
+        "okf_workspace.importers.pipeline.CloudMinerUClient",
+        fake_cloud,
     )
     importer = DocumentImporter(
         vault=vault,
         originals=tmp_path / "originals",
         state=tmp_path / "state",
-        settings=ImportSettings(mineru_ssh_host="bjmu-inner"),
+        settings=ImportSettings(mineru_token_file=token_file),
     )
 
     result = importer.import_document(
@@ -343,8 +343,7 @@ def test_default_mineru_uses_managed_ssh_session(
     )
 
     assert result.parser is ParserName.MINERU
-    assert seen[0].mineru_ssh_managed is True
-    assert seen[0].mineru_ssh_host == "bjmu-inner"
+    assert seen == [token_file]
     assert len(parser.calls) == 1
 
 

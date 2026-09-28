@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
+
+from okf_workspace.okf.file_io import document_lock
 
 from .models import ConversionStatus, ImportRequest, OriginalRecord, ParserName
 
@@ -37,46 +40,55 @@ class ConversionStore:
         warnings: Sequence[str] | None = None,
     ) -> None:
         target = self.record_path(conversion_id)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        existing: dict[str, object] = {}
-        if target.exists():
-            loaded_object = cast(
-                object,
-                json.loads(target.read_text(encoding="utf-8")),
-            )
-            if isinstance(loaded_object, dict):
-                existing = dict(cast(Mapping[str, object], loaded_object))
-        now = datetime.now(UTC).isoformat(timespec="seconds")
-        payload = {
-            **existing,
-            "conversion_id": conversion_id,
-            "status": status.value,
-            "source_sha256": original.sha256,
-            "source_filename": original.filename,
-            "original_path": str(original.stored_path),
-            "intent": request.intent.value,
-            "quality": request.quality.value,
-            "parser": parser.value,
-            "requested_parser": request.parser.value if request.parser is not None else "auto",
-            "course": request.course,
-            "project": request.project,
-            "generate": request.generate,
-            "error": error,
-            "stages": {
-                **(
-                    dict(cast(Mapping[str, str], existing.get("stages")))
-                    if isinstance(existing.get("stages"), dict)
-                    else {}
+        with document_lock(target):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            existing: dict[str, object] = {}
+            if target.exists():
+                loaded_object = cast(
+                    object,
+                    json.loads(target.read_text(encoding="utf-8")),
+                )
+                if isinstance(loaded_object, dict):
+                    existing = dict(cast(Mapping[str, object], loaded_object))
+            now = datetime.now(UTC).isoformat(timespec="seconds")
+            payload = {
+                **existing,
+                "conversion_id": conversion_id,
+                "status": status.value,
+                "source_sha256": original.sha256,
+                "source_filename": original.filename,
+                "original_path": str(original.stored_path),
+                "intent": request.intent.value,
+                "quality": request.quality.value,
+                "parser": parser.value,
+                "requested_parser": request.parser.value if request.parser is not None else "auto",
+                "course": request.course,
+                "project": request.project,
+                "generate": request.generate,
+                "error": error,
+                "stages": {
+                    **(
+                        dict(cast(Mapping[str, str], existing.get("stages")))
+                        if isinstance(existing.get("stages"), dict)
+                        else {}
+                    ),
+                    **(dict(stages) if stages is not None else {}),
+                },
+                "warnings": (
+                    list(warnings) if warnings is not None else existing.get("warnings", [])
                 ),
-                **(dict(stages) if stages is not None else {}),
-            },
-            "warnings": list(warnings) if warnings is not None else existing.get("warnings", []),
-            "outputs": outputs or existing.get("outputs", {}),
-            "created_at": existing.get("created_at", now),
-            "updated_at": now,
-            "attempt": existing.get("attempt", 0),
-        }
-        self._write(target, payload)
+                "outputs": {
+                    **(cast(dict[str, object], existing["outputs"])
+                       if isinstance(existing.get("outputs"), dict) else {}),
+                    **(outputs or {}),
+                },
+                "created_at": existing.get("created_at", now),
+                "updated_at": now,
+                "attempt": existing.get("attempt", 0),
+            }
+            if status is ConversionStatus.IMPORTED:
+                payload["reparse"] = False
+            self._write(target, payload)
 
     def transition(
         self,
@@ -89,36 +101,40 @@ class ConversionStore:
         outputs: Mapping[str, str] | None = None,
         stages: Mapping[str, str] | None = None,
     ) -> dict[str, object]:
-        payload = self.load(conversion_id)
-        now = datetime.now(UTC)
-        payload["status"] = status.value
-        payload["updated_at"] = now.isoformat(timespec="seconds")
-        payload["error"] = error
-        if retry_after_seconds is not None:
-            payload["next_retry_at"] = (now + timedelta(seconds=retry_after_seconds)).isoformat(
-                timespec="seconds"
-            )
-        else:
-            payload["next_retry_at"] = None
-        if increment_attempt:
-            attempt = payload.get("attempt", 0)
-            payload["attempt"] = (attempt if isinstance(attempt, int) else 0) + 1
-        if outputs:
-            current = payload.get("outputs")
-            merged = dict(cast(Mapping[str, object], current)) if isinstance(current, dict) else {}
-            merged.update(outputs)
-            payload["outputs"] = merged
-        if stages:
-            current_stages = payload.get("stages")
-            merged_stages = (
-                dict(cast(Mapping[str, object], current_stages))
-                if isinstance(current_stages, dict)
-                else {}
-            )
-            merged_stages.update(stages)
-            payload["stages"] = merged_stages
-        self._write(self.record_path(conversion_id), payload)
-        return payload
+        target = self.record_path(conversion_id)
+        with document_lock(target):
+            payload = self.load(conversion_id)
+            now = datetime.now(UTC)
+            payload["status"] = status.value
+            payload["updated_at"] = now.isoformat(timespec="seconds")
+            payload["error"] = error
+            if retry_after_seconds is not None:
+                payload["next_retry_at"] = (now + timedelta(seconds=retry_after_seconds)).isoformat(
+                    timespec="seconds"
+                )
+            else:
+                payload["next_retry_at"] = None
+            if increment_attempt:
+                attempt = payload.get("attempt", 0)
+                payload["attempt"] = (attempt if isinstance(attempt, int) else 0) + 1
+            if outputs:
+                current = payload.get("outputs")
+                merged = (
+                    dict(cast(Mapping[str, object], current)) if isinstance(current, dict) else {}
+                )
+                merged.update(outputs)
+                payload["outputs"] = merged
+            if stages:
+                current_stages = payload.get("stages")
+                merged_stages = (
+                    dict(cast(Mapping[str, object], current_stages))
+                    if isinstance(current_stages, dict)
+                    else {}
+                )
+                merged_stages.update(stages)
+                payload["stages"] = merged_stages
+            self._write(target, payload)
+            return payload
 
     def record_parser_attempt(
         self,
@@ -130,26 +146,30 @@ class ConversionStore:
         duration_ms: int,
         error: str | None = None,
     ) -> None:
-        payload = self.load(conversion_id)
-        existing = payload.get("parser_attempts")
-        attempts = list(cast(list[object], existing)) if isinstance(existing, list) else []
-        attempts.append(
-            {
-                "parser": parser.value,
-                "status": status,
-                "started_at": started_at,
-                "duration_ms": duration_ms,
-                "error": error,
-            }
-        )
-        payload["parser_attempts"] = attempts
-        payload["updated_at"] = datetime.now(UTC).isoformat(timespec="seconds")
-        self._write(self.record_path(conversion_id), payload)
+        target = self.record_path(conversion_id)
+        with document_lock(target):
+            payload = self.load(conversion_id)
+            existing = payload.get("parser_attempts")
+            attempts = list(cast(list[object], existing)) if isinstance(existing, list) else []
+            attempts.append(
+                {
+                    "parser": parser.value,
+                    "status": status,
+                    "started_at": started_at,
+                    "duration_ms": duration_ms,
+                    "error": error,
+                }
+            )
+            payload["parser_attempts"] = attempts
+            payload["updated_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+            self._write(target, payload)
 
     def reconcile_interrupted(self) -> int:
         changed = 0
         for record in self.list():
-            if record.get("status") != ConversionStatus.CONVERTING.value:
+            if record.get("status") not in {
+                ConversionStatus.CONVERTING.value, ConversionStatus.READY.value,
+            }:
                 continue
             self.transition(
                 str(record["conversion_id"]),
@@ -165,18 +185,39 @@ class ConversionStore:
         *,
         parser: ParserName | None = None,
     ) -> dict[str, object]:
-        payload = self.load(conversion_id)
-        if parser is not None:
-            payload["requested_parser"] = parser.value
-            payload["parser"] = parser.value
-        payload["status"] = ConversionStatus.QUEUED.value
-        payload["error"] = None
-        payload["next_retry_at"] = None
-        payload["outputs"] = {}
-        payload["stages"] = {"upload": "completed", "conversion": "queued"}
-        payload["updated_at"] = datetime.now(UTC).isoformat(timespec="seconds")
-        self._write(self.record_path(conversion_id), payload)
-        return payload
+        target = self.record_path(conversion_id)
+        with document_lock(target):
+            payload = self.load(conversion_id)
+            stages = payload.get("stages")
+            if (
+                parser is None and payload.get("status") == ConversionStatus.IMPORTED.value
+                and isinstance(stages, dict)
+                and cast(dict[str, object], stages).get("semantic") in {"pending", "failed"}
+            ):
+                payload["error"] = None
+                payload["next_retry_at"] = None
+                self._write(target, payload)
+                return payload
+            if parser is not None:
+                payload["requested_parser"] = parser.value
+                payload["parser"] = parser.value
+                payload["reparse"] = True
+                payload["generation_revision"] = uuid.uuid4().hex
+                outputs = payload.get("outputs")
+                if isinstance(outputs, dict):
+                    cast(dict[str, object], outputs).pop("semantic_operation_id", None)
+            payload["status"] = ConversionStatus.QUEUED.value
+            payload["error"] = None
+            payload["next_retry_at"] = None
+            payload["stages"] = (
+                {**cast(dict[str, object], stages), "routing": "pending"}
+                if parser is None and isinstance(stages, dict)
+                and cast(dict[str, object], stages).get("conversion") == "completed"
+                else {"upload": "completed", "conversion": "queued"}
+            )
+            payload["updated_at"] = datetime.now(UTC).isoformat(timespec="seconds")
+            self._write(target, payload)
+            return payload
 
     def load(self, conversion_id: str) -> dict[str, object]:
         path = self.record_path(conversion_id)

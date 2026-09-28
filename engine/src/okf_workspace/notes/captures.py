@@ -133,14 +133,14 @@ def recommend_capture_destination(vault: Path, relative: str) -> dict[str, str]:
         (("项目", "进度", "下一步"), "project-log", "内容与项目进展或行动有关"),
         (("感受", "反思", "心情", "意识到"), "reflection", "内容以个人感受和反思为主"),
         (("学习", "理解", "概念"), "study-guide", "内容适合进入学习流程"),
-        (("配置", "清单", "地址", "步骤", "指南"), "wiki", "内容适合作为以后查用的 Wiki"),
+        (("配置", "清单", "地址", "步骤", "指南"), "wiki", "内容适合作为以后查用的知识笔记"),
     )
     for markers, destination, reason in rules:
         if any(marker in text for marker in markers):
             return {"destination": destination, "reason": reason}
     return {
         "destination": "wiki",
-        "reason": "内容包含可继续提炼的想法，默认创建 Wiki 草稿",
+        "reason": "内容可能适合整理为知识笔记，请自行选择是否保留",
     }
 
 

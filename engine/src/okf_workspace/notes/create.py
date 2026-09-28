@@ -16,6 +16,7 @@ from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_docu
 from okf_workspace.okf.paths import slugify
 from okf_workspace.okf.relations import explicit_context_fields, inherited_context_fields
 
+from .organize import replace_managed_region
 from .project_logs import render_project_log_append
 
 Clock = Callable[[], datetime]
@@ -192,17 +193,17 @@ class NoteService:
         if period == "weekly":
             iso = value.isocalendar()
             key = f"{iso.year}-W{iso.week:02d}"
-            title = f"{key} Weekly Review"
+            title = f"{key} 每周复盘"
             start = value - timedelta(days=value.weekday())
             end = start + timedelta(days=6)
         elif period == "monthly":
             key = f"{value:%Y-%m}"
-            title = f"{key} Monthly Review"
+            title = f"{key} 每月复盘"
             start = value.replace(day=1)
             end = value.replace(day=calendar.monthrange(value.year, value.month)[1])
         elif period == "yearly":
             key = f"{value:%Y}"
-            title = f"{key} Yearly Review"
+            title = f"{key} 每年复盘"
             start = value.replace(month=1, day=1)
             end = value.replace(month=12, day=31)
         else:
@@ -401,6 +402,7 @@ class NoteService:
         sources: Sequence[str] = (),
         course: str | None = None,
         project: str | None = None,
+        ai_material: str = "",
     ) -> Path:
         fields: dict[str, Any] = {}
         if sources:
@@ -421,12 +423,15 @@ class NoteService:
         if course_reference is not None:
             course_home = Path(course_reference.removeprefix("/"))
             relative = course_home.parent / "guides" / f"{slugify(title)}.md"
+        body = render_artifact_body(
+            self.vault, "study-guide", title=title, content=content.strip()
+        )
+        if ai_material:
+            body = replace_managed_region(body, "study-material", ai_material)
         return self._create(
             relative,
             note_type="Study Guide",
             title=title,
-            body=render_artifact_body(
-                self.vault, "study-guide", title=title, content=content.strip()
-            ),
+            body=body,
             fields=fields,
         )

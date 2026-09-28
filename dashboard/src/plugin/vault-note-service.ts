@@ -70,7 +70,7 @@ function reviewDescriptor(period: ReviewPeriod, value: Date): ReviewDescriptor {
     const key = `${isoYear}-W${String(week).padStart(2, "0")}`;
     return {
       key,
-      title: `${key} Weekly Review`,
+      title: `${key} 每周复盘`,
       range: `${utcDateText(start)} — ${utcDateText(end)}`,
     };
   }
@@ -80,14 +80,14 @@ function reviewDescriptor(period: ReviewPeriod, value: Date): ReviewDescriptor {
     const end = new Date(Date.UTC(year, month + 1, 0));
     return {
       key,
-      title: `${key} Monthly Review`,
+      title: `${key} 每月复盘`,
       range: `${utcDateText(start)} — ${utcDateText(end)}`,
     };
   }
   const key = String(year);
   return {
     key,
-    title: `${key} Yearly Review`,
+    title: `${key} 每年复盘`,
     range: `${key}-01-01 — ${key}-12-31`,
   };
 }
@@ -148,6 +148,28 @@ export class VaultNoteService {
     return { path };
   }
 
+  /**
+   * Convert one workbench card exactly once. The durable source marker lets a
+   * retry after restart find a Capture written before the card was removed.
+   */
+  public async createCaptureFromWorkbench(
+    workspacePath: string,
+    cardId: string,
+    title: string,
+    content: string,
+  ): Promise<{ path: string; created: boolean }> {
+    const source = `${workspacePath.replace(/\.md$/u, "")}#${cardId}`;
+    const marker = `<!-- okf:apex-capture source=${JSON.stringify(source)} -->`;
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      if (!file.path.startsWith("inbox/captures/")) continue;
+      const existing = await this.app.vault.cachedRead(file);
+      if (existing.includes(marker)) return { path: file.path, created: false };
+    }
+    const body = [content.trim(), marker].filter(Boolean).join("\n\n");
+    const result = await this.createCapture(title, body);
+    return { ...result, created: true };
+  }
+
   /** Lightweight local options for Quick Capture; it never calls the backend. */
   public async captureContexts(): Promise<CaptureContextOptions> {
     const courses: { path: string; title: string }[] = [];
@@ -166,8 +188,8 @@ export class VaultNoteService {
     return { courses, projects };
   }
 
-  public async createDaily(): Promise<{ path: string }> {
-    const date = localDate();
+  public async createDaily(date = localDate()): Promise<{ path: string }> {
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) throw new Error(`日记日期无效：${date}`);
     const pending = this.dailyCreates.get(date);
     if (pending) return pending;
     const request = this.publishDaily(date);
@@ -210,6 +232,59 @@ export class VaultNoteService {
     return { path };
   }
 
+  public async appendDailyTask(
+    date: string,
+    taskLine: string,
+    position: "start" | "end" = "start",
+  ): Promise<{ file: TFile; line: number; writtenLine: string; kind: "daily-top" | "daily-end" | "daily-created" }> {
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) throw new Error(`任务日期无效：${date}`);
+    const oneLine = taskLine.trim();
+    if (!/^- \[[ xX]\]\s+/u.test(oneLine) || oneLine.includes("\n")) {
+      throw new Error("任务必须是单行 Markdown 清单");
+    }
+    const formal = /(?:^|\s)#task(?:\s|$)/iu.test(oneLine)
+      ? oneLine
+      : oneLine.replace(/^(- \[[ xX]\]\s*)/u, "$1#task ");
+    const writtenLine = /\s\^[a-zA-Z0-9-]+\s*$/u.test(formal)
+      ? formal
+      : `${formal} ^task-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
+    const path = `life/daily/${date.slice(0, 4)}/${date.slice(5, 7)}/${date}.md`;
+    const existed = this.app.vault.getAbstractFileByPath(path) instanceof TFile;
+    await this.createDaily(date);
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) throw new Error(`日记不存在：${path}`);
+
+    let insertedLine = -1;
+    await this.app.vault.process(file, (current) => {
+      const lines = current.split(/\r?\n/u);
+      const existing = lines.indexOf(writtenLine);
+      if (existing >= 0) {
+        insertedLine = existing;
+        return current;
+      }
+      const heading = lines.findIndex((line) => /^##\s+任务\s*$/u.test(line));
+      if (heading < 0) throw new Error(`日记缺少“任务”区域：${path}`);
+      const sectionEnd = lines.findIndex((line, index) => index > heading && /^##\s+/u.test(line));
+      let at = sectionEnd >= 0 ? sectionEnd : lines.length;
+      if (position === "start") {
+        at = heading + 1;
+        while (at < lines.length && lines[at]?.trim() === "") at += 1;
+      } else {
+        while (at > heading + 1 && lines[at - 1]?.trim() === "") at -= 1;
+      }
+      lines.splice(at, 0, writtenLine);
+      insertedLine = at;
+      return lines.join("\n");
+    });
+    if (insertedLine < 0) throw new Error(`任务未写入：${path}`);
+    return {
+      file,
+      line: insertedLine,
+      writtenLine,
+      kind: existed ? (position === "end" ? "daily-end" : "daily-top") : "daily-created",
+    };
+  }
+
   /** A deterministic local YAML update; completing a Study Guide never needs the API. */
   public async setStudyCompleted(path: string, completed: boolean): Promise<{ path: string }> {
     const normalized = path.replace(/^\/+|\/+$/gu, "");
@@ -232,7 +307,7 @@ export class VaultNoteService {
     const normalized = path.replace(/^\/+|\/+$/gu, "");
     const file = this.app.vault.getAbstractFileByPath(normalized);
     if (!(file instanceof TFile) || !/^projects\/[^/]+\/project\.md$/u.test(normalized)) {
-      throw new Error(`Project 不存在：${normalized}`);
+      throw new Error(`项目不存在：${normalized}`);
     }
     await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
       frontmatter.project_status = status;
@@ -277,7 +352,7 @@ export class VaultNoteService {
     const body = await this.renderBody(
       "course",
       { title },
-      `# ${title}\n\n## 学习目标\n\n## 当前进度\n\n## Lessons\n\n## Study Guides`,
+      `# ${title}\n\n## 学习目标\n\n## 当前进度\n\n## 课堂笔记\n\n## 学习笔记`,
     );
     await this.create(path, document("Course", title, body, { course_status: "active" }));
     return { path };

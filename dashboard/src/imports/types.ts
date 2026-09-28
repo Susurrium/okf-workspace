@@ -29,14 +29,14 @@ export interface DocumentImportResult {
 
 export const intentLabels: Record<ImportIntent, string> = {
   learn: "学习",
-  wiki: "直接生成 Wiki",
+  wiki: "直接生成知识笔记",
   source: "只存来源",
   later: "暂不确定",
 };
 
 export const qualityLabels: Record<ImportQuality, string> = {
   high: "高级完整解析",
-  quick: "MarkItDown 文本转换（默认）",
+  quick: "MinerU 云解析（默认）",
 };
 
 export const parserLabels: Record<ImportParser, string> = {

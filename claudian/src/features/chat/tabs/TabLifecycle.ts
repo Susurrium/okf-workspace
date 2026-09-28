@@ -1,6 +1,6 @@
 import { Notice } from 'obsidian';
 
-import type { FeatureHost } from '../../FeatureHost';
+import type { ChatFeatureHost } from '../ChatFeatureHost';
 import type {
   AssembledTabRuntime,
   TabRuntimeCleanupFailure,
@@ -36,13 +36,14 @@ export function isClosingLifecycleState(
 export function commitProvisionalTab(tab: AssembledTabRuntime): void {
   tab.session.claimUserOwnership();
   if (tab.lifecycleState === 'provisional') {
-    tab.lifecycleState = 'cold';
+    tab.session.commitAdmission();
   }
 }
 
 export function activateTab(tab: AssembledTabRuntime): void {
   tab.dom.contentEl.removeClass('claudian-hidden');
   tab.controllers.streamController.setTabActive(true);
+  tab.controllers.sideChatController.setTabActive(true);
   tab.controllers.selectionController.start();
   tab.controllers.browserSelectionController.start();
   tab.controllers.canvasSelectionController.start();
@@ -51,6 +52,7 @@ export function activateTab(tab: AssembledTabRuntime): void {
 
 export function deactivateTab(tab: AssembledTabRuntime): void {
   tab.controllers.streamController.setTabActive(false);
+  tab.controllers.sideChatController.setTabActive(false);
   tab.dom.contentEl.addClass('claudian-hidden');
   tab.controllers.selectionController.stop();
   tab.controllers.browserSelectionController.stop();
@@ -104,23 +106,25 @@ async function drainTabForShutdownSnapshotOnce(
   tab.session.pauseIntentAdmission();
   tab.session.pauseBackgroundWork();
   const cleanupFailures: TabRuntimeCleanupFailure[] = [];
+  const cancelledActiveTurn = tab.session.turns.isActive;
+  if (cancelledActiveTurn) {
+    tab.state.cancelRequested = true;
+    tab.state.bumpStreamGeneration();
+    tab.session.turns.cancel('shutdown');
+  }
 
   await captureTeardownFailure(
     cleanupFailures,
     'tab pending provider interaction',
     () => tab.controllers.inputController.dismissPendingApproval(),
   );
-  const activeTurn = tab.session.activeTurn;
-  const cancelledActiveTurn = activeTurn !== null;
-  if (activeTurn) {
-    tab.state.cancelRequested = true;
-    tab.state.bumpStreamGeneration();
+  if (cancelledActiveTurn) {
     await captureTeardownFailure(
       cleanupFailures,
       'tab active execution cancellation',
       () => tab.executionCoordinator.cancel(),
     );
-    await activeTurn.catch(() => undefined);
+    await tab.session.turns.drain().catch(() => undefined);
   }
   await captureTeardownFailure(
     cleanupFailures,
@@ -144,8 +148,9 @@ export async function destroyTab(tab: AssembledTabRuntime): Promise<void> {
 }
 
 async function destroyTabOnce(tab: AssembledTabRuntime): Promise<void> {
-  tab.lifecycleState = 'closing';
+  tab.session.beginClose();
   const drainResult = await drainTabForShutdownSnapshot(tab);
+  tab.session.sealIdentity();
   const cleanupFailures = [...drainResult.cleanupFailures];
   const { cancelledActiveTurn } = drainResult;
 
@@ -179,9 +184,9 @@ async function destroyTabOnce(tab: AssembledTabRuntime): Promise<void> {
   }
 }
 
-export function getTabTitle(tab: AssembledTabRuntime, plugin: FeatureHost): string {
+export function getTabTitle(tab: Pick<AssembledTabRuntime, 'conversationId'>, plugin: ChatFeatureHost): string {
   if (tab.conversationId) {
-    const conversation = plugin.getConversationSync(tab.conversationId);
+    const conversation = plugin.getConversationSummary(tab.conversationId);
     if (conversation?.title) {
       return conversation.title;
     }

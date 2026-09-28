@@ -4,6 +4,7 @@
     "cancel": "취소",
     "delete": "삭제",
     "edit": "편집",
+    "preview": "미리보기",
     "add": "추가",
     "remove": "제거",
     "clear": "지우기",
@@ -22,6 +23,8 @@
     "rewind": "되감기"
   },
   "chat": {
+    "selectAvailableModel": "전송하기 전에 사용 가능한 모델을 선택하세요.",
+    "selectAvailableTitleModel": "Claudian 설정에서 사용 가능한 제목 생성 모델을 선택하세요.",
     "rewind": {
       "confirmMessage": "이 시점으로 되감으시겠습니까? 이 메시지 이후의 파일 변경 사항이 덮어쓰이거나 삭제될 수 있습니다. 이 작업은 실행 취소할 수 없습니다.",
       "confirmMessageConflicts": "이 시점으로 되감으시겠습니까? 에이전트 외부에서 수정된 파일 {count}개를 덮어씁니다:\n{files}",
@@ -57,23 +60,38 @@
       "commandNoMessages": "포크할 수 없습니다: 대화에 메시지가 없습니다",
       "commandNoAssistantUuid": "포크할 수 없습니다: 식별자가 있는 어시스턴트 응답이 없습니다"
     },
-    "bangBash": {
-      "placeholder": "> bash 명령 실행...",
-      "commandPanel": "명령 패널",
-      "copyAriaLabel": "최신 명령 출력을 복사",
-      "clearAriaLabel": "bash 출력 지우기",
-      "commandLabel": "{command}",
-      "statusLabel": "상태: {status}",
-      "collapseOutput": "명령 출력 접기",
-      "expandOutput": "명령 출력 펼치기",
-      "running": "실행 중...",
-      "copyFailed": "클립보드에 복사하지 못했습니다"
+    "quote": {
+      "buttonLabel": "인용"
+    },
+    "sideChat": {
+      "title": "사이드 채팅",
+      "collapse": "접기",
+      "discard": "버리기",
+      "statusPreparing": "준비 중",
+      "statusQueued": "{count}개 대기 중",
+      "statusWorking": "작업 중",
+      "statusError": "확인 필요",
+      "statusActionRequired": "입력 필요",
+      "placeholder": "사이드 채팅에서 이어서 질문하세요",
+      "composerLabel": "사이드 채팅 메시지",
+      "needsPrompt": "/side 뒤에 프롬프트를 입력해 사이드 채팅을 시작하세요.",
+      "unsupportedProvider": "이 제공자는 사이드 채팅을 지원하지 않습니다.",
+      "unavailableBusy": "사이드 채팅에는 완료된 답변이 필요합니다. 현재 턴이 끝날 때까지 기다려 주세요.",
+      "unavailableNoCheckpoint": "먼저 이 대화에서 답변을 완료한 뒤 사이드 채팅을 시작하세요.",
+      "unavailableNoSession": "이 대화의 제공자 세션을 확인할 수 없습니다.",
+      "alreadyExists": "이 대화에는 이미 사이드 채팅이 있습니다. 버린 뒤 새로 시작하세요.",
+      "nestedUnavailable": "사이드 채팅에서 또 다른 사이드 채팅을 시작할 수 없습니다. 먼저 메인으로 접으세요.",
+      "mainOnlyCommand": "/{command} 은(는) 메인 채팅에서만 사용할 수 있습니다.",
+      "startFailed": "사이드 채팅을 시작하지 못했습니다: {error}",
+      "queued": "사이드 채팅 대기열에 추가했습니다.",
+      "busySide": "사이드 채팅이 아직 응답 중입니다. 완료될 때까지 기다려 주세요."
     }
   },
   "settings": {
     "title": "Claudian 설정",
     "tabs": {
       "general": "일반",
+      "providers": "제공자",
       "claude": "Claude",
       "codex": "Codex"
     },
@@ -112,7 +130,8 @@
     "titleModel": {
       "name": "제목 생성 모델",
       "desc": "대화 제목을 자동 생성하는 데 사용되는 모델.",
-      "auto": "자동 (Haiku)"
+      "select": "모델 선택",
+      "unavailableWarning": "자동 제목 생성이 일시 중지되었습니다. 사용 가능한 제목 모델을 선택하세요."
     },
     "navMappings": {
       "name": "Vim 스타일 네비게이션 매핑",
@@ -124,39 +143,19 @@
     },
     "hotkeys": "단축키",
     "inlineEditHotkey": {
-      "name": "인라인 편집",
-      "descWithKey": "현재 단축키: {hotkey}",
-      "descNoKey": "단축키 미설정",
-      "btnChange": "변경",
-      "btnSet": "단축키 설정"
+      "name": "인라인 편집"
     },
     "openChatHotkey": {
-      "name": "채팅 열기",
-      "descWithKey": "현재 단축키: {hotkey}",
-      "descNoKey": "단축키 미설정",
-      "btnChange": "변경",
-      "btnSet": "단축키 설정"
+      "name": "채팅 열기"
     },
     "newSessionHotkey": {
-      "name": "현재 대화 바꾸기",
-      "descWithKey": "현재 단축키: {hotkey}",
-      "descNoKey": "단축키 미설정",
-      "btnChange": "변경",
-      "btnSet": "단축키 설정"
+      "name": "현재 대화 바꾸기"
     },
     "newTabHotkey": {
-      "name": "새로 만들기",
-      "descWithKey": "현재 단축키: {hotkey}",
-      "descNoKey": "단축키 미설정",
-      "btnChange": "변경",
-      "btnSet": "단축키 설정"
+      "name": "새로 만들기"
     },
     "closeTabHotkey": {
-      "name": "탭 닫기",
-      "descWithKey": "현재 단축키: {hotkey}",
-      "descNoKey": "단축키 미설정",
-      "btnChange": "변경",
-      "btnSet": "단축키 설정"
+      "name": "탭 닫기"
     },
     "slashCommands": {
       "name": "명령어와 스킬",
@@ -167,58 +166,10 @@
       "desc": "드롭다운에서 특정 명령어와 스킬을 숨깁니다. Claudian과 관련 없는 Claude Code 항목을 숨기는 데 유용합니다. 앞의 슬래시 없이 이름을 한 줄에 하나씩 입력하세요.",
       "placeholder": "commit\nbuild\ntest"
     },
-    "mcpServers": {
-      "name": "MCP 서버",
-      "descBeforeCommand": "Claude Code는 자체 CLI로 MCP 서버를 관리합니다. ",
-      "descAfterCommand": " 명령으로 구성하면 Claudian에서 사용할 수 있습니다. ",
-      "learnMore": "자세히 알아보기"
-    },
-    "plugins": {
-      "name": "Claude Code 플러그인",
-      "desc": "~/.claude/plugins에서 발견된 Claude Code 플러그인을 관리합니다. 활성화된 플러그인은 .claude/settings.json에 Vault별로 저장됩니다."
-    },
-    "subagents": {
-      "name": "서브에이전트",
-      "desc": ".claude/agents/에 저장된 Vault 수준의 서브에이전트를 관리합니다. 각 Markdown 파일이 하나의 커스텀 에이전트를 정의합니다.",
-      "noAgents": "구성된 서브에이전트가 없습니다. +를 클릭해 새로 만드세요.",
-      "deleteConfirm": "서브에이전트 \"{name}\"을 삭제하시겠습니까?",
-      "saveFailed": "서브에이전트를 저장하지 못했습니다: {message}",
-      "refreshFailed": "서브에이전트를 새로고침하지 못했습니다: {message}",
-      "deleteFailed": "서브에이전트를 삭제하지 못했습니다: {message}",
-      "renameCleanupFailed": "경고: \"{name}\"의 이전 파일을 제거하지 못했습니다",
-      "created": "서브에이전트 \"{name}\"를 생성했습니다",
-      "updated": "서브에이전트 \"{name}\"를 업데이트했습니다",
-      "deleted": "서브에이전트 \"{name}\"를 삭제했습니다",
-      "duplicateName": "\"{name}\"이라는 이름의 에이전트가 이미 있습니다",
-      "descriptionRequired": "설명은 필수입니다",
-      "promptRequired": "시스템 프롬프트는 필수입니다",
-      "modal": {
-        "titleEdit": "서브에이전트 편집",
-        "titleAdd": "서브에이전트 추가",
-        "name": "이름",
-        "nameDesc": "소문자, 숫자, 하이픈만 사용할 수 있습니다",
-        "namePlaceholder": "code-reviewer",
-        "description": "설명",
-        "descriptionDesc": "이 에이전트에 대한 간단한 설명",
-        "descriptionPlaceholder": "코드의 버그와 스타일을 검토합니다",
-        "advancedOptions": "고급 옵션",
-        "model": "모델",
-        "modelDesc": "이 에이전트에 사용할 모델 재정의",
-        "tools": "도구",
-        "toolsDesc": "허용할 도구를 쉼표로 구분해 입력하세요 (비워두면 모두 허용)",
-        "disallowedTools": "금지 도구",
-        "disallowedToolsDesc": "금지할 도구를 쉼표로 구분해 입력하세요",
-        "skills": "스킬",
-        "skillsDesc": "스킬 목록을 쉼표로 구분해 입력하세요",
-        "prompt": "시스템 프롬프트",
-        "promptDesc": "에이전트용 지침",
-        "promptPlaceholder": "당신은 코드 리뷰어입니다. 주어진 코드를 분석하여..."
-      }
-    },
     "safety": "보안",
     "loadUserSettings": {
       "name": "사용자 Claude 설정 로드",
-      "desc": "~/.claude/settings.json을 로드합니다. 활성화하면 사용자의 Claude Code 허용 규칙이 보안 모드를 우회할 수 있습니다."
+      "desc": "~/.claude에서 사용자 수준 Claude Code 구성(settings.json, 스킬, 명령, 에이전트, 플러그인)을 로드합니다. 비활성화하면 Vault 수준 구성만 사용할 수 있습니다. 활성화하면 사용자의 허용 규칙이 보안 모드를 우회할 수 있습니다."
     },
     "claudeSafeMode": {
       "name": "안전 모드",
@@ -264,21 +215,9 @@
       "desc": "사용자 정의 모델의 컨텍스트 창 크기를 설정합니다. 기본값(200k 토큰)을 사용하려면 비워두세요.",
       "invalid": "잘못된 형식입니다. 사용: 256k, 1m 또는 정확한 숫자(1000-10000000)."
     },
-    "customModels": {
-      "name": "사용자 지정 모델",
-      "desc": "추가 Claude 모델 ID를 한 줄에 하나씩 선택기에 추가합니다. 환경 모델 재정의는 계속 선택기를 대체합니다.",
-      "placeholder": "claude-opus-4-6\nclaude-opus-4-5-20251101"
-    },
     "enableChrome": {
       "name": "Chrome 확장 프로그램 활성화",
       "desc": "claude-in-chrome 확장 프로그램을 통해 Claude가 Chrome과 상호작용할 수 있도록 합니다. 확장 프로그램이 설치되어 있어야 합니다. 세션 재시작이 필요합니다."
-    },
-    "enableBangBash": {
-      "name": "bash 모드 (!) 활성화",
-      "desc": "입력창이 비어 있을 때 !를 입력하면 bash 모드로 들어갑니다. Node.js child_process를 통해 명령을 직접 실행합니다. 보기를 다시 열어야 합니다.",
-      "validation": {
-        "noNode": "PATH에서 Node.js를 찾을 수 없습니다. Node.js를 설치하거나 PATH 설정을 확인하세요."
-      }
     },
     "maxWarmAgentProcesses": {
       "name": "최대 동시 실행 세션 수",
@@ -287,6 +226,10 @@
     "enableDualPane": {
       "name": "이중 창 모드 활성화",
       "desc": "보기 너비가 600px 이상이면 채팅 옆에 세션 관리자를 자동으로 표시합니다."
+    },
+    "restoreTabsOnStartup": {
+      "name": "시작할 때 탭 복원",
+      "desc": "단일 창 모드에서는 모든 탭을, 이중 창 모드에서는 마지막 활성 탭만 다시 엽니다."
     },
     "enableFilePane": {
       "name": "파일 창 활성화",
@@ -302,6 +245,10 @@
       "name": "스트리밍 중 자동 스크롤",
       "desc": "Claude가 응답을 스트리밍하는 동안 자동으로 아래로 스크롤합니다. 비활성화하면 상단에 머물러 처음부터 읽을 수 있습니다."
     },
+    "showMessageTimestamps": {
+      "name": "메시지 타임스탬프 표시",
+      "desc": "채팅 스레드에서 각 메시지의 로컬 전송 또는 도착 시간을 표시합니다."
+    },
     "deferMathRenderingDuringStreaming": {
       "name": "스트리밍 중 수식 렌더링 지연",
       "desc": "응답이 스트리밍되는 동안 원본 LaTeX를 표시하고 각 텍스트 블록이 완료되면 수식을 한 번 렌더링합니다."
@@ -316,6 +263,17 @@
       "rightSidebar": "오른쪽 사이드바",
       "leftSidebar": "왼쪽 사이드바",
       "mainTab": "메인 편집기 탭"
+    },
+    "cliInstallation": {
+      "disclosure": "{name} 설치",
+      "description": "이 컴퓨터의 CLI 경로입니다. 비워 두면 자동으로 감지합니다.",
+      "checking": "CLI 확인 중…",
+      "versionUnavailable": "버전을 확인할 수 없음",
+      "notFound": "찾을 수 없음",
+      "custom": "사용자 지정 경로",
+      "auto": "자동 감지",
+      "checkFailed": "CLI를 확인할 수 없음",
+      "saveFailed": "경로를 저장할 수 없습니다. 다시 시도하세요."
     },
     "cliPath": {
       "name": "Claude CLI 경로",
@@ -336,6 +294,14 @@
       "desc": "활성화된 {provider} 모델을 새 대화에서 사용할 수 있게 합니다. 비활성화해도 기존 세션은 유지됩니다.",
       "lastProviderWarning": "Claudian을 사용하려면 하나 이상의 제공자를 활성화해야 합니다.",
       "noModelsWarning": "활성화된 {provider} 모델이 없습니다. 아래 모델 섹션에서 하나 이상의 모델을 활성화하세요."
+    },
+    "claude": {
+      "responseStyle": {
+        "name": "응답 스타일",
+        "desc": "기본은 Claude의 일반 스타일입니다. 간결 모드는 결과부터 제시하고 서두를 생략합니다. Claude Code 2.1.237 이상이 필요합니다.",
+        "default": "기본",
+        "concise": "간결"
+      }
     },
     "codex": {
       "installationMethod": {
@@ -361,10 +327,11 @@
         "workspaceWrite": "작업공간 쓰기",
         "readOnly": "읽기 전용"
       },
-      "customModels": {
-        "name": "사용자 지정 모델",
-        "desc": "추가 Codex 모델 ID를 한 줄에 하나씩 선택기에 추가합니다. `OPENAI_MODEL`이 설정되어 있으면 계속 우선 적용됩니다.",
-        "placeholder": "gpt-5.4\ngpt-5.3-codex-spark"
+      "responseStyle": {
+        "name": "응답 스타일",
+        "desc": "지원되는 모델에서 Codex의 대화 스타일을 선택합니다. 다음 메시지부터 적용됩니다.",
+        "pragmatic": "실용적",
+        "friendly": "친근함"
       },
       "reasoningSummary": {
         "name": "추론 요약",
@@ -385,94 +352,56 @@
         "hiddenDesc": "드롭다운에서 특정 Codex 스킬을 숨깁니다. 앞의 $ 없이 스킬 이름을 한 줄에 하나씩 입력하세요.",
         "hiddenPlaceholder": "analyze\nexplain\nfix"
       },
-      "subagents": {
-        "name": "Codex 하위 에이전트",
-        "desc": ".codex/agents/에 저장된 vault 수준 Codex 하위 에이전트를 관리합니다. 각 TOML 파일은 사용자 지정 에이전트 하나를 정의합니다."
-      },
-      "mcp": {
-        "descBeforeCommand": "Codex는 자체 CLI로 MCP 서버를 관리합니다. ",
-        "descAfterCommand": " 명령으로 구성하면 Claudian에서 사용할 수 있습니다. ",
-        "learnMore": "자세히 알아보기"
-      },
       "environment": {
         "name": "Codex 환경",
         "desc": "Codex 전용 런타임 변수만 입력하세요. OPENAI_* 및 CODEX_* 설정에 사용합니다. Codex 자동 감지에 도움이 필요하면 이 공급자 섹션 대신 공유 PATH에 설치 디렉터리를 추가하세요."
       }
     },
     "agentSkills": {
-      "sectionTitle": "Skills", "fixedRoot": "Managed in .agents/skills", "sharedExpectation": "Manage shared skills in .agents/skills/ for compatible providers.", "noSkills": "No shared skills configured. Click + to create one.", "skillBadge": "skill", "diagnosticsTitle": "Skills needing attention", "loadFailed": "Could not load shared skills.", "savedRefreshFailed": "Saved, but provider refresh failed.", "validationFailed": "Invalid skill: {message}", "collisionFailed": "A skill named \"{name}\" already exists.", "saveFailed": "Failed to save shared skill: {message}", "deleteFailed": "Failed to move shared skill to trash: {message}", "staleConflict": "This skill changed elsewhere; refresh before saving.", "created": "Shared skill \"{name}\" created.", "updated": "Shared skill \"{name}\" updated.", "deleted": "Shared skill \"{name}\" moved to trash.",
-      "modal": { "titleEdit": "Edit Shared Skill", "titleAdd": "Add Shared Skill", "name": "Skill name", "nameDesc": "Lowercase letters and numbers separated by single hyphens", "namePlaceholder": "code-reviewer", "description": "Description", "descriptionDesc": "Required portable description used by providers to select the skill", "descriptionPlaceholder": "Reviews code for correctness and maintainability", "instructions": "Instructions", "instructionsDesc": "Required SKILL.md instructions", "instructionsPlaceholder": "Review the supplied code and report actionable findings..." },
-      "delete": { "title": "Delete Shared Skill", "description": "The entire skill folder, including scripts, references, and assets, will be moved to trash.", "confirm": "Move to trash" }
-    },
-    "codexSkills": {
+      "sectionTitle": "Skills",
+      "fixedRoot": "Managed in .agents/skills",
+      "sharedExpectation": "Manage shared skills in .agents/skills/ for compatible providers.",
+      "noSkills": "No shared skills configured. Click + to create one.",
+      "skillBadge": "skill",
+      "diagnosticsTitle": "Skills needing attention",
+      "loadFailed": "Could not load shared skills.",
+      "savedRefreshFailed": "Saved, but provider refresh failed.",
+      "validationFailed": "Invalid skill: {message}",
+      "collisionFailed": "A skill named \"{name}\" already exists.",
+      "saveFailed": "Failed to save shared skill: {message}",
+      "deleteFailed": "Failed to move shared skill to trash: {message}",
+      "staleConflict": "This skill changed elsewhere; refresh before saving.",
+      "created": "Shared skill \"{name}\" created.",
+      "updated": "Shared skill \"{name}\" updated.",
+      "deleted": "Shared skill \"{name}\" moved to trash.",
       "modal": {
-        "titleEdit": "Codex 스킬 편집",
-        "titleAdd": "Codex 스킬 추가",
-        "directory": "디렉터리",
-        "directoryDesc": "스킬을 저장할 위치",
-        "skillName": "스킬 이름",
-        "skillNameDesc": "$ 뒤에 사용할 이름입니다(예: $analyze의 경우 \"analyze\")",
-        "description": "설명",
-        "descriptionDesc": "드롭다운에 표시할 선택적 설명",
-        "instructions": "지침",
-        "instructionsDesc": "스킬 지침(SKILL.md 내용)",
-        "instructionsPlaceholder": "Analyze the code for..."
+        "titleEdit": "Edit Shared Skill",
+        "titleAdd": "Add Shared Skill",
+        "name": "Skill name",
+        "nameDesc": "Lowercase letters and numbers separated by single hyphens",
+        "namePlaceholder": "code-reviewer",
+        "description": "Description",
+        "descriptionDesc": "Required portable description used by providers to select the skill",
+        "descriptionPlaceholder": "Reviews code for correctness and maintainability",
+        "instructions": "Instructions",
+        "instructionsDesc": "Required SKILL.md instructions",
+        "instructionsPlaceholder": "Review the supplied code and report actionable findings..."
       },
-      "instructionsRequired": "지침은 필수입니다",
-      "saveFailed": "Codex 스킬 저장 실패",
-      "header": "Codex 스킬",
-      "noSkills": "Vault에 Codex 스킬이 없습니다. +를 클릭해 만드세요.",
-      "skillBadge": "스킬",
-      "deleted": "Codex 스킬 \"{name}\" 삭제됨",
-      "deleteFailed": "Codex 스킬 삭제 실패",
-      "created": "Codex 스킬 \"{name}\" 생성됨",
-      "updated": "Codex 스킬 \"{name}\" 업데이트됨"
-    },
-    "codexSubagents": {
-      "modal": {
-        "titleEdit": "Codex 하위 에이전트 편집",
-        "titleAdd": "Codex 하위 에이전트 추가",
-        "nameDesc": "Codex가 생성할 때 사용하는 에이전트 이름(소문자, 하이픈, 밑줄)",
-        "descriptionDesc": "Codex가 이 에이전트를 사용해야 하는 시점",
-        "modelDesc": "모델 재정의(비워 두면 상속)",
-        "namePlaceholder": "code_reviewer"
-      },
-      "reasoningEffort": {
-        "name": "추론 강도",
-        "desc": "모델 추론 강도 수준",
-        "inherit": "상속",
-        "low": "낮음",
-        "medium": "중간",
-        "high": "높음",
-        "xhigh": "매우 높음"
-      },
-      "sandboxMode": {
-        "name": "샌드박스 모드",
-        "desc": "이 에이전트의 샌드박스 제한",
-        "inherit": "상속",
-        "readOnly": "읽기 전용",
-        "dangerFullAccess": "전체 액세스",
-        "workspaceWrite": "작업공간 쓰기"
-      },
-      "nicknameCandidates": {
-        "name": "닉네임 후보",
-        "desc": "표시 닉네임을 쉼표로 구분합니다(예: atlas, delta, echo)"
-      },
-      "developerInstructions": {
-        "name": "개발자 지침",
-        "desc": "에이전트 동작을 정의하는 핵심 지침",
-        "placeholder": "Review code like an owner.\nPrioritize correctness, security, and missing test coverage.",
-        "required": "개발자 지침은 필수입니다"
-      },
-      "validation": {
-        "nameRequired": "하위 에이전트 이름은 필수입니다",
-        "nameTooLong": "하위 에이전트 이름은 {count}자 이하여야 합니다",
-        "nameInvalid": "하위 에이전트 이름은 소문자, 숫자, 하이픈, 밑줄만 포함할 수 있습니다",
-        "nicknameInvalid": "닉네임 후보는 ASCII 문자, 숫자, 공백, 하이픈, 밑줄만 포함할 수 있습니다",
-        "nicknameDuplicate": "닉네임 후보는 고유해야 합니다"
-      },
-      "header": "Codex 하위 에이전트",
-      "noAgents": "Vault에 Codex 하위 에이전트가 없습니다. +를 클릭해 만드세요."
+      "delete": {
+        "title": "Delete Shared Skill",
+        "description": "The entire skill folder, including scripts, references, and assets, will be moved to trash.",
+        "confirm": "Move to trash"
+      }
     }
+  },
+  "interface": {
+    "promptMode": "Codex prompt mode",
+    "promptModeHelp": "Applies when a new Codex conversation starts. Existing conversations keep the mode recorded in their provider state.",
+    "nativePrompt": "Workspace native (recommended)",
+    "fullPrompt": "Claudian full",
+    "customPrompt": "Custom replace",
+    "replacementInstructions": "Custom replacement instructions",
+    "replacementHelp": "Used only by custom replace. This replaces the Claudian prompt instead of being appended to it.",
+    "replacementPlaceholder": "Follow applicable AGENTS.md instructions."
   }
 }

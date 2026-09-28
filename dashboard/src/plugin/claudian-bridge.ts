@@ -19,6 +19,19 @@ export interface CodexHandoffResult {
   skill: string | null;
 }
 
+export function buildClaudianFallbackText(request: CodexHandoffRequest): string {
+  const context = request.contextPaths?.length
+    ? `\n\n上下文文件：\n${request.contextPaths.map((path) => `- ${path}`).join("\n")}`
+    : "";
+  const instructions = [
+    request.actionMode ? `模式：${request.actionMode}` : "",
+    request.skill ? `技能：${request.skill}` : "",
+  ].filter(Boolean).join("\n");
+  return [request.prompt?.trim() || "继续处理当前上下文。", instructions, context.trim()]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 interface OkfClaudianBridge {
   version: 1;
   open(): Promise<void>;
@@ -57,7 +70,7 @@ export class ClaudianBridgeAdapter {
     const bridge = this.bridge();
     if (!bridge) {
       throw new Error(
-        "Claudian 面板未启用或版本不兼容；请启用 okf-claudian 后重新加载 Obsidian。",
+        "Claudian 面板未启用或版本不兼容；请启用 Claudian 插件 后重新加载 Obsidian。",
       );
     }
     return bridge;

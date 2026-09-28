@@ -9,6 +9,11 @@ export type FeedDecisionAction =
 /** Read-only compatibility for receipts created before `later` was removed. */
 export type FeedDecisionReceiptAction = FeedDecisionAction | "later";
 
+export interface FeedDecisionContext {
+  course?: string;
+  project?: string;
+}
+
 export interface FeedComment {
   text: string;
   cid?: number;

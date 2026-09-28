@@ -1,5 +1,10 @@
-import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import {
+  type ChildProcessWithoutNullStreams,
+  spawn as nodeSpawn,
+} from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
+
+import crossSpawn from 'cross-spawn';
 
 import {
   resolveWindowsCmdShimSpawnSpec,
@@ -10,15 +15,20 @@ import {
 const DEFAULT_SIGKILL_TIMEOUT_MS = 3_000;
 const DEFAULT_FINAL_SHUTDOWN_TIMEOUT_MS = 3_000;
 const DEFAULT_STDERR_BUFFER_LIMIT = 8_000;
+const spawn = crossSpawn as typeof nodeSpawn;
 
 export interface ManagedStdioProcessOptions {
   args: string[];
   command: string;
   cwd: string;
   env: NodeJS.ProcessEnv;
+  /** Bypass cross-spawn's implicit Windows shell fallback. */
+  directSpawn?: boolean;
   finalShutdownTimeoutMs?: number;
+  killProcessTree?: boolean;
   sigkillTimeoutMs?: number;
   stderrBufferLimit?: number;
+  windowsVerbatimArguments?: boolean;
   stdio?: 'pipe' | ['pipe', 'pipe', 'pipe'];
 }
 
@@ -49,15 +59,15 @@ export class ManagedStdioProcess {
   constructor(private readonly options: ManagedStdioProcessOptions) {}
 
   get stdin(): Writable {
-    return this.requireProcess().stdin;
+    return this.#requireProcess().stdin;
   }
 
   get stdout(): Readable {
-    return this.requireProcess().stdout;
+    return this.#requireProcess().stdout;
   }
 
   get stderr(): Readable {
-    return this.requireProcess().stderr;
+    return this.#requireProcess().stderr;
   }
 
   start(): void {
@@ -71,14 +81,13 @@ export class ManagedStdioProcess {
 
     let proc: ChildProcessWithoutNullStreams;
     try {
-      proc = spawn(resolvedSpawnSpec.command, resolvedSpawnSpec.args, {
+      const spawnProcess = this.options.directSpawn ? nodeSpawn : spawn;
+      proc = spawnProcess(resolvedSpawnSpec.command, resolvedSpawnSpec.args, {
         cwd: this.options.cwd,
         env: this.options.env,
         stdio: this.options.stdio ?? 'pipe',
         windowsHide: true,
-        ...(resolvedSpawnSpec.windowsVerbatimArguments
-          ? { windowsVerbatimArguments: true }
-          : {}),
+        ...(this.options.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       });
     } catch (error) {
       const spawnError = toError(error);
@@ -88,8 +97,8 @@ export class ManagedStdioProcess {
         error: spawnError,
         signal: null,
       };
-      this.notifyError(spawnError);
-      this.clearLifecycleListeners();
+      this.#notifyError(spawnError);
+      this.#clearLifecycleListeners();
       throw spawnError;
     }
 
@@ -182,18 +191,18 @@ export class ManagedStdioProcess {
 
       killTimer = window.setTimeout(() => {
         if (this.alive) {
-          this.killProcess(proc, 'SIGKILL');
+          this.#killProcess(proc, 'SIGKILL');
         }
         finalTimer = window.setTimeout(() => {
           this.alive = false;
-          this.cleanupProcessListeners(proc);
+          this.#cleanupProcessListeners(proc);
           destroyStdio(proc);
-          this.clearLifecycleListeners();
+          this.#clearLifecycleListeners();
           finish();
         }, this.options.finalShutdownTimeoutMs ?? DEFAULT_FINAL_SHUTDOWN_TIMEOUT_MS);
       }, this.options.sigkillTimeoutMs ?? DEFAULT_SIGKILL_TIMEOUT_MS);
 
-      this.killProcess(proc, 'SIGTERM');
+      this.#killProcess(proc, 'SIGTERM');
     });
 
     return this.shutdownPromise;
@@ -209,7 +218,7 @@ export class ManagedStdioProcess {
       error,
       signal: this.exitState?.signal ?? null,
     };
-    this.notifyError(error);
+    this.#notifyError(error);
   };
 
   private readonly handleSpawn = (): void => {
@@ -246,18 +255,18 @@ export class ManagedStdioProcess {
     for (const listener of [...this.closeListeners]) {
       safelyNotify(() => listener(this.getExitState()!));
     }
-    this.cleanupProcessListeners(this.proc);
-    this.clearLifecycleListeners();
+    this.#cleanupProcessListeners(this.proc);
+    this.#clearLifecycleListeners();
   };
 
-  private requireProcess(): ChildProcessWithoutNullStreams {
+  #requireProcess(): ChildProcessWithoutNullStreams {
     if (!this.proc) {
       throw new Error('Managed stdio process is not started');
     }
     return this.proc;
   }
 
-  private killProcess(proc: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): boolean {
+  #killProcess(proc: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): boolean {
     try {
       return terminateSpawnedProcess(proc, signal, spawn, this.resolvedSpawnSpec);
     } catch {
@@ -265,13 +274,13 @@ export class ManagedStdioProcess {
     }
   }
 
-  private notifyError(error: Error): void {
+  #notifyError(error: Error): void {
     for (const listener of [...this.errorListeners]) {
       safelyNotify(() => listener(error));
     }
   }
 
-  private cleanupProcessListeners(proc: ChildProcessWithoutNullStreams | null): void {
+  #cleanupProcessListeners(proc: ChildProcessWithoutNullStreams | null): void {
     if (!proc) return;
     proc.off('spawn', this.handleSpawn);
     proc.off('error', this.handleError);
@@ -283,7 +292,7 @@ export class ManagedStdioProcess {
     }
   }
 
-  private clearLifecycleListeners(): void {
+  #clearLifecycleListeners(): void {
     this.errorListeners.clear();
     this.exitListeners.clear();
     this.closeListeners.clear();

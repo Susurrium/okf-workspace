@@ -1,4 +1,4 @@
-import { createCliPathFingerprintInputs } from '../../../core/providers/cli/CliPathFingerprintInputs';
+import { createCLIPathFingerprintInputs } from '../../../core/providers/cli/CLIPathFingerprintInputs';
 import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
 import { createRuntimeInputFingerprint } from '../../../core/providers/settings/RuntimeInputFingerprint';
 import type { ProviderSettingsReconciler } from '../../../core/providers/types';
@@ -8,14 +8,13 @@ import {
   encodeGrokModelId,
 } from '../models';
 import {
-  clearCurrentGrokCatalog,
   getGrokProviderSettings,
-  updateGrokProviderSettings,
+  updateGrokProviderSettings
 } from '../settings';
 
 export function computeGrokEnvironmentHash(settings: Record<string, unknown>): string {
   const providerSettings = getGrokProviderSettings(settings);
-  const cliPathInputs = createCliPathFingerprintInputs(
+  const cliPathInputs = createCLIPathFingerprintInputs(
     providerSettings.cliPathsByHost[getHostnameKey()],
     providerSettings.cliPath,
   );
@@ -44,7 +43,6 @@ export const grokSettingsReconciler: ProviderSettingsReconciler = {
       return { changed: false, invalidatedConversations: [] };
     }
 
-    clearCurrentGrokCatalog(settings);
     updateGrokProviderSettings(settings, { environmentHash });
     return { changed: true, invalidatedConversations: [] };
   },

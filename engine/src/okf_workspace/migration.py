@@ -44,6 +44,12 @@ _DEFAULT_WEB_CLIPPER_FIELDS = frozenset(
 _CANONICAL_CAPTURE_FIELDS = frozenset({"type", "created_at", "ingested_via", "resource"})
 
 
+def _is_dashboard_layout_markdown(relative: str) -> bool:
+    """Keep Apex's UI layout and rollback copies outside OKF artifact migration."""
+
+    return relative == "dashboard.md" or relative.startswith(".dashboard-backup/")
+
+
 def _read_json_object(path: Path) -> dict[str, object]:
     if not path.is_file():
         return {}
@@ -279,6 +285,8 @@ def _rewrite_links(root: Path, mapping: dict[str, str]) -> list[str]:
     if not mapping:
         return changes
     for path in root.rglob("*.md"):
+        if _is_dashboard_layout_markdown(path.relative_to(root).as_posix()):
+            continue
         original = path.read_text(encoding="utf-8")
         updated = original
         for old, new in mapping.items():
@@ -535,6 +543,8 @@ def _repair_legacy_structure(root: Path) -> list[str]:
     changes: list[str] = []
     for path in sorted(root.rglob("*.md")):
         relative = path.relative_to(root).as_posix()
+        if _is_dashboard_layout_markdown(relative):
+            continue
         if any(part in {".agents", ".git", ".obsidian", ".trash"} for part in path.parts):
             continue
         if path.name in {"index.md", "log.md", "AGENTS.md"}:
@@ -637,6 +647,8 @@ def _normalize_contract_v2(root: Path, state: Path | None) -> list[str]:
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     for path in sorted(root.rglob("*.md")):
         relative = path.relative_to(root).as_posix()
+        if _is_dashboard_layout_markdown(relative):
+            continue
         if any(
             part in {".agents", ".claudian", ".git", ".obsidian", ".trash"}
             for part in path.relative_to(root).parts
@@ -855,6 +867,8 @@ def _rewrite_profile_v3_legacy_path_prefixes(root: Path) -> list[str]:
     changes: list[str] = []
     for path in sorted(root.rglob("*.md")):
         relative = path.relative_to(root)
+        if _is_dashboard_layout_markdown(relative.as_posix()):
+            continue
         if any(part in {".agents", ".git", ".obsidian", ".trash"} for part in relative.parts):
             continue
         original = path.read_text(encoding="utf-8")
@@ -1039,6 +1053,8 @@ def _normalize_profile_v3(root: Path) -> list[str]:
     changes: list[str] = []
     for path in sorted(root.rglob("*.md")):
         relative = path.relative_to(root).as_posix()
+        if _is_dashboard_layout_markdown(relative):
+            continue
         if any(
             part in {".agents", ".claudian", ".git", ".obsidian", ".trash"}
             for part in path.relative_to(root).parts
@@ -1346,6 +1362,8 @@ def _remove_legacy_capture_links(root: Path) -> list[str]:
     source_line = re.compile(r"(?m)^\s*来源：\[Capture\]\(/archive/captures/[^)]+\)\s*\n?")
     for path in sorted(root.rglob("*.md")):
         relative = path.relative_to(root).as_posix()
+        if _is_dashboard_layout_markdown(relative):
+            continue
         if relative.startswith(("system/contracts/", "system/templates/")):
             continue
         if any(
@@ -1391,6 +1409,8 @@ def _normalize_capture_lifecycle(root: Path) -> list[str]:
     captures: list[tuple[Path, OkfDocument]] = []
     for path in sorted(root.rglob("*.md")):
         relative = path.relative_to(root)
+        if _is_dashboard_layout_markdown(relative.as_posix()):
+            continue
         if any(
             part in {".agents", ".claudian", ".git", ".obsidian", ".trash"}
             for part in relative.parts
@@ -1560,10 +1580,11 @@ def migrate_current_layout(
     root_index = root / "index.md"
     canonical_index = (templates / "index.md").read_text(encoding="utf-8")
     current_index = root_index.read_text(encoding="utf-8")
-    current_navigation = "# Workspace 总目录" in current_index
+    navigation_titles = ('# Workspace 总目录', '# 笔记导航')
+    current_navigation = any(title in current_index for title in navigation_titles)
     if not current_navigation or 'name="current-activity"' in current_index:
         root_index.write_text(canonical_index, encoding="utf-8", newline="\n")
-        changes.append("index.md (replaced with structured root directory)")
+        changes.append("index.md：已更新根目录导航")
     rebuild_root_index(root)
 
     with suppress(GitCheckpointError):

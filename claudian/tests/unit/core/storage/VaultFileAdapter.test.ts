@@ -1,3 +1,4 @@
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -115,17 +116,6 @@ describe('VaultFileAdapter', () => {
       expect(mockAdapter.mkdir).not.toHaveBeenCalled();
     });
 
-    it('creates parent folder when it does not exist', async () => {
-      mockAdapter.exists.mockImplementation((path: string) => Promise.resolve(path !== 'folder'));
-      mockAdapter.mkdir.mockResolvedValue();
-      mockAdapter.write.mockResolvedValue();
-
-      await vaultAdapter.write('folder/file.md', 'content');
-
-      expect(mockAdapter.mkdir).toHaveBeenCalledWith('folder');
-      expect(mockAdapter.write).toHaveBeenCalledWith('folder/file.md', 'content');
-    });
-
     it('handles file in root (no folder)', async () => {
       mockAdapter.write.mockResolvedValue();
 
@@ -150,71 +140,15 @@ describe('VaultFileAdapter', () => {
     });
   });
 
-  describe('append', () => {
-    it('creates new file if it does not exist', async () => {
-      // All existence checks return false: folder doesn't exist, file doesn't exist
-      mockAdapter.exists.mockResolvedValue(false);
-      mockAdapter.mkdir.mockResolvedValue();
-      mockAdapter.write.mockResolvedValue();
-
-      await vaultAdapter.append('folder/file.md', 'new content');
-
-      expect(mockAdapter.mkdir).toHaveBeenCalled();
-      expect(mockAdapter.write).toHaveBeenCalledWith('folder/file.md', 'new content');
-      expect(mockAdapter.read).not.toHaveBeenCalled();
-    });
-
-    it('appends to existing file', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue('existing content');
-      mockAdapter.write.mockResolvedValue();
-
-      await vaultAdapter.append('file.md', '\nmore content');
-
-      expect(mockAdapter.read).toHaveBeenCalledWith('file.md');
-      expect(mockAdapter.write).toHaveBeenCalledWith('file.md', 'existing content\nmore content');
-      expect(mockAdapter.mkdir).not.toHaveBeenCalled();
-    });
-
-    it('creates parent folder for new file', async () => {
-      mockAdapter.exists.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
-      mockAdapter.mkdir.mockResolvedValue();
-      mockAdapter.write.mockResolvedValue();
-
-      await vaultAdapter.append('folder/file.md', 'content');
-
-      expect(mockAdapter.mkdir).toHaveBeenCalledWith('folder');
-    });
-
-    it('handles file in root', async () => {
-      mockAdapter.write.mockResolvedValue();
-
-      await vaultAdapter.append('file.md', 'content');
-
-      expect(mockAdapter.mkdir).not.toHaveBeenCalled();
-      expect(mockAdapter.write).toHaveBeenCalledWith('file.md', 'content');
-    });
-
-    it('appends empty string', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue('existing');
-      mockAdapter.write.mockResolvedValue();
-
-      await vaultAdapter.append('file.md', '');
-
-      expect(mockAdapter.write).toHaveBeenCalledWith('file.md', 'existing');
-    });
-  });
-
   describe('delete', () => {
     it('deletes file when it exists', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.remove.mockResolvedValue();
 
-      await vaultAdapter.delete('file.md');
+      await vaultAdapter.delete('folder/subfolder/file.md');
 
-      expect(mockAdapter.exists).toHaveBeenCalledWith('file.md');
-      expect(mockAdapter.remove).toHaveBeenCalledWith('file.md');
+      expect(mockAdapter.exists).toHaveBeenCalledWith('folder/subfolder/file.md');
+      expect(mockAdapter.remove).toHaveBeenCalledWith('folder/subfolder/file.md');
     });
 
     it('does nothing when file does not exist', async () => {
@@ -224,15 +158,6 @@ describe('VaultFileAdapter', () => {
 
       expect(mockAdapter.exists).toHaveBeenCalledWith('file.md');
       expect(mockAdapter.remove).not.toHaveBeenCalled();
-    });
-
-    it('deletes nested file', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.remove.mockResolvedValue();
-
-      await vaultAdapter.delete('folder/subfolder/file.md');
-
-      expect(mockAdapter.remove).toHaveBeenCalledWith('folder/subfolder/file.md');
     });
   });
 
@@ -285,18 +210,6 @@ describe('VaultFileAdapter', () => {
 
       expect(result).toEqual([]);
       expect(mockAdapter.list).not.toHaveBeenCalled();
-    });
-
-    it('returns empty array when no files exist', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.list.mockResolvedValue({
-        files: [],
-        folders: [],
-      });
-
-      const result = await vaultAdapter.listFiles('folder');
-
-      expect(result).toEqual([]);
     });
 
     it('handles folder with only subfolders', async () => {
@@ -419,22 +332,6 @@ describe('VaultFileAdapter', () => {
       expect(result).toContain('b/c/c.txt');
       expect(result).toContain('b/c/d/d.txt');
     });
-
-    it('handles multiple subfolders at same level', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      const mockList = jest.fn();
-      mockList
-        .mockResolvedValueOnce({ files: ['root.md'], folders: ['a', 'b', 'c'] })
-        .mockResolvedValueOnce({ files: ['a/a.txt'], folders: [] })
-        .mockResolvedValueOnce({ files: ['b/b.txt'], folders: [] })
-        .mockResolvedValueOnce({ files: ['c/c.txt'], folders: [] });
-
-      mockAdapter.list.mockImplementation((path: string) => mockList(path));
-
-      const result = await vaultAdapter.listFilesRecursive('root');
-
-      expect(result).toHaveLength(4);
-    });
   });
 
   describe('ensureFolder', () => {
@@ -447,22 +344,13 @@ describe('VaultFileAdapter', () => {
       expect(mockAdapter.mkdir).not.toHaveBeenCalled();
     });
 
-    it('creates folder when it does not exist', async () => {
-      mockAdapter.exists.mockResolvedValueOnce(false);
-      mockAdapter.mkdir.mockResolvedValue();
-
-      await vaultAdapter.ensureFolder('new/folder');
-
-      expect(mockAdapter.exists).toHaveBeenCalledWith('new/folder');
-      expect(mockAdapter.mkdir).toHaveBeenCalledWith('new/folder');
-    });
-
     it('creates nested folders', async () => {
       mockAdapter.exists.mockResolvedValue(false);
       mockAdapter.mkdir.mockResolvedValue();
 
       await vaultAdapter.ensureFolder('a/b/c');
 
+      expect(mockAdapter.exists).toHaveBeenCalledWith('a/b/c');
       expect(mockAdapter.mkdir).toHaveBeenCalledTimes(3);
       expect(mockAdapter.mkdir).toHaveBeenCalledWith('a');
       expect(mockAdapter.mkdir).toHaveBeenCalledWith('a/b');
@@ -474,15 +362,6 @@ describe('VaultFileAdapter', () => {
       mockAdapter.mkdir.mockResolvedValue();
 
       await vaultAdapter.ensureFolder('folder/');
-
-      expect(mockAdapter.mkdir).toHaveBeenCalledWith('folder');
-    });
-
-    it('handles root folder', async () => {
-      mockAdapter.exists.mockResolvedValueOnce(false);
-      mockAdapter.mkdir.mockResolvedValue();
-
-      await vaultAdapter.ensureFolder('folder');
 
       expect(mockAdapter.mkdir).toHaveBeenCalledWith('folder');
     });
@@ -533,28 +412,12 @@ describe('VaultFileAdapter', () => {
   });
 
   describe('rename', () => {
-    it('delegates to vault adapter rename', async () => {
-      mockAdapter.rename.mockResolvedValue();
-
-      await vaultAdapter.rename('old.md', 'new.md');
-
-      expect(mockAdapter.rename).toHaveBeenCalledWith('old.md', 'new.md');
-    });
-
-    it('renames nested file', async () => {
-      mockAdapter.rename.mockResolvedValue();
-
-      await vaultAdapter.rename('folder/old.md', 'folder/new.md');
-
-      expect(mockAdapter.rename).toHaveBeenCalledWith('folder/old.md', 'folder/new.md');
-    });
-
     it('moves file across folders', async () => {
       mockAdapter.rename.mockResolvedValue();
 
-      await vaultAdapter.rename('folder1/file.md', 'folder2/file.md');
+      await vaultAdapter.rename('folder1/old.md', 'folder2/new.md');
 
-      expect(mockAdapter.rename).toHaveBeenCalledWith('folder1/file.md', 'folder2/file.md');
+      expect(mockAdapter.rename).toHaveBeenCalledWith('folder1/old.md', 'folder2/new.md');
     });
   });
 
@@ -562,10 +425,10 @@ describe('VaultFileAdapter', () => {
     it('returns file stats for existing file', async () => {
       mockAdapter.stat.mockResolvedValue({ mtime: 1234567890, size: 1024 });
 
-      const result = await vaultAdapter.stat('file.md');
+      const result = await vaultAdapter.stat('folder/subfolder/file.md');
 
       expect(result).toEqual({ mtime: 1234567890, size: 1024 });
-      expect(mockAdapter.stat).toHaveBeenCalledWith('file.md');
+      expect(mockAdapter.stat).toHaveBeenCalledWith('folder/subfolder/file.md');
     });
 
     it('returns null when stat returns null', async () => {
@@ -584,14 +447,6 @@ describe('VaultFileAdapter', () => {
       expect(result).toBeNull();
     });
 
-    it('handles nested file path', async () => {
-      mockAdapter.stat.mockResolvedValue({ mtime: 9876543210, size: 2048 });
-
-      const result = await vaultAdapter.stat('folder/subfolder/file.md');
-
-      expect(result).toEqual({ mtime: 9876543210, size: 2048 });
-    });
-
     it('handles zero-sized file', async () => {
       mockAdapter.stat.mockResolvedValue({ mtime: 1234567890, size: 0 });
 
@@ -603,37 +458,78 @@ describe('VaultFileAdapter', () => {
 
   describe('managed resources', () => {
     it.each([
-      ['managed root', '.agents', 'folder'],
-      ['skills root', '.agents/skills', 'folder'],
-      ['package', '.agents/skills/portable-skill', 'folder'],
-      ['SKILL.md', '.agents/skills/portable-skill/SKILL.md', 'file'],
-    ] as const)('rejects a symlinked %s on desktop adapters', async (_label, relative, type) => {
+      ['managed root', '.agents'],
+      ['skills root', '.agents/skills'],
+      ['package', '.agents/skills/portable-skill'],
+    ] as const)('rejects a symlinked %s on desktop adapters', async (_label, relative) => {
       const vaultPath = await fs.mkdtemp(path.join(os.tmpdir(), 'claudian-vault-'));
       const externalPath = await fs.mkdtemp(path.join(os.tmpdir(), 'claudian-external-'));
       try {
         if (relative !== '.agents') {
           await fs.mkdir(path.join(vaultPath, '.agents/skills/portable-skill'), { recursive: true });
         }
-        const target = type === 'folder'
-          ? externalPath
-          : path.join(externalPath, 'SKILL.md');
-        if (type === 'file') await fs.writeFile(target, 'external');
-        if (type === 'folder' && relative !== '.agents') {
+        if (relative !== '.agents') {
           await fs.rm(path.join(vaultPath, relative), { recursive: true });
         }
-        await fs.symlink(target, path.join(vaultPath, relative));
+        await fs.symlink(
+          externalPath,
+          path.join(vaultPath, relative),
+          process.platform === 'win32' ? 'junction' : 'dir',
+        );
         const desktopApp = {
           vault: { adapter: { getBasePath: () => vaultPath } },
         } as unknown as App;
 
         await expect(new VaultFileAdapter(desktopApp).verifyManagedPath(relative, {
-          expectedType: type,
+          expectedType: 'folder',
         })).rejects.toThrow('symlink');
       } finally {
         await fs.rm(vaultPath, { recursive: true, force: true });
         await fs.rm(externalPath, { recursive: true, force: true });
       }
     });
+
+    const fileSymlinkProbe = mkdtempSync(path.join(os.tmpdir(), 'claudian-file-symlink-probe-'));
+    const fileSymlinkSupported = (() => {
+      const target = path.join(fileSymlinkProbe, 'target.md');
+      const link = path.join(fileSymlinkProbe, 'link.md');
+      try {
+        writeFileSync(target, 'probe');
+        symlinkSync(target, link);
+        return true;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (process.platform === 'win32' && (code === 'EPERM' || code === 'EACCES')) return false;
+        throw error;
+      } finally {
+        rmSync(fileSymlinkProbe, { force: true, recursive: true });
+      }
+    })();
+    const fileSymlinkTest = fileSymlinkSupported ? it : it.skip;
+    // Jest's static rule does not recognize a capability-selected test registration function.
+    /* eslint-disable jest/no-standalone-expect */
+    fileSymlinkTest('rejects a symlinked SKILL.md on desktop adapters when the host permits file symlinks', async () => {
+      const vaultPath = await fs.mkdtemp(path.join(os.tmpdir(), 'claudian-vault-'));
+      const externalPath = await fs.mkdtemp(path.join(os.tmpdir(), 'claudian-external-'));
+      try {
+        const relative = '.agents/skills/portable-skill/SKILL.md';
+        await fs.mkdir(path.join(vaultPath, '.agents/skills/portable-skill'), { recursive: true });
+        const target = path.join(externalPath, 'SKILL.md');
+        await fs.writeFile(target, 'external');
+        await fs.symlink(target, path.join(vaultPath, relative));
+        const desktopApp = {
+          vault: { adapter: { getBasePath: () => vaultPath } },
+        } as unknown as App;
+
+        await expect(new VaultFileAdapter(desktopApp).verifyManagedPath(relative, {
+          expectedType: 'file',
+        })).rejects.toThrow('symlink');
+      } finally {
+        await fs.rm(vaultPath, { recursive: true, force: true });
+        await fs.rm(externalPath, { recursive: true, force: true });
+      }
+    });
+    /* eslint-enable jest/no-standalone-expect */
 
     it('rejects paths outside the normalized vault namespace', async () => {
       await expect(vaultAdapter.verifyManagedPath('../escape', {

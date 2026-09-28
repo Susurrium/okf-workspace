@@ -71,6 +71,6 @@ describe("showChineseCalendar", () => {
       reveal: async () => undefined,
       executeCreateCommand: () => false,
       pluginEnabled: false,
-    })).rejects.toThrow("Chinese Calendar 未启用");
+    })).rejects.toThrow("日历未启用");
   });
 });

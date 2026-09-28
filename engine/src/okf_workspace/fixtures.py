@@ -108,8 +108,7 @@ def generate_fixture_vault(output: Path) -> Path:
             "# 示例来源\n\n## 正文入口\n\n[完整正文](/sources/text/documents/sample-source.md)\n"
         ),
         fields={
-            "resource": "okf-original://sha256/example/sample.pdf",
-            "sha256": "example",
+            "resource": "https://example.test/sample.pdf",
             "kind": "document",
             "text": "/sources/text/documents/sample-source.md",
             "uses": [{"purpose": "reference"}],

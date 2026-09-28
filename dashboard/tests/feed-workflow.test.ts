@@ -10,6 +10,24 @@ import {
 } from "../src/ui/ai-daily-inline-decision.js";
 
 describe("Dashboard Feed workflow", () => {
+  it.each([
+    ["queued", "排队"], ["running", "正在生成"], ["failed", "失败"],
+    ["cancelled", "取消"], ["orphaned", "中断"], ["completed", "已生成"],
+  ] as const)("reports %s generation without claiming learning completion", (status, label) => {
+    for (const action of ["learn-now", "wiki-now"] as const) {
+      const feedback = feedDecisionFeedback({ item_id: "a", action,
+        semantic_operation: { operation_id: "op", status } });
+      expect(feedback.message).toContain(label);
+      expect(feedback.message).not.toContain("已开始学习");
+      if (status !== "running") expect(feedback.message).not.toContain("正在生成");
+    }
+  });
+
+  it("does not claim generation started without a task receipt", () => {
+    expect(feedDecisionFeedback({ item_id: "a", action: "learn-now" }).message)
+      .toContain("未确认");
+  });
+
   it("reads canonical Digest item mappings and keeps legacy compatibility", () => {
     const canonical = [{ id: "treehole:123", block_id: "treehole-123" }];
     const legacy = [{ id: "daily:1", block_id: "feed-abcdef123456" }];
@@ -45,8 +63,12 @@ describe("Dashboard Feed workflow", () => {
     vi.stubGlobal("fetch", fetchMock);
     try {
       const api = new HttpFeedApi("http://127.0.0.1:8765", "token");
-      await api.decide("ai-daily", "news-2", "learn-now");
+      await api.decide("ai-daily", "news-2", "learn-now", { project: "demo" });
       expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+        action: "learn-now",
+        project: "demo",
+      });
       expect(timeout.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([120_000]);
     } finally {
       vi.unstubAllGlobals();
@@ -255,18 +277,18 @@ describe("Dashboard Feed workflow", () => {
       action: "learn-later",
       study_guide: "learning/guides/news-2.md",
     })).toEqual({
-      message: "已保存来源并创建待生成的学习入口；可在 Learning 页面继续。",
+      message: "资料已保存到待学习列表；可在学习页生成辅助学习材料。",
       target: "learning/guides/news-2.md",
-      targetLabel: "打开学习入口",
+      targetLabel: "打开学习笔记",
     });
     expect(feedDecisionFeedback({
       item_id: "news-2",
       action: "later",
       source: "sources/records/ai-daily/news-2.md",
     })).toEqual({
-      message: "这是旧版的稍后决定记录；当时已保存 Source 并放入 Inbox，你仍可重新作出正式判断。",
+      message: "此前选择了稍后处理，已保存的资料仍可打开。你可以重新选择用途。",
       target: "sources/records/ai-daily/news-2.md",
-      targetLabel: "打开旧 Source",
+      targetLabel: "打开旧资料",
     });
   });
 });

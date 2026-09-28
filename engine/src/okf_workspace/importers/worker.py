@@ -10,22 +10,14 @@ from typing import cast
 
 from okf_workspace.semantic import SemanticKind, SemanticOperationService
 
-from .models import ConversionStatus, ImportIntent
+from .cloud_mineru import RetryableMinerUError
+from .models import ConversionStatus, ImportIntent, requires_semantic_generation
 from .pipeline import DocumentImporter
 
 _ACTIVE = {
     ConversionStatus.QUEUED.value,
     ConversionStatus.WAITING_FOR_MINERU.value,
 }
-_TRANSIENT_MINERU = (
-    "unavailable",
-    "connect",
-    "timeout",
-    "timed out",
-    "ssh",
-    "busy",
-    "capacity",
-)
 
 
 class DocumentImportWorker:
@@ -49,6 +41,9 @@ class DocumentImportWorker:
         if record is None:
             return False
         conversion_id = str(record["conversion_id"])
+        if record.get("status") == ConversionStatus.IMPORTED.value:
+            self.enqueue_semantic(conversion_id)
+            return True
         self.store.transition(
             conversion_id,
             ConversionStatus.QUEUED,
@@ -56,19 +51,22 @@ class DocumentImportWorker:
         )
         try:
             result = self.importer.retry(conversion_id)
-            self._enqueue_semantic(result.conversion_id)
+            self.enqueue_semantic(result.conversion_id)
         except Exception as exc:
-            current = self.store.load(conversion_id)
-            requested = current.get("requested_parser")
             message = str(exc)
-            if requested == "mineru" and any(
-                marker in message.casefold() for marker in _TRANSIENT_MINERU
-            ):
+            if isinstance(exc, RetryableMinerUError):
                 self.store.transition(
                     conversion_id,
                     ConversionStatus.WAITING_FOR_MINERU,
                     error=message[:2000],
                     retry_after_seconds=self.retry_seconds,
+                )
+            else:
+                self.store.transition(
+                    conversion_id,
+                    ConversionStatus.FAILED,
+                    error=message[:2000],
+                    stages={"routing": "failed"},
                 )
         return True
 
@@ -80,7 +78,10 @@ class DocumentImportWorker:
 
     def _eligible(self, record: dict[str, object]) -> bool:
         status = record.get("status")
-        if status not in _ACTIVE:
+        pending_handoff = (
+            status == ConversionStatus.IMPORTED.value and self._needs_generation(record)
+        )
+        if status not in _ACTIVE and not pending_handoff:
             return False
         if status == ConversionStatus.QUEUED.value:
             return True
@@ -92,22 +93,44 @@ class DocumentImportWorker:
         except ValueError:
             return True
 
-    def _enqueue_semantic(self, conversion_id: str) -> None:
-        if self.semantic_service is None:
-            return
+    @staticmethod
+    def _needs_generation(record: dict[str, object]) -> bool:
+        outputs = record.get("outputs")
+        if (
+            isinstance(outputs, dict)
+            and cast(dict[str, object], outputs).get("semantic_operation_id")
+        ):
+            return False
+        return requires_semantic_generation(
+            ImportIntent(str(record.get("intent"))), bool(record.get("generate")),
+        )
+
+    def enqueue_semantic(self, conversion_id: str) -> dict[str, object] | None:
+        """Persist a retryable handoff independently of the completed conversion."""
         record = self.store.load(conversion_id)
-        if not bool(record.get("generate")):
-            return
+        if not self._needs_generation(record):
+            return None
+        try:
+            return self._enqueue_semantic(record)
+        except Exception as exc:
+            self.store.transition(
+                conversion_id, ConversionStatus.IMPORTED, error=str(exc)[:2000],
+                retry_after_seconds=self.retry_seconds, stages={"semantic": "failed"},
+            )
+            return None
+
+    def _enqueue_semantic(self, record: dict[str, object]) -> dict[str, object]:
+        if self.semantic_service is None:
+            raise RuntimeError("Codex semantic automation is disabled")
+        conversion_id = str(record["conversion_id"])
         intent = ImportIntent(str(record.get("intent")))
-        if intent not in {ImportIntent.LEARN, ImportIntent.COURSE, ImportIntent.WIKI}:
-            return
         outputs = record.get("outputs")
         if not isinstance(outputs, dict):
-            return
+            raise ValueError("conversion outputs are missing")
         output_values = cast(Mapping[str, object], outputs)
         target = output_values.get("routed_target", output_values.get("routed_draft"))
         if not isinstance(target, str):
-            return
+            raise ValueError("conversion generation target is missing")
         vault = self.importer.vault
         target_relative = Path(target).resolve().relative_to(vault).as_posix()
         source_paths: list[str] = []
@@ -125,9 +148,14 @@ class DocumentImportWorker:
             project=(
                 str(record["project"]) if isinstance(record.get("project"), str) else None
             ),
+            idempotency_key=(
+                f"document:{conversion_id}:{record.get('generation_revision', 'initial')}"
+            ),
         )
         self.store.transition(
             conversion_id,
             ConversionStatus.IMPORTED,
             outputs={"semantic_operation_id": str(operation["operation_id"])},
+            stages={"semantic": "queued"},
         )
+        return operation

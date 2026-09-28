@@ -359,7 +359,7 @@ describe("Dashboard experience selectors", () => {
       notes,
       "project",
       "/projects/workspace/project.md",
-    )).toEqual({ key: "learning-entries", label: "学习入口", count: 2 });
+    )).toEqual({ key: "learning-entries", label: "待学习", count: 2 });
     expect(filterDashboardLearningScope(notes, "all")).toEqual([
       course,
       project,
@@ -393,8 +393,8 @@ describe("Dashboard experience selectors", () => {
       related_materials: [],
     })).toEqual([
       { key: "pending-captures", label: "待整理", count: 0 },
-      { key: "study-guides", label: "Study Guide", count: 0 },
-      { key: "sources", label: "来源", count: 0 },
+      { key: "study-guides", label: "学习笔记", count: 0 },
+      { key: "sources", label: "资料", count: 0 },
     ]);
 
     expect(dashboardCourseMetrics({
@@ -404,9 +404,9 @@ describe("Dashboard experience selectors", () => {
       lesson_count: 3,
     })).toEqual([
       { key: "pending-captures", label: "待整理", count: 1 },
-      { key: "study-guides", label: "Study Guide", count: 2 },
-      { key: "sources", label: "来源", count: 1 },
-      { key: "lessons", label: "Lesson", count: 3 },
+      { key: "study-guides", label: "学习笔记", count: 2 },
+      { key: "sources", label: "资料", count: 1 },
+      { key: "lessons", label: "课堂笔记", count: 3 },
     ]);
   });
 });

@@ -23,10 +23,7 @@ export class ProviderInitializationBoundary {
   private services: Partial<Record<ProviderId, ProviderWorkspaceServices>> = {};
   private initAttempts: Partial<Record<ProviderId, ProviderInitializationAttempt>> = {};
   private generation = 0;
-
-  getRegisteredProviderIds(): ProviderId[] {
-    return Object.keys(this.registrations);
-  }
+  private owner: ProviderHost | null = null;
 
   setServices(
     providerId: ProviderId,
@@ -52,6 +49,10 @@ export class ProviderInitializationBoundary {
     providerId: ProviderId,
     _reason: string,
   ): Promise<void> {
+    if (this.owner && this.owner !== plugin) {
+      throw new Error('Provider workspace host differs from the active owner. Dispose it before replacing the host.');
+    }
+    this.owner = plugin;
     if (this.services[providerId]) {
       return;
     }
@@ -65,7 +66,7 @@ export class ProviderInitializationBoundary {
     const generation = this.generation;
     const promise = plugin.runProviderExecutionTransition(
       [providerId],
-      (transitionScope) => this.runInitialize(
+      (transitionScope) => this.#runInitialize(
         plugin,
         providerId,
         generation,
@@ -101,10 +102,11 @@ export class ProviderInitializationBoundary {
       delete this.services[providerId];
     }
     this.initAttempts = {};
+    this.owner = null;
     await Promise.allSettled(promises);
   }
 
-  private async runInitialize(
+  async #runInitialize(
     plugin: ProviderHost,
     providerId: ProviderId,
     generation: number,

@@ -26,21 +26,14 @@ try {
 }
 finally { Pop-Location }
 
-Push-Location (Join-Path $root 'services/markitdown')
-try {
-    & uv run pytest
-    if ($LASTEXITCODE -ne 0) { throw 'MarkItDown service tests failed' }
-    & uv run ruff check src tests
-    if ($LASTEXITCODE -ne 0) { throw 'MarkItDown service Ruff check failed' }
-}
-finally { Pop-Location }
-
 Push-Location (Join-Path $root 'dashboard')
 try {
     & npm.cmd run check
     if ($LASTEXITCODE -ne 0) { throw 'Dashboard typecheck failed' }
     & npm.cmd test
     if ($LASTEXITCODE -ne 0) { throw 'Dashboard tests failed' }
+    & npm.cmd run build
+    if ($LASTEXITCODE -ne 0) { throw 'Dashboard build failed' }
 }
 finally { Pop-Location }
 
@@ -50,8 +43,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Claudian typecheck failed' }
     & npm.cmd run lint
     if ($LASTEXITCODE -ne 0) { throw 'Claudian lint failed' }
-    & npm.cmd run test:workspace
-    if ($LASTEXITCODE -ne 0) { throw 'Claudian Workspace tests failed' }
+    & npm.cmd test
+    if ($LASTEXITCODE -ne 0) { throw 'Claudian tests failed' }
+    & npm.cmd run build
+    if ($LASTEXITCODE -ne 0) { throw 'Claudian build failed' }
 }
 finally { Pop-Location }
 

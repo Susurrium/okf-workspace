@@ -8,11 +8,11 @@ export const FEED_DECISION_ACTIONS: readonly {
   label: string;
   result: string;
 }[] = [
-  { action: "learn-now", label: "现在生成 Study Guide", result: "保存来源并创建待生成的 Study Guide" },
-  { action: "learn-later", label: "稍后学习", result: "保存来源并创建待生成的学习入口" },
-  { action: "wiki-now", label: "直接整理成 Wiki", result: "保存来源并生成未学习 Wiki" },
-  { action: "source-only", label: "只保留原始资料", result: "仅保存来源和可读摘录" },
-  { action: "ignore", label: "不保留", result: "记录决定但不写入 Vault" },
+  { action: "learn-now", label: "现在生成辅助学习材料", result: "保存资料并安排生成辅助学习材料" },
+  { action: "learn-later", label: "稍后学习", result: "保存资料，之后从学习页继续" },
+  { action: "wiki-now", label: "整理为知识笔记", result: "保存资料并安排生成知识笔记" },
+  { action: "source-only", label: "只保存资料", result: "保存已获取的正文或摘要" },
+  { action: "ignore", label: "不保留", result: "记录选择，不另存为资料笔记" },
 ];
 
 export interface FeedDecisionFeedback {
@@ -21,45 +21,54 @@ export interface FeedDecisionFeedback {
   targetLabel?: string | undefined;
 }
 
+function generationFeedback(result: FeedDecisionResult, subject: string): string {
+  const status = result.semantic_operation?.status;
+  if (status === "completed") return `${subject}已生成。`;
+  const state = status ? {
+    queued: "生成任务已排队，切换页面不会中断。",
+    running: `正在生成${subject}，切换页面不会中断。`,
+    failed: "生成失败，可在系统状态中重试。",
+    cancelled: "生成已取消，已保存的资料仍然保留。",
+    orphaned: "生成已中断，可在系统状态中重新生成。",
+  }[status] : "生成任务尚未确认，请在系统状态中查看后再重试。";
+  return `资料已保存；${state}`;
+}
+
 export function feedDecisionFeedback(result: FeedDecisionResult): FeedDecisionFeedback {
   switch (result.action) {
     case "learn-now":
       return {
-        message: result.semantic_operation?.status === "completed"
-          ? "学习材料已经生成完成。"
-          : "已保存来源并创建学习入口；Codex 正在后台生成学习材料。",
+        message: generationFeedback(result, "辅助学习材料"),
         target: result.study_guide,
-        targetLabel: "打开学习材料",
+        targetLabel: "打开学习笔记",
       };
     case "learn-later":
       return {
-        message: "已保存来源并创建待生成的学习入口；可在 Learning 页面继续。",
-        target: result.study_guide,
-        targetLabel: "打开学习入口",
+        message: "资料已保存到待学习列表；可在学习页生成辅助学习材料。",
+        target: result.study_guide ?? result.source_text ?? result.source,
+        targetLabel: result.study_guide ? "打开学习笔记" : "打开已保存资料",
       };
     case "wiki-now":
       return {
-        message: result.semantic_operation?.status === "completed"
-          ? "Wiki 已经生成完成。"
-          : "已保存来源；Codex 正在后台整理 Wiki。",
+        message: generationFeedback(result, "知识笔记"),
         target: result.wiki,
-        targetLabel: "打开 Wiki",
+        targetLabel: "打开知识笔记",
       };
     case "source-only":
       return {
-        message: "已保存 Source 和完整 Source Text，不会创建 Study Guide 或 Wiki。",
+        message: "资料已保存，内容为已获取的正文或摘要。",
         target: result.source_text ?? result.source,
-        targetLabel: "打开完整来源",
+        targetLabel: "打开已保存资料",
       };
     case "ignore":
-      return { message: "已记录为不保留；没有向 Vault 写入内容。" };
+      return { message: "已记录为不保留，没有另存为资料笔记。" };
     case "later":
       return {
         message: result.source
-          ? "这是旧版的稍后决定记录；当时已保存 Source 并放入 Inbox，你仍可重新作出正式判断。"
-          : "这是旧版的稍后决定记录；记录中没有可用的 Source，你仍可重新作出正式判断。",
+          ? "此前选择了稍后处理，已保存的资料仍可打开。你可以重新选择用途。"
+          : "此前选择了稍后处理，尚无可打开的资料。你可以重新选择用途。",
         target: result.source,
-        targetLabel: result.source ? "打开旧 Source" : undefined,
+        targetLabel: result.source ? "打开旧资料" : undefined,
       };
   }
 }

@@ -1,40 +1,33 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import { Notice, Setting } from 'obsidian';
+import { Setting } from 'obsidian';
+
+import { probeCLIInstallation } from '@/core/providers/cli/CLIInstallationProbe';
+import { getRuntimeEnvironmentVariables } from '@/core/providers/providerEnvironment';
+import { GROK_PROVIDER_ICON } from '@/shared/icons';
+import { renderCLIInstallationSetting } from '@/shared/settings/CLIInstallationSetting';
 
 import { ProviderSettingsCoordinator } from '../../../core/providers/ProviderSettingsCoordinator';
 import { ProviderWorkspaceRegistry } from '../../../core/providers/ProviderWorkspaceRegistry';
 import type {
-  ProviderSettingsTabRenderer,
-  ProviderSettingsTabRendererContext,
+  ProviderSettingsTabRenderer
 } from '../../../core/providers/types';
 import type { ClaudianSettings } from '../../../core/types';
 import { t } from '../../../i18n/i18n';
 import { renderEnvironmentSettingsSection } from '../../../shared/settings/EnvironmentSettingsSection';
-import { renderHostnameCliPathSetting } from '../../../shared/settings/HostnameCliPathSetting';
-import { renderNativeMcpSettingsSection } from '../../../shared/settings/NativeMcpSettingsSection';
-import { renderProviderEnablementSetting } from '../../../shared/settings/ProviderEnablementSetting';
+import type { ProviderEnablementSettingOptions } from '../../../shared/settings/ProviderEnablementSetting';
 import {
   renderLastEnabledProviderWarning,
   renderProviderModelEnablementWarning,
 } from '../../../shared/settings/ProviderModelEnablementWarning';
-import {
-  type ProviderModelPickerModel,
-  type ProviderModelPickerState,
-  renderProviderModelPicker,
-} from '../../../shared/settings/ProviderModelPicker';
+import { renderProviderModelsSection } from '../../../shared/settings/ProviderModelsSection';
 import { getHostnameKey } from '../../../utils/env';
-import { expandHomePath } from '../../../utils/path';
+import { normalizeConfiguredCLIPath } from '../../../utils/path';
 import type { GrokWorkspaceServices } from '../app/GrokWorkspaceServices';
-import type { GrokDiscoveredModel } from '../models';
 import {
-  clearCurrentGrokCatalog,
   getGrokProviderSettings,
-  getOrderedGrokVisibleModelIds,
-  normalizeGrokVisibleModels,
-  updateGrokProviderSettings,
-  updateGrokVisibleModels,
+  updateGrokProviderSettings
 } from '../settings';
 
 const GROK_PROVIDER_ID = 'grok' as const;
@@ -45,23 +38,7 @@ export const grokSettingsTabRenderer: ProviderSettingsTabRenderer = {
     const hostnameKey = getHostnameKey();
     const workspace = getGrokWorkspaceServices();
 
-    const refreshModelCatalog = async (): Promise<'empty' | 'failed' | 'loaded'> => {
-      const result = await workspace.refreshModelCatalog();
-      if (result.diagnostics) {
-        new Notice(`Grok model discovery failed: ${result.diagnostics}`);
-        return 'failed';
-      }
-      modelWarning.context.notifyProviderModelOptionsChanged(GROK_PROVIDER_ID);
-      return (getGrokProviderSettings(settingsBag).currentCatalog?.models.length ?? 0) > 0
-        ? 'loaded'
-        : 'empty';
-    };
-
-    new Setting(container).setName('Setup').setHeading();
-
-    renderProviderEnablementSetting({
-      container,
-      description: t('settings.providerEnablement.desc', { provider: 'Grok' }),
+    const enablement: Omit<ProviderEnablementSettingOptions, 'container' | 'description'> = {
       getValue: () => getGrokProviderSettings(settingsBag).enabled,
       name: t('settings.providerEnablement.name', { provider: 'Grok' }),
       onChange: async (enabled) => {
@@ -92,8 +69,9 @@ export const grokSettingsTabRenderer: ProviderSettingsTabRenderer = {
         }
         modelWarning.context.notifyProviderModelOptionsChanged(GROK_PROVIDER_ID);
       },
-    });
+    };
 
+    const installationContainer = container.createDiv();
     const lastProviderWarning = renderLastEnabledProviderWarning(container);
 
     const modelWarning = renderProviderModelEnablementWarning(container, context, {
@@ -106,9 +84,21 @@ export const grokSettingsTabRenderer: ProviderSettingsTabRenderer = {
       providerName: 'Grok',
     });
 
-    renderHostnameCliPathSetting({
-      container,
-      description: 'Optional absolute path to the Grok CLI for this computer. Leave empty to prefer known installs, then `grok` from PATH.',
+    renderCLIInstallationSetting({
+      cliName: 'Grok CLI',
+      icon: GROK_PROVIDER_ICON,
+      inspect: async () => {
+        const settings = context.plugin.settings as unknown as Record<string, unknown>;
+        const config = getGrokProviderSettings(settings);
+        return probeCLIInstallation({
+          path: await context.plugin.getResolvedProviderCliPath('grok'),
+          configuredPath: config.cliPathsByHost[hostnameKey] || config.cliPath,
+          args: ['--version'],
+          env: { ...process.env, ...getRuntimeEnvironmentVariables(settings, 'grok') },
+        });
+      },
+      container: installationContainer,
+      enablement,
       getValue: () => {
         const current = getGrokProviderSettings(settingsBag);
         return current.cliPathsByHost[hostnameKey] ?? current.cliPath ?? '';
@@ -128,7 +118,6 @@ export const grokSettingsTabRenderer: ProviderSettingsTabRenderer = {
             cliPath: '',
             cliPathsByHost,
           });
-          clearCurrentGrokCatalog(settings);
         };
         await context.plugin.applyProviderRuntimeSettings(
           [GROK_PROVIDER_ID],
@@ -140,11 +129,11 @@ export const grokSettingsTabRenderer: ProviderSettingsTabRenderer = {
       placeholder: process.platform === 'win32'
         ? 'C:\\Users\\you\\AppData\\Roaming\\npm\\grok.cmd'
         : '/usr/local/bin/grok',
-      validate: validateCliPath,
+      validate: validateCLIPath,
     });
 
     new Setting(container).setName('Models').setHeading();
-    renderGrokModelPicker(container, modelWarning.context, settingsBag, refreshModelCatalog);
+    const modelPicker = renderProviderModelsSection(container, 'grok', 'Grok', workspace.modelCatalog!, () => modelWarning.refresh());
 
     new Setting(container).setName(t('settings.agentSkills.sectionTitle')).setHeading();
     context.renderAgentSkillSettings(container, GROK_PROVIDER_ID);
@@ -154,15 +143,6 @@ export const grokSettingsTabRenderer: ProviderSettingsTabRenderer = {
       name: 'Hidden Grok commands',
       desc: 'Hide runtime commands advertised by Grok from the command dropdown. Enter names without the leading slash, one per line.',
       placeholder: 'compact\nreview',
-    });
-
-    renderNativeMcpSettingsSection(container, {
-      descriptionAfterCommand: ' and they will be available in Claudian. ',
-      descriptionBeforeCommand: 'Grok Build manages MCP servers through its own CLI. Configure them with ',
-      documentationLabel: 'Learn more',
-      documentationUrl: 'https://docs.x.ai/build/features/mcp-servers',
-      heading: t('settings.mcpServers.name'),
-      setupCommand: 'grok mcp add',
     });
 
     renderEnvironmentSettingsSection({
@@ -175,101 +155,16 @@ export const grokSettingsTabRenderer: ProviderSettingsTabRenderer = {
       renderCustomContextLimits: target => context.renderCustomContextLimits(target, GROK_PROVIDER_ID),
       scope: 'provider:grok',
     });
+    return modelPicker;
   },
 };
 
-function renderGrokModelPicker(
-  container: HTMLElement,
-  context: ProviderSettingsTabRendererContext,
-  settingsBag: Record<string, unknown>,
-  loadCatalog: () => Promise<'empty' | 'failed' | 'loaded'>,
-): void {
-  const getState = (): ProviderModelPickerState => {
-    const settings = getGrokProviderSettings(settingsBag);
-    const catalogModels = settings.currentCatalog?.models ?? [];
-    const selectedIds = getOrderedGrokVisibleModelIds(settings);
-    return {
-      aliases: settings.modelAliases,
-      discoveredCount: catalogModels.length,
-      models: buildGrokPickerModels(catalogModels, selectedIds),
-      selectedIds,
-    };
-  };
-
-  renderProviderModelPicker({
-    checkCatalogFreshnessWhenCached: true,
-    container,
-    emptyCatalogText: 'No Grok models discovered yet. Run `grok login` if needed, then click Discover.',
-    failedCatalogText: 'Could not load the Grok model catalog. Check the CLI path, account login, and custom-model environment, then try again.',
-    getState,
-    initiallyOpen: (getGrokProviderSettings(settingsBag).currentCatalog?.models.length ?? 0) === 0,
-    loadCatalog: async () => loadCatalog(),
-    loadingCatalogText: 'Loading the Grok model catalog...',
-    modifier: 'grok',
-    async onAliasesChange(modelAliases) {
-      await context.plugin.mutateSettings((settings) => {
-        updateGrokProviderSettings(settings, { modelAliases });
-      });
-      context.notifyProviderModelOptionsChanged(GROK_PROVIDER_ID);
-    },
-    async onSelectedIdsChange(selectedIds) {
-      const current = getGrokProviderSettings(settingsBag);
-      const models = current.currentCatalog?.models ?? [];
-      const allowedIds = new Set(models.map(model => model.rawId));
-      const normalized = normalizeGrokVisibleModels(selectedIds, allowedIds, models.length > 0);
-      const nextVisibleModels = normalized;
-      if (sameOptionalList(current.visibleModels, nextVisibleModels)) {
-        return;
-      }
-      await context.plugin.mutateSettings((settings) => {
-        updateGrokVisibleModels(settings, nextVisibleModels);
-      });
-      context.notifyProviderModelOptionsChanged(GROK_PROVIDER_ID);
-    },
-    providerName: 'Grok',
-    searchPlaceholder: 'Filter by model name, description, or alias ID...',
-  });
-}
-
-function buildGrokPickerModels(
-  catalogModels: GrokDiscoveredModel[],
-  selectedIds: string[],
-): ProviderModelPickerModel[] {
-  const models: ProviderModelPickerModel[] = catalogModels.map(model => ({
-    description: model.description,
-    id: model.rawId,
-    isAvailable: true,
-    name: model.displayName,
-  }));
-  const catalogIds = new Set(catalogModels.map(model => model.rawId));
-  for (const rawId of selectedIds) {
-    if (catalogIds.has(rawId)) {
-      continue;
-    }
-    models.push({
-      description: 'Selected model',
-      id: rawId,
-      isAvailable: false,
-      name: rawId,
-      unavailableMessage: 'Not currently reported by Grok',
-    });
-  }
-  return models;
-}
-
-function sameOptionalList(left: string[] | null, right: string[] | null): boolean {
-  if (left === null || right === null) {
-    return left === right;
-  }
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function validateCliPath(value: string): string | null {
+function validateCLIPath(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) {
     return null;
   }
-  const expandedPath = expandHomePath(trimmed);
+  const expandedPath = normalizeConfiguredCLIPath(trimmed);
   if (!path.posix.isAbsolute(expandedPath) && !path.win32.isAbsolute(expandedPath)) {
     return 'Path must be absolute';
   }

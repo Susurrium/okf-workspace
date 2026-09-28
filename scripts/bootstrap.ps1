@@ -11,13 +11,6 @@ try {
 }
 finally { Pop-Location }
 
-Push-Location (Join-Path $root 'services\markitdown')
-try {
-    & uv sync --frozen
-    if ($LASTEXITCODE -ne 0) { throw 'MarkItDown service dependency installation failed' }
-}
-finally { Pop-Location }
-
 foreach ($application in @('dashboard', 'claudian')) {
     Push-Location (Join-Path $root $application)
     try {

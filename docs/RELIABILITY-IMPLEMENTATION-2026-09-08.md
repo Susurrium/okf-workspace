@@ -19,8 +19,8 @@ Keep existing primary navigation and workflows. Do not migrate or discard user c
 - [x] Maintenance/restore paths, pinned upstream build recipe, deployment receipts and current acceptance documentation.
 - [x] Full automated checks, fixture integration, local plugin deployment and artifact verification.
 - [x] MarkItDown 1.4.0 remote deployment and real PDF/DOCX/PPTX conversion smoke tests.
-- [ ] AI Daily 3.2.0 activation and real independent Feed stream smoke tests (see 2026-09-14 findings).
-- [ ] Real Obsidian visual interaction/restart acceptance (application currently closed).
+- [x] AI Daily 3.2.0 activation and real independent Feed stream smoke tests (closed 2026-09-20).
+- [x] Real Obsidian visual interaction/restart and single-service acceptance (closed 2026-09-20).
 
 ## Work ownership
 
@@ -256,3 +256,36 @@ reconstructed from the Sep 14 crawler. The local API/Obsidian UI was not
 running during server checks, so visual Today/Reading acceptance is not yet
 claimed. Keep the old pending release marker and rollback snapshots until
 those checks pass.
+
+## 2026-09-20 final development-stage acceptance
+
+The remaining development-stage acceptance was completed and supersedes the
+open status recorded above:
+
+- AI Daily 3.2.0 and the local Feed synchronization path are operational. The
+  2026-09-20 scheduled run produced current News and Learning editions. The
+  Learning edition contains 22 items. One `ruanyf-weekly` request timed out,
+  while the other streams and sources completed; no daily content was lost.
+  This isolated producer timeout is non-blocking and will be retried by the
+  normal schedule.
+- The Obsidian Dashboard was visually accepted. During the restart check there
+  was exactly one local API listener on `127.0.0.1:8765`, and its health check
+  succeeded. After Obsidian exited, no Obsidian, local API, or semantic worker
+  process remained. This closes visual, restart, single-service, and
+  exit-lifecycle acceptance.
+- The default-parser user guide correction was committed and pushed as
+  `f898c1d` (`docs: align import guide with MarkItDown default`). `main` and
+  `origin/main` were synchronized and the worktree was clean at acceptance.
+
+The following are explicit development-stage decisions, not open acceptance
+failures:
+
+- Keep reliability work in the existing consolidated commit `0211584`; do not
+  rewrite published history solely to split it into component commits.
+- Defer release packaging, the release tag, and a new clean deployment receipt
+  until feature development is complete. The current repository state is not
+  claimed as a formal release.
+- Defer the independent Restic repository during development because the
+  current production data volume is small and disposable. Before formal use,
+  configure the independent repository, complete the first backup, and perform
+  a real restore test.

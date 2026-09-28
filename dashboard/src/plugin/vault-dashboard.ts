@@ -15,14 +15,14 @@ import {
   filterDashboardLearningScope,
 } from "../domain/dashboard-experience.js";
 import { isIngestedVia } from "../domain/inbox-work-queue.js";
+import { scanFileTasks } from "../../apex/src/alltasks-scan.js";
 
 const USER_ROOTS = new Set(["inbox", "learning", "projects", "knowledge", "life", "sources"]);
 const TASK_ROOTS = new Set(["inbox", "learning", "projects", "knowledge", "life", "self"]);
-const TASK = /^\s*-\s+\[ \]\s+(.+?)\s*$/u;
-const FORMAL_TASK = /(?:^|\s)#task(?:\s|$)/iu;
 
 interface ScannedNote {
   file: TFile;
+  markdown: string;
   body: string;
   summary: NoteSummary;
 }
@@ -188,35 +188,12 @@ function section(body: string, title: string): string {
 }
 
 function collectTasks(notes: readonly ScannedNote[]): TaskItem[] {
-  const tasks: TaskItem[] = [];
-  for (const note of notes) {
-    if (!TASK_ROOTS.has(note.file.path.split("/")[0] ?? "")) continue;
-    let fenced = false;
-    let marker = "";
-    for (const [index, line] of note.body.split(/\r?\n/u).entries()) {
-      const candidate = line.trimStart().slice(0, 3);
-      if (candidate === "```" || candidate === "~~~") {
-        if (!fenced) {
-          fenced = true;
-          marker = candidate;
-        } else if (candidate === marker) {
-          fenced = false;
-          marker = "";
-        }
-        continue;
-      }
-      if (fenced) continue;
-      const match = TASK.exec(line);
-      if (match?.[1] && FORMAL_TASK.test(match[1])) {
-        tasks.push({
-          path: note.file.path,
-          line: index + 1,
-          text: match[1].replace(FORMAL_TASK, " ").trim(),
-        });
-      }
-    }
-  }
-  return tasks;
+  return notes.flatMap((note) => {
+    if (!TASK_ROOTS.has(note.file.path.split("/")[0] ?? "")) return [];
+    return scanFileTasks(note.file, note.markdown)
+      .filter((task) => task.formal && !task.checked)
+      .map((task) => ({ path: task.path, line: task.line + 1, text: task.text }));
+  });
 }
 
 function inheritSourceMetadata(
@@ -319,7 +296,7 @@ export class VaultDashboardReader {
       daily: { path: daily, exists: this.app.vault.getAbstractFileByPath(daily) instanceof TFile },
       daily_excerpt: dailySummary?.excerpt ?? "",
       tasks: collectTasks(notes),
-      active_projects: await this.projectsFrom(summaries),
+      active_projects: await this.projectsFrom(summaries, true, notes),
       active_courses: await this.coursesFrom(summaries),
       recent_study: summaries
         .filter(
@@ -356,7 +333,8 @@ export class VaultDashboardReader {
   }
 
   public async learning(): Promise<LearningProjection> {
-    const summaries = (await this.scan()).map((note) => note.summary);
+    const scanned = await this.scan();
+    const summaries = scanned.map((note) => note.summary);
     const studyGuides = summaries.filter((note) => note.note_type === "Study Guide");
     const pendingGuides = this.pendingLearningFrom(summaries);
     const readyGuides = studyGuides
@@ -367,7 +345,7 @@ export class VaultDashboardReader {
       .sort(compareNotesByRecency);
     const [courses, projects] = await Promise.all([
       this.coursesFrom(summaries, false),
-      this.projectsFrom(summaries, false),
+      this.projectsFrom(summaries, false, scanned),
     ]);
     return {
       pending_guides: pendingGuides,
@@ -384,8 +362,9 @@ export class VaultDashboardReader {
   }
 
   public async projects(): Promise<ProjectsProjection> {
-    const summaries = (await this.scan()).map((note) => note.summary);
-    return { projects: await this.projectsFrom(summaries, false) };
+    const scanned = await this.scan();
+    const summaries = scanned.map((note) => note.summary);
+    return { projects: await this.projectsFrom(summaries, false, scanned) };
   }
 
   public async knowledge(): Promise<KnowledgeProjection> {
@@ -490,7 +469,7 @@ export class VaultDashboardReader {
           source_paths: sourcePaths(frontmatter.sources),
           excerpt: markdownExcerpt(body),
         };
-        const note = { file, body, summary };
+        const note = { file, markdown, body, summary };
         cache.scans.set(file.path, { fingerprint, note });
         return note;
       } catch (error) {
@@ -550,8 +529,10 @@ export class VaultDashboardReader {
   private async projectsFrom(
     notes: readonly NoteSummary[],
     activeOnly = true,
+    scanned: readonly ScannedNote[] = [],
   ): Promise<ProjectSummary[]> {
     const files = this.app.vault.getFiles();
+    const formalTasks = collectTasks(scanned);
     const projects = notes.filter(
       (note) => note.note_type === "Project" && (!activeOnly || note.project_status === "active"),
     );
@@ -586,6 +567,7 @@ export class VaultDashboardReader {
         pending_captures: notes.filter(
           (note) => isPendingCapture(note) && sameVaultPath(note.project, project.path),
         ),
+        open_tasks: formalTasks.filter((task) => task.path.startsWith(`${root}/`)),
       };
     });
     const order: Record<string, number> = { active: 0, paused: 1, completed: 2 };

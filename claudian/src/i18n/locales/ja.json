@@ -4,6 +4,7 @@
     "cancel": "キャンセル",
     "delete": "削除",
     "edit": "編集",
+    "preview": "プレビュー",
     "add": "追加",
     "remove": "削除",
     "clear": "クリア",
@@ -22,6 +23,8 @@
     "rewind": "巻き戻し"
   },
   "chat": {
+    "selectAvailableModel": "送信する前に利用可能なモデルを選択してください。",
+    "selectAvailableTitleModel": "Claudianの設定で利用可能なタイトル生成モデルを選択してください。",
     "rewind": {
       "confirmMessage": "この時点に巻き戻しますか？このメッセージ以降のファイル変更は上書きまたは削除される可能性があります。この操作は元に戻せません。",
       "confirmMessageConflicts": "この時点に巻き戻しますか？エージェント外で変更された {count} 個のファイルが上書きされます：\n{files}",
@@ -57,23 +60,38 @@
       "commandNoMessages": "フォークできません: 会話にメッセージがありません",
       "commandNoAssistantUuid": "フォークできません: 識別子付きのアシスタント応答がありません"
     },
-    "bangBash": {
-      "placeholder": "> bash コマンドを実行...",
-      "commandPanel": "コマンドパネル",
-      "copyAriaLabel": "最新のコマンド出力をコピー",
-      "clearAriaLabel": "bash 出力をクリア",
-      "commandLabel": "{command}",
-      "statusLabel": "状態: {status}",
-      "collapseOutput": "コマンド出力を折りたたむ",
-      "expandOutput": "コマンド出力を展開",
-      "running": "実行中...",
-      "copyFailed": "クリップボードへのコピーに失敗しました"
+    "quote": {
+      "buttonLabel": "引用"
+    },
+    "sideChat": {
+      "title": "サイドチャット",
+      "collapse": "折りたたむ",
+      "discard": "破棄",
+      "statusPreparing": "準備中",
+      "statusQueued": "{count} 件待機中",
+      "statusWorking": "実行中",
+      "statusError": "要確認",
+      "statusActionRequired": "入力が必要",
+      "placeholder": "サイドチャットで続けて質問",
+      "composerLabel": "サイドチャットのメッセージ",
+      "needsPrompt": "/side の後にプロンプトを入力してサイドチャットを開始してください。",
+      "unsupportedProvider": "このプロバイダーはサイドチャットに対応していません。",
+      "unavailableBusy": "サイドチャットには完了した返信が必要です。現在のターンの終了をお待ちください。",
+      "unavailableNoCheckpoint": "先にこの会話で返信を完了してからサイドチャットを開始してください。",
+      "unavailableNoSession": "この会話のプロバイダーセッションを解決できませんでした。",
+      "alreadyExists": "この会話にはすでにサイドチャットがあります。破棄してから新しく開始してください。",
+      "nestedUnavailable": "サイドチャットから別のサイドチャットは開始できません。先にメインへ折りたたんでください。",
+      "mainOnlyCommand": "/{command} はメインチャットでのみ使用できます。",
+      "startFailed": "サイドチャットを開始できませんでした：{error}",
+      "queued": "サイドチャットのキューに追加しました。",
+      "busySide": "サイドチャットが応答中です。完了までお待ちください。"
     }
   },
   "settings": {
     "title": "Claudian 設定",
     "tabs": {
       "general": "一般",
+      "providers": "プロバイダー",
       "claude": "Claude",
       "codex": "Codex"
     },
@@ -112,7 +130,8 @@
     "titleModel": {
       "name": "タイトル生成モデル",
       "desc": "会話タイトルを自動生成するために使用されるモデル。",
-      "auto": "自動 (Haiku)"
+      "select": "モデルを選択",
+      "unavailableWarning": "タイトルの自動生成は一時停止中です。利用可能なタイトル用モデルを選択してください。"
     },
     "navMappings": {
       "name": "Vimスタイルナビゲーションマッピング",
@@ -124,39 +143,19 @@
     },
     "hotkeys": "ホットキー",
     "inlineEditHotkey": {
-      "name": "インライン編集",
-      "descWithKey": "現在のホットキー: {hotkey}",
-      "descNoKey": "ホットキー未設定",
-      "btnChange": "変更",
-      "btnSet": "設定"
+      "name": "インライン編集"
     },
     "openChatHotkey": {
-      "name": "チャットを開く",
-      "descWithKey": "現在のホットキー: {hotkey}",
-      "descNoKey": "ホットキー未設定",
-      "btnChange": "変更",
-      "btnSet": "設定"
+      "name": "チャットを開く"
     },
     "newSessionHotkey": {
-      "name": "現在の会話を置き換える",
-      "descWithKey": "現在のホットキー: {hotkey}",
-      "descNoKey": "ホットキー未設定",
-      "btnChange": "変更",
-      "btnSet": "設定"
+      "name": "現在の会話を置き換える"
     },
     "newTabHotkey": {
-      "name": "新規",
-      "descWithKey": "現在のホットキー: {hotkey}",
-      "descNoKey": "ホットキー未設定",
-      "btnChange": "変更",
-      "btnSet": "設定"
+      "name": "新規"
     },
     "closeTabHotkey": {
-      "name": "タブを閉じる",
-      "descWithKey": "現在のホットキー: {hotkey}",
-      "descNoKey": "ホットキー未設定",
-      "btnChange": "変更",
-      "btnSet": "設定"
+      "name": "タブを閉じる"
     },
     "slashCommands": {
       "name": "コマンドとスキル",
@@ -167,58 +166,10 @@
       "desc": "ドロップダウンから特定のコマンドとスキルを非表示にします。Claudian に関係のない Claude Code の項目を隠すのに便利です。先頭のスラッシュなしで名前を1行に1つ入力してください。",
       "placeholder": "commit\nbuild\ntest"
     },
-    "mcpServers": {
-      "name": "MCP サーバー",
-      "descBeforeCommand": "Claude Code は独自の CLI で MCP サーバーを管理します。",
-      "descAfterCommand": " で設定すると Claudian で利用できます。",
-      "learnMore": "詳しく見る"
-    },
-    "plugins": {
-      "name": "Claude Code プラグイン",
-      "desc": "~/.claude/plugins から検出された Claude Code プラグインを管理します。有効化されたプラグインは Vault ごとに .claude/settings.json に保存されます。"
-    },
-    "subagents": {
-      "name": "サブエージェント",
-      "desc": ".claude/agents/ に保存された Vault レベルのサブエージェントを管理します。各 Markdown ファイルがカスタムエージェントを1つ定義します。",
-      "noAgents": "サブエージェントが設定されていません。+ をクリックして作成してください。",
-      "deleteConfirm": "サブエージェント「{name}」を削除しますか？",
-      "saveFailed": "サブエージェントの保存に失敗しました: {message}",
-      "refreshFailed": "サブエージェントを更新できませんでした: {message}",
-      "deleteFailed": "サブエージェントの削除に失敗しました: {message}",
-      "renameCleanupFailed": "警告: 「{name}」の古いファイルを削除できませんでした",
-      "created": "サブエージェント「{name}」を作成しました",
-      "updated": "サブエージェント「{name}」を更新しました",
-      "deleted": "サブエージェント「{name}」を削除しました",
-      "duplicateName": "「{name}」という名前のエージェントは既に存在します",
-      "descriptionRequired": "説明は必須です",
-      "promptRequired": "システムプロンプトは必須です",
-      "modal": {
-        "titleEdit": "サブエージェントを編集",
-        "titleAdd": "サブエージェントを追加",
-        "name": "名前",
-        "nameDesc": "小文字、数字、ハイフンのみ使用できます",
-        "namePlaceholder": "code-reviewer",
-        "description": "説明",
-        "descriptionDesc": "このエージェントの簡単な説明",
-        "descriptionPlaceholder": "コードのバグやスタイルをレビューします",
-        "advancedOptions": "詳細オプション",
-        "model": "モデル",
-        "modelDesc": "このエージェントのモデル上書き",
-        "tools": "ツール",
-        "toolsDesc": "許可するツールのカンマ区切りリスト（空欄 = すべて）",
-        "disallowedTools": "禁止ツール",
-        "disallowedToolsDesc": "禁止するツールのカンマ区切りリスト",
-        "skills": "スキル",
-        "skillsDesc": "スキルのカンマ区切りリスト",
-        "prompt": "システムプロンプト",
-        "promptDesc": "エージェントへの指示",
-        "promptPlaceholder": "あなたはコードレビュアーです。与えられたコードを分析して..."
-      }
-    },
     "safety": "セキュリティ",
     "loadUserSettings": {
       "name": "ユーザーClaude設定を読み込む",
-      "desc": "~/.claude/settings.json を読み込みます。有効にすると、ユーザーの Claude Code 許可ルールがセキュリティモードをバイパスする可能性があります。"
+      "desc": "~/.claude からユーザーレベルの Claude Code 設定（settings.json、スキル、コマンド、エージェント、プラグイン）を読み込みます。無効にすると、Vault レベルの設定のみ利用できます。有効にすると、ユーザーの許可ルールがセキュリティモードをバイパスする可能性があります。"
     },
     "claudeSafeMode": {
       "name": "セーフモード",
@@ -264,21 +215,9 @@
       "desc": "カスタムモデルのコンテキストウィンドウサイズを設定します。デフォルト（200kトークン）を使用する場合は空欄のままにしてください。",
       "invalid": "無効な形式です。使用：256k、1m、または正確な数値（1000-10000000）。"
     },
-    "customModels": {
-      "name": "カスタムモデル",
-      "desc": "追加の Claude モデル ID を1行に1つずつピッカーに追加します。環境変数によるモデル上書きは引き続きピッカーを置き換えます。",
-      "placeholder": "claude-opus-4-6\nclaude-opus-4-5-20251101"
-    },
     "enableChrome": {
       "name": "Chrome拡張機能を有効化",
       "desc": "claude-in-chrome拡張機能を通じてClaudeがChromeと連携できるようにします。拡張機能のインストールが必要です。セッションの再起動が必要です。"
-    },
-    "enableBangBash": {
-      "name": "bash モード (!) を有効化",
-      "desc": "入力欄が空の状態で ! を入力すると bash モードに入ります。Node.js の child_process 経由でコマンドを直接実行します。ビューの再オープンが必要です。",
-      "validation": {
-        "noNode": "PATH に Node.js が見つかりません。Node.js をインストールするか、PATH 設定を確認してください。"
-      }
     },
     "maxWarmAgentProcesses": {
       "name": "同時実行セッションの上限",
@@ -287,6 +226,10 @@
     "enableDualPane": {
       "name": "デュアルペインモードを有効化",
       "desc": "ビューの幅が 600 px 以上になると、チャットの横にセッションマネージャーを自動表示します。"
+    },
+    "restoreTabsOnStartup": {
+      "name": "起動時にタブを復元",
+      "desc": "シングルペインモードではすべてのタブを、デュアルペインモードでは最後にアクティブだったタブのみを再度開きます。"
     },
     "enableFilePane": {
       "name": "ファイルペインを有効化",
@@ -302,6 +245,10 @@
       "name": "ストリーミング中の自動スクロール",
       "desc": "Claudeが応答をストリーミングしている間、自動的に下にスクロールします。無効にすると上部に留まり、最初から読むことができます。"
     },
+    "showMessageTimestamps": {
+      "name": "メッセージのタイムスタンプを表示",
+      "desc": "チャットスレッド内で各メッセージのローカル送信時刻または到着時刻を表示します。"
+    },
     "deferMathRenderingDuringStreaming": {
       "name": "ストリーミング中の数式レンダリングを遅延",
       "desc": "応答のストリーミング中は生の LaTeX を表示し、各テキストブロックの完了時に一度だけ数式をレンダリングします。"
@@ -316,6 +263,17 @@
       "rightSidebar": "右サイドバー",
       "leftSidebar": "左サイドバー",
       "mainTab": "メインエディタタブ"
+    },
+    "cliInstallation": {
+      "disclosure": "{name} のインストール",
+      "description": "このコンピューター用の任意の CLI パス。空欄で自動検出します。",
+      "checking": "CLI を確認中…",
+      "versionUnavailable": "バージョンを取得できません",
+      "notFound": "見つかりません",
+      "custom": "カスタムパス",
+      "auto": "自動検出",
+      "checkFailed": "CLI を確認できません",
+      "saveFailed": "パスを保存できません。再試行してください。"
     },
     "cliPath": {
       "name": "Claude CLI パス",
@@ -336,6 +294,14 @@
       "desc": "有効にした {provider} モデルを新しい会話で使用できるようにします。無効にしても既存のセッションは保持されます。",
       "lastProviderWarning": "Claudian を使用するには、少なくとも 1 つのプロバイダーを有効にする必要があります。",
       "noModelsWarning": "有効な {provider} モデルがありません。下の「モデル」で少なくとも1つのモデルを有効にしてください。"
+    },
+    "claude": {
+      "responseStyle": {
+        "name": "応答スタイル",
+        "desc": "デフォルトは Claude の通常のスタイルです。簡潔モードは結果を先に示し、前置きを省きます。Claude Code 2.1.237 以降が必要です。",
+        "default": "デフォルト",
+        "concise": "簡潔"
+      }
     },
     "codex": {
       "installationMethod": {
@@ -361,10 +327,11 @@
         "workspaceWrite": "ワークスペース書き込み",
         "readOnly": "読み取り専用"
       },
-      "customModels": {
-        "name": "カスタムモデル",
-        "desc": "追加の Codex モデル ID を1行に1つずつピッカーに追加します。`OPENAI_MODEL` が設定されている場合は引き続き優先されます。",
-        "placeholder": "gpt-5.4\ngpt-5.3-codex-spark"
+      "responseStyle": {
+        "name": "応答スタイル",
+        "desc": "対応モデルでの Codex の話し方を選択します。次のメッセージから適用されます。",
+        "pragmatic": "実用的",
+        "friendly": "フレンドリー"
       },
       "reasoningSummary": {
         "name": "推論サマリー",
@@ -385,94 +352,56 @@
         "hiddenDesc": "特定の Codex スキルをドロップダウンから非表示にします。先頭の $ なしでスキル名を1行に1つ入力してください。",
         "hiddenPlaceholder": "analyze\nexplain\nfix"
       },
-      "subagents": {
-        "name": "Codex サブエージェント",
-        "desc": ".codex/agents/ に保存された Vault レベルの Codex サブエージェントを管理します。各 TOML ファイルがカスタムエージェントを1つ定義します。"
-      },
-      "mcp": {
-        "descBeforeCommand": "Codex は独自の CLI で MCP サーバーを管理します。",
-        "descAfterCommand": " で設定すると Claudian で利用できます。",
-        "learnMore": "詳しく見る"
-      },
       "environment": {
         "name": "Codex 環境",
         "desc": "Codex が所有するランタイム変数のみ。OPENAI_* と CODEX_* 設定に使用します。Codex の自動検出に補助が必要な場合は、このプロバイダー環境ではなく共有 PATH にインストールディレクトリを追加してください。"
       }
     },
     "agentSkills": {
-      "sectionTitle": "Skills", "fixedRoot": "Managed in .agents/skills", "sharedExpectation": "Manage shared skills in .agents/skills/ for compatible providers.", "noSkills": "No shared skills configured. Click + to create one.", "skillBadge": "skill", "diagnosticsTitle": "Skills needing attention", "loadFailed": "Could not load shared skills.", "savedRefreshFailed": "Saved, but provider refresh failed.", "validationFailed": "Invalid skill: {message}", "collisionFailed": "A skill named \"{name}\" already exists.", "saveFailed": "Failed to save shared skill: {message}", "deleteFailed": "Failed to move shared skill to trash: {message}", "staleConflict": "This skill changed elsewhere; refresh before saving.", "created": "Shared skill \"{name}\" created.", "updated": "Shared skill \"{name}\" updated.", "deleted": "Shared skill \"{name}\" moved to trash.",
-      "modal": { "titleEdit": "Edit Shared Skill", "titleAdd": "Add Shared Skill", "name": "Skill name", "nameDesc": "Lowercase letters and numbers separated by single hyphens", "namePlaceholder": "code-reviewer", "description": "Description", "descriptionDesc": "Required portable description used by providers to select the skill", "descriptionPlaceholder": "Reviews code for correctness and maintainability", "instructions": "Instructions", "instructionsDesc": "Required SKILL.md instructions", "instructionsPlaceholder": "Review the supplied code and report actionable findings..." },
-      "delete": { "title": "Delete Shared Skill", "description": "The entire skill folder, including scripts, references, and assets, will be moved to trash.", "confirm": "Move to trash" }
-    },
-    "codexSkills": {
+      "sectionTitle": "Skills",
+      "fixedRoot": "Managed in .agents/skills",
+      "sharedExpectation": "Manage shared skills in .agents/skills/ for compatible providers.",
+      "noSkills": "No shared skills configured. Click + to create one.",
+      "skillBadge": "skill",
+      "diagnosticsTitle": "Skills needing attention",
+      "loadFailed": "Could not load shared skills.",
+      "savedRefreshFailed": "Saved, but provider refresh failed.",
+      "validationFailed": "Invalid skill: {message}",
+      "collisionFailed": "A skill named \"{name}\" already exists.",
+      "saveFailed": "Failed to save shared skill: {message}",
+      "deleteFailed": "Failed to move shared skill to trash: {message}",
+      "staleConflict": "This skill changed elsewhere; refresh before saving.",
+      "created": "Shared skill \"{name}\" created.",
+      "updated": "Shared skill \"{name}\" updated.",
+      "deleted": "Shared skill \"{name}\" moved to trash.",
       "modal": {
-        "titleEdit": "Codex スキルを編集",
-        "titleAdd": "Codex スキルを追加",
-        "directory": "ディレクトリ",
-        "directoryDesc": "スキルの保存先",
-        "skillName": "スキル名",
-        "skillNameDesc": "$ の後に使う名前（例: $analyze の場合は \"analyze\"）",
-        "description": "説明",
-        "descriptionDesc": "ドロップダウンに表示される任意の説明",
-        "instructions": "指示",
-        "instructionsDesc": "スキルの指示（SKILL.md の内容）",
-        "instructionsPlaceholder": "Analyze the code for..."
+        "titleEdit": "Edit Shared Skill",
+        "titleAdd": "Add Shared Skill",
+        "name": "Skill name",
+        "nameDesc": "Lowercase letters and numbers separated by single hyphens",
+        "namePlaceholder": "code-reviewer",
+        "description": "Description",
+        "descriptionDesc": "Required portable description used by providers to select the skill",
+        "descriptionPlaceholder": "Reviews code for correctness and maintainability",
+        "instructions": "Instructions",
+        "instructionsDesc": "Required SKILL.md instructions",
+        "instructionsPlaceholder": "Review the supplied code and report actionable findings..."
       },
-      "instructionsRequired": "指示は必須です",
-      "saveFailed": "Codex スキルの保存に失敗しました",
-      "header": "Codex スキル",
-      "noSkills": "Vault に Codex スキルがありません。+ をクリックして作成してください。",
-      "skillBadge": "スキル",
-      "deleted": "Codex スキル「{name}」を削除しました",
-      "deleteFailed": "Codex スキルの削除に失敗しました",
-      "created": "Codex スキル「{name}」を作成しました",
-      "updated": "Codex スキル「{name}」を更新しました"
-    },
-    "codexSubagents": {
-      "modal": {
-        "titleEdit": "Codex サブエージェントを編集",
-        "titleAdd": "Codex サブエージェントを追加",
-        "nameDesc": "Codex が起動時に使用するエージェント名（小文字、ハイフン、アンダースコア）",
-        "descriptionDesc": "Codex がこのエージェントを使うべきタイミング",
-        "modelDesc": "モデル上書き（空欄で継承）",
-        "namePlaceholder": "code_reviewer"
-      },
-      "reasoningEffort": {
-        "name": "推論強度",
-        "desc": "モデル推論強度レベル",
-        "inherit": "継承",
-        "low": "低",
-        "medium": "中",
-        "high": "高",
-        "xhigh": "非常に高い"
-      },
-      "sandboxMode": {
-        "name": "サンドボックスモード",
-        "desc": "このエージェントのサンドボックス制限",
-        "inherit": "継承",
-        "readOnly": "読み取り専用",
-        "dangerFullAccess": "完全アクセス",
-        "workspaceWrite": "ワークスペース書き込み"
-      },
-      "nicknameCandidates": {
-        "name": "ニックネーム候補",
-        "desc": "表示ニックネームをカンマ区切りで指定（例: atlas, delta, echo）"
-      },
-      "developerInstructions": {
-        "name": "開発者指示",
-        "desc": "エージェントの動作を定義する中核の指示",
-        "placeholder": "Review code like an owner.\nPrioritize correctness, security, and missing test coverage.",
-        "required": "開発者指示は必須です"
-      },
-      "validation": {
-        "nameRequired": "サブエージェント名は必須です",
-        "nameTooLong": "サブエージェント名は {count} 文字以内にしてください",
-        "nameInvalid": "サブエージェント名には小文字、数字、ハイフン、アンダースコアのみ使用できます",
-        "nicknameInvalid": "ニックネーム候補には ASCII 文字、数字、スペース、ハイフン、アンダースコアのみ使用できます",
-        "nicknameDuplicate": "ニックネーム候補は一意である必要があります"
-      },
-      "header": "Codex サブエージェント",
-      "noAgents": "Vault に Codex サブエージェントがありません。+ をクリックして作成してください。"
+      "delete": {
+        "title": "Delete Shared Skill",
+        "description": "The entire skill folder, including scripts, references, and assets, will be moved to trash.",
+        "confirm": "Move to trash"
+      }
     }
+  },
+  "interface": {
+    "promptMode": "Codex prompt mode",
+    "promptModeHelp": "Applies when a new Codex conversation starts. Existing conversations keep the mode recorded in their provider state.",
+    "nativePrompt": "Workspace native (recommended)",
+    "fullPrompt": "Claudian full",
+    "customPrompt": "Custom replace",
+    "replacementInstructions": "Custom replacement instructions",
+    "replacementHelp": "Used only by custom replace. This replaces the Claudian prompt instead of being appended to it.",
+    "replacementPlaceholder": "Follow applicable AGENTS.md instructions."
   }
 }

@@ -1,3 +1,5 @@
+import type { PermissionMode } from '@/core/types';
+
 export interface OpencodeMode {
   description?: string;
   id: string;
@@ -7,7 +9,6 @@ export interface OpencodeMode {
 export const OPENCODE_BUILD_MODE_ID = 'build';
 export const OPENCODE_YOLO_MODE_ID = 'claudian-yolo';
 export const OPENCODE_SAFE_MODE_ID = 'claudian-safe';
-export const OPENCODE_PLAN_MODE_ID = 'plan';
 
 export const OPENCODE_FALLBACK_MODES: ReadonlyArray<OpencodeMode> = Object.freeze([
   {
@@ -20,16 +21,6 @@ export const OPENCODE_FALLBACK_MODES: ReadonlyArray<OpencodeMode> = Object.freez
     id: OPENCODE_SAFE_MODE_ID,
     name: 'safe',
   },
-  {
-    description: 'Plan mode. Disallows all edit tools.',
-    id: OPENCODE_PLAN_MODE_ID,
-    name: OPENCODE_PLAN_MODE_ID,
-  },
-]);
-
-const OPENCODE_MANAGED_MODE_IDS = new Set([
-  OPENCODE_BUILD_MODE_ID,
-  ...OPENCODE_FALLBACK_MODES.map((mode) => mode.id),
 ]);
 
 export function normalizeOpencodeAvailableModes(value: unknown): OpencodeMode[] {
@@ -70,10 +61,6 @@ export function getEffectiveOpencodeModes(modes: OpencodeMode[]): OpencodeMode[]
   return modes.length > 0 ? modes : [...OPENCODE_FALLBACK_MODES];
 }
 
-export function isManagedOpencodeModeId(value: string): boolean {
-  return OPENCODE_MANAGED_MODE_IDS.has(value);
-}
-
 export function getManagedOpencodeModes(modes: OpencodeMode[]): OpencodeMode[] {
   const effectiveModes = getEffectiveOpencodeModes(modes);
   return OPENCODE_FALLBACK_MODES.map((fallbackMode) => (
@@ -109,12 +96,9 @@ export function normalizeManagedOpencodeSelectedMode(
     return OPENCODE_SAFE_MODE_ID;
   }
 
-  const canonicalModeId = normalized === OPENCODE_BUILD_MODE_ID
-    ? OPENCODE_YOLO_MODE_ID
-    : normalized;
   const managedModes = getManagedOpencodeModes(modes);
-  return managedModes.some((mode) => mode.id === canonicalModeId)
-    ? canonicalModeId
+  return managedModes.some((mode) => mode.id === normalized)
+    ? normalized
     : managedModes.find((mode) => mode.id === OPENCODE_SAFE_MODE_ID)?.id ?? '';
 }
 
@@ -125,9 +109,6 @@ export function resolveOpencodeModeForPermissionMode(
   const managedModes = getManagedOpencodeModes(modes);
   const managedModeIds = new Set(managedModes.map((mode) => mode.id));
 
-  if (permissionMode === 'plan' && managedModeIds.has(OPENCODE_PLAN_MODE_ID)) {
-    return OPENCODE_PLAN_MODE_ID;
-  }
   if (permissionMode === 'normal' && managedModeIds.has(OPENCODE_SAFE_MODE_ID)) {
     return OPENCODE_SAFE_MODE_ID;
   }
@@ -143,15 +124,12 @@ export function resolveOpencodeModeForPermissionMode(
 
 export function resolvePermissionModeForManagedOpencodeMode(
   modeId: unknown,
-): 'normal' | 'plan' | 'yolo' | null {
-  if (modeId === OPENCODE_BUILD_MODE_ID || modeId === OPENCODE_YOLO_MODE_ID) {
+): PermissionMode | null {
+  if (modeId === OPENCODE_YOLO_MODE_ID) {
     return 'yolo';
   }
   if (modeId === OPENCODE_SAFE_MODE_ID) {
     return 'normal';
-  }
-  if (modeId === OPENCODE_PLAN_MODE_ID) {
-    return 'plan';
   }
   return null;
 }

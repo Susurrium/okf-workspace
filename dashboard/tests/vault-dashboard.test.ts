@@ -18,9 +18,9 @@ describe("VaultDashboardReader", () => {
         "projects/okf/project.md",
         note(
           "Project",
-          "个人知识工作区",
+          "个人知识库",
           "project_status: active",
-          "## 当前状态\nDashboard local-first。\n\n## 下一步\n完成生产部署。",
+          "## 当前状态\nDashboard local-first。\n\n## 下一步\n完成生产部署。\n\n## 任务\n- [ ] #task 发布工作台 [scheduled:: 2026-09-29] ^task-release",
         ),
       ],
       ["projects/okf/log.md", "# 项目日志\n\n2026-08-17：完成直接读取 Vault。"],
@@ -111,7 +111,7 @@ describe("VaultDashboardReader", () => {
           "Source",
           "等待 Wiki",
           "purpose: wiki\ningested_via: feed\nkind: ai-daily",
-          "等待生成 Wiki。",
+          "等待生成知识笔记。",
         ),
       ],
     ]);
@@ -132,6 +132,7 @@ describe("VaultDashboardReader", () => {
     expect(today.recent_study[0]?.title).toBe("递归学习材料");
     expect(today.tasks).toEqual([
       expect.objectContaining({ path: "learning/courses/cs61a/lessons/01.md", text: "复习递归" }),
+      expect.objectContaining({ path: "projects/okf/project.md", text: "发布工作台" }),
     ]);
     expect(today.active_courses[0]).toEqual(
       expect.objectContaining({
@@ -156,6 +157,9 @@ describe("VaultDashboardReader", () => {
         related_materials: [
           expect.objectContaining({ path: "sources/records/project-source.md" }),
         ],
+        open_tasks: [
+          expect.objectContaining({ path: "projects/okf/project.md", text: "发布工作台" }),
+        ],
       }),
     );
 
@@ -171,7 +175,7 @@ describe("VaultDashboardReader", () => {
       ],
     }));
     expect(learning.projects[0]).toEqual(expect.objectContaining({
-      title: "个人知识工作区",
+      title: "个人知识库",
       related_learning: [
         expect.objectContaining({
           path: "learning/guides/recursion.md",

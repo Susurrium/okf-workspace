@@ -33,8 +33,31 @@ class SemanticOperationService:
         instruction: str = "",
         course: str | None = None,
         project: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, object]:
+        with self.store.transaction():
+            if idempotency_key:
+                receipt = self.store.find_by_idempotency_key(idempotency_key)
+                if receipt is not None:
+                    return receipt
+            return self._enqueue(
+                kind, target, sources=sources, instruction=instruction,
+                course=course, project=project, idempotency_key=idempotency_key,
+            )
+
+    def _enqueue(
+        self,
+        kind: SemanticKind,
+        target: str,
+        *,
+        sources: tuple[str, ...] = (),
+        instruction: str = "",
+        course: str | None = None,
+        project: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, object]:
         target_path = resolve_bundle_path(self.vault, target)
+        target = target_path.relative_to(self.vault).as_posix()
         normalized_sources = tuple(dict.fromkeys(sources))
         if not normalized_sources and not target_path.is_file():
             raise ValueError("semantic generation requires at least one explicit source")
@@ -65,10 +88,10 @@ class SemanticOperationService:
         )
         existing = self.store.find_active(fingerprint)
         if existing is not None:
-            return existing
+            return self.store.bind_handoff(existing, idempotency_key)
         completed = self.store.find_completed(fingerprint)
         if completed is not None and target_path.is_file():
-            return completed
+            return self.store.bind_handoff(completed, idempotency_key)
         request = SemanticRequest(
             operation_id=f"op-{uuid.uuid4().hex}",
             kind=kind,
@@ -83,10 +106,15 @@ class SemanticOperationService:
             request,
             fingerprint=fingerprint,
             source_hashes=source_hashes,
+            idempotency_key=idempotency_key,
         )
         return record
 
     def retry(self, operation_id: str) -> dict[str, object]:
+        with self.store.transaction():
+            return self._retry(operation_id)
+
+    def _retry(self, operation_id: str) -> dict[str, object]:
         record = self.store.load(operation_id)
         if record.get("status") not in {
             SemanticStatus.FAILED.value,
@@ -95,6 +123,13 @@ class SemanticOperationService:
         }:
             raise ValueError("only failed, cancelled, or orphaned operations can be retried")
         request = self.store.request(operation_id)
+        if any(
+            item.get("operation_id") != operation_id
+            and item.get("target") == request.target
+            and item.get("status") in {SemanticStatus.QUEUED.value, SemanticStatus.RUNNING.value}
+            for item in self.store.list()
+        ):
+            raise ValueError("another operation for this target is already active")
         self._validate_target(
             request.kind,
             resolve_bundle_path(self.vault, request.target),

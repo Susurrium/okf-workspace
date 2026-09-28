@@ -9,7 +9,7 @@ from okf_workspace.okf.frontmatter import read_document
 from okf_workspace.okf.templates import initialize_vault
 
 
-def test_explicit_ai_wiki_is_stable_by_default_sourced_and_one_step_undoable(
+def test_explicit_ai_wiki_is_a_sourced_draft_and_one_step_undoable(
     tmp_path: Path,
 ) -> None:
     vault = initialize_vault(tmp_path / "vault")
@@ -24,7 +24,7 @@ def test_explicit_ai_wiki_is_stable_by_default_sourced_and_one_step_undoable(
     )
 
     document = read_document(target)
-    assert "status" not in document.frontmatter
+    assert document.frontmatter["status"] == "draft"
     assert "studied_at" not in document.frontmatter
     assert "generated" not in document.frontmatter
     assert document.frontmatter["sources"][0]["resource"] == ("/knowledge/wiki/livesync.md")

@@ -9,15 +9,15 @@ from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 from urllib.parse import quote
 
 from okf_workspace.git import GitCheckpointError, checkpointing_enabled, create_checkpoint
 
-from .clients import MarkItDownClient, MinerUClient, ParserClient
+from .clients import MarkItDownClient, ParserClient
+from .cloud_mineru import CloudMinerUClient
 from .config import ImportSettings
 from .export import load_export_contract, write_export_contract
-from .managed_mineru import managed_mineru_client
 from .models import (
     ConversionStatus,
     ImportIntent,
@@ -28,6 +28,7 @@ from .models import (
     ParserExport,
     ParserName,
     QCReport,
+    requires_semantic_generation,
 )
 from .originals import OriginalStore
 from .publish import publish_import
@@ -87,7 +88,12 @@ class DocumentImporter:
 
     def _default_client(self, parser: ParserName) -> ParserClient:
         if parser is ParserName.MINERU:
-            return MinerUClient(self.settings.mineru_url)
+            if self.settings.mineru_token_file is None:
+                raise RuntimeError("MinerU cloud token file is not configured")
+            return CloudMinerUClient(
+                self.settings.mineru_token_file,
+                model=self.settings.mineru_model,
+            )
         return MarkItDownClient(
             self.settings.markitdown_url,
             self.settings.markitdown_token(),
@@ -100,9 +106,6 @@ class DocumentImporter:
         working: Path,
     ) -> ParserExport:
         injected = self.clients.get(parser)
-        if injected is None and parser is ParserName.MINERU and self.settings.mineru_ssh_managed:
-            with managed_mineru_client(self.settings) as managed:
-                return managed.convert(source, working)
         client = injected or self._default_client(parser)
         try:
             return client.convert(source, working)
@@ -149,6 +152,9 @@ class DocumentImporter:
         export_directory: Path,
         export: ParserExport,
         qc: QCReport,
+        *,
+        replace_existing: bool = False,
+        expected_text_sha256: str | None = None,
     ) -> ImportResult:
         checkpoint_warnings: list[str] = []
         self.store.update(
@@ -166,11 +172,16 @@ class DocumentImporter:
                 create_checkpoint(self.vault, "checkpoint before document import")
             except GitCheckpointError as exc:
                 checkpoint_warnings.append(f"写入前 Git 检查点失败：{exc}")
-        source, source_text, routed_target = publish_import(
+        published = publish_import(
             self.vault,
             request,
             original,
             export,
+            replace_existing=replace_existing,
+            expected_text_sha256=expected_text_sha256,
+        )
+        source, source_text, routed_target = (
+            published.source, published.source_text, published.routed_target,
         )
         checkpoint_status = "disabled"
         if checkpoints_enabled:
@@ -187,6 +198,8 @@ class DocumentImporter:
         }
         if routed_target is not None:
             outputs["routed_target"] = str(routed_target)
+        if published.text_sha256 is not None:
+            outputs["source_text_sha256"] = published.text_sha256
         self.store.update(
             identifier,
             status=ConversionStatus.IMPORTED,
@@ -199,6 +212,9 @@ class DocumentImporter:
                 "quality": "passed",
                 "routing": "completed",
                 "checkpoint": checkpoint_status,
+                "semantic": "pending" if requires_semantic_generation(
+                    request.intent, request.generate,
+                ) else "not-requested",
             },
             warnings=checkpoint_warnings,
         )
@@ -214,7 +230,10 @@ class DocumentImporter:
             qc=qc,
         )
 
-    def import_document(self, request: ImportRequest) -> ImportResult:
+    def import_document(
+        self, request: ImportRequest, *, replace_existing: bool = False,
+        expected_text_sha256: str | None = None,
+    ) -> ImportResult:
         original = self.original_store.ingest(
             request.source,
             filename=request.source_filename,
@@ -236,43 +255,28 @@ class DocumentImporter:
             parser=selected_parser,
             stages={"upload": "completed", "conversion": "queued"},
         )
-        prepared = original.stored_path
-        if original.extension == ".doc":
-            prepared = self.doc_converter.convert(
-                original.stored_path,
-                working / "normalized.docx",
-            )
-        elif original.extension == ".ppt":
-            prepared = self.doc_converter.convert(
-                original.stored_path,
-                working / "normalized.pptx",
-            )
-        self.store.update(
-            identifier,
-            status=ConversionStatus.CONVERTING,
-            request=request,
-            original=original,
-            parser=selected_parser,
-            stages={"conversion": "running"},
-        )
         export: ParserExport | None = None
         try:
-            try:
-                export = self._convert_recorded(identifier, selected_parser, prepared, working)
-            except Exception:
-                can_fallback = request.parser is None and selected_parser is ParserName.MINERU
-                if not can_fallback:
-                    raise
-                fallback = self._convert_recorded(
-                    identifier,
-                    ParserName.MARKITDOWN,
-                    prepared,
-                    working,
+            prepared = original.stored_path
+            if original.extension == ".doc":
+                prepared = self.doc_converter.convert(
+                    original.stored_path,
+                    working / "normalized.docx",
                 )
-                export = replace(
-                    fallback,
-                    degraded_from=ParserName.MINERU,
+            elif original.extension == ".ppt":
+                prepared = self.doc_converter.convert(
+                    original.stored_path,
+                    working / "normalized.pptx",
                 )
+            self.store.update(
+                identifier,
+                status=ConversionStatus.CONVERTING,
+                request=request,
+                original=original,
+                parser=selected_parser,
+                stages={"conversion": "running"},
+            )
+            export = self._convert_recorded(identifier, selected_parser, prepared, working)
             qc = inspect_export(
                 export,
                 strict_assets=request.quality is ImportQuality.HIGH,
@@ -293,6 +297,8 @@ class DocumentImporter:
                 export_directory,
                 export,
                 qc,
+                replace_existing=replace_existing,
+                expected_text_sha256=expected_text_sha256,
             )
         except Exception as exc:
             self.store.update(
@@ -343,7 +349,16 @@ class DocumentImporter:
         *,
         parser: ParserName | None = None,
     ) -> ImportResult:
+        if parser is not None:
+            self.store.queue_retry(identifier, parser=parser)
         record = self.store.load(identifier)
+        reparse = parser is not None or record.get("reparse") is True
+        output_values = record.get("outputs")
+        previous_hash = (
+            cast(dict[str, object], output_values).get("source_text_sha256")
+            if isinstance(output_values, dict) else None
+        )
+        expected_hash = previous_hash if isinstance(previous_hash, str) else None
 
         def required_string(key: str) -> str:
             value = record.get(key)
@@ -373,9 +388,14 @@ class DocumentImporter:
             generate=bool(generate_value),
         )
         export_directory = self.store.directory(identifier) / "export"
-        if parser is None and (export_directory / "manifest.json").is_file():
+        stages = record.get("stages")
+        resume_reparse = (
+            parser is None and isinstance(stages, dict)
+            and cast(dict[str, object], stages).get("conversion") == "completed"
+        )
+        if (not reparse or resume_reparse) and (export_directory / "manifest.json").is_file():
             export, qc = load_export_contract(export_directory)
-            if qc.passed:
+            if qc.passed and (request.parser is None or export.parser is request.parser):
                 original_path = Path(required_string("original_path"))
                 source_sha256 = required_string("source_sha256")
                 source_filename = required_string("source_filename")
@@ -397,5 +417,9 @@ class DocumentImporter:
                     export_directory,
                     export,
                     qc,
+                    replace_existing=reparse,
+                    expected_text_sha256=expected_hash,
                 )
-        return self.import_document(request)
+        return self.import_document(
+            request, replace_existing=reparse, expected_text_sha256=expected_hash,
+        )

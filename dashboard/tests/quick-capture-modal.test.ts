@@ -53,9 +53,9 @@ describe("QuickCaptureModal", () => {
 
   it.each([
     {
-      action: "关联 Course 后保存",
+      action: "关联课程后保存",
       option: "操作系统",
-      notice: "请先选择具体 Course",
+      notice: "请先选择具体的课程",
       relation: { course: "/learning/courses/os/course.md" },
       contexts: {
         courses: [{ title: "操作系统", path: "learning/courses/os/course.md" }],
@@ -63,13 +63,13 @@ describe("QuickCaptureModal", () => {
       },
     },
     {
-      action: "关联 Project 后保存",
-      option: "个人知识工作区",
-      notice: "请先选择具体 Project",
+      action: "关联项目后保存",
+      option: "个人知识库",
+      notice: "请先选择具体的项目",
       relation: { project: "/projects/workspace/project.md" },
       contexts: {
         courses: [],
-        projects: [{ title: "个人知识工作区", path: "projects/workspace/project.md" }],
+        projects: [{ title: "个人知识库", path: "projects/workspace/project.md" }],
       },
     },
   ])("requires a concrete context after choosing $action", ({ action, option, notice, relation, contexts }) => {

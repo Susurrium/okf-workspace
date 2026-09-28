@@ -67,41 +67,32 @@ export const DUAL_PANE_SIDES = ['left', 'right'] as const;
 /** Side of the chat occupied by the session manager in dual-pane mode. */
 export type DualPaneSide = typeof DUAL_PANE_SIDES[number];
 
-export type SessionManagerOrganization = 'list' | 'linked-note';
+export type SessionManagerOrganization = 'list' | 'linked-content';
 export type SessionManagerSort = 'last-updated' | 'created';
+
+export interface LegacyLinkedContentSettingsInput {
+  sessionManagerOrganization?: SessionManagerOrganization | 'linked-note';
+  pinnedLinkedNotePaths?: unknown;
+}
 
 /** Forced provider transition invalidated a parked auxiliary continuation. */
 export interface AuxiliaryContinuityReset {
   success: false;
   resetRequired: true;
   error: string;
-  refinedInstruction?: never;
   editedText?: never;
   insertedText?: never;
   clarification?: never;
 }
 
-/** Ordinary result from an instruction refinement agent query. */
-export interface InstructionRefineOutcome {
-  success: boolean;
-  resetRequired?: false;
-  refinedInstruction?: string;  // The refined instruction text
-  clarification?: string;       // Agent's clarifying question (if any)
-  error?: string;               // Error message (if failed)
-}
-
-export type InstructionRefineResult =
-  | InstructionRefineOutcome
-  | AuxiliaryContinuityReset;
-
 /** Permission mode for tool execution. */
-export type PermissionMode = 'yolo' | 'plan' | 'normal';
+export type PermissionMode = 'yolo' | 'normal';
 
 /** Scope for environment variable storage and snippets. */
 export type EnvironmentScope = 'shared' | `provider:${string}`;
 
 /** Opaque device-keyed CLI paths for per-device configuration. */
-export type HostnameCliPaths = Record<string, string>;
+export type HostnameCLIPaths = Record<string, string>;
 
 /** Opaque provider-owned settings bags keyed by provider id. */
 export type ProviderConfigMap = Partial<Record<string, Record<string, unknown>>>;
@@ -139,16 +130,13 @@ export interface ClaudianSettings {
   excludedTags: string[];
   mediaFolder: string;
   systemPrompt: string;
-  /** Integration-owned persisted value; consumers must normalize before use. */
-  systemPromptMode?: string;
-  replacementSystemPrompt?: string;
-  persistentExternalContextPaths: string[];
+  systemPromptMode: string;
+  replacementSystemPrompt: string;
 
   // Environment
   sharedEnvironmentVariables: string;
   envSnippets: EnvSnippet[];
   customContextLimits: Record<string, number>;
-  customModelAliases: Record<string, string>;
 
   // UI settings
   keyboardNavigation: KeyboardNavigationSettings;
@@ -172,21 +160,19 @@ export interface ClaudianSettings {
   // Internal lifecycle state. Entries remain until all affected session metadata is durable.
   pendingProviderSessionInvalidations: Partial<Record<string, number>>;
 
-  // State (provider-specific, round-tripped opaquely)
-  lastCustomModel?: string;
-
   // UI preferences
   maxWarmAgentProcesses: number;
   enableAutoScroll: boolean;
+  showMessageTimestamps?: boolean;
   deferMathRenderingDuringStreaming: boolean;
   expandFileEditsByDefault: boolean;
   chatViewPlacement: ChatViewPlacement;
   enableDualPane: boolean;
-  enableFilePane: boolean;
   dualPaneSide: DualPaneSide;
+  restoreTabsOnStartup: boolean;
   sessionManagerOrganization?: SessionManagerOrganization;
   sessionManagerSort?: SessionManagerSort;
-  pinnedLinkedNotePaths?: string[];
+  pinnedLinkedContentPaths?: string[];
 
   // Provider command visibility
   hiddenProviderCommands: HiddenProviderCommands;

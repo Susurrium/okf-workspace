@@ -151,10 +151,12 @@ function dataAttributeKey(name: string): string {
 }
 
 export class ItemView {
+  public static constructorCount = 0;
   public readonly app: unknown;
   public readonly contentEl = new TestElement() as unknown as HTMLElement;
 
   public constructor(leaf: WorkspaceLeaf) {
+    ItemView.constructorCount += 1;
     this.app = leaf.app;
   }
 }

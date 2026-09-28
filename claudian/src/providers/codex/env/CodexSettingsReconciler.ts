@@ -1,7 +1,7 @@
 import {
-  createCliPathFingerprintInputs,
-  hasCliPathFingerprintInputs,
-} from '../../../core/providers/cli/CliPathFingerprintInputs';
+  createCLIPathFingerprintInputs,
+  hasCLIPathFingerprintInputs,
+} from '../../../core/providers/cli/CLIPathFingerprintInputs';
 import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
 import {
   createRuntimeInputFingerprint,
@@ -10,25 +10,30 @@ import {
 import type { ProviderSettingsReconciler } from '../../../core/providers/types';
 import type { Conversation } from '../../../core/types';
 import { getHostnameKey, parseEnvironmentVariables } from '../../../utils/env';
+import { codexModelPolicy } from '../CodexModelPolicy';
 import { resolveCodexModelSelection } from '../modelOptions';
 import { getCodexProviderSettings, updateCodexProviderSettings } from '../settings';
 import { getCodexState } from '../types';
-import { codexChatUIConfig } from '../ui/CodexChatUIConfig';
 
 const LEGACY_CODEX_ENV_HASH_KEYS = [
   'OPENAI_MODEL',
   'OPENAI_BASE_URL',
   'OPENAI_API_KEY',
 ] as const;
-const ENV_HASH_KEYS = [...LEGACY_CODEX_ENV_HASH_KEYS, 'PATH'] as const;
+const NATIVE_HOME_ENV_KEYS = ['CODEX_HOME', 'HOME', 'USERPROFILE'];
+const ENV_HASH_KEYS = [...LEGACY_CODEX_ENV_HASH_KEYS, 'PATH', ...NATIVE_HOME_ENV_KEYS];
 
 export function computeCodexEnvHash(
   environmentText: string,
   additionalInputs: Readonly<Record<string, string | undefined>> = {},
 ): string {
+  const environment = parseEnvironmentVariables(environmentText);
   return createRuntimeInputFingerprint({
     additionalInputs,
-    environmentKeys: ENV_HASH_KEYS,
+    // Keep existing default-home fingerprints stable when no override is configured.
+    environmentKeys: ENV_HASH_KEYS.filter(key => (
+      !NATIVE_HOME_ENV_KEYS.includes(key) || Object.prototype.hasOwnProperty.call(environment, key)
+    )),
     environmentText,
   });
 }
@@ -59,7 +64,7 @@ function getCodexRuntimeFingerprintState(settings: Record<string, unknown>): {
 } {
   const environmentText = getRuntimeEnvironmentText(settings, 'codex');
   const codexSettings = getCodexProviderSettings(settings);
-  const cliPathInputs = createCliPathFingerprintInputs(
+  const cliPathInputs = createCLIPathFingerprintInputs(
     codexSettings.cliPathsByHost[getHostnameKey()],
     codexSettings.cliPath,
   );
@@ -73,7 +78,7 @@ function getCodexRuntimeFingerprintState(settings: Record<string, unknown>): {
     currentFingerprint: computeCodexEnvHash(environmentText, additionalInputs),
     environmentText,
     hasFingerprintInputs: Boolean(
-      hasCliPathFingerprintInputs(cliPathInputs)
+      hasCLIPathFingerprintInputs(cliPathInputs)
       || codexSettings.installationMethod === 'wsl'
       || codexSettings.wslDistroOverride
       || ENV_HASH_KEYS.some(key => Object.prototype.hasOwnProperty.call(environment, key))
@@ -96,7 +101,7 @@ function invalidateCodexConversationSessions(conversations: Conversation[]): Con
   return invalidatedConversations;
 }
 
-export const codexSettingsReconciler: ProviderSettingsReconciler = {
+export const codexSettingsReconciler = {
   invalidateConversationSessions: invalidateCodexConversationSessions,
 
   reconcileModelWithEnvironment(
@@ -149,7 +154,7 @@ export const codexSettingsReconciler: ProviderSettingsReconciler = {
       return changed;
     }
 
-    const normalizedModel = codexChatUIConfig.normalizeModelVariant(model, settings);
+    const normalizedModel = codexModelPolicy.normalizeModelVariant(model, settings);
     if (normalizedModel === model) {
       return changed;
     }
@@ -157,4 +162,4 @@ export const codexSettingsReconciler: ProviderSettingsReconciler = {
     settings.model = normalizedModel;
     return true;
   },
-};
+} satisfies ProviderSettingsReconciler;

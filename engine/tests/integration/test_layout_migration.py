@@ -61,8 +61,8 @@ def test_migration_replaces_root_navigation_and_removes_nested_indexes(tmp_path:
     assert not (vault / "learning/index.md").exists()
     assert not (vault / "knowledge/index.md").exists()
     root_navigation = (vault / "index.md").read_text(encoding="utf-8")
-    assert "# Workspace 总目录" in root_navigation
-    assert "### Learning" in root_navigation
+    assert "# 笔记导航" in root_navigation
+    assert "## 文件位置参考" in root_navigation
     assert 'name="current-activity"' not in root_navigation
     assert "learning_status" not in root_navigation
     knowledge_view = (vault / "system/views/Knowledge.md").read_text(encoding="utf-8")
@@ -70,6 +70,22 @@ def test_migration_replaces_root_navigation_and_removes_nested_indexes(tmp_path:
     assert "verified.at" in knowledge_view
     assert "ai_unverified" not in knowledge_view
     assert migrate_current_layout(vault, default_template_root()) == ()
+
+
+def test_migration_preserves_apex_dashboard_layout_and_rollback_files(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    board = vault / "dashboard.md"
+    board_bytes = b"---\ntype: ''\ndashboard: true\n---\n# Workbench\n"
+    board.write_bytes(board_bytes)
+    backup = vault / ".dashboard-backup" / "previous-dashboard.md"
+    backup.parent.mkdir(parents=True)
+    backup_bytes = b"---\ntype: ''\ndashboard: true\n---\n# Previous\n"
+    backup.write_bytes(backup_bytes)
+
+    migrate_current_layout(vault, default_template_root())
+
+    assert board.read_bytes() == board_bytes
+    assert backup.read_bytes() == backup_bytes
 
 
 def test_migration_repairs_missing_standard_directories_without_restoring_content(

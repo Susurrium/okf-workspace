@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -36,6 +37,27 @@ def test_task_projection_reads_real_markdown_and_ignores_code_fences(
     assert "示例代码，不是真任务" not in rendered
     assert "整理课堂笔记" not in rendered
     assert "检查同步配置" not in rendered
+
+
+def test_task_projection_matches_shared_cross_language_fixture(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    fixture_path = (
+        Path(__file__).resolve().parents[3]
+        / "tests"
+        / "fixtures"
+        / "tasks"
+        / "task-cases.json"
+    )
+    cases = json.loads(fixture_path.read_text(encoding="utf-8"))
+    expected: list[str] = []
+    for case in cases:
+        target = vault / case["path"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(case["markdown"], encoding="utf-8")
+    for case in sorted(cases, key=lambda item: item["path"]):
+        expected.extend(case["formal_open"])
+
+    assert [task.text for task in collect_tasks(vault)] == expected
 
 
 def test_task_projection_ignores_runtime_instruction_files(tmp_path: Path) -> None:

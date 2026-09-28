@@ -1,29 +1,15 @@
-import type * as fspType from 'node:fs/promises';
-
 import type * as fsType from 'fs';
 import type * as osType from 'os';
 import type * as pathType from 'path';
 
 const fs = jest.requireActual<typeof fsType>('fs');
-const fsp = jest.requireActual<typeof fspType>('node:fs/promises');
 const os = jest.requireActual<typeof osType>('os');
 const path = jest.requireActual<typeof pathType>('path');
 
-import type { ProviderConversationHistoryService } from '@/core/providers/types';
+import { testDate } from '@test/helpers/testClock';
+
 import type { Conversation } from '@/core/types';
 import { CodexConversationHistoryService } from '@/providers/codex/history/CodexConversationHistoryService';
-
-async function resolveMissingConversationSession(
-  service: CodexConversationHistoryService,
-  conversation: Conversation,
-  missingProviderSessionId?: string,
-): Promise<'delete' | 'reset' | 'preserve' | 'unimplemented'> {
-  const resolver = (service as ProviderConversationHistoryService)
-    .resolveMissingConversationSession;
-  return resolver
-    ? resolver.call(service, conversation, null, missingProviderSessionId)
-    : 'unimplemented';
-}
 
 describe('CodexConversationHistoryService', () => {
   let homeDirSpy: jest.SpyInstance<string, []>;
@@ -37,6 +23,84 @@ describe('CodexConversationHistoryService', () => {
   afterEach(() => {
     homeDirSpy.mockRestore();
     fs.rmSync(tempHome, { recursive: true, force: true });
+  });
+
+  it.each(['normal', 'pending fork', 'established fork'].flatMap(mode =>
+    ['raw first', 'raw later', 'native only'].map(events => ({ mode, events })),
+  ))('hydrates separate child runs from $mode history with $events events', async ({ mode, events }) => {
+    const root = path.join(tempHome, '.codex', 'sessions');
+    fs.mkdirSync(root, { recursive: true });
+    const record = (type: string, payload: Record<string, unknown>, seconds: number) => JSON.stringify({ type, payload, timestamp: testDate({ seconds }).toISOString() });
+    const parentPath = path.join(root, 'rollout-parent.jsonl');
+    const followup = record('response_item', { type: 'function_call', call_id: 'followup', name: 'followup_task', namespace: 'collaboration', arguments: '{"target":"helper","message":"Run date"}' }, 6);
+    fs.writeFileSync(parentPath, [
+      record('event_msg', { type: 'task_started', turn_id: 'parent-turn' }, 0),
+      record('event_msg', { type: 'item_completed', item: { type: 'SubAgentActivity', id: 'spawn', kind: 'started', agent_thread_id: 'child', agent_path: '/root/helper' } }, 1),
+      record('event_msg', { type: 'item_completed', item: { type: 'SubAgentActivity', id: 'running-message', kind: 'interacted', agent_thread_id: 'child', agent_path: '/root/helper' } }, 2),
+      record('event_msg', { type: 'task_complete', turn_id: 'parent-turn' }, 2),
+      record('event_msg', { type: 'item_completed', item: { type: 'SubAgentActivity', id: 'done', kind: 'completed', agent_thread_id: 'child', agent_path: '/root/helper' } }, 5),
+      record('event_msg', { type: 'task_started', turn_id: 'earlier-idle-turn' }, 5.1),
+      record('event_msg', { type: 'item_completed', turn_id: 'earlier-idle-turn', item: { type: 'SubAgentActivity', id: 'earlier-idle-message', kind: 'interacted', agent_thread_id: 'child', agent_path: '/root/helper' } }, 5.2),
+      record('event_msg', { type: 'task_complete', turn_id: 'earlier-idle-turn' }, 5.3),
+      record('event_msg', { type: 'task_started', turn_id: 'later-parent-turn' }, 6),
+      ...(events === 'raw first' ? [followup] : []),
+      record('event_msg', { type: 'item_completed', turn_id: 'later-parent-turn', item: { type: 'SubAgentActivity', id: 'followup', kind: 'interacted', agent_thread_id: 'child', agent_path: '/root/helper' } }, 6),
+      ...(events === 'raw later' ? [followup] : []),
+      record('event_msg', { type: 'item_completed', turn_id: 'later-parent-turn', item: { type: 'SubAgentActivity', id: 'same-turn-message', kind: 'interacted', agent_thread_id: 'child', agent_path: '/root/helper' } }, 7),
+      record('event_msg', { type: 'task_complete', turn_id: 'later-parent-turn' }, 7),
+      record('event_msg', { type: 'task_started', turn_id: 'steering-parent-turn' }, 8),
+      record('event_msg', { type: 'item_completed', turn_id: 'steering-parent-turn', item: { type: 'SubAgentActivity', id: 'followup-running-message', kind: 'interacted', agent_thread_id: 'child', agent_path: '/root/helper' } }, 8),
+      record('event_msg', { type: 'item_completed', turn_id: 'later-parent-turn', item: { type: 'SubAgentActivity', id: 'done-2', kind: 'completed', agent_thread_id: 'child', agent_path: '/root/helper' } }, 9),
+      record('event_msg', { type: 'task_complete', turn_id: 'steering-parent-turn' }, 10),
+      record('event_msg', { type: 'task_started', turn_id: 'idle-parent-turn' }, 11),
+      ...(events === 'native only' ? [] : [record('response_item', { type: 'function_call', call_id: 'idle-message', name: 'send_message', arguments: '{"target":"helper","message":"Thanks"}' }, 12)]),
+      record('event_msg', { type: 'item_completed', item: { type: 'SubAgentActivity', id: 'idle-message', kind: 'interacted', agent_thread_id: 'child', agent_path: '/root/helper' } }, 12),
+      record('event_msg', { type: 'task_complete', turn_id: 'idle-parent-turn' }, 13),
+    ].join('\n'));
+    fs.writeFileSync(path.join(root, 'rollout-child.jsonl'), [
+      record('session_meta', { id: 'child', source: { subagent: { thread_spawn: { agent_nickname: 'Bohr', parent_thread_id: 'parent' } } } }, 1),
+      record('session_meta', { id: 'parent', source: 'vscode' }, 0),
+      record('response_item', { type: 'function_call', call_id: 'inherited-tool', name: 'parent_only', arguments: '{}' }, 0),
+      record('turn_context', { model: 'child-model', effort: 'high' }, 2),
+      record('event_msg', { type: 'task_started', turn_id: 'child-turn' }, 2),
+      record('response_item', { type: 'custom_tool_call', call_id: 'clock-call', name: 'exec', input: 'const t = await tools.clock__curr_time({}); text(t.current_time);' }, 3),
+      record('response_item', { type: 'custom_tool_call_output', call_id: 'clock-call', output: [{ type: 'input_text', text: 'Clock result' }] }, 3),
+      record('response_item', { type: 'message', role: 'assistant', phase: 'final_answer', content: [{ type: 'output_text', text: 'Ready.' }] }, 3),
+      record('event_msg', { type: 'task_complete', turn_id: 'child-turn' }, 4),
+      record('event_msg', { type: 'task_started', turn_id: 'later-child-turn' }, 7),
+      record('response_item', { type: 'custom_tool_call', call_id: 'date-call', name: 'exec', input: 'text(await tools.exec_command({cmd: "date"}));' }, 7),
+      record('response_item', { type: 'custom_tool_call_output', call_id: 'date-call', output: 'Date result' }, 8),
+      record('response_item', { type: 'message', role: 'assistant', phase: 'final_answer', content: [{ type: 'output_text', text: 'Future answer.' }] }, 8),
+    ].join('\n'));
+    const forkPath = path.join(root, 'rollout-fork.jsonl');
+    fs.writeFileSync(forkPath, '');
+    const source = { forkSource: { sessionId: 'parent', resumeAt: 'parent-turn' }, forkSourceSessionFilePath: parentPath, forkSourceTranscriptRootPath: root };
+    const providerState = mode === 'normal' ? { threadId: 'parent', sessionFilePath: parentPath, transcriptRootPath: root }
+      : mode === 'pending fork' ? source : { ...source, threadId: 'fork', sessionFilePath: forkPath, transcriptRootPath: root };
+    const readFile = jest.spyOn(fs.promises, 'readFile');
+    try {
+      const result = await new CodexConversationHistoryService().hydrateConversationHistory({
+        id: 'conversation', sessionId: mode === 'pending fork' ? null : mode === 'normal' ? 'parent' : 'fork', providerState, messages: [],
+      } as any, null);
+      expect(readFile.mock.calls.filter(([file]) => file === parentPath)).toHaveLength(1);
+      const cards = result.messages!.flatMap(message => message.toolCalls ?? []).filter(tool => tool.subagent);
+      expect(cards).toHaveLength(mode === 'normal' ? 2 : 1);
+      const owner = result.messages!.find(message => message.toolCalls?.some(tool => tool.id === 'followup'));
+      expect(owner?.timestamp).toBe(mode === 'normal' ? testDate({ seconds: 6 }).getTime() : undefined);
+      const tools = result.messages!.flatMap(message => message.toolCalls ?? []);
+      expect(tools.filter(tool => tool.id === 'idle-message')).toHaveLength(mode === 'normal' ? 1 : 0);
+      expect(tools.find(tool => tool.id === 'idle-message')?.subagent).toBeUndefined();
+      expect(tools.find(tool => tool.id === 'earlier-idle-message')?.subagent).toBeUndefined();
+      expect(tools.find(tool => tool.id === 'same-turn-message')?.subagent).toBeUndefined();
+      expect(tools.find(tool => tool.id === 'running-message')?.subagent).toBeUndefined();
+      expect(tools.find(tool => tool.id === 'followup-running-message')?.subagent).toBeUndefined();
+      const laterCards = mode === 'normal' ? [{ id: 'followup', status: 'completed', startedAt: testDate({ seconds: 6 }).getTime(), completedAt: testDate({ seconds: 9 }).getTime(), prompt: events === 'native only' ? '' : 'Run date', result: 'Future answer.', toolCalls: [{ id: 'date-call' }] }] : [];
+      expect(cards.slice(1).map(tool => tool.subagent)).toMatchObject(laterCards);
+      expect(cards[0].subagent).toMatchObject({
+        status: 'completed', completedAt: testDate({ seconds: 5 }).getTime(), result: 'Ready.', description: 'Bohr (child-model, high)',
+        toolCalls: [expect.objectContaining({ id: 'clock-call', status: 'completed', result: expect.stringContaining('Clock result') })],
+      });
+    } finally { readFile.mockRestore(); }
   });
 
   it('hydrates history by resolving the transcript path from thread id', async () => {
@@ -73,6 +137,7 @@ describe('CodexConversationHistoryService', () => {
       ].join('\n'),
       'utf-8',
     );
+    const originalTranscript = fs.readFileSync(transcriptPath, 'utf8');
 
     const conversation: Conversation = {
       id: 'conv-1',
@@ -86,7 +151,13 @@ describe('CodexConversationHistoryService', () => {
     };
 
     const service = new CodexConversationHistoryService();
-    await service.hydrateConversationHistory(conversation, null);
+    conversation.messages = [{ id: 'local', role: 'assistant', content: 'Local placeholder', timestamp: testDate().getTime() }];
+    const before = structuredClone(conversation);
+    const first = await service.hydrateConversationHistory(conversation, null);
+    expect(conversation).toEqual(before);
+    expect(await service.hydrateConversationHistory(conversation, null)).toEqual(first);
+    expect(fs.readFileSync(transcriptPath, 'utf8')).toBe(originalTranscript);
+    Object.assign(conversation, first);
 
     expect(conversation.messages).toHaveLength(2);
     expect(conversation.messages[0]).toMatchObject({
@@ -98,6 +169,7 @@ describe('CodexConversationHistoryService', () => {
       content: 'Here is the summary.',
     });
     expect((conversation.providerState as Record<string, unknown>).sessionFilePath).toBe(transcriptPath);
+    expect(fs.existsSync(transcriptPath)).toBe(true);
   });
 
   it('recovers the last Codex model from turn context without catalog validation', async () => {
@@ -122,26 +194,8 @@ describe('CodexConversationHistoryService', () => {
     };
 
     await expect(new CodexConversationHistoryService()
-      .recoverConversationModelSelection?.(conversation, null))
+      .recoverConversationModelSelection(conversation, null))
       .resolves.toBe('openai-codex/gpt-5.5');
-  });
-
-  it('retries the same native transcript after its first read fails', async () => {
-    const transcriptPath = path.join(tempHome, 'retry-history.jsonl');
-    fs.writeFileSync(transcriptPath, JSON.stringify({ type: 'response_item', payload: {
-      type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Native history' }],
-    } }), 'utf8');
-    const conversation: Conversation = { id: 'retry-history', providerId: 'codex', title: 'Retry',
-      createdAt: 1, lastActivityAt: 2, sessionId: 'retry-thread',
-      providerState: { threadId: 'retry-thread', sessionFilePath: transcriptPath }, messages: [] };
-    const service = new CodexConversationHistoryService();
-    const read = jest.spyOn(fsp, 'readFile').mockRejectedValueOnce(new Error('temporary read failure'));
-    try {
-      await expect(service.hydrateConversationHistory(conversation, null)).rejects.toThrow('Codex history could not be read');
-      expect(conversation.messages).toEqual([]);
-      await expect(service.hydrateConversationHistory(conversation, null)).resolves.toEqual({ status: 'loaded' });
-      expect(conversation.messages[0]?.content).toBe('Native history');
-    } finally { read.mockRestore(); }
   });
 
   it('does not recover a Codex model past a missing rewind checkpoint', async () => {
@@ -337,10 +391,10 @@ describe('CodexConversationHistoryService', () => {
       messages: [],
     };
 
-    await new CodexConversationHistoryService().hydrateConversationHistory(
+    Object.assign(conversation, await new CodexConversationHistoryService().hydrateConversationHistory(
       conversation,
       null,
-    );
+    ));
 
     expect(conversation.messages).toHaveLength(2);
     expect(conversation.providerState).toEqual(expect.objectContaining({
@@ -349,7 +403,7 @@ describe('CodexConversationHistoryService', () => {
     }));
   });
 
-  it('rehydrates when the same conversation id is restored with empty messages', async () => {
+  it('rehydrates the same conversation object after its messages are cleared', async () => {
     const threadId = 'thread-456';
     const sessionsDir = path.join(tempHome, '.codex', 'sessions', '2026', '03', '27');
     fs.mkdirSync(sessionsDir, { recursive: true });
@@ -396,11 +450,11 @@ describe('CodexConversationHistoryService', () => {
     };
 
     const service = new CodexConversationHistoryService();
-    await service.hydrateConversationHistory(conversation, null);
+    Object.assign(conversation, await service.hydrateConversationHistory(conversation, null));
     expect(conversation.messages).toHaveLength(2);
 
     conversation.messages = [];
-    await service.hydrateConversationHistory(conversation, null);
+    Object.assign(conversation, await service.hydrateConversationHistory(conversation, null));
 
     expect(conversation.messages).toHaveLength(2);
     expect(conversation.messages[1]).toMatchObject({
@@ -450,7 +504,7 @@ describe('CodexConversationHistoryService', () => {
     };
 
     const service = new CodexConversationHistoryService();
-    await service.hydrateConversationHistory(conversation, null);
+    Object.assign(conversation, await service.hydrateConversationHistory(conversation, null));
 
     expect(conversation.messages).toHaveLength(1);
     expect(conversation.messages[0]).toMatchObject({
@@ -501,7 +555,7 @@ describe('CodexConversationHistoryService', () => {
     };
 
     const service = new CodexConversationHistoryService();
-    await service.hydrateConversationHistory(conversation, null);
+    Object.assign(conversation, await service.hydrateConversationHistory(conversation, null));
 
     expect(conversation.messages).toHaveLength(1);
     expect((conversation.providerState as Record<string, unknown>).transcriptRootPath).toBe(
@@ -546,11 +600,11 @@ describe('CodexConversationHistoryService', () => {
       messages: [],
     };
 
-    await new CodexConversationHistoryService().hydrateConversationHistory(
+    Object.assign(conversation, await new CodexConversationHistoryService().hydrateConversationHistory(
       conversation,
       null,
       { environment: { HOME: tempHome } },
-    );
+    ));
 
     expect(conversation.messages.map(message => message.content)).toEqual(['Trusted transcript.']);
     expect((conversation.providerState as Record<string, unknown>).sessionFilePath).toBe(trustedPath);
@@ -580,72 +634,81 @@ describe('CodexConversationHistoryService', () => {
       messages: [],
     };
 
-    await new CodexConversationHistoryService().hydrateConversationHistory(
+    Object.assign(conversation, await new CodexConversationHistoryService().hydrateConversationHistory(
       conversation,
       null,
       { environment: { CODEX_HOME: configuredHome, HOME: tempHome } },
-    );
+    ));
 
     expect(conversation.messages.map(message => message.content)).toEqual(['Configured transcript.']);
   });
 
   describe('buildForkProviderState', () => {
-    it('stores forkSource with sessionId and resumeAt in providerState', () => {
-      const service = new CodexConversationHistoryService();
-      const result = service.buildForkProviderState('source-thread-id', 'turn-uuid-2');
+    let transcriptPath: string;
+    let transcript: string;
 
-      expect(result).toEqual({
-        forkSource: { sessionId: 'source-thread-id', resumeAt: 'turn-uuid-2' },
-      });
+    beforeEach(() => {
+      const sessionsDir = path.join(tempHome, '.codex', 'sessions');
+      fs.mkdirSync(sessionsDir, { recursive: true });
+      transcriptPath = path.join(sessionsDir, 'rollout-source-thread-id.jsonl');
+      transcript = [
+        { type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-uuid-2' } },
+        { type: 'response_item', payload: {
+          type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }],
+        } },
+        { type: 'response_item', payload: {
+          type: 'message', role: 'assistant', id: 'msg_item',
+          content: [{ type: 'output_text', text: 'Hi' }],
+        } },
+        { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-uuid-2' } },
+      ].map(record => JSON.stringify(record)).join('\n');
+      fs.writeFileSync(transcriptPath, transcript);
     });
 
-    it('preserves source transcript hints when provided', () => {
+    it('validates the native checkpoint and preserves source context for hydration', async () => {
       const service = new CodexConversationHistoryService();
-      const result = service.buildForkProviderState(
-        'source-thread-id',
-        'turn-uuid-2',
-        {
-          sessionFilePath: '\\\\wsl$\\Ubuntu\\home\\user\\.codex\\sessions\\2026\\03\\27\\rollout-thread.jsonl',
-          transcriptRootPath: '\\\\wsl$\\Ubuntu\\home\\user\\.codex\\sessions',
-        },
-      );
-
-      expect(result).toEqual({
-        forkSource: { sessionId: 'source-thread-id', resumeAt: 'turn-uuid-2' },
-        forkSourceSessionFilePath: '\\\\wsl$\\Ubuntu\\home\\user\\.codex\\sessions\\2026\\03\\27\\rollout-thread.jsonl',
-        forkSourceTranscriptRootPath: '\\\\wsl$\\Ubuntu\\home\\user\\.codex\\sessions',
+      const state = await service.buildForkProviderState('source-thread-id', 'turn-uuid-2', {
+        sessionFilePath: transcriptPath, workspaceDependencyToolVersion: 1,
       });
+      expect(state).toMatchObject({ workspaceDependencyToolVersion: 1 });
+      const fork: Conversation = {
+        id: 'fork', providerId: 'codex', title: 'Fork', createdAt: 1, lastActivityAt: 1,
+        sessionId: null, messages: [], providerState: state,
+      };
+      Object.assign(fork, await service.hydrateConversationHistory(fork, null));
+      expect(fork.messages.map(message => message.content)).toEqual(['Hello', 'Hi']);
+      expect(fs.readFileSync(transcriptPath, 'utf8')).toBe(transcript);
     });
 
-    it('preserves workspace dependency tool provenance from the source thread', () => {
+    it.each(['msg_item', 'missing-turn'])('rejects unavailable checkpoint %s during fork creation', async checkpoint => {
       const service = new CodexConversationHistoryService();
-      const result = service.buildForkProviderState(
-        'source-thread-id',
-        'turn-uuid-2',
-        { workspaceDependencyToolVersion: 1 },
-      );
-
-      expect(result).toEqual({
-        forkSource: { sessionId: 'source-thread-id', resumeAt: 'turn-uuid-2' },
-        workspaceDependencyToolVersion: 1,
-      });
+      await expect(service.buildForkProviderState(
+        'source-thread-id', checkpoint, { sessionFilePath: transcriptPath },
+      )).rejects.toThrow('Fork checkpoint not found');
     });
 
-    it('derives the source transcript root from sessionFilePath when only the session path is stored', () => {
+    it('rejects an unavailable source during fork creation', async () => {
+      fs.unlinkSync(transcriptPath);
       const service = new CodexConversationHistoryService();
-      const result = service.buildForkProviderState(
-        'source-thread-id',
-        'turn-uuid-2',
-        {
-          sessionFilePath: '\\\\wsl$\\Ubuntu\\home\\user\\.codex\\sessions\\2026\\03\\27\\rollout-thread.jsonl',
-        },
-      );
+      await expect(service.buildForkProviderState(
+        'source-thread-id', 'turn-uuid-2', { sessionFilePath: transcriptPath },
+      )).rejects.toThrow('Fork checkpoint not found');
+    });
 
-      expect(result).toEqual({
-        forkSource: { sessionId: 'source-thread-id', resumeAt: 'turn-uuid-2' },
-        forkSourceSessionFilePath: '\\\\wsl$\\Ubuntu\\home\\user\\.codex\\sessions\\2026\\03\\27\\rollout-thread.jsonl',
-        forkSourceTranscriptRootPath: '\\\\wsl$\\Ubuntu\\home\\user\\.codex\\sessions',
-      });
+    it('finds an archived source when its saved path has moved', async () => {
+      const archive = path.join(tempHome, '.codex', 'archived_sessions');
+      fs.mkdirSync(archive, { recursive: true });
+      fs.renameSync(transcriptPath, path.join(archive, path.basename(transcriptPath)));
+      const service = new CodexConversationHistoryService();
+      const state = await service.buildForkProviderState(
+        'source-thread-id', 'turn-uuid-2', { sessionFilePath: transcriptPath },
+      );
+      const fork: Conversation = {
+        id: 'fork', providerId: 'codex', title: 'Fork', createdAt: 1, lastActivityAt: 1,
+        sessionId: null, messages: [], providerState: state,
+      };
+      Object.assign(fork, await service.hydrateConversationHistory(fork, null));
+      expect(fork.messages.map(message => message.content)).toEqual(['Hello', 'Hi']);
     });
   });
 
@@ -770,11 +833,13 @@ describe('CodexConversationHistoryService', () => {
         messages: [],
       };
 
-      await expect(resolveMissingConversationSession(
-        new CodexConversationHistoryService(),
+      const update1 = await new CodexConversationHistoryService().resolveMissingConversationSession(
         conversation,
+        null,
         'thread-missing',
-      )).resolves.toBe('reset');
+      );
+      expect(update1.outcome).toBe('reset');
+      Object.assign(conversation, update1.changes);
 
       expect(conversation.sessionId).toBeNull();
       expect(conversation.resumeAtMessageId).toBe('fork-checkpoint');
@@ -813,11 +878,13 @@ describe('CodexConversationHistoryService', () => {
         messages: [],
       };
 
-      await expect(resolveMissingConversationSession(
-        new CodexConversationHistoryService(),
+      const update2 = await new CodexConversationHistoryService().resolveMissingConversationSession(
         conversation,
+        null,
         missingSessionId,
-      )).resolves.toBe('preserve');
+      );
+      expect(update2.outcome).toBe('preserve');
+      Object.assign(conversation, update2.changes);
 
       expect(conversation.sessionId).toBe('thread-current');
       expect(conversation.providerState).toBe(providerState);
@@ -866,7 +933,7 @@ describe('CodexConversationHistoryService', () => {
       };
 
       const service = new CodexConversationHistoryService();
-      await service.hydrateConversationHistory(conversation, null);
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, null));
 
       // Should only have messages from turn 1 and turn 2 (truncated at resumeAt)
       expect(conversation.messages).toHaveLength(4);
@@ -908,7 +975,7 @@ describe('CodexConversationHistoryService', () => {
       };
 
       const service = new CodexConversationHistoryService();
-      await service.hydrateConversationHistory(conversation, null);
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, null));
 
       expect(conversation.messages).toEqual([]);
     });
@@ -928,7 +995,7 @@ describe('CodexConversationHistoryService', () => {
       };
 
       const service = new CodexConversationHistoryService();
-      await service.hydrateConversationHistory(conversation, null);
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, null));
 
       expect(conversation.messages).toHaveLength(1);
       expect(conversation.messages[0].content).toBe('Cloned message');
@@ -1000,7 +1067,7 @@ describe('CodexConversationHistoryService', () => {
       };
 
       const service = new CodexConversationHistoryService();
-      await service.hydrateConversationHistory(conversation, null);
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, null));
 
       // Expected: source prefix (turns 1+2) + fork-only turn
       // = SrcQ1, SrcA1, SrcQ2, SrcA2, ForkQ1, ForkA1
@@ -1065,7 +1132,7 @@ describe('CodexConversationHistoryService', () => {
       };
 
       const service = new CodexConversationHistoryService();
-      await service.hydrateConversationHistory(conversation, null);
+      Object.assign(conversation, await service.hydrateConversationHistory(conversation, null));
 
       expect(conversation.messages).toEqual([]);
     });
@@ -1095,7 +1162,7 @@ describe('CodexConversationHistoryService', () => {
     };
 
     const service = new CodexConversationHistoryService();
-    await service.hydrateConversationHistory(conversation, null);
+    Object.assign(conversation, await service.hydrateConversationHistory(conversation, null));
     expect(conversation.messages).toEqual([]);
 
     fs.writeFileSync(
@@ -1123,7 +1190,7 @@ describe('CodexConversationHistoryService', () => {
       'utf-8',
     );
 
-    await service.hydrateConversationHistory(conversation, null);
+    Object.assign(conversation, await service.hydrateConversationHistory(conversation, null));
 
     expect(conversation.messages).toHaveLength(2);
     expect(conversation.messages[0]).toMatchObject({
@@ -1131,4 +1198,18 @@ describe('CodexConversationHistoryService', () => {
       content: 'Second prompt',
     });
   });
+});
+
+
+test('missing-session recovery returns an update without mutating its input', async () => {
+  const conversation = {
+    id: 'immutable-history', providerId: 'codex' as const, title: 'History',
+    createdAt: testDate().getTime(), lastActivityAt: testDate({ seconds: 1 }).getTime(), sessionId: 'missing-thread',
+    providerState: { threadId: 'missing-thread' }, messages: [],
+  };
+  const before = structuredClone(conversation);
+  const result = await new CodexConversationHistoryService()
+    .resolveMissingConversationSession(conversation, null, 'missing-thread');
+  expect(conversation).toEqual(before);
+  expect(result).toMatchObject({ outcome: 'reset', changes: { sessionId: null } });
 });

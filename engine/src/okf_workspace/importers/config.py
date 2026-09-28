@@ -10,6 +10,8 @@ from urllib.parse import urlsplit
 
 @dataclass(frozen=True, slots=True)
 class ImportSettings:
+    mineru_token_file: Path | None = None
+    mineru_model: str = "vlm"
     mineru_url: str = "http://127.0.0.1:18000"
     mineru_ssh_managed: bool = True
     mineru_ssh_host: str = "bjmu-inner"
@@ -20,7 +22,10 @@ class ImportSettings:
     @classmethod
     def from_env(cls) -> ImportSettings:
         token = os.environ.get("OKF_MARKITDOWN_TOKEN_FILE", "").strip()
+        mineru_token = os.environ.get("OKF_MINERU_TOKEN_FILE", "").strip()
         return cls(
+            mineru_token_file=Path(mineru_token).resolve() if mineru_token else None,
+            mineru_model=os.environ.get("OKF_MINERU_MODEL", "vlm").strip(),
             mineru_url=os.environ.get(
                 "OKF_MINERU_URL",
                 "http://127.0.0.1:18000",
@@ -37,6 +42,8 @@ class ImportSettings:
         )
 
     def __post_init__(self) -> None:
+        if self.mineru_model not in {"vlm", "pipeline"}:
+            raise ValueError("MinerU cloud model must be vlm or pipeline")
         if not self.mineru_ssh_host or any(
             character.isspace() for character in self.mineru_ssh_host
         ):

@@ -12,7 +12,7 @@ export interface FeedDecisionFlowActions {
 /** Shared decision presentation for Reading and CodeMirror Live Preview. */
 export function renderFeedDecisionFlow(controls: HTMLElement, status: HTMLElement, actions: FeedDecisionFlowActions): void {
   let busy = false;
-  const message = (error: unknown): string => error instanceof Error ? error.message : "Feed 操作失败";
+  const message = (error: unknown): string => error instanceof Error ? error.message : "订阅操作失败";
   const button = (label: string, handler: () => void): void => {
     controls.createEl("button", { text: label, attr: { type: "button" } }).addEventListener("click", handler);
   };
@@ -36,15 +36,7 @@ export function renderFeedDecisionFlow(controls: HTMLElement, status: HTMLElemen
   const renderResult = (result: FeedDecisionResult): void => {
     const feedback = feedDecisionFeedback(result);
     const operation = result.semantic_operation;
-    const operationText = operation ? ({
-      queued: "任务已排队，等待 Codex 开始生成。",
-      running: "Codex 正在后台生成；切换页面不会中断。",
-      orphaned: "后台生成已中断，可在 Learning 或 System 中重新生成。",
-      completed: "后台生成已完成。",
-      failed: "后台生成失败，可在 Learning 或 System 中重试。",
-      cancelled: "后台任务已取消。",
-    })[operation.status] : "";
-    status.setText([feedback.message, operationText, result.warnings?.join("；")].filter(Boolean).join(" "));
+    status.setText([feedback.message, result.warnings?.join("；")].filter(Boolean).join(" "));
     controls.replaceChildren();
     if (feedback.target && feedback.targetLabel) button(feedback.targetLabel, () => {
       void actions.openPath(feedback.target!).catch((error: unknown) => actions.notify(message(error)));
@@ -54,16 +46,16 @@ export function renderFeedDecisionFlow(controls: HTMLElement, status: HTMLElemen
   };
   const renderLearning = (): void => {
     controls.replaceChildren();
-    status.setText("你想学习：现在生成 Study Guide，还是先放进 Learning？");
-    button("现在生成 Study Guide", () => void choose("learn-now"));
+    status.setText("你想学习：现在生成辅助学习材料，还是先放进学习？");
+    button("现在生成辅助学习材料", () => void choose("learn-now"));
     button("稍后学习", () => void choose("learn-later"));
     button("返回", renderPrimary);
   };
   const renderNoLearning = (): void => {
     controls.replaceChildren();
     status.setText("你不打算学习：它仍有长期参考价值吗？");
-    button("直接整理成 Wiki", () => void choose("wiki-now"));
-    button("只保留原始资料", () => void choose("source-only"));
+    button("整理为知识笔记", () => void choose("wiki-now"));
+    button("只保存资料", () => void choose("source-only"));
     button("不保留", () => void choose("ignore"));
     button("返回", renderPrimary);
   };

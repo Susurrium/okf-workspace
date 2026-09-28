@@ -1,37 +1,18 @@
 import {
-  type CliPathFingerprintInputs,
-  createCliPathFingerprintInputs,
-  hasCliPathFingerprintInputs,
-} from '../../../core/providers/cli/CliPathFingerprintInputs';
+  type CLIPathFingerprintInputs,
+  createCLIPathFingerprintInputs,
+  hasCLIPathFingerprintInputs,
+} from '../../../core/providers/cli/CLIPathFingerprintInputs';
 import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
 import { createRuntimeInputFingerprint } from '../../../core/providers/settings/RuntimeInputFingerprint';
 import type { ProviderSettingsReconciler } from '../../../core/providers/types';
 import type { Conversation } from '../../../core/types';
 import { getHostnameKey, parseEnvironmentVariables } from '../../../utils/env';
-import { clearOpencodeDiscoveryState } from '../discoveryState';
-import { sameStringList, sameStringMap } from '../internal/compareCollections';
-import { ensureProviderProjectionMap } from '../internal/providerProjection';
-import {
-  decodeOpencodeModelId,
-  encodeOpencodeModelId,
-  extractOpencodeModelVariantValue,
-  isOpencodeModelSelectionId,
-  OPENCODE_DEFAULT_THINKING_LEVEL,
-  resolveOpencodeBaseModelRawId,
-} from '../models';
 import {
   getOpencodeProviderSettings,
-  hasLegacyOpencodeDiscoveryFields,
-  normalizeOpencodePreferredThinkingByModel,
-  normalizeOpencodeVisibleModels,
-  updateOpencodeProviderSettings,
+  updateOpencodeProviderSettings
 } from '../settings';
 import { getOpencodeState } from '../types';
-
-interface NormalizedSelection {
-  baseModelId: string | null;
-  variant: string | null;
-}
 
 const OPENCODE_ENV_HASH_KEYS = [
   'OPENCODE_CONFIG',
@@ -43,7 +24,7 @@ const OPENCODE_ENV_HASH_KEYS = [
 
 function computeOpencodeRuntimeFingerprint(
   environmentText: string,
-  cliPathInputs: CliPathFingerprintInputs,
+  cliPathInputs: CLIPathFingerprintInputs,
 ): string {
   return createRuntimeInputFingerprint({
     additionalInputs: cliPathInputs,
@@ -71,10 +52,7 @@ function invalidateOpencodeConversationSessions(conversations: Conversation[]): 
   return invalidatedConversations;
 }
 
-export const opencodeSettingsReconciler: ProviderSettingsReconciler = {
-  handleEnvironmentChange(settings: Record<string, unknown>): boolean {
-    return clearOpencodeDiscoveryState(settings);
-  },
+export const opencodeSettingsReconciler = {
 
   invalidateConversationSessions: invalidateOpencodeConversationSessions,
 
@@ -84,7 +62,7 @@ export const opencodeSettingsReconciler: ProviderSettingsReconciler = {
   ): { changed: boolean; invalidatedConversations: Conversation[] } {
     const envText = getRuntimeEnvironmentText(settings, 'opencode');
     const opencodeSettings = getOpencodeProviderSettings(settings);
-    const cliPathInputs = createCliPathFingerprintInputs(
+    const cliPathInputs = createCLIPathFingerprintInputs(
       opencodeSettings.cliPathsByHost[getHostnameKey()],
       opencodeSettings.cliPath,
     );
@@ -93,7 +71,7 @@ export const opencodeSettingsReconciler: ProviderSettingsReconciler = {
 
     const environment = parseEnvironmentVariables(envText);
     const hasFingerprintInputs = Boolean(
-      hasCliPathFingerprintInputs(cliPathInputs)
+      hasCLIPathFingerprintInputs(cliPathInputs)
       || OPENCODE_ENV_HASH_KEYS.some(
         key => Object.prototype.hasOwnProperty.call(environment, key),
       )
@@ -111,99 +89,4 @@ export const opencodeSettingsReconciler: ProviderSettingsReconciler = {
     return { changed: true, invalidatedConversations };
   },
 
-  normalizeModelVariantSettings(settings: Record<string, unknown>): boolean {
-    const hadLegacyDiscoveryFields = hasLegacyOpencodeDiscoveryFields(settings);
-    if (hadLegacyDiscoveryFields) {
-      updateOpencodeProviderSettings(settings, {});
-    }
-
-    const opencodeSettings = getOpencodeProviderSettings(settings);
-    let changed = hadLegacyDiscoveryFields;
-
-    const normalizeSelection = (value: unknown): NormalizedSelection => {
-      if (typeof value !== 'string' || !isOpencodeModelSelectionId(value)) {
-        return { baseModelId: null, variant: null };
-      }
-
-      const rawModelId = decodeOpencodeModelId(value);
-      if (!rawModelId) {
-        return { baseModelId: value, variant: null };
-      }
-
-      const baseRawId = resolveOpencodeBaseModelRawId(rawModelId, opencodeSettings.discoveredModels);
-      return {
-        baseModelId: encodeOpencodeModelId(baseRawId),
-        variant: extractOpencodeModelVariantValue(rawModelId, opencodeSettings.discoveredModels),
-      };
-    };
-
-    const modelSelection = normalizeSelection(settings.model);
-    if (typeof settings.model === 'string' && modelSelection.baseModelId && settings.model !== modelSelection.baseModelId) {
-      settings.model = modelSelection.baseModelId;
-      changed = true;
-    }
-    if (
-      modelSelection.variant
-      && (typeof settings.effortLevel !== 'string' || settings.effortLevel.trim().length === 0)
-    ) {
-      settings.effortLevel = modelSelection.variant;
-      changed = true;
-    }
-
-    const titleModelSelection = normalizeSelection(settings.titleGenerationModel);
-    if (
-      typeof settings.titleGenerationModel === 'string'
-      && titleModelSelection.baseModelId
-      && settings.titleGenerationModel !== titleModelSelection.baseModelId
-    ) {
-      settings.titleGenerationModel = titleModelSelection.baseModelId;
-      changed = true;
-    }
-
-    const savedProviderModelRaw = settings.savedProviderModel;
-    if (savedProviderModelRaw && typeof savedProviderModelRaw === 'object' && !Array.isArray(savedProviderModelRaw)) {
-      const savedProviderModel = savedProviderModelRaw as Record<string, unknown>;
-      const savedSelection = normalizeSelection(savedProviderModel.opencode);
-      if (
-        typeof savedProviderModel.opencode === 'string'
-        && savedSelection.baseModelId
-        && savedProviderModel.opencode !== savedSelection.baseModelId
-      ) {
-        savedProviderModel.opencode = savedSelection.baseModelId;
-        changed = true;
-      }
-      if (savedSelection.variant) {
-        const savedEffort = ensureProviderProjectionMap(settings, 'savedProviderEffort');
-        if (typeof savedEffort.opencode !== 'string') {
-          savedEffort.opencode = savedSelection.variant;
-          changed = true;
-        }
-      }
-    }
-
-    const normalizedVisibleModels = normalizeOpencodeVisibleModels(
-      opencodeSettings.visibleModels,
-      opencodeSettings.discoveredModels,
-    );
-    const normalizedPreferredThinking = normalizeOpencodePreferredThinkingByModel(
-      opencodeSettings.preferredThinkingByModel,
-      opencodeSettings.discoveredModels,
-    );
-    const shouldUpdateProviderSettings = !sameStringList(normalizedVisibleModels, opencodeSettings.visibleModels)
-      || !sameStringMap(normalizedPreferredThinking, opencodeSettings.preferredThinkingByModel);
-    if (shouldUpdateProviderSettings) {
-      updateOpencodeProviderSettings(settings, {
-        preferredThinkingByModel: normalizedPreferredThinking,
-        visibleModels: normalizedVisibleModels,
-      });
-      changed = true;
-    }
-
-    if (typeof settings.effortLevel === 'string' && !settings.effortLevel.trim()) {
-      settings.effortLevel = OPENCODE_DEFAULT_THINKING_LEVEL;
-      changed = true;
-    }
-
-    return changed;
-  },
-};
+} satisfies ProviderSettingsReconciler;

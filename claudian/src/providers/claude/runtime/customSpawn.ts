@@ -1,5 +1,6 @@
 import type { SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
-import { type ChildProcess, spawn } from 'child_process';
+import { type ChildProcess, spawn as nodeSpawn } from 'child_process';
+import crossSpawn from 'cross-spawn';
 
 import { cliPathRequiresNode, findNodeExecutable } from '../../../utils/env';
 import {
@@ -7,6 +8,8 @@ import {
   terminateSpawnedProcess,
   type WindowsCmdShimSpawnSpec,
 } from '../../../utils/windowsCmdShim';
+
+const spawn = crossSpawn as typeof nodeSpawn;
 
 export function createCustomSpawnFunction(
   enhancedPath: string
@@ -19,7 +22,8 @@ export function createCustomSpawnFunction(
 
     // The SDK only routes some script extensions through `node`; normalize the
     // remaining Node-backed paths here before Electron spawns with shell=false.
-    if (command === 'node' || cliPathRequiresNode(command)) {
+    const requiresNode = command === 'node' || cliPathRequiresNode(command);
+    if (requiresNode) {
       const nodeFullPath = findNodeExecutable(enhancedPath);
       if (command === 'node') {
         if (nodeFullPath) {
@@ -36,12 +40,12 @@ export function createCustomSpawnFunction(
     // Do not pass `signal` directly to spawn() — Obsidian's Electron runtime
     // uses a different realm for AbortSignal, causing `instanceof EventTarget`
     // checks inside Node's internals to fail. Handle abort manually instead.
-    const child = spawn(resolvedSpawnSpec.command, resolvedSpawnSpec.args, {
+    const spawnProcess = process.platform === 'win32' && requiresNode ? nodeSpawn : spawn;
+    const child = spawnProcess(resolvedSpawnSpec.command, resolvedSpawnSpec.args, {
       cwd,
       env: env,
       stdio: ['pipe', 'pipe', shouldPipeStderr ? 'pipe' : 'ignore'],
       windowsHide: true,
-      ...(resolvedSpawnSpec.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
     });
     installTreeAwareKill(child, resolvedSpawnSpec);
 

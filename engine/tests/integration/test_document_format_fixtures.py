@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 
 import pytest
 
@@ -108,14 +111,14 @@ def test_committed_office_and_pdf_fixtures_are_structurally_real() -> None:
 @pytest.mark.parametrize(
     ("filename", "quality", "expected"),
     [
-        ("text.pdf", ImportQuality.HIGH, ParserName.MARKITDOWN),
-        ("scan.pdf", ImportQuality.HIGH, ParserName.MARKITDOWN),
-        ("two-column.pdf", ImportQuality.HIGH, ParserName.MARKITDOWN),
-        ("formula.pdf", ImportQuality.HIGH, ParserName.MARKITDOWN),
-        ("text.pdf", ImportQuality.QUICK, ParserName.MARKITDOWN),
-        ("simple.docx", ImportQuality.HIGH, ParserName.MARKITDOWN),
-        ("slides.pptx", ImportQuality.HIGH, ParserName.MARKITDOWN),
-        ("legacy.doc", ImportQuality.HIGH, ParserName.MARKITDOWN),
+        ("text.pdf", ImportQuality.HIGH, ParserName.MINERU),
+        ("scan.pdf", ImportQuality.HIGH, ParserName.MINERU),
+        ("two-column.pdf", ImportQuality.HIGH, ParserName.MINERU),
+        ("formula.pdf", ImportQuality.HIGH, ParserName.MINERU),
+        ("text.pdf", ImportQuality.QUICK, ParserName.MINERU),
+        ("simple.docx", ImportQuality.HIGH, ParserName.MINERU),
+        ("slides.pptx", ImportQuality.HIGH, ParserName.MINERU),
+        ("legacy.doc", ImportQuality.HIGH, ParserName.MINERU),
     ],
 )
 def test_real_format_fixtures_complete_the_expected_pipeline(
@@ -162,6 +165,40 @@ def test_duplicate_pdf_reuses_one_original_and_records_both_names(tmp_path: Path
     assert first.stored_path == second.stored_path
     metadata = json.loads((first.stored_path.parent / "manifest.json").read_text("utf-8"))
     assert metadata["filenames"] == ["duplicate.pdf", "text.pdf"]
+
+
+def test_concurrent_duplicate_originals_preserve_every_filename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = OriginalStore(tmp_path / "originals")
+    first = store.ingest(FIXTURES / "text.pdf")
+    metadata = first.stored_path.parent / "manifest.json"
+    original_read = Path.read_text
+
+    def slow_manifest_read(
+        path: Path,
+        encoding: str | None = None,
+        errors: str | None = None,
+    ) -> str:
+        content = original_read(path, encoding=encoding, errors=errors)
+        if path == metadata:
+            time.sleep(0.02)
+        return content
+
+    monkeypatch.setattr(Path, "read_text", slow_manifest_read)
+    names = [f"duplicate-{index}.pdf" for index in range(8)]
+    ready = Barrier(len(names))
+
+    def ingest(name: str) -> None:
+        ready.wait(timeout=5)
+        store.ingest(FIXTURES / "text.pdf", filename=name)
+
+    with ThreadPoolExecutor(max_workers=len(names)) as pool:
+        list(pool.map(ingest, names))
+
+    manifest = json.loads(metadata.read_text(encoding="utf-8"))
+    assert manifest["filenames"] == sorted(["text.pdf", *names])
 
 
 def test_broken_pdf_is_failed_without_publishing_a_source(tmp_path: Path) -> None:

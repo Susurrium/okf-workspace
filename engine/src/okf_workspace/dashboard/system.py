@@ -2,20 +2,15 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
-import threading
-import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from importlib.metadata import version
 from pathlib import Path
 from typing import cast
-
-import httpx
 
 from okf_workspace.feeds import FeedKind
 from okf_workspace.governance import scan_governance
@@ -29,138 +24,6 @@ class SystemItem:
     status: str
     detail: str
     action: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class _ServiceProbe:
-    kind: str
-    expires_at: float
-    status_code: int | None = None
-
-
-_SERVICE_PROBE_CACHE: dict[tuple[str, str, bytes], _ServiceProbe] = {}
-_SERVICE_PROBE_LOCK = threading.Lock()
-
-
-def _probe_service(
-    url: str,
-    health_path: str,
-    headers: Mapping[str, str],
-    *,
-    cache_namespace: str,
-    timeouts: tuple[float, ...],
-    refresh: bool,
-    success_ttl_seconds: float,
-    failure_ttl_seconds: float,
-) -> _ServiceProbe:
-    endpoint = f"{url.rstrip('/')}{health_path}"
-    authorization_fingerprint = hashlib.sha256(
-        headers.get("Authorization", "").encode("utf-8")
-    ).digest()
-    cache_key = (cache_namespace, endpoint, authorization_fingerprint)
-    now = time.monotonic()
-    if not refresh:
-        with _SERVICE_PROBE_LOCK:
-            cached = _SERVICE_PROBE_CACHE.get(cache_key)
-        if cached is not None and cached.expires_at > now:
-            return cached
-
-    kind = "unreachable"
-    status_code: int | None = None
-    for attempt, timeout_seconds in enumerate(timeouts):
-        try:
-            response = httpx.get(
-                endpoint,
-                headers=dict(headers),
-                timeout=timeout_seconds,
-                trust_env=False,
-            )
-            status_code = response.status_code
-            if status_code == 200:
-                kind = "available"
-            elif status_code in {401, 403}:
-                kind = "authentication-failed"
-            else:
-                kind = "degraded"
-            if status_code not in {502, 504} or attempt == len(timeouts) - 1:
-                break
-        except httpx.TransportError:
-            if attempt == len(timeouts) - 1:
-                kind = "unreachable"
-
-    ttl_seconds = success_ttl_seconds if kind == "available" else failure_ttl_seconds
-    result = _ServiceProbe(
-        kind=kind,
-        status_code=status_code,
-        expires_at=time.monotonic() + ttl_seconds,
-    )
-    with _SERVICE_PROBE_LOCK:
-        _SERVICE_PROBE_CACHE[cache_key] = result
-    return result
-
-
-def _service_item(
-    item_id: str,
-    label: str,
-    url: str,
-    *,
-    health_path: str = "/health",
-    token_file: Path | None = None,
-    cache_namespace: str = "default",
-    probe_timeouts: tuple[float, ...] = (1.5,),
-    refresh: bool = False,
-    success_ttl_seconds: float = 60.0,
-    failure_ttl_seconds: float = 15.0,
-) -> SystemItem:
-    headers: dict[str, str] = {}
-    if token_file is not None:
-        try:
-            token = token_file.read_text(encoding="utf-8").strip()
-        except OSError:
-            token = ""
-        if not token:
-            return SystemItem(
-                item_id=item_id,
-                label=label,
-                status="unavailable",
-                detail="认证 token 未配置",
-                action=f"配置 {label} token 文件",
-            )
-        headers["Authorization"] = f"Bearer {token}"
-    probe = _probe_service(
-        url,
-        health_path,
-        headers,
-        cache_namespace=cache_namespace,
-        timeouts=probe_timeouts,
-        refresh=refresh,
-        success_ttl_seconds=success_ttl_seconds,
-        failure_ttl_seconds=failure_ttl_seconds,
-    )
-    if probe.kind == "authentication-failed":
-        return SystemItem(
-            item_id=item_id,
-            label=label,
-            status="unavailable",
-            detail="认证失败",
-            action=f"检查 {label} token",
-        )
-    if probe.kind == "degraded":
-        return SystemItem(
-            item_id=item_id,
-            label=label,
-            status="degraded",
-            detail=f"服务可连接，但健康检查异常；HTTP {probe.status_code}",
-            action=f"检查 {label} Worker 或存储状态",
-        )
-    available = probe.kind == "available"
-    return SystemItem(
-        item_id=item_id,
-        label=label,
-        status="available" if available else "unavailable",
-        detail="可用" if available else "当前无法连接",
-        action=None if available else f"启动或检查 {label}",
-    )
 
 
 def _conversion_failures(state: Path) -> int:
@@ -275,24 +138,19 @@ def system_status(
     root = vault.resolve()
     runtime = state.resolve()
     settings = ImportSettings.from_env()
-    cache_namespace = str(runtime)
+    token_file = settings.mineru_token_file
+    token_present = bool(token_file and token_file.is_file() and token_file.stat().st_size)
     mineru = SystemItem(
         "mineru",
-        "MinerU",
-        "deferred",
-        "当前暂不使用；文档默认由 MarkItDown 转换，仅保留显式高级调用能力",
+        "MinerU 云解析",
+        "configured" if token_present else "not-configured",
+        (
+            f"已配置本机 token 文件；模型：{settings.mineru_model}。连接状态由解析任务验证。"
+            if token_present else "尚未配置 MinerU token 文件，文档导入无法开始。"
+        ),
+        None if token_present else "配置本机 MinerU token 文件",
     )
-    markitdown = _service_item(
-        "markitdown",
-        "MarkItDown",
-        settings.markitdown_url,
-        health_path="/v1/health",
-        token_file=settings.markitdown_token_file,
-        cache_namespace=cache_namespace,
-        probe_timeouts=(1.5, 4.0),
-        refresh=refresh_services,
-    )
-    items = [markitdown, mineru]
+    items = [mineru]
     ai_mode = os.environ.get("OKF_AI_MODE", "codex").strip().casefold()
     if ai_mode == "codex":
         configured_command = os.environ.get("OKF_CODEX_COMMAND", "").strip()
@@ -322,10 +180,10 @@ def system_status(
         items.append(
             SystemItem(
                 "ai",
-                "AI Provider (可选)",
+                "其他 AI 服务 (可选)",
                 "configured" if ai_ready else "not-configured",
                 f"已配置模型：{ai_model}" if ai_ready else "尚未配置可调用的模型",
-                None if ai_ready else "配置 AI 地址、模型和 Vault 外密钥文件",
+                None if ai_ready else "配置 AI 服务地址、模型和凭据文件",
             )
         )
     index = runtime / "brain.sqlite"
@@ -353,13 +211,13 @@ def system_status(
     items.append(
         SystemItem(
             "semantic-operations",
-            "Codex 语义任务",
+            "后台生成",
             semantic_status,
             (
                 f"{failed_semantics} 个失败，{pending_semantics} 个运行或排队"
                 if failed_semantics
                 else (
-                    "后台 Worker 未运行，任务仍安全保留在队列中"
+                    "后台处理服务未运行，已排队任务仍然保留"
                     if pending_semantics and not semantic_worker_ready
                     else (
                         f"{pending_semantics} 个运行或排队" if pending_semantics else "没有失败任务"
@@ -368,7 +226,7 @@ def system_status(
             ),
             "查看并重试"
             if failed_semantics
-            else "重新打开 Obsidian 以启动 Worker"
+            else "重新打开 Obsidian 以启动后台处理"
             if pending_semantics and not semantic_worker_ready
             else None,
         )
@@ -377,14 +235,14 @@ def system_status(
     items.append(
         SystemItem(
             "governance",
-            "知识与链接治理",
+            "笔记与链接检查",
             "warning" if governance else "ok",
             (
                 f"{len(governance)} 个需要检查的问题"
                 if governance
-                else "标签、Wiki 状态和内部链接正常"
+                else "标签、知识笔记状态和内部链接正常"
             ),
-            "查看治理报告" if governance else None,
+            "查看检查结果" if governance else None,
         )
     )
     failures = _conversion_failures(runtime)
@@ -408,7 +266,7 @@ def system_status(
     livesync_configured = _livesync_is_configured(livesync_settings)
     if not livesync_required and not livesync_configured:
         livesync_status = "deferred"
-        livesync_detail = "已按计划延后；当前单机使用不受影响"
+        livesync_detail = "未启用，当前设备仍可正常使用"
         livesync_action = None
     elif not livesync.is_dir():
         livesync_status = "not-installed"
@@ -425,7 +283,7 @@ def system_status(
     items.append(
         SystemItem(
             "livesync",
-            "Self-hosted LiveSync (后续)",
+            "多设备同步 (LiveSync)",
             livesync_status,
             livesync_detail,
             livesync_action,
@@ -474,12 +332,12 @@ def system_status(
     items.append(
         SystemItem(
             "feeds",
-            "AI Daily / 树洞",
+            "每日资讯与树洞订阅",
             "not-configured"
             if not producer_config.is_file()
             else ("stale" if feed_stale else "ok"),
             (
-                "尚未配置 Feed producer"
+                "尚未连接订阅服务"
                 if not producer_config.is_file()
                 else (
                     f"最近更新：{latest_feed_at.astimezone().isoformat(timespec='minutes')}"
@@ -487,7 +345,7 @@ def system_status(
                     else "尚未完成首次同步"
                 )
             ),
-            "配置 Feed producer"
+            "配置订阅服务"
             if not producer_config.is_file()
             else ("立即同步" if feed_stale else None),
         )

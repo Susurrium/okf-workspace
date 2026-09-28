@@ -338,13 +338,26 @@ export class LocalApi {
       });
     } catch (error) {
       if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) {
-        throw new Error("Workspace 本地服务响应超时");
+        throw new Error("本地服务响应超时，请稍后重试。仍可阅读和编辑笔记，导入与生成暂不可用。", { cause: error });
       }
-      throw error;
+      throw new Error(
+        "无法连接本地服务，请在系统状态中检查连接。仍可阅读和编辑笔记，导入与生成暂不可用。",
+        { cause: error instanceof Error ? error : undefined },
+      );
     }
     if (!response.ok) {
-      const message = await response.text();
-      throw new Error(message || `Workspace API request failed (${response.status})`);
+      const detail = await response.text();
+      const messages: Record<number, string> = {
+        400: "操作未完成，请检查输入后重试。",
+        401: "本地服务认证失败，请在连接设置中检查凭据。",
+        403: "当前操作没有权限，请检查连接设置。",
+        404: "内容已不存在或服务版本不匹配，请刷新后重试。",
+        409: "内容或任务状态已变化，请刷新后重试。",
+        422: "输入内容不符合要求，请检查后重试。",
+      };
+      throw new Error(messages[response.status] ?? "本地服务处理失败，请在系统状态中检查后重试。", {
+        cause: { status: response.status, detail },
+      });
     }
     return (await response.json()) as T;
   }

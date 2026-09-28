@@ -22,16 +22,16 @@ describe("capture context", () => {
 
   it("rejects relations that do not identify the canonical context note", () => {
     expect(() => normalizeCaptureRelation({ course: "learning/courses/cs61a" }))
-      .toThrow("Course 关联必须指向");
+      .toThrow("课程 关联必须指向");
     expect(() => normalizeCaptureRelation({ project: "projects/okf/log.md" }))
-      .toThrow("Project 关联必须指向");
+      .toThrow("项目 关联必须指向");
   });
 
   it("uses the confirmed two-step labels and searches contexts by title or path", () => {
     expect(CAPTURE_ENTRY_ACTION_LABELS).toEqual([
-      "直接保存到 Inbox",
-      "关联 Course 后保存",
-      "关联 Project 后保存",
+      "直接保存到待处理",
+      "关联课程后保存",
+      "关联项目后保存",
     ]);
     const options = [
       { path: "learning/courses/cs61a/course.md", title: "计算机程序构造" },

@@ -25,6 +25,12 @@ class ImportIntent(StrEnum):
     COURSE = "course"
 
 
+def requires_semantic_generation(intent: ImportIntent, generate: bool) -> bool:
+    return intent is ImportIntent.WIKI or (
+        generate and intent in {ImportIntent.LEARN, ImportIntent.COURSE}
+    )
+
+
 class ConversionStatus(StrEnum):
     QUEUED = "queued"
     CONVERTING = "converting"

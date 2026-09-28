@@ -45,7 +45,7 @@ class DecisionWidget extends WidgetType {
     const controls = container.createSpan({ cls: "okf-feed-decisions" });
     const mapping = editorFeedMapping(this.app, this.file, this.blockId);
     if (!mapping) {
-      summary.setText("未找到这条内容的 Feed 映射");
+      summary.setText("未找到这条内容的订阅映射");
       return container;
     }
     renderFeedDecisionFlow(controls, summary, {

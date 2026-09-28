@@ -37,6 +37,7 @@ from okf_workspace.ai import (
     ExplicitAIWorkflows,
     provider_from_env,
 )
+from okf_workspace.ai.workflows import AIInputTooLarge, AIOutputError
 from okf_workspace.config import BrainPaths
 from okf_workspace.dashboard.catalog import scan_notes
 from okf_workspace.dashboard.feeds import (
@@ -85,6 +86,7 @@ from okf_workspace.notes.captures import (
 )
 from okf_workspace.notes.web_captures import publish_web_capture
 from okf_workspace.notes.web_media import mirror_web_source_images
+from okf_workspace.okf.file_io import FileWriteConflict
 from okf_workspace.okf.frontmatter import read_document, write_document
 from okf_workspace.okf.paths import resolve_bundle_path
 from okf_workspace.projections.navigation import rebuild_root_index
@@ -102,6 +104,8 @@ from okf_workspace.semantic import (
 from okf_workspace.semantic.worker import SemanticWorker, SemanticWorkerProcess
 
 from .auth import LocalTokenStore
+
+MAX_DOCUMENT_UPLOAD_BYTES = 64 * 1024 * 1024
 
 
 class CaptureRequest(BaseModel):
@@ -198,6 +202,8 @@ class FeedDecisionRequest(BaseModel):
         "source-only",
         "ignore",
     ]
+    course: str | None = Field(default=None, max_length=500)
+    project: str | None = Field(default=None, max_length=500)
 
 
 class DocumentRouteRequest(BaseModel):
@@ -299,7 +305,7 @@ def _conversion_public(record: dict[str, object], vault: Path) -> dict[str, obje
             }.get(name, name)
             if public_name in {"source", "source_text", "routed_target"}:
                 outputs[public_name] = _relative(Path(value), vault)
-            elif name != "export":
+            elif name not in {"export", "source_text_sha256"}:
                 outputs[name] = value
     result["outputs"] = outputs
     return result
@@ -459,6 +465,24 @@ def create_app(
     @app.exception_handler(FileNotFoundError)
     def missing_resource(_request: Request, _error: FileNotFoundError) -> JSONResponse:
         return JSONResponse(status_code=404, content={"detail": "resource not found"})
+
+    @app.exception_handler(FileExistsError)
+    def existing_resource(_request: Request, _error: FileExistsError) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": "target already exists"})
+
+    @app.exception_handler(FileWriteConflict)
+    def stale_ai_write(_request: Request, _error: FileWriteConflict) -> JSONResponse:
+        return JSONResponse(
+            status_code=409, content={"detail": "target changed during AI generation"}
+        )
+
+    @app.exception_handler(AIInputTooLarge)
+    def ai_input_too_large(_request: Request, error: AIInputTooLarge) -> JSONResponse:
+        return JSONResponse(status_code=413, content={"detail": str(error)})
+
+    @app.exception_handler(AIOutputError)
+    def invalid_ai_output(_request: Request, error: AIOutputError) -> JSONResponse:
+        return JSONResponse(status_code=502, content={"detail": str(error)})
 
     @app.exception_handler(ValueError)
     def invalid_request(_request: Request, error: ValueError) -> JSONResponse:
@@ -826,9 +850,23 @@ def create_app(
     ) -> dict[str, object]:
         filename = Path(file.filename or "upload.bin").name
         upload = configured.state / "uploads" / f"{uuid.uuid4()}-{filename}"
-        upload.parent.mkdir(parents=True, exist_ok=True)
-        upload.write_bytes(await file.read())
         try:
+            if file.size is not None and file.size > MAX_DOCUMENT_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"document upload exceeds {MAX_DOCUMENT_UPLOAD_BYTES} bytes",
+                )
+            upload.parent.mkdir(parents=True, exist_ok=True)
+            total_bytes = 0
+            with upload.open("wb") as target:
+                while chunk := await file.read(1024 * 1024):
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_DOCUMENT_UPLOAD_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"document upload exceeds {MAX_DOCUMENT_UPLOAD_BYTES} bytes",
+                        )
+                    target.write(chunk)
             import_request = ImportRequest(
                 source=upload,
                 intent=ImportIntent(intent),
@@ -845,28 +883,13 @@ def create_app(
             result = configured_importer.import_document(import_request)
         finally:
             upload.unlink(missing_ok=True)
-        semantic_operation: dict[str, object] | None = None
-        wants_study = result.routed_target is not None and (
-            result.status is ConversionStatus.IMPORTED
-            and ImportIntent(intent) in {ImportIntent.LEARN, ImportIntent.COURSE}
-            and generate
-        )
-        wants_wiki = result.routed_target is not None and ImportIntent(intent) is ImportIntent.WIKI
-        if (wants_study or wants_wiki) and semantic_service is not None:
-            target = _relative(cast(Path, result.routed_target), configured.vault)
-            sources = tuple(
-                _relative(Path(path), configured.vault)
-                for path in (result.source, result.source_text)
-                if path is not None
-            )
-            semantic_operation = semantic_service.enqueue(
-                SemanticKind.GENERATE_STUDY_GUIDE if wants_study else SemanticKind.GENERATE_WIKI,
-                target,
-                sources=sources,
-                course=course,
-                project=project,
-            )
+        semantic_operation = DocumentImportWorker(
+            configured_importer, semantic_service=semantic_service,
+        ).enqueue_semantic(result.conversion_id)
         return {
+            **_conversion_public(
+                configured_importer.store.load(result.conversion_id), configured.vault,
+            ),
             "conversion_id": result.conversion_id,
             "status": result.status.value,
             "parser": result.parser.value,
@@ -1006,6 +1029,8 @@ def create_app(
             item,
             DecisionAction(request.action),
             checkpoint=False,
+            course=request.course,
+            project=request.project,
         )
         public = asdict(result)
         for key in ("source", "source_text", "study_guide", "wiki"):
@@ -1029,6 +1054,8 @@ def create_app(
                 else SemanticKind.GENERATE_WIKI,
                 _relative(Path(target_path), configured.vault),
                 sources=sources,
+                course=request.course,
+                project=request.project,
             )
             FeedDecisionService(configured.vault, configured.state).store.attach_semantic_operation(
                 item,

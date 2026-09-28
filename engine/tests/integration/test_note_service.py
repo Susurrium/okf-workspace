@@ -69,7 +69,7 @@ def test_periodic_reviews_are_human_first_and_idempotent(tmp_path: Path) -> None
     weekly_document = read_document(weekly)
     assert weekly_document.frontmatter == {
         "type": "Review",
-        "title": "2026-W34 Weekly Review",
+        "title": "2026-W34 每周复盘",
         "created_at": NOW.isoformat(timespec="seconds"),
     }
     assert "复盘范围：2026-08-17 — 2026-08-23" in weekly_document.body

@@ -19,7 +19,7 @@ class RecordingProvider(ChatProvider):
         self.user_prompt = ""
 
     def complete(self, *, system: str, user: str) -> str:
-        assert "只能把“实际读取的本地笔记”" in system
+        assert "请根据本次实际读取的用户本地笔记回答问题" in system
         self.user_prompt = user
         return "本地笔记指出同步不能替代独立备份。[笔记 1]"
 

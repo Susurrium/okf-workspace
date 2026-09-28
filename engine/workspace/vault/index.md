@@ -2,78 +2,55 @@
 okf_version: "0.2"
 ---
 
-# Workspace 总目录
+# 笔记导航
 
-这是供人查看的稳定目录。日常操作从 Dashboard 进入；AI 检索会定位并读取真实 Markdown，不依赖本页内容。
+日常操作从 Obsidian 左侧的“工作台”进入，也可以通过这里浏览笔记。
 
-## 1. 日常入口
+| 想做什么 | 入口 |
+|---|---|
+| 记录今天、继续学习或推进项目 | 工作台 → 今天 |
+| 整理随手记录和导入资料 | 工作台 → 待处理 |
+| 阅读订阅与每日更新 | 工作台 → 订阅阅读 |
+| 查看课程和学习笔记 | [学习目录](system/views/Learning.md) |
+| 查看项目进度 | [项目目录](system/views/Projects.md) |
+| 查找知识笔记和主题导航 | [知识目录](system/views/Knowledge.md) |
+| 查看未完成任务 | [任务](system/views/Tasks.md) |
+| 写日记、反思和复盘 | 工作台 → 生活 |
+| 查看后台任务或解决连接问题 | 工作台 → 系统状态 |
 
-| 入口 | 位置 | 用途 |
-|---|---|---|
-| Dashboard | Obsidian 左侧 Workspace 图标 | 快速创建、导入、筛选、查看进度和跳转 |
-| Today | `life/daily/YYYY/MM/YYYY-MM-DD.md` | 今日日记、随手记录和明确任务 |
-| Inbox | `inbox/captures/YYYY/MM/` | 尚未确定去向的输入 |
-| Reading | Dashboard → Reading | 浏览 RSS、周刊、教程与工具更新；明确选择后才进入 Learning |
-| Tasks | [正式任务视图](system/views/Tasks.md) | 汇总带 `#task` 的未完成任务 |
+## 保存与整理资料
 
-## 2. 内容结构
+导入文档、剪藏网页或阅读订阅后，可以选择：
 
-### Learning
+- **现在学习**：保存资料，并生成辅助学习材料。
+- **稍后学习**：保存资料，之后从学习页继续。
+- **整理为知识笔记**：直接提炼可长期查用的内容，无需先完成学习。
+- **只保存资料**：保留已获取的正文或摘要，供以后参考。
 
-- [学习视图](system/views/Learning.md)
-- `learning/courses/<course>/course.md`：Course 主页
-- `learning/courses/<course>/lessons/`：Lesson 原始记录与整理
-- `learning/courses/<course>/guides/`：课程内 Study Guide
-- `learning/guides/`：不属于某个课程的 Study Guide
+是否学习、是否值得保留由你决定。生成完成不会自动标记为已学完。
 
-### Projects
+## 文件位置参考
 
-- [项目视图](system/views/Projects.md)
-- `projects/<project>/project.md`：Project 目标和当前状态
-- `projects/<project>/log.md`：无 YAML 的连续进展日志
-- `projects/<project>/decisions/`：需要独立追溯的 Decision
-- `projects/<project>/outputs/`：项目产物
+| 内容 | 位置 |
+|---|---|
+| 待整理的随手记录 | `inbox/captures/` |
+| 课程主页、课堂笔记和课程学习笔记 | `learning/courses/` |
+| 独立学习笔记 | `learning/guides/` |
+| 项目主页 | `projects/<project>/project.md` |`r`n| 项目日志 | `projects/<project>/log.md` |`r`n| 项目决策与产物 | `projects/<project>/decisions/`、`projects/<project>/outputs/` |
+| 知识笔记与知识导航 | `knowledge/wiki/`、`knowledge/maps/` |
+| 日记、反思与复盘 | `life/daily/`、`life/reflections/`、`life/reviews/` |
+| 个人方向、偏好和当前重点 | `self/` |
+| 资料的来源信息与正文 | `sources/records/`、`sources/text/` |
+| 已打开的订阅汇总 | `feeds/` |
 
-### Knowledge
+## 系统资源
 
-- `knowledge/wiki/`：长期复用的 Wiki 正文
-- `knowledge/maps/`：组织 Wiki 关系和阅读路径的 Wiki Map
+- [助手工作规则](AGENTS.md)
+- [笔记格式规范](system/contracts/README.md)
+- `system/templates/core/`：日记模板
+- `system/templates/interactive/`：手动创建反思、复盘等内容的模板
+- `system/templates/canonical/`：程序新建笔记时使用的模板
+- `system/integrations/web-clipper/`：浏览器网页剪藏模板
+- `system/reports/`：笔记与链接检查报告
 
-### Life & Self
-
-- `life/daily/`：Daily
-- `life/reflections/`：Reflection
-- `life/reviews/`：Review
-- `self/`：Profile 类型的方向、约束、能力、偏好和当前重点
-
-## 3. 外部输入链路
-
-```text
-本地文件 → Original → Source → Source Text ┐
-网页剪藏 → Capture  → Source → Source Text ├→ Study Guide → Wiki → Wiki Map
-Feed     → Digest   → Source → Source Text ┘
-```
-
-- `feeds/ai-daily/`、`feeds/treehole/`：Today 和 Reading 打开后物化的原生 Digest；列表与历史目录仍由 Vault 外 Feed cache 提供
-- `sources/records/<kind>/`：Source 身份、原件资源和持久用途列表 `uses[]`
-- `sources/text/<kind>/`：转换、Feed 或 Web Clipper 得到的完整 Source Text
-- `system/integrations/web-clipper/`：每个浏览器一次性导入的官方 Web Clipper 模板
-- Original、运行状态、Feed cache、检索数据库和密钥保存在 Vault 外
-
-## 4. 系统与协作
-
-- [Agent Policy](AGENTS.md)
-- [OKF Profile Contracts](system/contracts/README.md)
-- `system/templates/canonical/`：Dashboard 和程序使用的正文模板
-- `system/templates/core/`：Obsidian Core 插件模板
-- `system/templates/interactive/`：供人手动调用的模板
-- `system/views/`：Dataview、Tasks 等原生插件视图
-- `system/reports/`：可读治理报告
-
-## 5. 最短工作流
-
-1. 随手内容写入 Daily 或 Capture；外部文档从 Dashboard 导入。
-2. 由你决定：现在学习、稍后学习、直接生成 Wiki 或只保留 Source；Feed 暂时不判断时直接离开。
-3. 第一版 Study Guide 使用 `$prepare-study-guide`；讨论后使用 `$update-study-guide`。
-4. 长期沉淀使用 `$distill-wiki`；需要主题导航时使用 `$maintain-wiki-map`。
-5. Project 进展写入 `log.md`，当前状态同步回 `project.md`。
+原文件、运行状态、订阅缓存、检索数据库和密钥保存在笔记库外。此页仅用于导航，不参与检索或决定笔记状态。

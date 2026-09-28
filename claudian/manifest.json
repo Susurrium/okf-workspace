@@ -1,10 +1,10 @@
 {
   "id": "okf-claudian",
-  "name": "OKF Claudian",
-  "version": "2.1.4-okf.3",
-  "minAppVersion": "1.7.2",
-  "description": "Embeds Codex in Obsidian as the interactive AI layer for OKF Workspace, with minimal prompt mode and structured Dashboard handoffs.",
+  "name": "Claudian",
+  "version": "2.3.6-okf.4",
+  "minAppVersion": "1.13.0",
+  "description": "Embeds Claude Code, Codex, and other coding agents as AI collaborators in your vault. Your vault becomes their working directory, giving them capabilities for file reads and writes, search, bash commands, and multi-step workflows.",
   "author": "susurrus, based on Claudian by Yishen Tu",
-  "authorUrl": "https://github.com/YishenTu/claudian",
+  "authorUrl": "https://github.com/YishenTu",
   "isDesktopOnly": true
 }

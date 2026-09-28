@@ -188,12 +188,15 @@ def normalize_zip(
             elif parser is ParserName.MARKITDOWN and normalized == "manifest.json":
                 markitdown_manifest = data
             elif path.suffix.casefold() in ASSET_SUFFIXES:
-                if parser is ParserName.MARKITDOWN and path.suffix.casefold() == ".svg":
-                    raise ValueError("MarkItDown SVG assets are not safe to publish")
+                if path.suffix.casefold() == ".svg":
+                    raise ValueError("SVG assets are not safe to publish")
                 assets[normalized] = data
     if not markdown_candidates:
         raise ValueError("parser ZIP contains no Markdown")
-    preferred = [item for item in markdown_candidates if item[0] == "document.md"]
+    preferred = [
+        item for item in markdown_candidates
+        if PurePosixPath(item[0]).name in {"document.md", "full.md"}
+    ]
     if not preferred:
         preferred = [
             item for item in markdown_candidates if item[0].casefold().endswith("_full.md")

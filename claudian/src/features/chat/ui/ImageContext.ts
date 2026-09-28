@@ -1,8 +1,12 @@
 import { Notice } from 'obsidian';
 import * as path from 'path';
 
+import type { ComposerInputElement } from '@/shared/composer-dropdown/types';
+
 import type { ImageAttachment, ImageMediaType } from '../../../core/types';
+import { normalizeImageMediaType } from '../../../utils/imageAttachment';
 import { ComposerContextTray } from './ComposerContextTray';
+import { ImagePreviewModal } from './ImagePreviewModal';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 
@@ -15,7 +19,6 @@ const IMAGE_EXTENSIONS: Record<string, ImageMediaType> = {
 };
 
 export interface ImageContextCallbacks {
-  onImagesChanged?: () => void;
   onUserImagesChanged?: () => void;
 }
 
@@ -24,13 +27,14 @@ export class ImageContextManager {
   private containerEl: HTMLElement;
   private contextTray: ComposerContextTray;
   private ownedContextTray: ComposerContextTray | null = null;
-  private inputEl: HTMLTextAreaElement;
+  private inputEl: ComposerInputElement;
   private dropOverlay: HTMLElement | null = null;
   private dropZoneEl: HTMLElement | null = null;
   private attachedImages: Map<string, ImageAttachment> = new Map();
-  private closeImageModal: (() => void) | null = null;
+  private readonly imagePreviewModal = new ImagePreviewModal();
   private destroyed = false;
   private enabled = true;
+  private attachmentGeneration = 0;
   private readonly dragEnterHandler = (event: DragEvent): void => this.handleDragEnter(event);
   private readonly dragOverHandler = (event: DragEvent): void => this.handleDragOver(event);
   private readonly dragLeaveHandler = (event: DragEvent): void => this.handleDragLeave(event);
@@ -38,12 +42,12 @@ export class ImageContextManager {
     void this.handleDrop(event);
   };
   private readonly pasteHandler = (event: ClipboardEvent): void => {
-    void this.handlePaste(event);
+    void this.#handlePaste(event);
   };
 
   constructor(
     containerEl: HTMLElement,
-    inputEl: HTMLTextAreaElement,
+    inputEl: ComposerInputElement,
     callbacks: ImageContextCallbacks,
     previewContainerEl?: HTMLElement,
     contextTray?: ComposerContextTray,
@@ -60,8 +64,8 @@ export class ImageContextManager {
     }
 
     try {
-      this.setupDragAndDrop();
-      this.setupPasteHandler();
+      this.#setupDragAndDrop();
+      this.#setupPasteHandler();
     } catch (error) {
       this.destroy();
       throw error;
@@ -70,7 +74,7 @@ export class ImageContextManager {
 
   setEnabled(enabled: boolean): void {
     this.enabled = enabled;
-    if (!enabled && this.attachedImages.size > 0) {
+    if (!enabled) {
       this.clearImages();
     }
   }
@@ -84,25 +88,25 @@ export class ImageContextManager {
   }
 
   clearImages() {
+    this.attachmentGeneration += 1;
     this.attachedImages.clear();
     this.updateImagePreview();
-    this.callbacks.onImagesChanged?.();
   }
 
   /** Sets images directly (used for queued messages). */
   setImages(images: ImageAttachment[]) {
+    this.attachmentGeneration += 1;
     this.attachedImages.clear();
     for (const image of images) {
       this.attachedImages.set(image.id, image);
     }
     this.updateImagePreview();
-    this.callbacks.onImagesChanged?.();
   }
 
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    this.inputEl.removeEventListener('paste', this.pasteHandler);
+    this.inputEl.removeEventListener('paste', this.pasteHandler, true);
     if (this.dropZoneEl) {
       this.dropZoneEl.removeEventListener('dragenter', this.dragEnterHandler);
       this.dropZoneEl.removeEventListener('dragover', this.dragOverHandler);
@@ -112,14 +116,14 @@ export class ImageContextManager {
     }
     this.dropOverlay?.remove();
     this.dropOverlay = null;
-    this.closeImageModal?.();
+    this.imagePreviewModal.close();
     this.attachedImages.clear();
     this.contextTray.clearItems('images');
     this.ownedContextTray?.destroy();
     this.ownedContextTray = null;
   }
 
-  private setupDragAndDrop() {
+  #setupDragAndDrop() {
     const inputWrapper = this.containerEl.querySelector('.claudian-input-wrapper') as HTMLElement;
     if (!inputWrapper) return;
     this.dropZoneEl = inputWrapper;
@@ -197,7 +201,9 @@ export class ImageContextManager {
     const files = e.dataTransfer?.files;
     if (!files) return;
 
+    const generation = this.attachmentGeneration;
     for (let i = 0; i < files.length; i++) {
+      if (this.destroyed || generation !== this.attachmentGeneration) return;
       const file = files[i];
       if (this.isImageFile(file)) {
         await this.addImageFromFile(file, 'drop');
@@ -205,11 +211,11 @@ export class ImageContextManager {
     }
   }
 
-  private setupPasteHandler() {
-    this.inputEl.addEventListener('paste', this.pasteHandler);
+  #setupPasteHandler() {
+    this.inputEl.addEventListener('paste', this.pasteHandler, true);
   }
 
-  private async handlePaste(e: ClipboardEvent): Promise<void> {
+  async #handlePaste(e: ClipboardEvent): Promise<void> {
     if (this.destroyed) return;
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -248,15 +254,16 @@ export class ImageContextManager {
       return false;
     }
 
-    const mediaType = this.getMediaType(file.name) || (file.type as ImageMediaType);
+    const mediaType = this.getMediaType(file.name) ?? normalizeImageMediaType(file.type);
     if (!mediaType) {
       this.notifyImageError('Unsupported image type.');
       return false;
     }
 
+    const generation = this.attachmentGeneration;
     try {
       const base64 = await this.fileToBase64(file);
-      if (this.destroyed) return false;
+      if (this.destroyed || !this.enabled || generation !== this.attachmentGeneration) return false;
 
       const attachment: ImageAttachment = {
         id: this.generateId(),
@@ -269,11 +276,10 @@ export class ImageContextManager {
 
       this.attachedImages.set(attachment.id, attachment);
       this.updateImagePreview();
-      this.callbacks.onImagesChanged?.();
       this.callbacks.onUserImagesChanged?.();
       return true;
     } catch (error) {
-      if (this.destroyed) return false;
+      if (this.destroyed || !this.enabled || generation !== this.attachmentGeneration) return false;
       this.notifyImageError('Failed to attach image.', error);
       return false;
     }
@@ -300,13 +306,11 @@ export class ImageContextManager {
       id,
       kind: 'image' as const,
       label: images.length === 1 ? 'Image' : `Image ${index + 1}`,
-      title: `${image.name} · ${this.formatSize(image.size)}`,
-      ariaLabel: `Image attachment: ${image.name}`,
+      ariaLabel: `Image attachment: ${image.name} · ${this.formatSize(image.size)}`,
       onActivate: () => this.showFullImage(image),
       onRemove: () => {
         this.attachedImages.delete(id);
         this.updateImagePreview();
-        this.callbacks.onImagesChanged?.();
         this.callbacks.onUserImagesChanged?.();
       },
     })));
@@ -314,45 +318,9 @@ export class ImageContextManager {
 
   private showFullImage(image: ImageAttachment) {
     if (this.destroyed) return;
-    this.closeImageModal?.();
 
     const ownerDocument = this.containerEl.ownerDocument ?? window.document;
-    const overlay = ownerDocument.body.createDiv({ cls: 'claudian-image-modal-overlay' });
-    const modal = overlay.createDiv({ cls: 'claudian-image-modal' });
-
-    modal.createEl('img', {
-      attr: {
-        src: `data:${image.mediaType};base64,${image.data}`,
-        alt: image.name,
-      },
-    });
-
-    const closeBtn = modal.createDiv({ cls: 'claudian-image-modal-close' });
-    closeBtn.setText('\u00D7');
-
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        close();
-      }
-    };
-
-    let isClosed = false;
-    const close = () => {
-      if (isClosed) return;
-      isClosed = true;
-      ownerDocument.removeEventListener('keydown', handleEsc);
-      overlay.remove();
-      if (this.closeImageModal === close) {
-        this.closeImageModal = null;
-      }
-    };
-
-    closeBtn.addEventListener('click', close);
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) close();
-    });
-    ownerDocument.addEventListener('keydown', handleEsc);
-    this.closeImageModal = close;
+    this.imagePreviewModal.open(ownerDocument, image);
   }
 
   private generateId(): string {

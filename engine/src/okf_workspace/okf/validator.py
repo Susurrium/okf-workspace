@@ -55,11 +55,14 @@ def _relative(path: Path, vault: Path) -> str:
 
 
 def _is_skipped(path: Path, vault: Path) -> bool:
+    relative = path.relative_to(vault).as_posix()
     parts = path.relative_to(vault).parts
     return (
         path.name in _CONTROL_FILES
         or any(part in _SKIPPED_DIRECTORIES for part in parts)
         or (len(parts) >= 2 and parts[0] == "system" and parts[1] in _SKIPPED_SYSTEM_SECTIONS)
+        or relative == "dashboard.md"
+        or relative.startswith(".dashboard-backup/")
     )
 
 

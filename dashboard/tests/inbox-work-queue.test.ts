@@ -13,6 +13,12 @@ import {
 } from "../src/domain/inbox-work-queue.js";
 
 describe("Inbox work queue", () => {
+  it("keeps failed generation handoffs visible after conversion succeeded", () => {
+    const pending = { ...conversion("imported", "pending"), stages: { semantic: "failed" }, error: "queue busy" };
+    const attached = { ...pending, conversion_id: "attached", outputs: { semantic_operation_id: "op-1" } };
+    const queue = buildInboxWorkQueue({ captures: [], processed_captures: [], pending_imports: [] }, [pending, attached]);
+    expect(queue.conversion.map((item) => item.conversion.conversion_id)).toEqual(["conv-pending"]);
+  });
   it("exposes only the four explicit Web Capture publication actions", () => {
     expect(WEB_CAPTURE_ACTIONS.map((item) => item.action)).toEqual([
       "learn-now",

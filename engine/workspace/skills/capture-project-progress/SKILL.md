@@ -1,18 +1,16 @@
 ---
 name: capture-project-progress
-description: Record durable progress, decisions, blockers, and next actions in one existing Workspace Project. Use only when the user explicitly asks to record or organize project progress. Do not trigger merely because project work is being discussed.
+description: 在用户明确要求记录或整理项目进展时，更新一个 Workspace Project 的日志与当前状态。用于持久保存已发生的进展、决定、阻塞和下一步；普通项目讨论不自动触发。
 ---
 
-# Capture Project Progress
+# 记录项目进展
 
-Capture what changed without turning the project log into a transcript.
+让 `log.md` 保留真实过程，让 `project.md` 给出可继续行动的当前快照。记录实际变化及其影响，不把对话逐句搬进项目。
 
-1. Identify exactly one Project and read its `project.md` and `log.md`. Read related Decisions, outputs, Sources, or Study Guides only when the update depends on them.
-2. Separate user-reported events, tool-verified results, user decisions, AI proposals, blockers, and possible next steps. Do not promote a suggestion into a decision.
-3. Read `system/contracts/base.yaml` and `system/contracts/project.yaml` before creating files or changing project structure. These YAML Contracts are the only format authority.
-4. Append a dated log entry describing what happened, why it matters, confirmed decisions, blockers, and the immediate next action. Preserve all earlier log entries.
-5. Update only the managed current-state region in `project.md` so it reflects the log. Use the file modification time for recency; do not maintain an `updated_at` field.
-6. Create a separate `Decision` only for a consequential choice whose alternatives, rationale, and consequences deserve durable treatment.
-7. Create formal tasks only from explicit commitments. Link detailed learning material or Wiki notes instead of duplicating them in the log.
+1. 从明确路径或当前项目确定一项 Project，完整读取 `project.md` 和 `log.md`；只有进展依赖相关 Decision、成果或资料时再读取它们。若多个项目同样可能且无法判断，再询问。
+2. 区分用户报告的事件、工具实际验证的结果、已确认决定、AI 提议、阻塞和可能的下一步。写清发生了什么、为何影响项目、当前还缺什么证据；不要把计划说成已完成，也不要把建议升级为决定。
+3. 在 `log.md` 追加一条有日期的过程记录，保留既有记录。内容按本次变化取舍：重要结果写具体，细节资料使用链接，不默认填写“进展/决定/阻塞/下一步”四个空栏目。
+4. 只在当前状态确实变化时更新 `project.md` 的 `project-current-state` 区域，使其与日志一致；无变化时不重写快照。只有影响后续行动的具体事项才写下一步，不机械生成行动清单。
+5. 有足够明确且重要的选择需要长期追溯时，可另建 Decision；创建前读取 `system/contracts/decision.yaml`，记录真实备选、理由和后果。正式任务只来自用户明确承诺，按 Vault 任务格式去重；不把 AI 建议或一般可能性变成任务。
 
-Do not silently change scope, completion criteria, project status, or user-authored sections. Mark completion only when the user explicitly confirms it. Report all written paths and the resulting next action.
+创建文件或结构性修改前读取 `system/contracts/base.yaml` 和 `system/contracts/project.yaml`。保留人工正文、未知 frontmatter 和既有任务；不用 `updated_at` 表示新近程度，也不自行改变项目范围、完成标准或 `project_status`，完成须由用户明确确认。交付前核对日志与快照是否一致、事实与提议是否分清、有没有重复任务。报告所有写入路径和当前确有依据的下一步。

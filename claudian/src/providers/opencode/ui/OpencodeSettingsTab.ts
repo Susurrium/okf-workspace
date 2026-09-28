@@ -1,274 +1,166 @@
 import * as fs from 'fs';
 import { Setting } from 'obsidian';
 
+import { probeCLIInstallation } from '@/core/providers/cli/CLIInstallationProbe';
+import { getRuntimeEnvironmentVariables } from '@/core/providers/providerEnvironment';
+import type { ProviderCLIResolver } from '@/core/providers/types';
+import { OPENCODE_PROVIDER_ICON } from '@/shared/icons';
+import { renderCLIInstallationSetting } from '@/shared/settings/CLIInstallationSetting';
+
+import type { ProviderModelCatalog } from '../../../core/providers/models/ProviderModelCatalog';
 import { ProviderSettingsCoordinator } from '../../../core/providers/ProviderSettingsCoordinator';
 import type {
-  ProviderSettingsTabRenderer,
-  ProviderSettingsTabRendererContext,
+  ProviderSettingsTabRenderer
 } from '../../../core/providers/types';
 import { t } from '../../../i18n/i18n';
 import { renderEnvironmentSettingsSection } from '../../../shared/settings/EnvironmentSettingsSection';
-import { renderHostnameCliPathSetting } from '../../../shared/settings/HostnameCliPathSetting';
-import { renderNativeMcpSettingsSection } from '../../../shared/settings/NativeMcpSettingsSection';
-import { renderProviderEnablementSetting } from '../../../shared/settings/ProviderEnablementSetting';
+import type { ProviderEnablementSettingOptions } from '../../../shared/settings/ProviderEnablementSetting';
 import {
   renderLastEnabledProviderWarning,
   renderProviderModelEnablementWarning,
 } from '../../../shared/settings/ProviderModelEnablementWarning';
-import {
-  type ProviderModelPickerModel,
-  type ProviderModelPickerState,
-  renderProviderModelPicker,
-} from '../../../shared/settings/ProviderModelPicker';
+import { renderProviderModelsSection } from '../../../shared/settings/ProviderModelsSection';
 import { getHostnameKey } from '../../../utils/env';
-import { expandHomePath } from '../../../utils/path';
-import { maybeGetOpencodeWorkspaceServices } from '../app/OpencodeWorkspaceServices';
-import { clearOpencodeDiscoveryState } from '../discoveryState';
-import { sameStringList } from '../internal/compareCollections';
-import { OpencodeMetadataService } from '../metadata/OpencodeMetadataService';
-import {
-  buildOpencodeBaseModels,
-  encodeOpencodeModelId,
-  type OpencodeDiscoveredModel,
-  splitOpencodeModelLabel,
-} from '../models';
+import { normalizeConfiguredCLIPath } from '../../../utils/path';
+import type { OpencodeMetadataService } from '../metadata/OpencodeMetadataService';
 import {
   getOpencodeProviderSettings,
-  normalizeOpencodeVisibleModels,
-  OPENCODE_DEFAULT_ENVIRONMENT_VARIABLES,
-  updateOpencodeProviderSettings,
+  updateOpencodeProviderSettings
 } from '../settings';
-import { OpencodeAgentSettings } from './OpencodeAgentSettings';
+import { renderOpencodeMigrationNotice } from './OpencodeMigrationNotice';
 
-export const opencodeSettingsTabRenderer: ProviderSettingsTabRenderer = {
-  render(container, context) {
-    const opencodeWorkspace = maybeGetOpencodeWorkspaceServices();
-    const settingsBag = context.plugin.settings as unknown as Record<string, unknown>;
-    const hostnameKey = getHostnameKey();
+export function createOpencodeSettingsTabRenderer(
+  opencodeWorkspace: { cliResolver: Pick<ProviderCLIResolver, 'reset'>; metadataService: Pick<OpencodeMetadataService, 'loadCatalog' | 'warmModelMetadata'>; modelCatalog: ProviderModelCatalog; },
+): ProviderSettingsTabRenderer {
+  return {
+    render(container, context) {
+      const settingsBag = context.plugin.settings as unknown as Record<string, unknown>;
+      const hostnameKey = getHostnameKey();
 
-    new Setting(container).setName('Setup').setHeading();
+      const enablement: Omit<ProviderEnablementSettingOptions, 'container' | 'description'> = {
+        getValue: () => getOpencodeProviderSettings(settingsBag).enabled,
+        name: t('settings.providerEnablement.name', { provider: 'OpenCode' }),
+        onChange: async (value) => {
+          if (!ProviderSettingsCoordinator.canApplyProviderEnablement(
+            settingsBag,
+            'opencode',
+            value,
+          )) {
+            lastProviderWarning.showFor();
+            return;
+          }
 
-    renderProviderEnablementSetting({
-      container,
-      description: t('settings.providerEnablement.desc', { provider: 'OpenCode' }),
-      getValue: () => getOpencodeProviderSettings(settingsBag).enabled,
-      name: t('settings.providerEnablement.name', { provider: 'OpenCode' }),
-      onChange: async (value) => {
-        if (!ProviderSettingsCoordinator.canApplyProviderEnablement(
-          settingsBag,
-          'opencode',
-          value,
-        )) {
-          lastProviderWarning.showFor();
-          return;
-        }
-
-        let accepted = true;
-        await context.plugin.runProviderExecutionTransition(['opencode'], async () => {
-          await context.plugin.mutateSettings((settings) => {
-            accepted = ProviderSettingsCoordinator.applyProviderEnablement(
-              settings,
-              'opencode',
-              value,
-            );
-          });
-        });
-        if (accepted) {
-          lastProviderWarning.hide();
-        } else {
-          lastProviderWarning.showFor();
-        }
-        modelWarning.context.notifyProviderModelOptionsChanged('opencode');
-      },
-    });
-
-    const lastProviderWarning = renderLastEnabledProviderWarning(container);
-
-    const modelWarning = renderProviderModelEnablementWarning(container, context, {
-      getHasEnabledModels: () => getOpencodeProviderSettings(settingsBag).visibleModels.length > 0,
-      getIsEnabled: () => getOpencodeProviderSettings(settingsBag).enabled,
-      providerId: 'opencode',
-      providerName: 'OpenCode',
-    });
-
-    renderHostnameCliPathSetting({
-      container,
-      description: 'Optional absolute path to the OpenCode CLI for this computer. Leave empty to use `opencode` from PATH.',
-      getValue: () => getOpencodeProviderSettings(settingsBag).cliPathsByHost[hostnameKey] || '',
-      name: 'CLI path',
-      onChange: async (value) => {
-        const cliPathsByHost = {
-          ...getOpencodeProviderSettings(settingsBag).cliPathsByHost,
-        };
-        if (value) {
-          cliPathsByHost[hostnameKey] = value;
-        } else {
-          delete cliPathsByHost[hostnameKey];
-        }
-
-        await context.plugin.applyProviderRuntimeSettings(
-          ['opencode'],
-          (settings) => {
-            updateOpencodeProviderSettings(settings, { cliPathsByHost });
-            clearOpencodeDiscoveryState(settings);
-          },
-          () => opencodeWorkspace?.cliResolver?.reset(),
-        );
-      },
-      placeholder: process.platform === 'win32'
-        ? 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.cmd'
-        : '/usr/local/bin/opencode',
-      validate: validateCliPath,
-    });
-
-    new Setting(container).setName('Models').setHeading();
-    renderOpencodeModelPicker(container, modelWarning.context, settingsBag);
-
-    new Setting(container).setName(t('settings.agentSkills.sectionTitle')).setHeading();
-    context.renderAgentSkillSettings(container, 'opencode');
-
-    new Setting(container).setName('Commands').setHeading();
-    context.renderHiddenProviderCommandSetting(container, 'opencode', {
-      name: 'Hidden Commands and Skills',
-      desc: 'Hide specific OpenCode commands and skills from the dropdown. Enter names without the leading slash, one per line.',
-      placeholder: 'compact\nreview\nfix',
-    });
-
-    if (opencodeWorkspace?.agentStorage) {
-      new Setting(container).setName('Subagents').setHeading();
-
-      const subagentsDesc = container.createDiv({ cls: 'claudian-sp-settings-desc' });
-      subagentsDesc.createEl('p', {
-        cls: 'setting-item-description',
-        text: 'Manage vault-level OpenCode subagents from .opencode/agent/ and legacy .opencode/agents/. New entries are saved as subagent-only files and appear in the @mention menu.',
-      });
-
-      const subagentsContainer = container.createDiv({ cls: 'claudian-slash-commands-container' });
-      new OpencodeAgentSettings(
-        subagentsContainer,
-        opencodeWorkspace.agentStorage,
-        context.plugin.app,
-        async () => {
+          let accepted = true;
           await context.plugin.runProviderExecutionTransition(['opencode'], async () => {
-            await opencodeWorkspace.refreshAgentMentions?.();
+            await context.plugin.mutateSettings((settings) => {
+              accepted = ProviderSettingsCoordinator.applyProviderEnablement(
+                settings,
+                'opencode',
+                value,
+              );
+            });
           });
+          if (accepted) {
+            lastProviderWarning.hide();
+          } else {
+            lastProviderWarning.showFor();
+          }
+          modelWarning.context.notifyProviderModelOptionsChanged('opencode');
         },
-      );
-    }
+      };
 
-    renderNativeMcpSettingsSection(container, {
-      descriptionAfterCommand: ' and they will be available in Claudian. ',
-      descriptionBeforeCommand: 'OpenCode manages MCP servers through its own CLI. Configure them with ',
-      documentationLabel: 'Learn more',
-      documentationUrl: 'https://opencode.ai/docs/mcp-servers/',
-      heading: t('settings.mcpServers.name'),
-      setupCommand: 'opencode mcp add',
-    });
+      const installationContainer = container.createDiv();
+      const updateMigrationNotice = renderOpencodeMigrationNotice(container);
+      const lastProviderWarning = renderLastEnabledProviderWarning(container);
 
-    renderEnvironmentSettingsSection({
-      container,
-      plugin: context.plugin,
-      scope: 'provider:opencode',
-      heading: 'Environment',
-      name: 'Environment Variables',
-      desc: 'Extra environment variables passed to OpenCode. `OPENCODE_ENABLE_EXA=1` is enabled by default.',
-      placeholder: `${OPENCODE_DEFAULT_ENVIRONMENT_VARIABLES}\nOPENCODE_DB=/path/to/opencode.db`,
-      renderCustomContextLimits: (target) => context.renderCustomContextLimits(target, 'opencode'),
-    });
-  },
-};
-
-function renderOpencodeModelPicker(
-  container: HTMLElement,
-  context: ProviderSettingsTabRendererContext,
-  settingsBag: Record<string, unknown>,
-): void {
-  const getState = (): ProviderModelPickerState => {
-    const current = getOpencodeProviderSettings(settingsBag);
-    return {
-      aliases: current.modelAliases,
-      discoveredCount: current.discoveredModels.length,
-      models: buildOpencodePickerModels(current.discoveredModels, current.visibleModels),
-      selectedIds: current.visibleModels,
-    };
-  };
-
-  const warmModelMetadata = async (rawId: string): Promise<void> => {
-    const workspaceService = maybeGetOpencodeWorkspaceServices()?.metadataService;
-    const metadataService = workspaceService
-      ?? new OpencodeMetadataService(context.plugin);
-    try {
-      if (
-        await metadataService.warmModelMetadata(encodeOpencodeModelId(rawId))
-      ) {
-        context.notifyProviderModelOptionsChanged('opencode');
-      }
-    } catch {
-      // Metadata warmup is opportunistic; the first chat turn can still discover it.
-    } finally {
-      if (!workspaceService) await metadataService.dispose();
-    }
-  };
-
-  renderProviderModelPicker({
-    container,
-    emptyCatalogText: 'Start OpenCode once to load its model catalog. Claudian will then let you pick visible models.',
-    failedCatalogText: 'Could not load the OpenCode model catalog. Check the CLI path and login state, then try again.',
-    getState,
-    async loadCatalog() {
-      const workspaceService = maybeGetOpencodeWorkspaceServices()?.metadataService;
-      const metadataService = workspaceService
-        ?? new OpencodeMetadataService(context.plugin);
-      try {
-        const loaded = await metadataService.loadCatalog();
-        const discoveredCount = getOpencodeProviderSettings(settingsBag).discoveredModels.length;
-        if (!loaded) {
-          return 'failed';
-        }
-        if (discoveredCount > 0) {
-          context.notifyProviderModelOptionsChanged('opencode');
-          return 'loaded';
-        }
-        return 'empty';
-      } catch {
-        return 'failed';
-      } finally {
-        if (!workspaceService) await metadataService.dispose();
-      }
-    },
-    loadCatalogOnRender: true,
-    loadingCatalogText: 'Loading OpenCode model catalog...',
-    modifier: 'opencode',
-    async onAliasesChange(modelAliases) {
-      await context.plugin.mutateSettings((settings) => {
-        updateOpencodeProviderSettings(settings, { modelAliases });
+      const modelWarning = renderProviderModelEnablementWarning(container, context, {
+        getHasEnabledModels: () => getOpencodeProviderSettings(settingsBag).visibleModels.length > 0,
+        getIsEnabled: () => getOpencodeProviderSettings(settingsBag).enabled,
+        providerId: 'opencode',
+        providerName: 'OpenCode',
       });
-      context.notifyProviderModelOptionsChanged('opencode');
-    },
-    onModelSelected: async (model) => warmModelMetadata(model.id),
-    async onSelectedIdsChange(visibleModels) {
-      const current = getOpencodeProviderSettings(settingsBag);
-      const normalized = normalizeOpencodeVisibleModels(visibleModels, current.discoveredModels);
-      if (sameStringList(current.visibleModels, normalized)) {
-        return;
-      }
 
-      await context.plugin.mutateSettings((settings) => {
-        updateOpencodeProviderSettings(settings, { visibleModels: normalized });
+      renderCLIInstallationSetting({
+        cliName: 'OpenCode CLI',
+        icon: OPENCODE_PROVIDER_ICON,
+        inspect: async () => {
+          const settings = context.plugin.settings as unknown as Record<string, unknown>;
+          const config = getOpencodeProviderSettings(settings);
+          const installation = await probeCLIInstallation({
+            path: await context.plugin.getResolvedProviderCliPath('opencode'),
+            configuredPath: config.cliPathsByHost[hostnameKey] || config.cliPath,
+            args: ['--version'],
+            env: { ...process.env, ...getRuntimeEnvironmentVariables(settings, 'opencode') },
+          });
+          updateMigrationNotice(installation.version);
+          return installation;
+        },
+        container: installationContainer,
+        enablement,
+        getValue: () => {
+          const config = getOpencodeProviderSettings(settingsBag);
+          return config.cliPathsByHost[hostnameKey] || config.cliPath;
+        },
+        name: 'CLI path',
+        onChange: async (value) => {
+          const cliPathsByHost = {
+            ...getOpencodeProviderSettings(settingsBag).cliPathsByHost,
+          };
+          if (value) {
+            cliPathsByHost[hostnameKey] = value;
+          } else {
+            delete cliPathsByHost[hostnameKey];
+          }
+
+          await context.plugin.applyProviderRuntimeSettings(
+            ['opencode'],
+            (settings) => {
+              updateOpencodeProviderSettings(settings, { cliPathsByHost });
+            },
+            () => opencodeWorkspace?.cliResolver?.reset(),
+          );
+        },
+        placeholder: process.platform === 'win32'
+          ? 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.cmd'
+          : '/usr/local/bin/opencode',
+        validate: validateCLIPath,
       });
-      context.notifyProviderModelOptionsChanged('opencode');
+
+      new Setting(container).setName('Models').setHeading();
+      const modelPicker = renderProviderModelsSection(container, 'opencode', 'OpenCode', opencodeWorkspace.modelCatalog, () => modelWarning.refresh());
+
+      new Setting(container).setName(t('settings.agentSkills.sectionTitle')).setHeading();
+      context.renderAgentSkillSettings(container, 'opencode');
+
+      new Setting(container).setName('Commands').setHeading();
+      context.renderHiddenProviderCommandSetting(container, 'opencode', {
+        name: 'Hidden Commands and Skills',
+        desc: 'Hide specific OpenCode commands and skills from the dropdown. Enter names without the leading slash, one per line.',
+        placeholder: 'compact\nreview\nfix',
+      });
+
+      renderEnvironmentSettingsSection({
+        container,
+        plugin: context.plugin,
+        scope: 'provider:opencode',
+        heading: 'Environment',
+        name: 'Environment Variables',
+        desc: 'Extra environment variables passed to OpenCode.',
+        placeholder: 'OPENCODE_DB=/path/to/opencode.db',
+        renderCustomContextLimits: (target) => context.renderCustomContextLimits(target, 'opencode'),
+      });
+      return modelPicker;
     },
-    providerName: 'OpenCode',
-  });
+  };
 }
 
-function validateCliPath(value: string): string | null {
+function validateCLIPath(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) {
     return null;
   }
 
-  const expandedPath = expandHomePath(trimmed);
+  const expandedPath = normalizeConfiguredCLIPath(trimmed);
   if (!fs.existsSync(expandedPath)) {
     return 'Path does not exist';
   }
@@ -276,49 +168,4 @@ function validateCliPath(value: string): string | null {
     return 'Path must point to a file';
   }
   return null;
-}
-
-function buildOpencodePickerModels(
-  discoveredModels: OpencodeDiscoveredModel[],
-  visibleModels: string[],
-): ProviderModelPickerModel[] {
-  const models: ProviderModelPickerModel[] = [];
-  const discoveredIds = new Set<string>();
-
-  for (const model of buildOpencodeBaseModels(discoveredModels)) {
-    const { modelLabel, providerLabel } = splitOpencodeModelLabel(model.label || model.rawId);
-    discoveredIds.add(model.rawId);
-    models.push({
-      description: model.description ?? '',
-      id: model.rawId,
-      isAvailable: true,
-      name: modelLabel,
-      providerKey: providerLabel.toLowerCase(),
-      providerLabel,
-    });
-  }
-
-  for (const rawId of visibleModels) {
-    if (discoveredIds.has(rawId)) {
-      continue;
-    }
-
-    const { modelLabel, providerLabel } = splitOpencodeModelLabel(rawId);
-    models.push({
-      id: rawId,
-      isAvailable: false,
-      name: modelLabel,
-      providerKey: providerLabel.toLowerCase(),
-      providerLabel,
-      unavailableMessage: 'Not currently reported by OpenCode',
-    });
-  }
-
-  return models.sort((left, right) => {
-    const providerCmp = (left.providerLabel ?? '').localeCompare(right.providerLabel ?? '');
-    if (providerCmp !== 0) {
-      return providerCmp;
-    }
-    return left.name.localeCompare(right.name);
-  });
 }

@@ -1,27 +1,28 @@
 ---
 name: distill-wiki
-description: Create, update, merge, or split durable Workspace Wiki notes from Sources, Study Guides, or completed learning. Use when the user asks to generate a Wiki, preserve useful but unstudied material, or reconcile overlapping Wiki notes. Do not use for Study Guide preparation.
+description: 从 Source、Study Guide 或学习成果创建、更新、合并或拆分可复用的 Workspace Wiki。用于沉淀长期知识或整理重叠概念；第一版学习材料使用 prepare-study-guide。
 ---
 
-# Distill Wiki
+# 沉淀长期知识
 
-Produce concept-centered long-term knowledge, not a source summary or transcript.
+形成以概念或问题为中心、可独立使用的 Wiki。它应解释一个可复用的认识及其依据、条件和关联，而不是资料摘要、学习过程记录或来源目录。
 
-## Human-owned learning completion
+## 定位知识边界
 
-- Omit `studied_at` by default, including when useful material is preserved without studying it.
-- Write `studied_at` only after explicit confirmation that this learning has been completed.
-- Never infer mastery, interest, value, agreement, or verification.
+1. 读取用户明确指定的 Source、Source Text、Study Guide 或学习成果；Source 只有身份信息时，沿 `text` 读取真实正文。课程和项目主页仅在归属影响知识表述时读取。已转换正文足够时直接使用；只有关键图表、数据或表述无法可靠判断时才局部核查原件。
+2. 根据概念和可能的别名检索相关 Wiki，读取最有可能重叠的真实笔记。标题和搜索摘要只用于定位；不要因同源就默认新建，也不要为了查重扫描整个 Vault。
+3. 选择能保持知识边界清晰的最小操作：已有笔记足以承载则更新；两个笔记确实重复且合并后仍聚焦才合并；有独立用途和关联网络的概念才新建或拆分。目标不清且不同选择会影响现有内容时再询问。
 
-## Reconcile before writing
+## 写出可复用的解释
 
-1. Read the explicit Source, Source Text, Study Guide, and relevant Course or Project context.
-2. Use Vault retrieval to find related Wiki notes and read the strongest candidates.
-3. Choose the smallest durable operation: update the note that already owns the concept; merge overlap that has no useful boundary; create a note for a distinct reusable concept; split only when the parts have independent uses and link neighborhoods.
-4. Read `system/contracts/base.yaml` and `system/contracts/wiki.yaml` before creating or structurally changing a Wiki. These YAML Contracts are the only format authority.
+从资料中提炼结论、机制、适用条件、证据、限制及与其他概念的关系。按知识自身的逻辑组织正文；用必要例子讲清“何时、为何、怎样使用”，不固定要求定义、例子、权衡、开放问题等栏目，也不把来源逐篇复述。数值、实验条件和例外若决定结论，必须保留；来源不足或相互冲突时明确不确定性，不能把外部补充冒充原资料结论。
 
-Write a concise definition or conclusion, why and when it matters, mechanisms and relationships, constraints and tradeoffs, useful examples, uncertainty or conflicting evidence, provenance, and links to genuinely related notes. Preserve unknown fields and human-authored text. Do not create one Wiki per source by default or copy the source body.
+来源路径按 Contract 记录在 `sources`；链接只指向实际读取、确实相关的笔记。长篇来源不逐句标页码；如果纠正原资料的事实错误，应核查原件和可靠依据，并在相邻位置留下可核查的原说法与位置。不要推断用户的兴趣、长期价值、同意、核验或学习完成。
 
-There are no failed or pending Markdown drafts. Background task state belongs outside the Vault. If an unattended background worker creates a Wiki, write `generated: {by: process:codex-background, at: <timestamp>}` only after useful content exists and keep `sources`; an interactive user-directed Wiki does not need a `generated` marker merely because AI helped write it.
+## 保存与核对
 
-When multiple existing Wiki notes will be merged or split, state that operation before writing. Report whether the result was created, updated, merged, or split and list the written paths.
+创建或结构性修改前读取 `system/contracts/base.yaml` 和 `system/contracts/wiki.yaml`。已有 Wiki 有 `wiki-content` 区域时在其中整合；没有该可选区域时保留人工正文和结构，按用户授权做必要的局部修改。保留未知 frontmatter。合并或拆分时核对原笔记中的独有内容和受影响链接，避免留下断链或丢失有效知识；不要制造失败或待处理的 Markdown 占位笔记。
+
+只有用户明确确认完成学习才写 `studied_at`。交互式协作不因使用 AI 而写 `generated`；无人值守后台成功生成、且用户尚未检查的长期 Wiki 才按 Contract 写 `generated` 并保留 `sources`。
+
+交付前检查概念边界、正文的独立可读性、关键证据与限制、与已有 Wiki 的重复程度以及链接。报告创建、更新、合并或拆分的结果、写入路径、关键读取来源和仍未解决的实质问题。

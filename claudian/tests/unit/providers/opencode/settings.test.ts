@@ -1,3 +1,4 @@
+import { projectOpencodeModelSettings } from '@/providers/opencode/settings';
 const mockGetHostnameKey = jest.fn(() => 'host-a');
 
 jest.mock('../../../../src/utils/env', () => ({
@@ -6,12 +7,10 @@ jest.mock('../../../../src/utils/env', () => ({
 }));
 
 import {
-  DEFAULT_OPENCODE_PROVIDER_SETTINGS,
   getOpencodeProviderSettings,
   normalizeOpencodeModelAliases,
   normalizeOpencodePreferredThinkingByModel,
-  normalizeOpencodeVisibleModels,
-  updateOpencodeProviderSettings,
+  updateOpencodeProviderSettings
 } from '../../../../src/providers/opencode/settings';
 
 describe('OpenCode settings normalization', () => {
@@ -26,32 +25,29 @@ describe('OpenCode settings normalization', () => {
     mockGetHostnameKey.mockReturnValue('host-a');
   });
 
-  it('enables Exa-backed web search in the default provider env', () => {
-    expect(DEFAULT_OPENCODE_PROVIDER_SETTINGS.environmentVariables).toBe('OPENCODE_ENABLE_EXA=1');
+  it('does not migrate saved variant model IDs into another selection', () => {
+    const settings = getOpencodeProviderSettings({      providerConfigs: {        opencode: {
+          discoveredModels,
+          visibleModels: ['anthropic/claude-sonnet-4/high', 'anthropic/claude-sonnet-4'],
+          preferredThinkingByModel: { 'anthropic/claude-sonnet-4/high': 'high' },
+          modelAliases: { 'anthropic/claude-sonnet-4/high': 'Saved alias' },
+        }      }    });
+    expect(settings.visibleModels).toEqual(['anthropic/claude-sonnet-4/high', 'anthropic/claude-sonnet-4']);
+    expect(settings.preferredThinkingByModel).toEqual({ 'anthropic/claude-sonnet-4/high': 'high' });
+    expect(settings.modelAliases).toEqual({ 'anthropic/claude-sonnet-4/high': 'Saved alias' });
   });
 
-  it('normalizes visible models to base model ids', () => {
-    expect(normalizeOpencodeVisibleModels([
-      'anthropic/claude-sonnet-4/high',
-      'anthropic/claude-sonnet-4',
-      'google/gemini-2.5-pro',
-    ], discoveredModels)).toEqual([
-      'anthropic/claude-sonnet-4',
-      'google/gemini-2.5-pro',
-    ]);
-  });
-
-  it('normalizes preferred thinking keys to base model ids', () => {
+  it('preserves preferred thinking keys', () => {
     expect(normalizeOpencodePreferredThinkingByModel({
       'anthropic/claude-sonnet-4/high': 'high',
       'google/gemini-2.5-pro': 'max',
-    }, discoveredModels)).toEqual({
-      'anthropic/claude-sonnet-4': 'high',
+    })).toEqual({
+      'anthropic/claude-sonnet-4/high': 'high',
       'google/gemini-2.5-pro': 'max',
     });
   });
 
-  it('hydrates provider settings with normalized base models and preferred thinking', () => {
+  it('hydrates provider settings without rewriting model identities', () => {
     expect(getOpencodeProviderSettings({
       providerConfigs: {
         opencode: {
@@ -72,7 +68,7 @@ describe('OpenCode settings normalization', () => {
       },
     })).toMatchObject({
       preferredThinkingByModel: {
-        'anthropic/claude-sonnet-4': 'high',
+        'anthropic/claude-sonnet-4/high': 'high',
       },
       cliPath: '/legacy/opencode',
       cliPathsByHost: {
@@ -80,7 +76,7 @@ describe('OpenCode settings normalization', () => {
         'host-b': '/host-b/opencode',
       },
       visibleModels: [
-        'anthropic/claude-sonnet-4',
+        'anthropic/claude-sonnet-4/high',
         'google/gemini-2.5-pro',
       ],
     });
@@ -119,23 +115,23 @@ describe('OpenCode settings normalization', () => {
     }).cliPathsByHost).toEqual({ 'host-a': '/host-a/opencode' });
   });
 
-  it('normalizes model aliases to base model ids and trims values', () => {
+  it('preserves model alias keys and trims values', () => {
     expect(normalizeOpencodeModelAliases({
       'anthropic/claude-sonnet-4/high': '  Sonnet  ',
       'google/gemini-2.5-pro': 'Gemini Pro',
       'unknown/model': 'ignored',
       'anthropic/claude-sonnet-4': '',
-    }, discoveredModels)).toEqual({
-      'anthropic/claude-sonnet-4': 'Sonnet',
+    })).toEqual({
+      'anthropic/claude-sonnet-4/high': 'Sonnet',
       'google/gemini-2.5-pro': 'Gemini Pro',
       'unknown/model': 'ignored',
     });
   });
 
   it('ignores non-string and non-object alias payloads', () => {
-    expect(normalizeOpencodeModelAliases(null, discoveredModels)).toEqual({});
-    expect(normalizeOpencodeModelAliases(['alias'], discoveredModels)).toEqual({});
-    expect(normalizeOpencodeModelAliases({ 'anthropic/claude-sonnet-4': 123 }, discoveredModels)).toEqual({});
+    expect(normalizeOpencodeModelAliases(null)).toEqual({});
+    expect(normalizeOpencodeModelAliases(['alias'])).toEqual({});
+    expect(normalizeOpencodeModelAliases({ 'anthropic/claude-sonnet-4': 123 })).toEqual({});
   });
 
   it('prunes aliases whose rawId is no longer visible when updating settings', () => {
@@ -161,10 +157,10 @@ describe('OpenCode settings normalization', () => {
 
     expect(next.visibleModels).toEqual(['anthropic/claude-sonnet-4']);
     expect(next.modelAliases).toEqual({ 'anthropic/claude-sonnet-4': 'Sonnet' });
-    expect((settings.providerConfigs as Record<string, any>).opencode.discoveredModels).toBeUndefined();
+    expect(projectOpencodeModelSettings(settings).discoveredModels).toBeUndefined();
   });
 
-  it('falls back active and saved OpenCode selections when the current model is removed from visible models', () => {
+  it('preserves active and saved OpenCode selections when the current model is removed from visible models', () => {
     const settings: Record<string, unknown> = {
       effortLevel: 'high',
       model: 'opencode:google/gemini-2.5-pro',
@@ -198,14 +194,14 @@ describe('OpenCode settings normalization', () => {
     });
 
     expect(next.visibleModels).toEqual(['openai/gpt-5']);
-    expect(settings.model).toBe('opencode:openai/gpt-5');
+    expect(settings.model).toBe('opencode:google/gemini-2.5-pro');
     expect(settings.effortLevel).toBe('high');
-    expect((settings.savedProviderModel as Record<string, string>).opencode).toBe('opencode:openai/gpt-5');
+    expect((settings.savedProviderModel as Record<string, string>).opencode).toBe('opencode:google/gemini-2.5-pro');
     expect((settings.savedProviderEffort as Record<string, string>).opencode).toBe('high');
-    expect(settings.titleGenerationModel).toBe('opencode:openai/gpt-5');
+    expect(settings.titleGenerationModel).toBe('opencode:google/gemini-2.5-pro');
   });
 
-  it('clears the OpenCode title model when all visible models are removed', () => {
+  it('preserves the OpenCode title model when all visible models are removed', () => {
     const settings: Record<string, unknown> = {
       providerConfigs: {
         opencode: {
@@ -221,7 +217,7 @@ describe('OpenCode settings normalization', () => {
     });
 
     expect(next.visibleModels).toEqual([]);
-    expect(settings.titleGenerationModel).toBe('');
+    expect(settings.titleGenerationModel).toBe('opencode:google/gemini-2.5-pro');
   });
 
   it('keeps runtime discovery in memory when updating provider settings', () => {
@@ -256,8 +252,8 @@ describe('OpenCode settings normalization', () => {
       ...discoveredModels,
       { label: 'OpenAI/GPT-5', rawId: 'openai/gpt-5' },
     ]);
-    expect((settings.providerConfigs as Record<string, any>).opencode.availableModes).toBeUndefined();
-    expect((settings.providerConfigs as Record<string, any>).opencode.discoveredModels).toBeUndefined();
+    expect(projectOpencodeModelSettings(settings).availableModes).toBeUndefined();
+    expect(projectOpencodeModelSettings(settings).discoveredModels).toBeUndefined();
   });
 
   it('persists thinking options only for visible or selected OpenCode models', () => {
@@ -296,15 +292,12 @@ describe('OpenCode settings normalization', () => {
         { label: 'Low', value: 'low' },
       ],
     });
-    expect((settings.providerConfigs as Record<string, any>).opencode.thinkingOptionsByModel).toEqual({
+    expect(projectOpencodeModelSettings(settings).thinkingOptionsByModel).toEqual({
       'anthropic/claude-sonnet-4': [
         { label: 'High', value: 'high' },
       ],
-      'google/gemini-2.5-pro': [
-        { label: 'Low', value: 'low' },
-      ],
     });
-    expect((settings.providerConfigs as Record<string, any>).opencode.discoveredModels).toBeUndefined();
+    expect(projectOpencodeModelSettings(settings).discoveredModels).toBeUndefined();
   });
 
   it('hydrates persisted thinking options without requiring the full discovered model catalog', () => {
@@ -351,7 +344,7 @@ describe('OpenCode settings normalization', () => {
       environmentHash: 'OPENCODE_DB=/tmp/opencode.db',
     });
 
-    expect((settings.providerConfigs as Record<string, any>).opencode.thinkingOptionsByModel).toEqual({
+    expect(projectOpencodeModelSettings(settings).thinkingOptionsByModel).toEqual({
       'deepseek/deepseek-v4-pro': [
         { label: 'Low', value: 'low' },
         { label: 'Max', value: 'max' },
@@ -370,15 +363,8 @@ describe('OpenCode settings normalization', () => {
     }).selectedMode).toBe('claudian-safe');
   });
 
-  it('normalizes the legacy build alias back to the managed YOLO mode', () => {
-    expect(getOpencodeProviderSettings({
-      providerConfigs: {
-        opencode: {
-          availableModes: [],
-          selectedMode: 'build',
-        },
-      },
-    }).selectedMode).toBe('claudian-yolo');
+  it('does not grant YOLO permissions to the retired build alias', () => {
+    expect(getOpencodeProviderSettings({ providerConfigs: { opencode: { availableModes: [], selectedMode: 'build' } } }).selectedMode).toBe('claudian-safe');
   });
 
   it('preserves legacy cliPath when no host-scoped path exists', () => {

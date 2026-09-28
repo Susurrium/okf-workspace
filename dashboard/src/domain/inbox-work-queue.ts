@@ -18,15 +18,15 @@ export type IngestedViaFilter = DisplayIngestedVia | "all";
 export const INGESTED_VIA_LABELS: Readonly<Record<DisplayIngestedVia, string>> = {
   "web-clip": "网页剪藏",
   "file-import": "手动上传",
-  feed: "Feed",
+  feed: "订阅",
   "direct-entry": "直接记录",
   unlabeled: "未标注",
 };
 
 export const WEB_CAPTURE_ACTIONS = [
-  { label: "立即学习", action: "learn-now" },
+  { label: "生成辅助学习材料", action: "learn-now" },
   { label: "稍后学习", action: "learn-later" },
-  { label: "生成 Wiki", action: "wiki-now" },
+  { label: "生成知识笔记", action: "wiki-now" },
   { label: "仅作参考", action: "source-only" },
 ] as const satisfies readonly { label: string; action: WebCaptureAction }[];
 
@@ -75,6 +75,12 @@ const PENDING_CONVERSIONS = new Set<ConversionRecord["status"]>([
   "failed",
 ]);
 
+export function hasPendingGeneration(record: ConversionRecord): boolean {
+  return record.status === "imported"
+    && ["pending", "failed"].includes(record.stages?.semantic ?? "")
+    && !record.outputs.semantic_operation_id;
+}
+
 export function isIngestedVia(value: unknown): value is IngestedVia {
   return typeof value === "string" && (INGESTED_VIA_ORDER as readonly string[]).includes(value);
 }
@@ -96,7 +102,7 @@ export function buildInboxWorkQueue(
     }),
   );
   const conversion = conversions
-    .filter((record) => PENDING_CONVERSIONS.has(record.status))
+    .filter((record) => PENDING_CONVERSIONS.has(record.status) || hasPendingGeneration(record))
     .map((record): ConversionWorkItem => ({
       key: `conversion:${record.conversion_id}`,
       stage: "conversion",

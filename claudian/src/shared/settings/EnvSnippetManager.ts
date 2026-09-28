@@ -116,7 +116,7 @@ export class EnvSnippetModal extends Modal {
       contextLimitsContainer.removeClass('claudian-hidden');
 
       const existingLimits = this.snippet?.contextLimits ?? this.plugin.settings.customContextLimits ?? {};
-      const existingAliases = this.snippet?.modelAliases ?? this.plugin.settings.customModelAliases ?? {};
+      const existingAliases = this.snippet?.modelAliases ?? (ProviderRegistry.getChatUIConfig('claude').customModelAliases?.get(this.plugin.settings) ?? {});
 
       contextLimitsContainer.createDiv({
         text: t('settings.customModelOverrides.name'),
@@ -139,7 +139,7 @@ export class EnvSnippetModal extends Modal {
         });
         aliasInput.value = existingAliases[modelId] ?? '';
         aliasInput.setAttribute('aria-label', `Alias for ${modelId}`);
-        aliasInput.title = 'Custom label shown in the model selector. Leave empty to use the default.';
+        aliasInput.setAttribute('aria-description', 'Custom label shown in the model selector. Leave empty to use the default.');
         modelAliasInputs.set(modelId, aliasInput);
 
         const input = row.createEl('input', {
@@ -242,10 +242,10 @@ export class EnvSnippetManager {
     });
     setIcon(saveBtn, 'plus');
     saveBtn.addEventListener('click', () => {
-      void this.saveCurrentEnv();
+      void this.#saveCurrentEnv();
     });
 
-    const snippets = this.plugin.settings.envSnippets.filter((snippet) => this.shouldDisplaySnippet(snippet));
+    const snippets = this.plugin.settings.envSnippets.filter((snippet) => this.#shouldDisplaySnippet(snippet));
 
     if (snippets.length === 0) {
       const emptyEl = this.containerEl.createDiv({ cls: 'claudian-snippet-empty' });
@@ -278,7 +278,7 @@ export class EnvSnippetManager {
       restoreBtn.addEventListener('click', () => {
         void (async (): Promise<void> => {
         try {
-          await this.insertSnippet(snippet);
+          await this.#insertSnippet(snippet);
         } catch {
           new Notice('Failed to insert snippet');
         }
@@ -291,7 +291,7 @@ export class EnvSnippetManager {
       });
       setIcon(editBtn, 'pencil');
       editBtn.addEventListener('click', () => {
-        this.editSnippet(snippet);
+        this.#editSnippet(snippet);
       });
 
       const deleteBtn = actionsEl.createEl('button', {
@@ -303,7 +303,7 @@ export class EnvSnippetManager {
         void (async (): Promise<void> => {
         try {
           if (await confirmDelete(this.plugin.app, `Delete environment snippet "${snippet.name}"?`)) {
-            await this.deleteSnippet(snippet);
+            await this.#deleteSnippet(snippet);
           }
         } catch {
           new Notice('Failed to delete snippet');
@@ -313,7 +313,7 @@ export class EnvSnippetManager {
     }
   }
 
-  private async saveCurrentEnv() {
+  async #saveCurrentEnv() {
     const modal = new EnvSnippetModal(
       this.plugin.app,
       this.plugin,
@@ -332,7 +332,7 @@ export class EnvSnippetManager {
     modal.open();
   }
 
-  private async insertSnippet(snippet: EnvSnippet) {
+  async #insertSnippet(snippet: EnvSnippet) {
     const snippetContent = snippet.envVars.trim();
     const updates = getEnvironmentScopeUpdates(
       snippetContent,
@@ -341,16 +341,15 @@ export class EnvSnippetManager {
 
     if (updates.length === 1) {
       const [update] = updates;
-      this.syncTextareaValue(update.scope, update.envText);
+      this.#syncTextareaValue(update.scope, update.envText);
       await this.plugin.applyEnvironmentVariables(update.scope, update.envText);
     } else if (updates.length > 1) {
       for (const update of updates) {
-        this.syncTextareaValue(update.scope, update.envText);
+        this.#syncTextareaValue(update.scope, update.envText);
       }
       await this.plugin.applyEnvironmentVariablesBatch(updates);
     }
 
-    // Legacy snippets without contextLimits don't modify limits
     await this.plugin.mutateSettings((settings) => {
       if (snippet.contextLimits) {
         settings.customContextLimits = {
@@ -359,11 +358,11 @@ export class EnvSnippetManager {
         };
       }
 
-      // Legacy snippets without modelAliases don't modify aliases. Snippets saved
-      // with alias fields clear aliases for their own model IDs when left empty.
+      // Explicit empty aliases clear the aliases for this snippet's model IDs.
       if (snippet.modelAliases) {
         const modelIds = ProviderRegistry.getCustomModelIds(parseEnvironmentVariables(snippet.envVars));
-        const nextAliases = { ...(settings.customModelAliases ?? {}) };
+        const modelAliases = ProviderRegistry.getChatUIConfig('claude').customModelAliases;
+        const nextAliases = modelAliases?.get(settings) ?? {};
         for (const modelId of modelIds) {
           const alias = snippet.modelAliases[modelId]?.trim();
           if (alias) {
@@ -372,7 +371,7 @@ export class EnvSnippetManager {
             delete nextAliases[modelId];
           }
         }
-        settings.customModelAliases = nextAliases;
+        modelAliases?.update(settings, nextAliases);
       }
     });
 
@@ -383,7 +382,7 @@ export class EnvSnippetManager {
     view?.refreshModelSelector?.();
   }
 
-  private editSnippet(snippet: EnvSnippet) {
+  #editSnippet(snippet: EnvSnippet) {
     const modal = new EnvSnippetModal(
       this.plugin.app,
       this.plugin,
@@ -408,7 +407,7 @@ export class EnvSnippetManager {
     modal.open();
   }
 
-  private async deleteSnippet(snippet: EnvSnippet) {
+  async #deleteSnippet(snippet: EnvSnippet) {
     await this.plugin.mutateSettings((settings) => {
       settings.envSnippets = settings.envSnippets.filter(s => s.id !== snippet.id);
     });
@@ -420,7 +419,7 @@ export class EnvSnippetManager {
     this.render();
   }
 
-  private shouldDisplaySnippet(snippet: EnvSnippet): boolean {
+  #shouldDisplaySnippet(snippet: EnvSnippet): boolean {
     if (this.scope === 'shared') {
       return !snippet.scope || snippet.scope === 'shared';
     }
@@ -428,7 +427,7 @@ export class EnvSnippetManager {
     return snippet.scope === this.scope;
   }
 
-  private syncTextareaValue(scope: EnvironmentScope, value: string): void {
+  #syncTextareaValue(scope: EnvironmentScope, value: string): void {
     const selector = `.claudian-settings-env-textarea[data-env-scope="${scope}"]`;
     const envTextarea = (this.containerEl.ownerDocument ?? window.document).querySelector<HTMLTextAreaElement>(selector);
     if (envTextarea) {

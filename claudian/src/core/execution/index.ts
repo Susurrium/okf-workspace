@@ -1,4 +1,13 @@
 export {
+  type BranchableExecutionSession,
+  type ConversationBranchRecoveryRequest,
+  type ConversationBranchRequest,
+  type ConversationBranchResult,
+  type ConversationBranchState,
+  isBranchableExecutionSession,
+} from './BranchableExecutionSession';
+export { ExecutionEventQueue } from './ExecutionEventQueue';
+export {
   type ProviderExecutionBackend,
   type ProviderNativePersistence,
   type ProviderNativeResumeSeed,
@@ -14,19 +23,23 @@ export {
   type ProviderBackgroundTurnStartedEvent,
   type ProviderCancelledEvent,
   type ProviderCitationsEvent,
+  type ProviderCommandsChangedEvent,
   type ProviderContextCompactedEvent,
   type ProviderExecutionErrorCategory,
   type ProviderExecutionErrorEvent,
   type ProviderExecutionEvent,
   type ProviderExecutionEventScope,
-  type ProviderModeChangedEvent,
   type ProviderNoticeEvent,
+  type ProviderPermissionModeChangedEvent,
   type ProviderRequestedEventScope,
   type ProviderRequestedExecutionEvent,
   type ProviderSessionErrorEvent,
   type ProviderSessionEvent,
   type ProviderSessionEventScope,
   type ProviderSessionStateChangedEvent,
+  type ProviderSubagentProgressEvent,
+  type ProviderSubagentUpdatedEvent,
+  type ProviderTaskNotificationEvent,
   type ProviderTextDeltaEvent,
   type ProviderThinkingDeltaEvent,
   type ProviderToolCompletedEvent,
@@ -52,11 +65,11 @@ export {
   type ProviderExecutionTransitionScope,
 } from './ProviderExecutionLifecycleRegistry';
 export {
-  type ProviderCurrentNoteContext,
   type ProviderExecutionConfiguration,
   type ProviderExecutionContext,
   type ProviderExecutionInputBlock,
   type ProviderExecutionRequest,
+  type ProviderLinkedContentContext,
   type ProviderSystemInstructions,
   type ProviderToolPolicy,
 } from './ProviderExecutionRequest';
@@ -71,8 +84,6 @@ export {
   type ProviderInteractionDismissReason,
   type ProviderInteractionIdentity,
   type ProviderInteractionPort,
-  type ProviderPlanInteractionRequest,
-  type ProviderPlanInteractionResponse,
   type ProviderQuestionInteractionRequest,
   type ProviderQuestionInteractionResponse,
 } from './ProviderInteractionPort';
@@ -88,10 +99,8 @@ export {
   type ChatRewindPreview,
   type ChatRewindResult,
   type ChatRewindSessionStrategy,
-  isModeConfigurableExecutionSession,
   isRewindableExecutionSession,
   isSteerableExecutionSession,
-  type ModeConfigurableExecutionSession,
   type RewindableExecutionSession,
   type SteerableExecutionSession,
 } from './RewindableExecutionSession';

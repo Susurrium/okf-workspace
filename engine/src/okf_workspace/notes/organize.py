@@ -86,6 +86,11 @@ def read_heading_section(text: str, heading: str) -> str:
     return "\n".join(text.splitlines()[start + 1 : end]).strip()
 
 
+def heading_level(text: str, heading: str) -> int:
+    """Return the level of one unambiguous Markdown heading."""
+    return _heading_bounds(text, heading)[2]
+
+
 def replace_heading_section(text: str, heading: str, replacement: str) -> str:
     """Replace one exact heading body while preserving the rest of the document."""
 

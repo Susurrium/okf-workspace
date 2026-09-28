@@ -1,0 +1,4565 @@
+import { memoCardText } from './card-move';
+import { extractCardParts } from './parser';
+import { App, Component, MarkdownRenderer, Platform, TFile, setIcon } from 'obsidian';
+import type { HoverParent, EventRef } from 'obsidian';
+import { sectionRef, type DashboardData, type DashboardColumn, type DashboardCard, type RenderCallbacks, type TaskItem, type DocNode, type DashboardSettings, type CardSize, type TrackerStyle } from './types';
+import { t, getLanguage } from './i18n';
+import { renderLibrarySection } from './library-section';
+import { renderMediaSection, destroyMediaSection } from './media-section';
+import { getMediaTagService } from './media-tags';
+import { renderWereadSection } from './weread-section';
+import { getRegisteredApexHost } from './host';
+import { renderTickTickSection } from './ticktick-section';
+import { renderDataviewSection, setDataviewApp } from './dataview-section';
+import { renderWebSection } from './web-section';
+import { renderQuickNoteRegion } from './quick-note-section';
+import { resolveVaultImage } from './banner';
+import { focalToBackgroundPosition, isCenterFocal } from './focal-point-picker';
+import { ITEM_DRAG_TYPE } from './dnd';
+import { captureScrollStates, restoreScrollStates } from './scroll-preserve';
+import { attachFileSuggest } from './file-suggest';
+import { showConfirmDialog } from './confirm-dialog';
+import { applyModalTheme } from './modal-theme';
+import { partnerIndexOf } from './column-pairs';
+import { RATIO_SPAN, buildStackedSpanSpecs, resolveStackedSpans, isTieredWidgetKey } from './widget-span';
+import { normalizeExcludeFolders, isUnderExcludedFolder } from './exclude-folders';
+import { attachNoteHover } from './hover-preview';
+import { fetchWeather, getCachedWeather, getWeatherEmoji, getWeatherDescription } from './weather-service';
+import { readTrackerData, computeStreak } from './tracker-service';
+import type { PomodoroService } from './pomodoro-service';
+import { showPomodoroStats as openWidePomodoroStats } from './pomodoro-stats-modal';
+import type { ReadingService } from './reading-service';
+import { searchBooks, resolveCoverAsObjectUrl } from './book-service';
+import { activityColor } from './pomodoro-service';
+import { renderSidebarLunarWidget } from './lunar-widget';
+import { renderSidebarYearProgress } from './year-progress-widget';
+import { renderSidebarCalendar } from './calendar-widget';
+import { renderCalendarSection } from './calendar-section';
+import { renderSidebarHabitWidget } from './habit-widget';
+import { renderSidebarExpenseWidget } from './expense-widget';
+import { renderSidebarAlbumWidget } from './album-widget';
+import { renderSidebarAnniversaryWidget } from './anniversary-widget';
+import { applyWidgetBackground, appendInlineBackgroundButton, getWidgetPlugin } from './widget-background';
+import { startGuardedDrag } from './drag-guard';
+import { renderSidebarMusicWidget } from './music-widget';
+import { SUPPORTED_FILE_EXTS, iconForExtension } from './file-types';
+import type { HolidayInfo } from './holiday-service';
+import { CountdownSettingsModal } from './countdown-modal';
+import { getSectionDefinition } from './section-registry';
+import { createSectionCollapseToggle } from './section-collapse-state';
+import { Chart, LineController, LineElement, PointElement, BarController, BarElement, LinearScale, CategoryScale, Filler, Tooltip } from 'chart.js';
+
+Chart.register(LineController, LineElement, PointElement, BarController, BarElement, LinearScale, CategoryScale, Filler, Tooltip);
+
+const chartInstances = new Map<string, Chart>();
+/** Countdown tick timers keyed by their timer id, mapped to the widget content
+ *  they animate. destroyAllCharts skips entries still inside a preserved widget
+ *  area, so re-attaching the sidebar widgets DOM keeps them running. */
+const countdownTimers = new Map<number, HTMLElement>();
+
+function destroyChart(cardId: string): void {
+	const chart = chartInstances.get(cardId);
+	if (chart) {
+		chart.destroy();
+		chartInstances.delete(cardId);
+	}
+}
+
+/** Destroy chart instances and idle countdown timers ahead of a re-render.
+ *  `preserveWidgets` is the detached-but-reused sidebar widgets element from the
+ *  previous render (see renderSidebarWidgets): timers animating its countdowns
+ *  survive so the re-attached DOM keeps ticking. Timers are also self-cleaning
+ *  (they check isConnected), so any survivors of a discarded DOM unwind themselves. */
+export function destroyAllCharts(preserveWidgets?: HTMLElement | null): void {
+	for (const [, chart] of chartInstances) {
+		chart.destroy();
+	}
+	chartInstances.clear();
+	for (const [id, content] of countdownTimers) {
+		if (preserveWidgets && preserveWidgets.contains(content)) continue;
+		window.clearInterval(id);
+		countdownTimers.delete(id);
+	}
+}
+
+function getCSSVar(name: string): string {
+	const el = activeDocument.querySelector('.apex-dashboard-root');
+	if (!el) return '';
+	return getComputedStyle(el).getPropertyValue(name).trim();
+}
+
+// Determine whether the dashboard accent is light enough that white text on it
+// would be unreadable (e.g. the mono/墨白 and onyx themes).
+function isAccentLight(): boolean {
+	const el = activeDocument.querySelector('.apex-dashboard-root');
+	if (!el) return false;
+	return isLightColor(getComputedStyle(el).getPropertyValue('--db-accent').trim());
+}
+
+// Accepts "#rgb", "#rrggbb", "rgb(...)" or "rgba(...)"; returns true when the
+// color is bright enough that dark text reads better than white.
+function isLightColor(color: string): boolean {
+	const value = color.trim();
+	if (value.startsWith('rgb')) {
+		const nums = value.match(/[\d.]+/g);
+		if (!nums || nums.length < 3) return false;
+		return relativeLuminance(Number(nums[0]), Number(nums[1]), Number(nums[2])) > 0.6;
+	}
+	const hex = value.replace(/^#/, '');
+	if (!/^[0-9a-fA-F]+$/.test(hex)) return false;
+	const full = hex.length === 3 ? hex.split('').map(c => c + c).join('') : hex;
+	if (full.length !== 6) return false;
+	return relativeLuminance(
+		parseInt(full.slice(0, 2), 16),
+		parseInt(full.slice(2, 4), 16),
+		parseInt(full.slice(4, 6), 16),
+	) > 0.6;
+}
+
+// WCAG relative luminance (0..1).
+function relativeLuminance(r: number, g: number, b: number): number {
+	const toLinear = (c: number) => {
+		const s = c / 255;
+		return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+	};
+	return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+
+let taskDragSource: { cardId: string; taskPath: number[] } | null = null;
+let docDragSource: { cardId: string; docPath: number[] } | null = null;
+
+// Set once per render pass by renderDashboard so the deep doc/wikilink renderers
+// can attach hover previews and open the note popover without threading these
+// through every function signature. Mirrors the docDragSource module-level idiom.
+let activeHoverParent: HoverParent | null = null;
+let activeNoteOpener: ((file: TFile, subpath?: string) => void) | null = null;
+// The rendering view as a Component — MarkdownRenderer.render requires one for
+// its async lifecycle; null when the caller passed a bare hover parent, in
+// which case memo cards keep the synchronous plain-lines paint.
+let activeMarkdownComponent: Component | null = null;
+
+const VAULT_FILE_EXTS = SUPPORTED_FILE_EXTS;
+
+function getSearchableFiles(app: App) {
+	return app.vault.getFiles()
+		.filter(f => !f.path.startsWith('.') && VAULT_FILE_EXTS.has(f.extension));
+}
+
+/**
+ * Cached basename → TFile index for the wikilink/doc basename fallback in
+ * {@link resolveNoteFile}. Building it scans the whole vault, so doing that per
+ * wikilink (the old behavior) was O(wikilinks × vaultSize) per render — the
+ * dominant cost on large vaults. We build it once lazily and keep it in sync
+ * via vault create/delete/rename events (registered once per app).
+ *
+ * `null` = not built yet; the Map is keyed by basename and holds the first
+ * matching file (wikilinks resolve to one target anyway).
+ */
+let basenameIndex: Map<string, TFile> | null = null;
+let basenameIndexApp: App | null = null;
+const basenameEventRefs: EventRef[] = [];
+
+function indexFile(file: TFile): void {
+	if (file.path.startsWith('.') || !VAULT_FILE_EXTS.has(file.extension)) return;
+	const idx = basenameIndex;
+	if (idx && !idx.has(file.basename)) idx.set(file.basename, file);
+}
+
+function unindexFile(file: TFile): void {
+	const idx = basenameIndex;
+	if (!idx) return;
+	// Only clear if this file is the one indexed; a same-named other may own it.
+	if (idx.get(file.basename) === file) {
+		idx.delete(file.basename);
+	}
+}
+
+function ensureBasenameIndex(app: App): Map<string, TFile> {
+	if (basenameIndex && basenameIndexApp === app) return basenameIndex;
+	const idx = new Map<string, TFile>();
+	for (const f of app.vault.getFiles()) {
+		if (!f.path.startsWith('.') && VAULT_FILE_EXTS.has(f.extension) && !idx.has(f.basename)) {
+			idx.set(f.basename, f);
+		}
+	}
+	basenameIndex = idx;
+	basenameIndexApp = app;
+	// Register invalidation hooks exactly once per app; store refs so the plugin
+	// can detach them on unload (matches the sync.ts EventRef pattern).
+	basenameEventRefs.push(app.vault.on('create', (file) => {
+		if (file instanceof TFile) indexFile(file);
+	}));
+	basenameEventRefs.push(app.vault.on('delete', (file) => {
+		if (file instanceof TFile) unindexFile(file);
+	}));
+	basenameEventRefs.push(app.vault.on('rename', (file, oldPath) => {
+		// Rename keeps the TFile identity but Obsidian has already updated
+		// file.basename/path to the NEW values by the time this fires. Drop the
+		// old key (derived from oldPath) if this file owned it, then re-index.
+		const oldBasename = oldPath.split('/').pop()?.replace(/\.[^.]+$/, '') ?? '';
+		if (basenameIndex?.get(oldBasename) === file) basenameIndex?.delete(oldBasename);
+		if (file instanceof TFile) indexFile(file);
+	}));
+	return idx;
+}
+
+/**
+ * Detach the basename index's vault listeners and drop the cache. Called from
+ * plugin onunload to avoid leaking handlers across hot reloads.
+ */
+export function teardownBasenameIndex(app: App): void {
+	for (const ref of basenameEventRefs) app.vault.offref(ref);
+	basenameEventRefs.length = 0;
+	basenameIndex = null;
+	basenameIndexApp = null;
+}
+
+/**
+ * Resolve a raw doc/wikilink target to a TFile, trying the path verbatim, with
+ * an implicit `.md`, and finally a cached basename lookup. Centralised so the
+ * doc list and inline wikilinks resolve links identically.
+ */
+function resolveNoteFile(app: App, rawPath: string): TFile | null {
+	const direct = app.vault.getFileByPath(rawPath);
+	if (direct) return direct;
+	const withMd = rawPath.includes('.') ? rawPath : `${rawPath}.md`;
+	const tried = app.vault.getFileByPath(withMd);
+	if (tried) return tried;
+	const basename = rawPath.split('/').pop()?.replace(/\.md$/, '') ?? '';
+	if (basename) {
+		return ensureBasenameIndex(app).get(basename) ?? null;
+	}
+	return null;
+}
+
+// ===== Sidebar Widget Rendering =====
+
+export function renderSidebarWeekCalendar(container: HTMLElement): void {
+	// Reuse the existing calendar node so cross-day refreshes don't grow the DOM.
+	let row = container.querySelector<HTMLElement>('.dashboard-sidebar-week-calendar');
+	if (row) {
+		row.empty();
+	} else {
+		row = container.createDiv({ cls: 'dashboard-sidebar-week-calendar' });
+	}
+
+	const now = new Date();
+	const today = now.getDay();
+	const mondayOffset = today === 0 ? -6 : 1 - today;
+	const monday = new Date(now);
+	monday.setDate(now.getDate() + mondayOffset);
+
+	const lang = getLanguage() === 'zh' ? 'zh-CN' : 'en';
+	const accentLight = isAccentLight();
+
+	for (let i = 0; i < 7; i++) {
+		const d = new Date(monday);
+		d.setDate(monday.getDate() + i);
+		const isToday = d.toDateString() === now.toDateString();
+
+		const cell = row.createDiv({
+			cls: 'dashboard-sidebar-week-cell'
+				+ (isToday ? ' dashboard-sidebar-week-cell--today' : '')
+				+ (isToday && accentLight ? ' dashboard-sidebar-week-cell--today-on-light' : ''),
+		});
+		cell.createDiv({
+			cls: 'dashboard-sidebar-week-day',
+			text: d.toLocaleDateString(lang, { weekday: 'narrow' }),
+		});
+		cell.createDiv({
+			cls: 'dashboard-sidebar-week-date',
+			text: String(d.getDate()),
+		});
+	}
+}
+
+/** True when the board should render top-bottom (widget strip under the
+ *  banner). Phones are excluded: their layout is CSS-fixed and must not
+ *  change shape because a desktop-only setting flipped. Every call site
+ *  funnels through this one helper so the gate can never drift. */
+export function isStackedLayout(settings: import('./types').DashboardSettings): boolean {
+	return settings.layoutMode === 'stacked' && !Platform.isPhone;
+}
+
+/** Fingerprint of every input the sidebar widgets depend on. The view compares
+ *  it across full re-renders: when unchanged, the previous widgets DOM is
+ *  re-attached instead of rebuilt (see renderSidebarWidgets), so dashboard data
+ *  mutations (card moves, section edits, ...) never churn the widgets. */
+export function sidebarWidgetSignature(
+	settings: import('./types').DashboardSettings,
+	hasPomodoro: boolean,
+	hasReading: boolean,
+	hasHolidayData: boolean,
+	quickActionsSig: string,
+): string {
+	return JSON.stringify({
+		// The stacked widget area has a different internal structure (quick
+		// actions card pinned leftmost + column-major strip wrapper), so a
+		// layout switch must rebuild rather than re-attach the previous mode's
+		// DOM.
+		stacked: isStackedLayout(settings),
+		weatherEnabled: settings.widgetWeatherEnabled,
+		weatherCity: settings.widgetWeatherCity,
+		weatherLat: settings.widgetWeatherLat,
+		weatherLon: settings.widgetWeatherLon,
+		pomodoroEnabled: settings.pomodoroEnabled,
+		pomodoroLongBreakInterval: settings.pomodoroLongBreakInterval,
+		lunarEnabled: settings.widgetLunarEnabled,
+		yearProgressEnabled: settings.widgetYearProgressEnabled,
+		calendarEnabled: settings.widgetCalendarEnabled,
+		calendarExcludeFolders: settings.calendarExcludeFolders,
+		habitEnabled: settings.widgetHabitEnabled,
+		// Tier settings must break the reuse signature: they change the stacked
+		// grid spans, which are written as inline CSS variables at build time.
+		// (sidebarWidth / widgetUnitHeight deliberately stay OUT — those apply
+		// as plain CSS variables on the outer sidebar every render and must not
+		// churn the widgets DOM.)
+		habitHeightRatio: settings.habitHeightRatio,
+		readingHeightRatio: settings.readingHeightRatio,
+		expenseEnabled: settings.widgetExpenseEnabled,
+		expenseCurrency: settings.expenseCurrency,
+		albums: settings.albums ?? [],
+		quickActionsBackground: settings.quickActionsBackground,
+		pomodoroBackground: settings.pomodoroBackground,
+		habitBackground: settings.habitBackground,
+		musicBackground: settings.musicBackground,
+		yearProgressBackground: settings.yearProgressBackground,
+		anniversaryEnabled: settings.anniversaryEnabled,
+		anniversaries: settings.anniversaries ?? [],
+		// Playlist content itself must NOT enter the signature: every add would
+		// rebuild the whole widget area. The service subscription refreshes it
+		// in place instead; only the enable flag matters here. Phones have no
+		// sidebar widget area; tablets share the desktop layout.
+		musicEnabled: settings.widgetMusicEnabled && !Platform.isPhone,
+		countdownEnabled: settings.countdownEnabled,
+		countdowns: settings.countdowns,
+		readingEnabled: settings.readingEnabled,
+		quickActionsEnabled: settings.widgetQuickActionsEnabled,
+		// Quick buttons live inside the widget area now; their content (actions,
+		// order, hidden presets) must break the reuse signature so add/remove/edit
+		// rebuilds the area instead of re-attaching a stale quick-actions DOM.
+		quickActionsSig,
+		widgetOrder: settings.widgetOrder,
+		hasPomodoro,
+		hasReading,
+		hasHolidayData,
+		lang: getLanguage(),
+	});
+}
+
+/** Render the sidebar widgets area. When `reuse` carries the widgets element
+ *  detached from a previous render AND the widget signature is unchanged (the
+ *  caller's responsibility), that element is re-attached as-is - listeners,
+ *  countdown timers, pomodoro/reading service wiring and the task calendar's
+ *  navigation state all survive the surrounding full re-render.
+ *  Returns the widgets area element (reused or fresh), or null when no widget
+ *  is enabled. */
+
+/** Persist a singleton widget's background straight from the card's config
+ *  button (plugin reached via the app service locator — the same idiom the
+ *  countdown settings button uses). */
+function saveSingletonBackground(
+	app: App,
+	key: 'quickActionsBackground' | 'pomodoroBackground' | 'habitBackground' | 'musicBackground' | 'yearProgressBackground',
+	bg: import('./types').WidgetBackground | undefined,
+): void {
+	const plugin = getWidgetPlugin(app);
+	if (!plugin) return;
+	plugin.settings = { ...plugin.settings, [key]: bg };
+	void plugin.saveSettings();
+	plugin.refreshAllDashboards();
+}
+
+export function renderSidebarWidgets(
+	container: HTMLElement,
+	settings: import('./types').DashboardSettings,
+	app: App,
+	pomodoroService?: PomodoroService,
+	readingService?: ReadingService,
+	holidayData?: Record<string, HolidayInfo>,
+	onWidgetReorder?: (order: string[]) => void,
+	reuse?: HTMLElement | null,
+	onOpenNote?: (file: TFile, line?: number) => void,
+	renderQuickActions?: (container: HTMLElement) => void,
+): HTMLElement | null {
+	const anyEnabled = settings.widgetWeatherEnabled || settings.pomodoroEnabled || settings.widgetLunarEnabled || settings.widgetYearProgressEnabled || settings.widgetCalendarEnabled || settings.widgetHabitEnabled || settings.widgetExpenseEnabled || (settings.albums?.length ?? 0) > 0 || (settings.anniversaryEnabled && (settings.anniversaries?.length ?? 0) > 0) || (settings.countdownEnabled && (settings.countdowns?.length ?? 0) > 0) || settings.readingEnabled || (settings.widgetQuickActionsEnabled && !!renderQuickActions) || (settings.widgetMusicEnabled && !Platform.isPhone);
+	if (!anyEnabled) return null;
+
+	const stacked = isStackedLayout(settings);
+	// Unchanged inputs: keep the previous DOM (and its live timers/listeners).
+	// The layout marker check is local defense-in-depth on top of the caller's
+	// signature gate: a side-built area (flat children) must never re-attach
+	// into a stacked render (strip wrapper expected) or vice versa, even if a
+	// future caller forgets to include the layout in its signature.
+	if (reuse && reuse.isConnected === false && reuse.childElementCount > 0
+		&& reuse.dataset.layout === (stacked ? 'stacked' : 'side')) {
+		container.appendChild(reuse);
+		return reuse;
+	}
+
+	const widgetArea = container.createDiv({ cls: 'dashboard-sidebar-widgets' });
+	widgetArea.dataset.layout = stacked ? 'stacked' : 'side';
+
+	const DEFAULT_ORDER = ['quickActions', 'lunar', 'weather', 'pomodoro', 'reading', 'countdown', 'anniversary', 'yearProgress', 'calendar', 'habit', 'expense', 'album', 'music'];
+	// Legacy: an order saved before quick buttons were a widget lacks the
+	// 'quickActions' key. Render it first there (its historical spot, above the
+	// other widgets) until the user drags it elsewhere.
+	const order = settings.widgetOrder?.length ? settings.widgetOrder : DEFAULT_ORDER;
+
+	type WidgetEntry = { key: string; render: (host: HTMLElement) => void };
+	const enabled: WidgetEntry[] = [];
+	if (settings.widgetQuickActionsEnabled && renderQuickActions) {
+		const renderQuick = renderQuickActions;
+		enabled.push({ key: 'quickActions', render: (host) => { renderQuick(host); } });
+	}
+	if (settings.widgetLunarEnabled) {
+		enabled.push({ key: 'lunar', render: (host) => renderSidebarLunarWidget(host, holidayData ?? {}, app) });
+	}
+	if (settings.widgetYearProgressEnabled) {
+		enabled.push({ key: 'yearProgress', render: (host) => renderSidebarYearProgress(host, settings.yearProgressBackground, app, bg => saveSingletonBackground(app, 'yearProgressBackground', bg)) });
+	}
+	if (settings.widgetCalendarEnabled) {
+		enabled.push({ key: 'calendar', render: (host) => renderSidebarCalendar(host, settings, app, onOpenNote) });
+	}
+	if (settings.widgetWeatherEnabled) {
+		enabled.push({ key: 'weather', render: (host) => renderSidebarWeather(host, settings, app) });
+	}
+	if (settings.pomodoroEnabled && pomodoroService) {
+		enabled.push({ key: 'pomodoro', render: (host) => renderSidebarPomodoro(host, pomodoroService, settings, app, bg => saveSingletonBackground(app, 'pomodoroBackground', bg)) });
+	}
+	if (settings.readingEnabled && readingService) {
+		enabled.push({ key: 'reading', render: (host) => renderSidebarReading(host, readingService) });
+	}
+	if (settings.widgetHabitEnabled) {
+		enabled.push({ key: 'habit', render: (host) => renderSidebarHabitWidget(host, app, settings.habitBackground, bg => saveSingletonBackground(app, 'habitBackground', bg)) });
+	}
+	if (settings.widgetExpenseEnabled) {
+		enabled.push({ key: 'expense', render: (host) => renderSidebarExpenseWidget(host, app) });
+	}
+	// Multiple album widgets: one card per albums[] entry, keyed album-<id>.
+	// renderSidebarAlbumWidget reads the legacy flat fields, so each entry
+	// renders through a per-album settings shim (spread — never mutated).
+	for (const cfg of settings.albums ?? []) {
+		const ref = cfg;
+		enabled.push({
+			key: `album-${ref.id}`,
+			render: (host) => renderSidebarAlbumWidget(host, {
+				...settings,
+				widgetAlbumFolder: ref.folder,
+				widgetAlbumIntervalSec: ref.intervalSec,
+				widgetAlbumRecursive: ref.recursive,
+				widgetAlbumRatio: ref.ratio,
+				widgetAlbumTransition: ref.transition,
+			}, app),
+		});
+	}
+	// Anniversary widgets: one card per anniversaries[] entry, keyed
+	// anniversary-<id> (the countdown multi-instance pattern).
+	if (settings.anniversaryEnabled) {
+		for (const cfg of settings.anniversaries ?? []) {
+			const ref = cfg;
+			enabled.push({ key: `anniversary-${ref.id}`, render: (host) => renderSidebarAnniversaryWidget(host, ref, app, updated => {
+			const plugin = getWidgetPlugin(app);
+			if (!plugin) return;
+			plugin.settings = {
+				...plugin.settings,
+				anniversaries: (plugin.settings.anniversaries ?? []).map(a => a.id === updated.id ? updated : a),
+			};
+			void plugin.saveSettings();
+			plugin.refreshAllDashboards();
+		}) });
+		}
+	}
+	if (settings.widgetMusicEnabled && !Platform.isPhone) {
+		enabled.push({ key: 'music', render: (host) => renderSidebarMusicWidget(host, settings.musicBackground, app, bg => saveSingletonBackground(app, 'musicBackground', bg)) });
+	}
+	if (settings.countdownEnabled) {
+		for (const cd of settings.countdowns ?? []) {
+			const cdRef = cd;
+			enabled.push({ key: `countdown-${cd.id}`, render: (host) => renderSidebarCountdown(host, cdRef, app) });
+		}
+	}
+
+	const ordered = sortByOrder(enabled, order);
+
+	// Stacked mode: quick actions is a regular card in the strip grid, always
+	// FIRST in the build order = leftmost column (it also exits the reorder
+	// system there, so the pinned position is deterministic). The saved drag
+	// order is untouched and still rules the side layout. The strip wrapper is
+	// created lazily on the first widget, so an empty enable set never gets a
+	// stray container.
+	const buildOrder = stacked
+		? [...ordered.filter(e => e.key === 'quickActions'), ...ordered.filter(e => e.key !== 'quickActions')]
+		: ordered;
+	let stripRow: HTMLElement | null = null;
+	const hostFor = (_key: string): HTMLElement => {
+		if (!stacked) return widgetArea;
+		stripRow ??= widgetArea.createDiv({ cls: 'dashboard-sidebar-widgets-row' });
+		return stripRow;
+	};
+
+	// Stacked-mode height ratios: rows of the 6-row widget grid per fraction.
+	const albumById = new Map((settings.albums ?? []).map(a => [String(a.id), a]));
+	// Adaptive column packing ("首选档 + 放不下自动换挡"): simulate the sparse
+	// column-first grid over the DOM order and resolve each TIERED card's
+	// span (habit / reading / album-*). Fixed cards keep their hardcoded
+	// per-type CSS spans; tiered cards get the resolved span inline as
+	// --db-widget-span, which their CSS rule reads with a historical fallback.
+	const spans = stacked
+		? resolveStackedSpans(buildStackedSpanSpecs(buildOrder.map(e => e.key), {
+			// Explicit mapping: the settings field names (habitHeightRatio)
+			// differ from the StackedRatios shape, and a whole-settings pass
+			// would type-check (all-optional interface) while silently reading
+			// undefined -> default tiers.
+			habit: settings.habitHeightRatio,
+			reading: settings.readingHeightRatio,
+			albums: settings.albums,
+		}))
+		: null;
+
+	for (let i = 0; i < buildOrder.length; i++) {
+		const { key, render } = buildOrder[i]!;
+		const host = hostFor(key);
+		const childCount = host.children.length;
+		render(host);
+		const el = host.children[childCount] as HTMLElement | undefined;
+		if (el) {
+			el.dataset.widgetKey = key;
+			// The quick-actions section carries its own section classes; give it
+			// the widget class too so it joins the drag-to-reorder system.
+			if (key === 'quickActions') {
+				el.addClass('dashboard-sidebar-widget');
+				// Card background + config gear INSIDE the header's button group
+				// (left of palette/add) — a corner button would overlap them.
+				applyWidgetBackground(el, settings.quickActionsBackground, app, { skipFrame: true });
+				const btnGroup = el.querySelector<HTMLElement>('.dashboard-qa-btn-group');
+				if (btnGroup) {
+					const gear = appendInlineBackgroundButton(btnGroup, app, settings.quickActionsBackground,
+						bg => saveSingletonBackground(app, 'quickActionsBackground', bg));
+					btnGroup.insertBefore(gear, btnGroup.firstChild);
+				}
+			}
+			// Album cards carry their config id (the multi-instance refresh
+			// matches on it).
+			if (key.startsWith('album-')) {
+				const cfg = albumById.get(key.slice('album-'.length));
+				if (cfg) el.dataset.albumId = String(cfg.id);
+			}
+			if (spans && isTieredWidgetKey(key)) {
+				el.setCssProps({ '--db-widget-span': String(spans[i] ?? RATIO_SPAN.full) });
+			}
+		}
+	}
+
+	if (onWidgetReorder) {
+		setupWidgetDnD(widgetArea, ordered.map(e => e.key), onWidgetReorder, stacked);
+	}
+	return widgetArea;
+}
+
+type WidgetEntry = { key: string; render: (host: HTMLElement) => void };
+
+function sortByOrder(items: WidgetEntry[], order: string[]): WidgetEntry[] {
+	const orderMap = new Map(order.map((k, i) => [k, i]));
+	const sorted = [...items].sort((a, b) => {
+		// quickActions predates the widget system; a saved order without it
+		// keeps it first (its historical spot above the widgets).
+		const ai = orderMap.get(a.key) ?? (a.key === 'quickActions' ? -1 : order.length);
+		const bi = orderMap.get(b.key) ?? (b.key === 'quickActions' ? -1 : order.length);
+		return ai - bi;
+	});
+	return sorted;
+}
+
+function setupWidgetDnD(
+	widgetArea: HTMLElement,
+	currentKeys: string[],
+	onReorder: (order: string[]) => void,
+	stacked: boolean,
+): void {
+	let draggedKey: string | null = null;
+
+	/** All drag-order cards: keyed by [data-widget-key], which sits on the
+	 *  widget itself OR on the bare mount wrapper refreshDataWidget re-renders
+	 *  lunar/pomodoro/reading into (the wrapper inherits the key). */
+	const widgets = () => widgetArea.querySelectorAll('[data-widget-key]');
+
+	/** Clear every drag-over indicator class (both axes swept as defense). */
+	const clearDragOver = (el: HTMLElement): void => {
+		el.removeClass('dashboard-sidebar-widget--drag-over-top');
+		el.removeClass('dashboard-sidebar-widget--drag-over-bottom');
+		el.removeClass('dashboard-sidebar-widget--drag-over-left');
+		el.removeClass('dashboard-sidebar-widget--drag-over-right');
+	};
+
+	/** Insertion side for a pointer position over `wEl`: against the vertical
+	 *  midpoint. Both layouts read the Y axis — the side rail stacks widgets
+	 *  vertically, and the stacked deck is a column-major grid where "above
+	 *  the target" is exactly "earlier in the flat order". */
+	const isBefore = (wEl: HTMLElement, e: DragEvent): boolean => {
+		const rect = wEl.getBoundingClientRect();
+		return e.clientY < rect.top + rect.height / 2;
+	};
+
+	/** Controls whose own pointer gesture must not be hijacked by the widget's
+	 *  drag-to-reorder: the music volume slider, text inputs, selects, buttons
+	 *  and links. A native HTML5 drag starts on ANY mousedown inside a
+	 *  `draggable` ancestor, so `draggable` is armed per gesture instead of
+	 *  once at setup: pressing a control leaves it off (the control keeps its
+	 *  drag/select behaviour), pressing plain widget surface turns it on.
+	 *  `[data-no-drag]` is the opt-out hook for clickable non-form elements
+	 *  (playlist rows and similar) that want the same protection. */
+	const DRAG_BLOCKED = 'input, textarea, select, button, a[href], [contenteditable], [data-no-drag]';
+
+	// Stacked mode pins the quick-actions card to the leftmost slot, so
+	// dropping onto it (or dragging it) could never move anything on screen.
+	// It exits the reorder system there entirely: no insertion indicators, no
+	// persisted no-op order writes that would read as a broken drag.
+	const isPinned = (keyEl: HTMLElement): boolean =>
+		stacked && keyEl.dataset.widgetKey === 'quickActions';
+
+	widgets().forEach(el => {
+		const wEl = el as HTMLElement;
+		if (isPinned(wEl)) return;
+		wEl.setAttribute('draggable', 'false');
+	});
+
+	// Delegation on the widget AREA, not per-widget listeners: the in-place
+	// data refresh (view.refreshDataWidget) re-mounts lunar/pomodoro/reading
+	// inside a new wrapper mid-session, and drag events bubble — delegated
+	// handlers keep working across those swaps without re-wiring.
+	const keyElOf = (e: Event): HTMLElement | null => {
+		const target = e.target as HTMLElement | null;
+		const hit = target?.closest('[data-widget-key]') as HTMLElement | null;
+		if (!hit || !widgetArea.contains(hit)) return null;
+		return hit;
+	};
+
+	widgetArea.addEventListener('mousedown', (e) => {
+		const keyEl = keyElOf(e);
+		if (!keyEl || isPinned(keyEl)) return;
+		const blocked = e.button !== 0 || !!(e.target as HTMLElement | null)?.closest(DRAG_BLOCKED);
+		keyEl.setAttribute('draggable', blocked ? 'false' : 'true');
+	});
+
+	widgetArea.addEventListener('dragstart', (e) => {
+		const keyEl = keyElOf(e);
+		if (!keyEl || isPinned(keyEl)) return;
+		draggedKey = keyEl.dataset.widgetKey ?? null;
+		keyEl.addClass('dashboard-sidebar-widget--dragging');
+		if (e.dataTransfer) {
+			e.dataTransfer.effectAllowed = 'move';
+			e.dataTransfer.setData('text/plain', draggedKey ?? '');
+		}
+	});
+
+	widgetArea.addEventListener('dragend', (e) => {
+		const keyEl = keyElOf(e);
+		if (keyEl) {
+			keyEl.setAttribute('draggable', 'false');
+			keyEl.removeClass('dashboard-sidebar-widget--dragging');
+		}
+		widgets().forEach(el2 => clearDragOver(el2 as HTMLElement));
+		draggedKey = null;
+	});
+
+	widgetArea.addEventListener('dragover', (e) => {
+		const keyEl = keyElOf(e);
+		if (!keyEl || isPinned(keyEl)) return;
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		if (!draggedKey || keyEl.dataset.widgetKey === draggedKey) return;
+		widgets().forEach(el2 => clearDragOver(el2 as HTMLElement));
+		keyEl.addClass(isBefore(keyEl, e) ? 'dashboard-sidebar-widget--drag-over-top' : 'dashboard-sidebar-widget--drag-over-bottom');
+	});
+
+	widgetArea.addEventListener('dragleave', (e) => {
+		const keyEl = keyElOf(e);
+		if (keyEl) clearDragOver(keyEl);
+	});
+
+	widgetArea.addEventListener('drop', (e) => {
+		const keyEl = keyElOf(e);
+		if (!keyEl || isPinned(keyEl)) return;
+		e.preventDefault();
+		clearDragOver(keyEl);
+		if (!draggedKey || keyEl.dataset.widgetKey === draggedKey) return;
+
+		const targetKey = keyEl.dataset.widgetKey ?? '';
+		const insertBefore = isBefore(keyEl, e);
+
+		const keys = [...currentKeys];
+		const fromIdx = keys.indexOf(draggedKey);
+		if (fromIdx === -1) return;
+		keys.splice(fromIdx, 1);
+		let toIdx = keys.indexOf(targetKey);
+		if (toIdx === -1) return;
+		if (!insertBefore) toIdx += 1;
+		keys.splice(toIdx, 0, draggedKey);
+		onReorder(keys);
+	});
+}
+
+function renderSidebarWeather(container: HTMLElement, settings: import('./types').DashboardSettings, app: App): void {
+	const widget = container.createDiv({ cls: 'dashboard-sidebar-widget dashboard-sidebar-weather' });
+	renderSidebarWeatherInto(widget, settings, app);
+}
+
+/** Render weather content into an existing widget element (fresh or preserved).
+ *  Reads through the weather cache, so a periodic call only refetches once the
+ *  30-minute TTL has lapsed. */
+function renderSidebarWeatherInto(widget: HTMLElement, settings: import('./types').DashboardSettings, app: App): void {
+	const cityName = settings.widgetWeatherCity || '';
+
+	widget.createDiv({ cls: 'dashboard-sidebar-weather-loading', text: '...' });
+
+	const config = {
+		latitude: settings.widgetWeatherLat || 31.23,
+		longitude: settings.widgetWeatherLon || 121.47,
+		cityName: cityName || 'Shanghai',
+	};
+
+	const cached = getCachedWeather(config);
+	if (cached) {
+		widget.empty();
+		renderSidebarWeatherContent(widget, cached, config.cityName);
+		return;
+	}
+
+	fetchWeather(config).then(data => {
+		widget.empty();
+		renderSidebarWeatherContent(widget, data, config.cityName);
+	}).catch(() => {
+		widget.empty();
+		widget.createDiv({ cls: 'dashboard-sidebar-weather-error', text: '--' });
+	});
+}
+
+/** Refresh the live sidebar weather widget in place. The widgets DOM survives
+ *  full re-renders (signature-guarded reuse), so the periodic weather timer
+ *  refreshes it here instead of relying on a re-render happening to occur. */
+export function refreshSidebarWeatherWidget(root: HTMLElement, settings: import('./types').DashboardSettings, app: App): void {
+	const el = root.querySelector<HTMLElement>('.dashboard-sidebar-weather');
+	if (!el) return;
+	el.empty();
+	renderSidebarWeatherInto(el, settings, app);
+}
+
+function renderSidebarWeatherContent(el: HTMLElement, data: import('./types').WeatherData, cityName: string): void {
+	const top = el.createDiv({ cls: 'dashboard-sidebar-weather-top' });
+	top.createDiv({ cls: 'dashboard-sidebar-weather-icon', text: getWeatherEmoji(data.weatherCode) });
+	const tempWrap = top.createDiv({ cls: 'dashboard-sidebar-weather-temp-wrap' });
+	tempWrap.createDiv({ cls: 'dashboard-sidebar-weather-temp', text: `${Math.round(data.temperature)}°` });
+
+	const info = el.createDiv({ cls: 'dashboard-sidebar-weather-info' });
+	info.createDiv({ cls: 'dashboard-sidebar-weather-city', text: cityName });
+	const descLine = info.createDiv({ cls: 'dashboard-sidebar-weather-desc-line' });
+	descLine.createSpan({ cls: 'dashboard-sidebar-weather-desc', text: getWeatherDescription(data.weatherCode) });
+
+	const details = el.createDiv({ cls: 'dashboard-sidebar-weather-details' });
+	details.createDiv({ cls: 'dashboard-sidebar-weather-detail', text: `${t('weather.feelsLike') ?? 'Feels like'} ${Math.round(data.feelsLike)}°` });
+	details.createDiv({ cls: 'dashboard-sidebar-weather-detail', text: `${t('weather.humidity') ?? 'Humidity'} ${Math.round(data.humidity)}%` });
+	details.createDiv({ cls: 'dashboard-sidebar-weather-detail', text: `${Math.round(data.windSpeed)} km/h` });
+
+	if (data.dailyDates.length > 1) {
+		const forecast = el.createDiv({ cls: 'dashboard-sidebar-weather-forecast' });
+		const count = Math.min(data.dailyDates.length, 5);
+		for (let i = 0; i < count; i++) {
+			const day = forecast.createDiv({ cls: 'dashboard-sidebar-weather-fday' });
+			const d = new Date(data.dailyDates[i]! + 'T00:00:00');
+			const dayName = d.toLocaleDateString(getLanguage() === 'zh' ? 'zh-CN' : 'en', { weekday: 'short' });
+			day.createDiv({ cls: 'dashboard-sidebar-weather-fday-name', text: i === 0 ? t('weather.today') ?? 'Today' : dayName });
+			day.createDiv({ cls: 'dashboard-sidebar-weather-fday-icon', text: getWeatherEmoji(data.dailyCodes[i]!) });
+			const temps = day.createDiv({ cls: 'dashboard-sidebar-weather-fday-temps' });
+			temps.createSpan({ cls: 'dashboard-sidebar-weather-fday-high', text: `${Math.round(data.dailyMax[i]!)}°` });
+			temps.createSpan({ cls: 'dashboard-sidebar-weather-fday-low', text: `${Math.round(data.dailyMin[i]!)}°` });
+		}
+	}
+}
+
+export function renderSidebarPomodoro(
+	container: HTMLElement,
+	service: PomodoroService,
+	settings: import('./types').DashboardSettings,
+	app?: App,
+	onBgChange?: (bg: import('./types').WidgetBackground | undefined) => void,
+): void {
+	const widget = container.createDiv({ cls: 'dashboard-sidebar-widget dashboard-sidebar-pomodoro' });
+	if (app) applyWidgetBackground(widget, settings.pomodoroBackground, app);
+
+	const state = service.getState();
+	const isRunning = state.status === 'running';
+
+	// Top row: today count left + activity selector centered + stats button right
+	const topRow = widget.createDiv({ cls: 'dashboard-sidebar-pomodoro-top' });
+
+	const todayCount = service.getTodayCount();
+	const statsHint = topRow.createDiv({
+		cls: 'dashboard-sidebar-pomodoro-stats-hint',
+		text: '🍅 ' + t('pomodoro.today') + ' ' + todayCount,
+	});
+
+	topRow.createDiv({ cls: 'dashboard-sidebar-pomodoro-top-spacer' });
+
+	// Activity selector (in title position)
+	const currentActivity = service.getActivity();
+	createActivitySelector(topRow, service, currentActivity);
+
+	const statsBtn = topRow.createDiv({ cls: 'dashboard-sidebar-pomodoro-stats-btn' });
+	setIcon(statsBtn, 'bar-chart-2');
+
+	// Background gear rides the top row's right cluster (before stats), the
+	// inline pattern shared with habit/music/quick-actions.
+	if (app && onBgChange) {
+		const gear = appendInlineBackgroundButton(topRow, app, settings.pomodoroBackground, onBgChange);
+		topRow.insertBefore(gear, statsBtn);
+	}
+
+	// Ring
+	const ringWrap = widget.createDiv({ cls: 'dashboard-sidebar-pomodoro-ring-wrap' });
+	const svgSize = 72;
+	const strokeWidth = 6;
+	const radius = (svgSize - strokeWidth) / 2;
+	const circumference = 2 * Math.PI * radius;
+
+	const svg = ringWrap.createSvg('svg', {
+		cls: 'dashboard-sidebar-pomodoro-ring',
+		attr: { viewBox: `0 0 ${svgSize} ${svgSize}`, width: String(svgSize), height: String(svgSize) },
+	});
+	svg.createSvg('circle', {
+		cls: 'dashboard-sidebar-pomodoro-ring-bg',
+		attr: { cx: svgSize / 2, cy: svgSize / 2, r: radius, 'stroke-width': strokeWidth, fill: 'none' },
+	});
+	const progressCircle = svg.createSvg('circle', {
+		cls: 'dashboard-sidebar-pomodoro-ring-progress',
+		attr: {
+			cx: svgSize / 2, cy: svgSize / 2, r: radius, 'stroke-width': strokeWidth, fill: 'none',
+			'stroke-linecap': 'round', 'stroke-dasharray': circumference, 'stroke-dashoffset': '0',
+			transform: `rotate(-90 ${svgSize / 2} ${svgSize / 2})`,
+		},
+	});
+	const timeText = ringWrap.createDiv({
+		cls: 'dashboard-sidebar-pomodoro-time',
+		text: formatTime(state.remainingSeconds),
+	});
+
+	// Dots inside ring, below time
+	const dotsWrap = ringWrap.createDiv({ cls: 'dashboard-sidebar-pomodoro-dots' });
+	const interval = settings.pomodoroLongBreakInterval;
+	for (let i = 0; i < interval; i++) {
+		dotsWrap.createDiv({
+			cls: 'dashboard-sidebar-pomodoro-dot' + (i < state.completedWorkSessions ? ' dashboard-sidebar-pomodoro-dot--filled' : ''),
+		});
+	}
+
+	// Start/stop button. When AutoStartBreak is off and a phase completed, the
+	// service parks in paused-ready — label the button with the next action
+	// instead of a generic start.
+	const state2 = service.getState();
+	const isStandby = state2.status === 'paused' && state2.remainingSeconds === state2.totalSeconds;
+	const mainLabel = isRunning
+		? t('pomodoro.stop')
+		: isStandby
+			? (state2.phase === 'work' ? t('pomodoro.resumeFocus') : t('pomodoro.startBreak'))
+			: t('pomodoro.startFocus');
+	const mainBtn = widget.createEl('button', {
+		cls: 'dashboard-sidebar-pomodoro-main-btn',
+		text: mainLabel,
+	});
+	if (isRunning) {
+		mainBtn.addClass('dashboard-sidebar-pomodoro-main-btn--running');
+	}
+
+	// --- Helpers ---
+	function updateRing(remaining: number, total: number): void {
+		const progress = total > 0 ? remaining / total : 1;
+		progressCircle.setAttribute('stroke-dashoffset', String(circumference * (1 - progress)));
+		timeText.textContent = formatTime(remaining);
+	}
+	updateRing(state.remainingSeconds, state.totalSeconds);
+
+	function updateUI(): void {
+		const s = service.getState();
+		updateRing(s.remainingSeconds, s.totalSeconds);
+		const running = s.status === 'running';
+		const standby = s.status === 'paused' && s.remainingSeconds === s.totalSeconds;
+		mainBtn.textContent = running
+			? t('pomodoro.stop')
+			: standby
+				? (s.phase === 'work' ? t('pomodoro.resumeFocus') : t('pomodoro.startBreak'))
+				: t('pomodoro.startFocus');
+		mainBtn.toggleClass('dashboard-sidebar-pomodoro-main-btn--running', running);
+		const dots = dotsWrap.querySelectorAll('.dashboard-sidebar-pomodoro-dot');
+		dots.forEach((dot, i) => dot.toggleClass('dashboard-sidebar-pomodoro-dot--filled', i < s.completedWorkSessions));
+		const tc = service.getTodayCount();
+		statsHint.textContent = t('pomodoro.today') + ' ' + tc;
+	}
+
+	let unsubscribeTick: (() => void) | undefined;
+	unsubscribeTick = service.subscribeTick(() => {
+		if (!widget.isConnected) {
+			unsubscribeTick?.();
+			return;
+		}
+		const s = service.getState();
+		updateRing(s.remainingSeconds, s.totalSeconds);
+	});
+
+	let unsubscribeComplete: (() => void) | undefined;
+	unsubscribeComplete = service.subscribeComplete(() => {
+		if (!widget.isConnected) {
+			unsubscribeComplete?.();
+			return;
+		}
+		updateUI();
+	});
+
+	mainBtn.addEventListener('click', () => {
+		if (service.getState().status === 'running') {
+			service.reset();
+			updateUI();
+		} else {
+			service.start();
+			updateUI();
+		}
+	});
+
+	statsBtn.addEventListener('click', () => {
+		showPomodoroStats(widget.ownerDocument, service);
+	});
+}
+
+function createActivitySelector(
+	parent: HTMLElement,
+	service: PomodoroService,
+	initialActivity: string,
+): { activityTrigger: HTMLElement; updateActivityDisplay: (name: string) => void } {
+	const wrap = parent.createDiv({ cls: 'dashboard-pomodoro-activity-selector' });
+
+	const trigger = wrap.createDiv({
+		cls: 'dashboard-pomodoro-activity-trigger' + (initialActivity ? ' dashboard-pomodoro-activity-trigger--set' : ''),
+	});
+
+	let colorDot: HTMLElement | null = null;
+
+	if (initialActivity) {
+		colorDot = trigger.createDiv({ cls: 'dashboard-pomodoro-activity-color-dot' });
+		colorDot.style.backgroundColor = activityColor(initialActivity);
+		trigger.createSpan({ text: initialActivity });
+	} else {
+		trigger.createSpan({ text: t('pomodoro.tapToSetActivity'), cls: 'dashboard-pomodoro-activity-placeholder' });
+	}
+
+	let panel: HTMLElement | null = null;
+
+	function updateActivityDisplay(name: string): void {
+		trigger.empty();
+		trigger.toggleClass('dashboard-pomodoro-activity-trigger--set', name.length > 0);
+		if (name) {
+			const dot = trigger.createDiv({ cls: 'dashboard-pomodoro-activity-color-dot' });
+			dot.style.backgroundColor = activityColor(name);
+			trigger.createSpan({ text: name });
+		} else {
+			trigger.createSpan({ text: t('pomodoro.tapToSetActivity'), cls: 'dashboard-pomodoro-activity-placeholder' });
+		}
+	}
+
+	function closePanel(): void {
+		if (panel) {
+			panel.remove();
+			panel = null;
+		}
+	}
+
+	function openPanel(): void {
+		closePanel();
+
+		panel = wrap.createDiv({ cls: 'dashboard-pomodoro-activity-panel' });
+
+		const input = panel.createEl('input', {
+			cls: 'dashboard-pomodoro-activity-panel-input',
+			attr: { type: 'text', placeholder: t('pomodoro.inputActivity') },
+		});
+
+		const recentActivities = service.getRecentActivities(6);
+		if (recentActivities.length > 0) {
+			const chipsWrap = panel.createDiv({ cls: 'dashboard-pomodoro-activity-chips' });
+			for (const act of recentActivities) {
+				const chip = chipsWrap.createDiv({ cls: 'dashboard-pomodoro-activity-chip' });
+				const dot = chip.createDiv({ cls: 'dashboard-pomodoro-activity-color-dot' });
+				dot.style.backgroundColor = activityColor(act);
+				chip.createSpan({ text: act });
+				chip.addEventListener('click', (e) => {
+					e.stopPropagation();
+					service.setActivity(act);
+					updateActivityDisplay(act);
+					closePanel();
+				});
+			}
+		}
+
+		input.focus();
+
+		const finish = (save: boolean) => {
+			const val = input.value.trim();
+			if (save && val) {
+				service.setActivity(val);
+				updateActivityDisplay(val);
+			}
+			closePanel();
+		};
+
+		input.addEventListener('keydown', (e: KeyboardEvent) => {
+			if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+			else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+		});
+	}
+
+	trigger.addEventListener('click', (e) => {
+		e.stopPropagation();
+		if (panel) {
+			closePanel();
+		} else {
+			openPanel();
+		}
+	});
+
+	// Close panel when clicking outside
+	const doc = parent.ownerDocument;
+	const onDocClick = (e: MouseEvent) => {
+		if (panel && !panel.contains(e.target as Node) && !trigger.contains(e.target as Node)) {
+			closePanel();
+		}
+	};
+	doc.addEventListener('click', onDocClick);
+
+	return { activityTrigger: trigger, updateActivityDisplay };
+}
+
+export function renderSidebarCountdown(
+	container: HTMLElement,
+	cd: import('./types').CountdownConfig,
+	app: App,
+): void {
+	const widget = container.createDiv({ cls: 'dashboard-sidebar-widget dashboard-sidebar-countdown' });
+	applyWidgetBackground(widget, cd.background, app);
+
+	// Settings button (absolute positioned)
+	const settingsBtn = widget.createEl('button', {
+		cls: 'dashboard-sidebar-countdown-settings-btn',
+		attr: { 'aria-label': t('countdown.settingsTitle') },
+	});
+	setIcon(settingsBtn, 'settings');
+
+	settingsBtn.addEventListener('click', (e) => {
+		e.stopPropagation();
+		const modal = new CountdownSettingsModal(app, cd, (updated) => {
+			const plugin = getRegisteredApexHost()
+				?? (app as unknown as { plugins: { plugins: Record<string, { settings?: import('./types').DashboardSettings; saveSettings?: () => Promise<void>; refreshAllDashboards?: () => void }> } })
+					.plugins?.plugins?.['apex-dashboard'];
+			if (plugin?.settings) {
+				plugin.settings = {
+					...plugin.settings,
+					countdowns: (plugin.settings.countdowns ?? []).map(c => c.id === updated.id ? updated : c),
+				};
+				void plugin.saveSettings?.();
+				plugin.refreshAllDashboards?.();
+			}
+		});
+		modal.open();
+	});
+
+	// Content
+	const content = widget.createDiv({ cls: 'dashboard-sidebar-countdown-content' });
+
+	const targetDate = cd.targetDate;
+	if (!targetDate) {
+		content.createDiv({ cls: 'dashboard-sidebar-countdown-placeholder', text: t('countdown.setTarget') });
+		return;
+	}
+
+	const target = targetDate.includes('T') ? new Date(targetDate) : new Date(targetDate + 'T00:00:00');
+	const now = new Date();
+
+	if (now >= target) {
+		if (cd.label) {
+			content.createDiv({ cls: 'dashboard-sidebar-countdown-until', text: t('countdown.untilLabel', { label: cd.label }) });
+		}
+		content.createDiv({ cls: 'dashboard-sidebar-countdown-expired', text: t('countdown.expired') });
+		return;
+	}
+
+	const diffMs = target.getTime() - now.getTime();
+	const remainDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+	const remainHours = Math.ceil(diffMs / (1000 * 60 * 60));
+	const displayMode = cd.displayMode;
+	const remainMinutes = Math.ceil(diffMs / (1000 * 60));
+	const currentVal = displayMode === 'minutes' ? remainMinutes : displayMode === 'hours' ? remainHours : remainDays;
+
+	// "距离xx还有" label above the number
+	if (cd.label) {
+		content.createDiv({ cls: 'dashboard-sidebar-countdown-until', text: t('countdown.untilLabel', { label: cd.label }) });
+	}
+
+	// Value display with flip
+	const flipWrap = content.createDiv({ cls: 'dashboard-sidebar-countdown-flip' });
+	const valueEl = flipWrap.createDiv({ cls: 'dashboard-sidebar-countdown-value', text: String(currentVal) });
+	flipWrap.createDiv({ cls: 'dashboard-sidebar-countdown-unit', text: displayMode === 'minutes' ? t('countdown.minutes') : displayMode === 'hours' ? t('countdown.hours') : t('countdown.days') });
+
+	// Auto-refresh with flip animation
+	let prevVal = currentVal;
+	const timer = window.setInterval(() => {
+		if (!content.isConnected) {
+			window.clearInterval(timer);
+			countdownTimers.delete(timer);
+			return;
+		}
+		const now2 = new Date();
+		if (now2 >= target) {
+			window.clearInterval(timer);
+			countdownTimers.delete(timer);
+			content.empty();
+			content.createDiv({ cls: 'dashboard-sidebar-countdown-expired', text: t('countdown.expired') });
+			return;
+		}		const diff = target.getTime() - now2.getTime();
+		const newVal = displayMode === 'minutes' ? Math.ceil(diff / (1000 * 60)) : displayMode === 'hours' ? Math.ceil(diff / (1000 * 60 * 60)) : Math.ceil(diff / (1000 * 60 * 60 * 24));
+		if (newVal !== prevVal) {
+			prevVal = newVal;
+			valueEl.textContent = String(newVal);
+			valueEl.addClass('dashboard-sidebar-countdown-value--flip');
+			window.setTimeout(() => valueEl.removeClass('dashboard-sidebar-countdown-value--flip'), 400);
+		}
+	}, 60000);
+	countdownTimers.set(timer, content);
+}
+
+function showPomodoroStats(doc: Document, service: PomodoroService): void {
+	// Landscape stats modal lives in its own module (KPIs, donut, trend,
+	// ranking, heatmap, recent records + tag management entry).
+	openWidePomodoroStats(doc, service);
+}
+
+function formatTime(seconds: number): string {
+	if (seconds >= 3600) {
+		const h = Math.floor(seconds / 3600);
+		const m = Math.floor((seconds % 3600) / 60);
+		const s = seconds % 60;
+		return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+	}
+	const m = Math.floor(seconds / 60);
+	const s = seconds % 60;
+	return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function formatReadingDuration(totalSeconds: number): string {
+	const hours = Math.floor(totalSeconds / 3600);
+	const mins = Math.floor((totalSeconds % 3600) / 60);
+	if (hours > 0 && mins > 0) return t('reading.timeHM', { h: hours, m: mins });
+	if (hours > 0) return t('reading.hours', { count: hours });
+	return t('reading.minutes', { count: Math.max(1, mins) });
+}
+
+function formatShortDuration(totalSeconds: number): string {
+	const h = Math.floor(totalSeconds / 3600);
+	const m = Math.floor((totalSeconds % 3600) / 60);
+	if (h > 0) return `${h}h${m > 0 ? m + 'm' : ''}`;
+	return `${Math.max(1, m)}m`;
+}
+
+export function renderSidebarReading(
+	container: HTMLElement,
+	service: ReadingService,
+): void {
+	const widget = container.createDiv({ cls: 'dashboard-sidebar-widget dashboard-sidebar-reading' });
+
+	// Title row
+	const titleRow = widget.createDiv({ cls: 'dashboard-reading-title-row' });
+	titleRow.createDiv({ cls: 'dashboard-reading-title', text: t('reading.title') });
+	titleRow.createDiv({ cls: 'dashboard-reading-title-spacer' });
+	const addBtn = titleRow.createDiv({ cls: 'dashboard-reading-add-btn' });
+	setIcon(addBtn, 'plus');
+	const statsBtn = titleRow.createDiv({ cls: 'dashboard-reading-stats-btn' });
+	setIcon(statsBtn, 'bar-chart-2');
+
+	// Book cards scroll area
+	const scrollArea = widget.createDiv({ cls: 'dashboard-reading-scroll' });
+
+	const state = service.getState();
+	const activeBooks = service.getActiveBooks();
+
+	for (const book of activeBooks) {
+		const isActive = state.status !== 'idle' && state.currentBook?.title === book.title;
+		const isRunning = isActive && state.status === 'running';
+		const card = scrollArea.createDiv({
+			cls: 'dashboard-reading-book-card' + (isActive ? ' dashboard-reading-book-card--active' : ''),
+		});
+
+		// Cover - always show title fallback, async load real cover
+		const coverWrap = card.createDiv({ cls: 'dashboard-reading-book-card-cover-wrap' });
+		const placeholder = coverWrap.createDiv({ cls: 'dashboard-reading-book-card-cover-placeholder' });
+		placeholder.textContent = book.title.length > 8 ? book.title.slice(0, 8) + '..' : book.title;
+		if (book.coverUrl) {
+			void resolveCoverAsObjectUrl(book.coverUrl, service.getApp()).then(blobUrl => {
+				if (blobUrl) {
+					placeholder.setCssProps({ display: 'none' });
+					coverWrap.style.backgroundImage = `url(${blobUrl})`;
+				}
+			});
+		}
+
+		// Info area
+		const info = card.createDiv({ cls: 'dashboard-reading-book-card-info' });
+		info.createDiv({ cls: 'dashboard-reading-book-card-title', text: book.title });
+		if (book.author) {
+			info.createDiv({ cls: 'dashboard-reading-book-card-author', text: book.author });
+		}
+
+		// Timer row
+		const timerRow = info.createDiv({ cls: 'dashboard-reading-book-card-timer' });
+
+		if (isActive) {
+			timerRow.createDiv({
+				cls: 'dashboard-reading-book-card-time dashboard-reading-book-card-time--active',
+				text: formatTime(state.elapsedSeconds),
+			});
+		} else {
+			const todaySec = service.getTodaySecondsForBook(book.title);
+			timerRow.createDiv({
+				cls: 'dashboard-reading-book-card-time',
+				text: todaySec > 0 ? formatShortDuration(todaySec) : '--',
+			});
+		}
+
+		// Play/pause/stop buttons
+		const actions = timerRow.createDiv({ cls: 'dashboard-reading-book-card-actions' });
+
+		if (isRunning) {
+			const pauseBtn = actions.createDiv({ cls: 'dashboard-reading-book-card-btn dashboard-reading-book-card-btn--pause' });
+			setIcon(pauseBtn, 'pause');
+			pauseBtn.addEventListener('click', (e) => { e.stopPropagation(); service.pause(); refreshCards(); });
+			const stopBtn = actions.createDiv({ cls: 'dashboard-reading-book-card-btn dashboard-reading-book-card-btn--stop' });
+			setIcon(stopBtn, 'square');
+			stopBtn.addEventListener('click', (e) => { e.stopPropagation(); service.pause(); showEndModal(book); });
+		} else if (isActive && state.status === 'paused') {
+			const resumeBtn = actions.createDiv({ cls: 'dashboard-reading-book-card-btn dashboard-reading-book-card-btn--play' });
+			setIcon(resumeBtn, 'play');
+			resumeBtn.addEventListener('click', (e) => { e.stopPropagation(); service.resume(); refreshCards(); });
+			const stopBtn = actions.createDiv({ cls: 'dashboard-reading-book-card-btn dashboard-reading-book-card-btn--stop' });
+			setIcon(stopBtn, 'square');
+			stopBtn.addEventListener('click', (e) => { e.stopPropagation(); showEndModal(book); });
+		} else {
+			const playBtn = actions.createDiv({ cls: 'dashboard-reading-book-card-btn dashboard-reading-book-card-btn--play' });
+			setIcon(playBtn, 'play');
+			playBtn.addEventListener('click', (e) => { e.stopPropagation(); service.startReading(book); refreshCards(); });
+		}
+
+		// Progress bar
+		if (book.totalPages > 0) {
+			const progressWrap = info.createDiv({ cls: 'dashboard-reading-book-card-progress' });
+			const pct = book.finished ? 100 : Math.min(100, Math.round((book.currentPage / book.totalPages) * 100));
+			const progressBar = progressWrap.createDiv({ cls: 'dashboard-reading-book-card-progress-bar' });
+			progressBar.createDiv({
+				cls: 'dashboard-reading-book-card-progress-fill' + (book.finished ? ' dashboard-reading-book-card-progress-fill--done' : ''),
+				attr: { style: `width:${pct}%` },
+			});
+			progressWrap.createDiv({
+				cls: 'dashboard-reading-book-card-progress-text',
+				text: book.finished ? '100%' : `${book.currentPage}/${book.totalPages}`,
+			});
+		}
+
+		// Action buttons (edit / remove)
+		const editBtn = card.createDiv({ cls: 'dashboard-reading-book-card-action dashboard-reading-book-card-edit' });
+		setIcon(editBtn, 'pencil');
+		editBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			openEditBookInfo(widget.ownerDocument, service, book, () => refreshCards());
+		});
+
+		const removeBtn = card.createDiv({ cls: 'dashboard-reading-book-card-action dashboard-reading-book-card-remove' });
+		setIcon(removeBtn, 'x');
+		removeBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			void service.removeActiveBook(book.title).then(() => refreshCards());
+		});
+	}
+
+	// Timer tick - update active timer display
+	let unsubscribeTick: (() => void) | undefined;
+	unsubscribeTick = service.subscribeTick(() => {
+		if (!widget.isConnected) {
+			unsubscribeTick?.();
+			return;
+		}
+		const s = service.getState();
+		if (s.status === 'running') {
+			const activeTime = scrollArea.querySelector('.dashboard-reading-book-card-time--active');
+			if (activeTime) activeTime.textContent = formatTime(s.elapsedSeconds);
+		}
+	});
+
+	addBtn.addEventListener('click', () => {
+		openBookSearch(widget.ownerDocument, service, (book) => {
+			if (book) void service.addActiveBook(book).then(() => refreshCards());
+		});
+	});
+
+	statsBtn.addEventListener('click', () => {
+		showReadingStats(widget.ownerDocument, service);
+	});
+
+	function showEndModal(book: import('./reading-service').BookInfo): void {
+		const elapsed = service.getElapsedSeconds();
+		openEndReadingModal(widget.ownerDocument, service, book, elapsed, () => refreshCards());
+	}
+
+	function refreshCards(): void {
+		refreshSidebarReadingWidget(widget.ownerDocument, service);
+	}
+}
+
+/** Re-render every live reading widget (desktop sidebar + mobile drawer
+ *  copies) from scratch. Used after mutations that outlive a single card
+ *  (session finished, book added/removed) — also by the floating mini
+ *  reading timer, which lives outside the widget's closure. */
+export function refreshSidebarReadingWidget(doc: Document, service: ReadingService): void {
+	const widgets = Array.from(doc.querySelectorAll<HTMLElement>('.dashboard-sidebar-reading'));
+	if (widgets.length === 0) return;
+	for (const w of widgets) {
+		const parent = w.parentElement;
+		if (!parent) continue;
+		w.remove();
+		renderSidebarReading(parent, service);
+	}
+}
+
+export function openEndReadingModal(
+	doc: Document,
+	service: ReadingService,
+	book: import('./reading-service').BookInfo,
+	elapsedSeconds: number,
+	onDone: () => void,
+): void {
+	const overlay = doc.body.createDiv({ cls: 'dashboard-reading-end-overlay' });
+	const modal = overlay.createDiv({ cls: 'dashboard-reading-end-modal' });
+	applyModalTheme(modal);
+
+	function close() {
+		doc.removeEventListener('keydown', onKey);
+		overlay.remove();
+	}
+	function onKey(e: KeyboardEvent) { if (e.key === 'Escape') close(); }
+	doc.addEventListener('keydown', onKey);
+	overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+	// Header
+	const header = modal.createDiv({ cls: 'dashboard-reading-end-header' });
+	header.createDiv({ cls: 'dashboard-reading-end-title', text: t('reading.endTitle') });
+	const closeBtn = header.createDiv({ cls: 'dashboard-reading-end-close' });
+	setIcon(closeBtn, 'x');
+	closeBtn.addEventListener('click', close);
+
+	// Body
+	const body = modal.createDiv({ cls: 'dashboard-reading-end-body' });
+
+	// Date row
+	const dateRow = body.createDiv({ cls: 'dashboard-reading-end-row' });
+	dateRow.createDiv({ cls: 'dashboard-reading-end-label', text: t('reading.endDate') });
+	const now = new Date();
+	dateRow.createDiv({
+		cls: 'dashboard-reading-end-value',
+		text: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
+	});
+
+	// Duration row
+	const durRow = body.createDiv({ cls: 'dashboard-reading-end-row' });
+	durRow.createDiv({ cls: 'dashboard-reading-end-label', text: t('reading.endDuration') });
+	durRow.createDiv({ cls: 'dashboard-reading-end-value', text: formatReadingDuration(elapsedSeconds) });
+
+	// Progress section
+	const progressSection = body.createDiv({ cls: 'dashboard-reading-end-section' });
+	progressSection.createDiv({ cls: 'dashboard-reading-end-section-title', text: t('reading.endProgress') });
+
+	// Mode toggle: page / percentage
+	let progressMode: 'page' | 'pct' = book.totalPages > 0 ? 'page' : 'pct';
+	const modeToggle = progressSection.createDiv({ cls: 'dashboard-reading-end-mode-toggle' });
+	const pageModeBtn = modeToggle.createDiv({
+		cls: 'dashboard-reading-end-mode-btn' + (progressMode === 'page' ? ' dashboard-reading-end-mode-btn--active' : ''),
+		text: t('reading.endModePage'),
+	});
+	const pctModeBtn = modeToggle.createDiv({
+		cls: 'dashboard-reading-end-mode-btn' + (progressMode === 'pct' ? ' dashboard-reading-end-mode-btn--active' : ''),
+		text: t('reading.endModePct'),
+	});
+
+	// Inputs container
+	const inputsContainer = progressSection.createDiv({ cls: 'dashboard-reading-end-inputs' });
+
+	function renderInputs(): void {
+		inputsContainer.empty();
+		const pageRow = inputsContainer.createDiv({ cls: 'dashboard-reading-end-page-row' });
+
+		// Start value (readonly)
+		const startCol = pageRow.createDiv({ cls: 'dashboard-reading-end-page-col' });
+		startCol.createDiv({ cls: 'dashboard-reading-end-page-label', text: t('reading.endStartPage') });
+		const startVal = progressMode === 'pct'
+			? (book.totalPages > 0 ? Math.round((book.currentPage / book.totalPages) * 100) : 0)
+			: book.currentPage;
+		const suffix = progressMode === 'pct' ? '%' : '';
+		startCol.createDiv({ cls: 'dashboard-reading-end-page-readonly', text: `${startVal}${suffix}` });
+
+		pageRow.createDiv({ cls: 'dashboard-reading-end-page-arrow' });
+
+		// End value (input)
+		const endCol = pageRow.createDiv({ cls: 'dashboard-reading-end-page-col' });
+		endCol.createDiv({ cls: 'dashboard-reading-end-page-label', text: t('reading.endEndPage') });
+		const endInput = endCol.createEl('input', {
+			cls: 'dashboard-reading-end-page-input',
+			attr: {
+				type: 'number',
+				min: '0',
+				max: progressMode === 'pct' ? '100' : '',
+				placeholder: progressMode === 'pct' ? '0%' : '0',
+			},
+		});
+		endInput.focus();
+
+		// Total pages row (page mode, unknown total)
+		if (progressMode === 'page' && !book.totalPages) {
+			const totalRow = inputsContainer.createDiv({ cls: 'dashboard-reading-end-total-row' });
+			totalRow.createDiv({ cls: 'dashboard-reading-end-page-label', text: t('reading.endTotalPages') });
+			totalRow.createEl('input', {
+				cls: 'dashboard-reading-end-page-input dashboard-reading-end-page-input--total',
+				attr: { type: 'number', min: '0', placeholder: '?' },
+			});
+		}
+	}
+	renderInputs();
+
+	pageModeBtn.addEventListener('click', () => {
+		progressMode = 'page';
+		pageModeBtn.addClass('dashboard-reading-end-mode-btn--active');
+		pctModeBtn.removeClass('dashboard-reading-end-mode-btn--active');
+		renderInputs();
+	});
+	pctModeBtn.addEventListener('click', () => {
+		progressMode = 'pct';
+		pctModeBtn.addClass('dashboard-reading-end-mode-btn--active');
+		pageModeBtn.removeClass('dashboard-reading-end-mode-btn--active');
+		renderInputs();
+	});
+
+	// Finished checkbox
+	const finishedRow = body.createDiv({ cls: 'dashboard-reading-end-finished' });
+	const checkbox = finishedRow.createEl('input', {
+		cls: 'dashboard-reading-end-checkbox',
+		attr: { type: 'checkbox', id: 'reading-finished' },
+	});
+	const checkLabel = finishedRow.createEl('label', {
+		cls: 'dashboard-reading-end-checkbox-label',
+		attr: { for: 'reading-finished' },
+	});
+	checkLabel.textContent = t('reading.endMarkFinished');
+
+	// Footer
+	const footer = modal.createDiv({ cls: 'dashboard-reading-end-footer' });
+
+	footer.createEl('button', {
+		cls: 'dashboard-reading-end-btn dashboard-reading-end-btn--cancel',
+		text: t('reading.endCancel'),
+	}).addEventListener('click', close);
+
+	footer.createEl('button', {
+		cls: 'dashboard-reading-end-btn dashboard-reading-end-btn--discard',
+		text: t('reading.endDiscard'),
+	}).addEventListener('click', () => {
+		service.discardSession();
+		close();
+		onDone();
+	});
+
+	footer.createEl('button', {
+		cls: 'dashboard-reading-end-btn dashboard-reading-end-btn--confirm',
+		text: t('reading.endConfirm'),
+	}).addEventListener('click', () => {
+		void (async () => {
+			const endInput = inputsContainer.querySelector<HTMLInputElement>('.dashboard-reading-end-page-input:not(.dashboard-reading-end-page-input--total)');
+			const totalInput = inputsContainer.querySelector<HTMLInputElement>('.dashboard-reading-end-page-input--total');
+			const endVal = parseInt(endInput?.value || '0') || 0;
+			const finished = checkbox.checked;
+
+			let endPage: number;
+			let totalPages = book.totalPages;
+
+			if (progressMode === 'pct') {
+				if (totalPages > 0) {
+					endPage = Math.round((Math.min(endVal, 100) / 100) * totalPages);
+				} else {
+					endPage = Math.min(endVal, 100);
+					totalPages = 100;
+				}
+			} else {
+				endPage = endVal;
+				if (totalInput) {
+					totalPages = parseInt(totalInput.value) || 0;
+				}
+			}
+
+			await service.finishSession(endPage, totalPages, finished);
+			close();
+			onDone();
+		})();
+	});
+}
+
+function openEditBookInfo(
+	doc: Document,
+	service: ReadingService,
+	book: import('./reading-service').BookInfo,
+	onDone: () => void,
+): void {
+	const overlay = doc.body.createDiv({ cls: 'dashboard-reading-end-overlay' });
+	const modal = overlay.createDiv({ cls: 'dashboard-reading-end-modal' });
+	applyModalTheme(modal);
+
+	function close() {
+		doc.removeEventListener('keydown', onKey);
+		overlay.remove();
+	}
+	function onKey(e: KeyboardEvent) { if (e.key === 'Escape') close(); }
+	doc.addEventListener('keydown', onKey);
+	overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+	const header = modal.createDiv({ cls: 'dashboard-reading-end-header' });
+	header.createDiv({ cls: 'dashboard-reading-end-title', text: t('reading.editTitle') });
+	const closeBtn = header.createDiv({ cls: 'dashboard-reading-end-close' });
+	setIcon(closeBtn, 'x');
+	closeBtn.addEventListener('click', close);
+
+	const body = modal.createDiv({ cls: 'dashboard-reading-end-body' });
+
+	body.createDiv({ cls: 'dashboard-reading-end-label', text: t('reading.editBookName') });
+	const titleInput = body.createEl('input', {
+		cls: 'dashboard-reading-end-input',
+		attr: { type: 'text' },
+	});
+	titleInput.value = book.title;
+
+	body.createDiv({ cls: 'dashboard-reading-end-label', text: t('reading.editAuthorName') });
+	const authorInput = body.createEl('input', {
+		cls: 'dashboard-reading-end-input',
+		attr: { type: 'text' },
+	});
+	authorInput.value = book.author;
+
+	body.createDiv({ cls: 'dashboard-reading-end-label', text: t('reading.editTotalPages') });
+	const pagesInput = body.createEl('input', {
+		cls: 'dashboard-reading-end-input',
+		attr: { type: 'number', min: '0' },
+	});
+	pagesInput.value = String(book.totalPages || '');
+
+	body.createDiv({ cls: 'dashboard-reading-end-label', text: t('reading.editCoverUrl') });
+	const coverInput = body.createEl('input', {
+		cls: 'dashboard-reading-end-input',
+		attr: { type: 'text', placeholder: t('reading.editCoverPlaceholder') },
+	});
+	coverInput.value = book.coverUrl;
+
+	const footer = modal.createDiv({ cls: 'dashboard-reading-end-footer' });
+	const saveBtn = footer.createEl('button', {
+		cls: 'dashboard-reading-end-btn dashboard-reading-end-btn--confirm',
+		text: t('reading.editConfirm'),
+	});
+	footer.createEl('button', {
+		cls: 'dashboard-reading-end-btn dashboard-reading-end-btn--cancel',
+		text: t('reading.endCancel'),
+	}).addEventListener('click', close);
+
+	const deleteBtn = footer.createEl('button', {
+		cls: 'dashboard-reading-end-btn dashboard-reading-end-btn--delete',
+		text: t('reading.editDeleteBook'),
+	});
+	deleteBtn.addEventListener('click', () => {
+		void (async () => {
+			await service.removeActiveBook(book.title);
+			close();
+			onDone();
+		})();
+	});
+
+	saveBtn.addEventListener('click', () => {
+		void (async () => {
+			const newTitle = titleInput.value.trim();
+			if (!newTitle) return;
+
+			await service.updateBookInfo(book.title, {
+				title: newTitle,
+				author: authorInput.value.trim(),
+				coverUrl: coverInput.value.trim(),
+				totalPages: parseInt(pagesInput.value) || 0,
+			});
+			close();
+			onDone();
+		})();
+	});
+
+	titleInput.focus();
+}
+
+function openBookSearch(
+	doc: Document,
+	service: ReadingService,
+	onSelect: (book: import('./reading-service').BookInfo | null) => void,
+): void {
+	const overlay = doc.body.createDiv({ cls: 'dashboard-reading-book-overlay' });
+	const modal = overlay.createDiv({ cls: 'dashboard-reading-book-modal' });
+	applyModalTheme(modal);
+
+	function close() {
+		doc.removeEventListener('keydown', onKey);
+		overlay.remove();
+	}
+	function onKey(e: KeyboardEvent) { if (e.key === 'Escape') close(); }
+	doc.addEventListener('keydown', onKey);
+
+	overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+	const header = modal.createDiv({ cls: 'dashboard-reading-book-header' });
+	header.createDiv({ cls: 'dashboard-reading-book-header-title', text: t('reading.selectBook') });
+	const closeBtn = header.createDiv({ cls: 'dashboard-reading-book-close' });
+	setIcon(closeBtn, 'x');
+	closeBtn.addEventListener('click', close);
+
+	const inputArea = modal.createDiv({ cls: 'dashboard-reading-book-input-area' });
+	const input = inputArea.createEl('input', {
+		cls: 'dashboard-reading-book-input',
+		attr: { type: 'text', placeholder: t('reading.searchBook') },
+	});
+	input.focus();
+
+	const resultsArea = modal.createDiv({ cls: 'dashboard-reading-book-results' });
+
+	// Manual input row (always at bottom)
+	const manualRow = resultsArea.createDiv({ cls: 'dashboard-reading-book-manual' });
+	manualRow.createDiv({ cls: 'dashboard-reading-book-manual-label', text: t('reading.manualInput') });
+	const manualInput = manualRow.createEl('input', {
+		cls: 'dashboard-reading-book-manual-input',
+		attr: { type: 'text', placeholder: t('reading.manualPlaceholder') },
+	});
+	const manualBtn = manualRow.createEl('button', {
+		cls: 'dashboard-reading-book-manual-btn',
+		text: 'OK',
+	});
+	manualBtn.addEventListener('click', () => {
+		const val = manualInput.value.trim();
+		if (val) {
+			onSelect({ title: val, author: '', coverUrl: '', isbn: '', source: 'manual', currentPage: 0, totalPages: 0, finished: false });
+			close();
+		}
+	});
+
+	let searchTimer: number | null = null;
+	let searching = false;
+
+	input.addEventListener('input', () => {
+		if (searchTimer) window.clearTimeout(searchTimer);
+		const query = input.value.trim();
+
+		// Remove previous search results (keep manual row)
+		while (resultsArea.firstChild && resultsArea.firstChild !== manualRow) {
+			resultsArea.removeChild(resultsArea.firstChild);
+		}
+
+		if (!query) return;
+
+		const indicator = resultsArea.createDiv({ cls: 'dashboard-reading-book-searching', text: t('reading.searching') });
+		resultsArea.insertBefore(indicator, manualRow);
+
+		searchTimer = window.setTimeout(() => {
+			void (async () => {
+				if (searching) return;
+				searching = true;
+
+				let results: import('./book-service').BookSearchResult[] = [];
+				try {
+					results = await searchBooks(query);
+				} catch {
+					results = [];
+				}
+				searching = false;
+
+				// Remove previous results
+				while (resultsArea.firstChild && resultsArea.firstChild !== manualRow) {
+					resultsArea.removeChild(resultsArea.firstChild);
+				}
+
+				if (results.length === 0) {
+					const noResult = resultsArea.createDiv({ cls: 'dashboard-reading-book-no-results', text: t('reading.noResults') });
+					resultsArea.insertBefore(noResult, manualRow);
+					return;
+				}
+
+				for (const book of results) {
+					const item = resultsArea.createDiv({ cls: 'dashboard-reading-book-item' });
+					if (book.coverUrl) {
+						const c = item.createDiv({ cls: 'dashboard-reading-book-item-cover' });
+						void resolveCoverAsObjectUrl(book.coverUrl, service.getApp()).then(url => { if (url) c.style.backgroundImage = `url(${url})`; });
+					} else {
+						item.createDiv({ cls: 'dashboard-reading-book-item-nocover' });
+					}
+					const info = item.createDiv({ cls: 'dashboard-reading-book-item-info' });
+					info.createDiv({ cls: 'dashboard-reading-book-item-title', text: book.title });
+					if (book.author) {
+						info.createDiv({ cls: 'dashboard-reading-book-item-author', text: book.author });
+					}
+					item.addEventListener('click', () => {
+						onSelect({
+							title: book.title, author: book.author, coverUrl: book.coverUrl,
+							isbn: book.isbn, source: 'google', currentPage: 0, totalPages: 0, finished: false,
+						});
+						close();
+					});
+					resultsArea.insertBefore(item, manualRow);
+				}
+			})();
+		}, 500);
+	});
+}
+
+function showReadingStats(doc: Document, service: ReadingService): void {
+	const overlay = doc.body.createDiv({ cls: 'dashboard-pomodoro-stats-overlay' });
+	const modal = overlay.createDiv({ cls: 'dashboard-pomodoro-stats-modal' });
+	applyModalTheme(modal);
+
+	function close() {
+		doc.removeEventListener('keydown', onKey);
+		overlay.remove();
+	}
+	function onKey(e: KeyboardEvent) { if (e.key === 'Escape') close(); }
+	doc.addEventListener('keydown', onKey);
+	overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+
+	const header = modal.createDiv({ cls: 'dashboard-pomodoro-stats-header' });
+	header.createDiv({ cls: 'dashboard-pomodoro-stats-header-title', text: t('reading.statsTitle') });
+	const closeBtn = header.createDiv({ cls: 'dashboard-pomodoro-stats-close' });
+	setIcon(closeBtn, 'x');
+	closeBtn.addEventListener('click', close);
+
+	const content = modal.createDiv({ cls: 'dashboard-reading-stats-content' });
+
+	function renderContent(): void {
+		content.empty();
+
+		// Summary card
+		const summaryCard = content.createDiv({ cls: 'dashboard-reading-stats-card' });
+		const summaryGrid = summaryCard.createDiv({ cls: 'dashboard-reading-stats-summary' });
+		const totalItem = summaryGrid.createDiv({ cls: 'dashboard-reading-stats-summary-item' });
+		totalItem.createDiv({ cls: 'dashboard-reading-stats-summary-value', text: formatReadingDuration(service.getTotalSeconds()) });
+		totalItem.createDiv({ cls: 'dashboard-reading-stats-summary-label', text: t('reading.totalReading') });
+		const todayItem = summaryGrid.createDiv({ cls: 'dashboard-reading-stats-summary-item' });
+		todayItem.createDiv({ cls: 'dashboard-reading-stats-summary-value', text: formatReadingDuration(service.getTodaySeconds()) });
+		todayItem.createDiv({ cls: 'dashboard-reading-stats-summary-label', text: t('reading.todayReading') });
+		const bookItem = summaryGrid.createDiv({ cls: 'dashboard-reading-stats-summary-item' });
+		bookItem.createDiv({ cls: 'dashboard-reading-stats-summary-value', text: String(service.getBookCountInRange(365)) });
+		bookItem.createDiv({ cls: 'dashboard-reading-stats-summary-label', text: t('reading.bookCount') });
+		const streakItem = summaryGrid.createDiv({ cls: 'dashboard-reading-stats-summary-item' });
+		streakItem.createDiv({ cls: 'dashboard-reading-stats-summary-value', text: String(service.getStreak()) });
+		streakItem.createDiv({ cls: 'dashboard-reading-stats-summary-label', text: t('reading.streakDays') });
+
+		// Book list card
+		const bookCard = content.createDiv({ cls: 'dashboard-reading-stats-card' });
+		bookCard.createDiv({ cls: 'dashboard-reading-stats-card-title', text: t('reading.bookList') });
+		const rangeToggle = bookCard.createDiv({ cls: 'dashboard-reading-stats-range' });
+		const ranges: { key: string; label: string; days: number }[] = [
+			{ key: 'week', label: t('reading.rangeWeek'), days: 7 },
+			{ key: 'month', label: t('reading.rangeMonth'), days: 30 },
+			{ key: 'year', label: t('reading.rangeYear'), days: 365 },
+		];
+		let activeRange = 'month';
+		const toggleButtons = ranges.map(r => rangeToggle.createDiv({
+			cls: 'dashboard-reading-stats-range-btn' + (r.key === activeRange ? ' dashboard-reading-stats-range-btn--active' : ''),
+			text: r.label,
+		}));
+		const bookListContainer = bookCard.createDiv({ cls: 'dashboard-reading-book-list' });
+
+		function renderBookList(rangeKey: string): void {
+			bookListContainer.empty();
+			const rangeInfo = ranges.find(r => r.key === rangeKey);
+			if (!rangeInfo) return;
+			const books = service.getBookBreakdownInRange(rangeInfo.days);
+			if (books.length === 0) {
+				bookListContainer.createDiv({ cls: 'dashboard-reading-stats-empty', text: t('reading.noRecords') });
+				return;
+			}
+			for (const book of books) {
+				const row = bookListContainer.createDiv({ cls: 'dashboard-reading-book-list-row' });
+				if (book.coverUrl) {
+					const c = row.createDiv({ cls: 'dashboard-reading-book-list-cover' });
+					void resolveCoverAsObjectUrl(book.coverUrl, service.getApp()).then(url => {
+						if (url) c.style.backgroundImage = `url(${url})`;
+					});
+				} else {
+					row.createDiv({ cls: 'dashboard-reading-book-list-nocover' });
+				}
+				const info = row.createDiv({ cls: 'dashboard-reading-book-list-info' });
+				info.createDiv({ cls: 'dashboard-reading-book-list-title', text: book.title });
+				if (book.author) info.createDiv({ cls: 'dashboard-reading-book-list-author', text: book.author });
+				const meta = row.createDiv({ cls: 'dashboard-reading-book-list-meta' });
+				meta.createDiv({ cls: 'dashboard-reading-book-list-duration', text: formatReadingDuration(book.totalSeconds) });
+				meta.createDiv({ cls: 'dashboard-reading-book-list-sessions', text: t('reading.times', { count: book.sessions }) });
+				const del = meta.createDiv({ cls: 'dashboard-reading-stats-record-del' });
+				setIcon(del, 'trash-2');
+				del.addEventListener('click', (e) => {
+					e.stopPropagation();
+					void (async () => {
+						await service.deleteBookRecords(book.title);
+						renderBookList(rangeKey);
+					})();
+				});
+			}
+		}
+		toggleButtons.forEach((btn, i) => {
+			btn.addEventListener('click', () => {
+				activeRange = ranges[i]!.key;
+				toggleButtons.forEach((b, j) => b.toggleClass('dashboard-reading-stats-range-btn--active', j === i));
+				renderBookList(activeRange);
+			});
+		});
+		renderBookList(activeRange);
+
+		// Recent records card
+		const recentRecords = service.getRecentRecords(10);
+		if (recentRecords.length > 0) {
+			const recentCard = content.createDiv({ cls: 'dashboard-reading-stats-card' });
+			recentCard.createDiv({ cls: 'dashboard-reading-stats-card-title', text: t('reading.recentRecords') });
+			for (const rec of recentRecords) {
+				const row = recentCard.createDiv({ cls: 'dashboard-reading-stats-record' });
+				const ts = new Date(rec.timestamp);
+				const dateText = `${ts.getMonth() + 1}/${ts.getDate()} ${String(ts.getHours()).padStart(2, '0')}:${String(ts.getMinutes()).padStart(2, '0')}`;
+				row.createDiv({ cls: 'dashboard-reading-stats-record-date', text: dateText });
+				row.createDiv({ cls: 'dashboard-reading-stats-record-book', text: rec.bookTitle });
+				row.createDiv({ cls: 'dashboard-reading-stats-record-dur', text: formatReadingDuration(rec.durationSeconds) });
+				const del = row.createDiv({ cls: 'dashboard-reading-stats-record-del' });
+				setIcon(del, 'trash-2');
+				del.addEventListener('click', (e) => {
+					e.stopPropagation();
+					void (async () => {
+						await service.deleteRecord(rec.timestamp);
+						renderContent();
+					})();
+				});
+			}
+		}
+	}
+
+	renderContent();
+}
+
+
+
+export function renderDashboard(
+	container: HTMLElement,
+	data: DashboardData,
+	callbacks: RenderCallbacks,
+	app: App,
+	settings?: DashboardSettings,
+	hoverParent: HoverParent | null = null,
+	opts?: { skipQuickNotes?: boolean },
+): void {
+	activeHoverParent = hoverParent;
+	activeNoteOpener = callbacks.onOpenNoteInPopover ?? null;
+	// The dashboard view doubles as the markdown Component (ItemView extends
+	// Component); other hover-parent callers fall back to plain memo lines.
+	activeMarkdownComponent = hoverParent instanceof Component ? hoverParent : null;
+
+	container.empty();
+	container.addClass('dashboard-kanban');
+
+	// Quick Notes region: pinned at the top, above all sections (non-reorderable).
+	// Stacked layout hoists it out of the kanban entirely — the view renders it
+	// above the widget strip instead (skipQuickNotes), because the kanban sits
+	// below the strip there and the bar must stay directly under the banner.
+	if (settings?.quickNotesEnabled && !opts?.skipQuickNotes) {
+		renderQuickNoteRegion(container, settings, callbacks);
+	}
+
+	for (const column of data.columns) {
+		const section = renderSection(column, callbacks, app, data, settings);
+		container.appendChild(section);
+	}
+
+	const addColBtn = container.createDiv({ cls: 'dashboard-add-section' });
+	addColBtn.setText(t('renderer.addSection'));
+	addColBtn.setAttribute('role', 'button');
+	addColBtn.addEventListener('click', () => {
+		callbacks.onRequestAddSection();
+	});
+}
+
+const SCANNING_SECTION_TYPES = new Set(['library', 'folder']);
+const MEDIA_SECTION_TYPES = new Set(['images', 'videos']);
+
+/** Render-input signatures per scanning section, keyed
+ *  `<scope>|<index>:<name>` (scope = the owning board file, so two open
+ *  dashboards on different workspaces never share entries). Populated by
+ *  refreshScanningSections; see scanningSectionSignature. */
+const scanningSectionSignatures = new Map<string, string>();
+
+/** Drop every cached scanning-section signature. Called when the metadata
+ *  cache (re)resolves: a section first rendered before resolution may hold
+ *  partially-indexed frontmatter/tags, and a path+mtime signature cannot see
+ *  that difference — clearing forces the next vault event to rebuild it. */
+export function invalidateScanningSectionSignatures(): void {
+	scanningSectionSignatures.clear();
+}
+
+/** Cheap fingerprint of everything a library/folder section's render derives
+ *  from vault state: its libraryConfig plus the path, mtime, and ctime of
+ *  every in-scope markdown file. Frontmatter/tag changes ride mtime (any
+ *  content write bumps it). An equal signature means a rebuild would be
+ *  byte-identical, so the DOM swap can be skipped without visible loss. */
+function scanningSectionSignature(column: DashboardColumn, app: App): string {
+	const cfg = column.libraryConfig;
+	const folders = (cfg?.folders ?? [])
+		.map(f => f.trim().replace(/^\/+|\/+$/g, ''))
+		.filter(f => f.length > 0);
+	const excluded = normalizeExcludeFolders(cfg?.excludeFolders ?? []);
+	const parts: string[] = [];
+	for (const file of app.vault.getMarkdownFiles()) {
+		if (folders.length > 0) {
+			const lp = file.path.toLowerCase();
+			if (!folders.some(f => lp.startsWith(f.toLowerCase() + '/'))) continue;
+		}
+		if (isUnderExcludedFolder(file.path, excluded)) continue;
+		parts.push(`${file.path}|${file.stat.mtime}|${file.stat.ctime}`);
+	}
+	// Vault iteration order is not contractual; sort for a stable signature.
+	parts.sort();
+	return JSON.stringify([column.name, cfg ?? null, parts]);
+}
+
+/**
+ * Re-render only the vault-scanning sections (library/folder) in place,
+ * leaving media and card sections untouched. Used by the view's vault-event
+ * debounce so editing a note no longer tears down the whole board (and the
+ * media section's <video> thumbnails with it). `shouldRefresh` narrows the
+ * pass to sections whose scan scope intersects the changed paths;
+ * `signatureScope` keys the signature cache per board file.
+ */
+export function refreshScanningSections(
+	kanban: HTMLElement,
+	data: DashboardData,
+	callbacks: RenderCallbacks,
+	app: App,
+	settings: DashboardSettings | undefined,
+	hoverParent: HoverParent | null,
+	shouldRefresh?: (column: DashboardColumn) => boolean,
+	signatureScope?: string,
+): number {
+	activeHoverParent = hoverParent;
+	let refreshed = 0;
+	for (const column of data.columns) {
+		if (!SCANNING_SECTION_TYPES.has(getSectionType(column))) continue;
+		if (shouldRefresh && !shouldRefresh(column)) continue;
+		const oldEl = kanban.querySelector(`:scope > [data-column="${CSS.escape(sectionRef(column))}"]`);
+		if (!oldEl) continue;
+		// Skip the swap when the section's render inputs are unchanged since the
+		// last one (out-of-scope edit, write inside an excluded folder, non-md
+		// churn under a scan folder): rebuilding would flash identical content.
+		const key = `${signatureScope ?? ''}|${data.columns.indexOf(column)}:${column.name}`;
+		const signature = scanningSectionSignature(column, app);
+		if (scanningSectionSignatures.get(key) === signature) continue;
+		scanningSectionSignatures.set(key, signature);
+		const newEl = renderSection(column, callbacks, app, data, settings);
+		// Carry the old row's scroll positions over the swap (file lists,
+		// library kanban) so a vault-event refresh doesn't yank the viewport.
+		const scrollStates = captureScrollStates(oldEl);
+		oldEl.replaceWith(newEl);
+		restoreScrollStates(newEl, scrollStates);
+		refreshed++;
+	}
+	return refreshed;
+}
+
+/**
+ * Re-render only the media sections (images/videos) in place. Releases the old
+ * sections' <video> decoders + lazy observers (via destroyMediaSection) before
+ * swapping. Only invoked on structural vault changes (create/delete/rename),
+ * never on plain note edits, so videos are not churned during normal editing.
+ */
+export function refreshMediaSections(
+	kanban: HTMLElement,
+	data: DashboardData,
+	callbacks: RenderCallbacks,
+	app: App,
+	settings: DashboardSettings | undefined,
+	hoverParent: HoverParent | null,
+	shouldRefresh?: (column: DashboardColumn) => boolean,
+): number {
+	activeHoverParent = hoverParent;
+	let refreshed = 0;
+	for (const column of data.columns) {
+		if (!MEDIA_SECTION_TYPES.has(getSectionType(column))) continue;
+		if (shouldRefresh && !shouldRefresh(column)) continue;
+		const matched = kanban.querySelector(`:scope > [data-column="${CSS.escape(sectionRef(column))}"]`);
+		if (!(matched instanceof HTMLElement)) continue;
+		const scrollStates = captureScrollStates(matched);
+		destroyMediaSection(matched);
+		const newEl = renderSection(column, callbacks, app, data, settings);
+		matched.replaceWith(newEl);
+		restoreScrollStates(newEl, scrollStates);
+		refreshed++;
+	}
+	return refreshed;
+}
+
+const COLLAPSED_KEY = 'apex-dashboard-collapsed';
+const SUPPORTED_SECTION_TYPES = new Set([
+	'memo', 'todo', 'projects', 'notes', 'dashboard', 'library', 'folder', 'images', 'videos',
+	'alltasks', 'calendar', 'dataview', 'weread', 'ticktick', 'sticky', 'web',
+]);
+
+function getCollapsedSections(app: App): Set<string> {
+	try {
+		const raw = app.loadLocalStorage(COLLAPSED_KEY) as string | null;
+		if (!raw) return new Set();
+		return new Set(JSON.parse(raw) as string[]);
+	} catch {
+		return new Set();
+	}
+}
+
+function saveCollapsedSections(app: App, collapsed: Set<string>): void {
+	app.saveLocalStorage(COLLAPSED_KEY, JSON.stringify([...collapsed]));
+}
+
+function attachSectionResizeHandle(el: HTMLElement, column: DashboardColumn, callbacks: RenderCallbacks): void {
+	if (Platform.isMobile) return;
+	// Memo and web sections are driven by a fixed CSS height, so the drag must
+	// write inline height as well; other types are content-sized rows where
+	// max-height can only clamp (shrink), never grow.
+	const isFixedHeight = getSectionType(column) === 'memo' || getSectionType(column) === 'web';
+	const handle = el.createDiv({ cls: 'dashboard-section-resize-handle' });
+	handle.addEventListener('pointerdown', (e) => {
+		if (!el.parentElement) return;
+		const startY = e.clientY;
+		const startHeight = el.offsetHeight;
+		el.addClass('dashboard-section-row--resizing');
+		// Guarded drag (pointer capture + viewport shield, see drag-guard):
+		// keeps the move/up stream whole across embedded frames and Windows
+		// webview surface overflow. frames-muted stays for hover calm.
+		const shieldHost = el.closest('.apex-dashboard-root') ?? el.parentElement;
+		shieldHost?.addClass('dashboard-frames-muted');
+
+		startGuardedDrag(e, {
+			cursor: 'ns-resize',
+			onMove: (ev) => {
+				// The row can be torn down mid-drag by a re-render; resizing a
+				// detached element is stale work, so stop touching it.
+				if (!el.isConnected) {
+					el.removeClass('dashboard-section-row--resizing');
+					shieldHost?.removeClass('dashboard-frames-muted');
+					return;
+				}
+				const delta = ev.clientY - startY;
+				const newHeight = Math.max(160, Math.min(2000, startHeight + delta));
+				el.style.maxHeight = `${newHeight}px`;
+				if (isFixedHeight) el.style.height = `${newHeight}px`;
+			},
+			onUp: (ev) => {
+				el.removeClass('dashboard-section-row--resizing');
+				shieldHost?.removeClass('dashboard-frames-muted');
+				const finalHeight = Math.max(160, Math.min(2000, startHeight + (ev.clientY - startY)));
+				if (finalHeight !== column.height) {
+					callbacks.onColumnHeightChange(sectionRef(column), finalHeight);
+				}
+			},
+		});
+	});
+}
+
+/** Sanitize a stored pair split: left member's share in percent, 50 default.
+ *  Out-of-range/garbage values (hand-edited files) fall back to the default. */
+function clampPairWidth(width: unknown): number {
+	return typeof width === 'number' && Number.isFinite(width)
+		? Math.max(20, Math.min(80, Math.round(width)))
+		: 50;
+}
+
+/** Pair split rendering: the LEFT member of a pair owns the split (its
+ *  `width`, left share %) and mounts the col-resize divider over the board
+ *  gutter; the RIGHT member mirrors the complement. Both write --db-pair-basis,
+ *  which the half-row basis consumes (calc basis minus half the gutter,
+ *  defaulting to the historical 50%). Exported for the verify script. */
+export function applyPairWidth(el: HTMLElement, column: DashboardColumn, data: DashboardData | undefined, callbacks: RenderCallbacks): void {
+	if (!data) return;
+	const idx = data.columns.indexOf(column);
+	if (idx < 0) return;
+	const partner = partnerIndexOf(data.columns, idx);
+	if (partner === idx + 1) {
+		el.addClass('dashboard-section-row--pair-left');
+		el.style.setProperty('--db-pair-basis', `${clampPairWidth(column.width)}%`);
+		attachPairWidthHandle(el, column, callbacks);
+	} else if (partner === idx - 1) {
+		const left = data.columns[partner]!;
+		el.style.setProperty('--db-pair-basis', `${100 - clampPairWidth(left.width)}%`);
+	}
+}
+
+/** Drag the pair divider: live-writes --db-pair-basis on both halves, then
+ *  persists the rounded split on mouseup (the same write-nothing-mid-drag
+ *  discipline as the height handle). Same drag-shield treatment for embedded
+ *  frames. Desktop only (only ever attached from a rendered pair). */
+function attachPairWidthHandle(el: HTMLElement, column: DashboardColumn, callbacks: RenderCallbacks): void {
+	const handle = el.createDiv({ cls: 'dashboard-pair-width-handle' });
+	handle.setAttribute('aria-label', t('renderer.pairWidthHint'));
+	handle.setAttribute('aria-label', t('renderer.pairWidthHint'));
+	handle.addEventListener('pointerdown', (e) => {
+		const board = el.parentElement;
+		const partnerEl = el.nextElementSibling;
+		if (!board || !(partnerEl instanceof HTMLElement)
+			|| !partnerEl.hasClass('dashboard-section-row--half')) return;
+		// Split math runs against the draggable span (line minus the one
+		// gutter between the halves), reading the gutter from the board's own
+		// --db-kanban-gap so a future CSS retune keeps the drag calibrated.
+		const gutter = parseFloat(getComputedStyle(board).getPropertyValue('--db-kanban-gap')) || 10;
+		const usable = board.clientWidth - gutter;
+		if (usable <= 0) return;
+		const startX = e.clientX;
+		const startPct = clampPairWidth(column.width);
+		let lastPct = startPct;
+		el.addClass('dashboard-section-row--resizing');
+		// Guarded drag (pointer capture + viewport shield, see drag-guard):
+		// the pair divider shares a gutter-adjacent strip with everything the
+		// board hosts, and on Windows a webview surface can overflow onto the
+		// strip mid-drag — capture keeps the stream on this document.
+		const shieldHost = el.closest('.apex-dashboard-root') ?? board;
+		shieldHost.addClass('dashboard-frames-muted');
+		startGuardedDrag(e, {
+			cursor: 'col-resize',
+			onMove: (ev) => {
+				// The row can be torn down mid-drag by a re-render; stop rather
+				// than resize a detached element.
+				if (!el.isConnected) {
+					el.removeClass('dashboard-section-row--resizing');
+					shieldHost.removeClass('dashboard-frames-muted');
+					return;
+				}
+				lastPct = Math.max(20, Math.min(80, startPct + ((ev.clientX - startX) / usable) * 100));
+				el.style.setProperty('--db-pair-basis', `${lastPct}%`);
+				partnerEl.style.setProperty('--db-pair-basis', `${100 - lastPct}%`);
+			},
+			onUp: () => {
+				el.removeClass('dashboard-section-row--resizing');
+				shieldHost.removeClass('dashboard-frames-muted');
+				const rounded = Math.round(lastPct);
+				// Snap BOTH inline bases to the rounded value: the live drag wrote
+				// un-rounded percentages, and any update path that refreshes only
+				// one half in place would otherwise leave a stale mate whose basis
+				// sums past 100% and wraps the pair.
+				el.style.setProperty('--db-pair-basis', `${rounded}%`);
+				partnerEl.style.setProperty('--db-pair-basis', `${100 - rounded}%`);
+				if (rounded !== Math.round(startPct)) {
+					callbacks.onColumnWidthChange(sectionRef(column), rounded);
+				}
+			},
+		});
+	});
+}
+
+export function renderSection(column: DashboardColumn, callbacks: RenderCallbacks, app: App, data?: DashboardData, settings?: DashboardSettings): HTMLElement {
+	const el = createDiv();
+	el.addClass('dashboard-section-row');
+	const reference = sectionRef(column);
+	el.dataset.column = reference;
+	const sectionType = getSectionType(column);
+	el.dataset.sectionType = sectionType;
+
+	const initiallyCollapsed = callbacks.getCollapsedSections?.() ?? getCollapsedSections(app);
+	if (initiallyCollapsed.has(reference) || initiallyCollapsed.has(column.name)) {
+		el.addClass('dashboard-section-row--collapsed');
+	}
+
+	// Apply user-dragged height (desktop). Overrides the per-type max-height.
+	// Desktop-only: the resize handle that sets it never runs on mobile, and a px
+	// value tuned on a big screen would clamp phone rows far below the mobile
+	// CSS sizing (50vh-family), shrinking card bodies to a sliver.
+	if (!Platform.isMobile && typeof column.height === 'number' && column.height > 0) {
+		el.style.maxHeight = `${column.height}px`;
+		// Memo (aligned with Quick Links) and web (the frame fills the row)
+		// sections have a fixed CSS height, so max-height alone can only shrink
+		// them. Write the inline height too so the drag-resized value can also
+		// grow the section past the default.
+		if (sectionType === 'memo' || sectionType === 'web') {
+			el.style.height = `${column.height}px`;
+		}
+	}
+
+	// Side-by-side pairing (desktop only): mobile keeps full-width stacking —
+	// the class never renders there, so the mobile CSS sizing is untouched.
+	if (!Platform.isMobile && column.half) {
+		el.addClass('dashboard-section-row--half');
+		applyPairWidth(el, column, data, callbacks);
+	}
+
+	attachSectionResizeHandle(el, column, callbacks);
+
+	const header = el.createDiv({ cls: 'dashboard-section-header' });
+
+	// Drag handle to reorder sections (desktop only).
+	const titleWrap = header.createDiv({ cls: 'dashboard-section-title-wrap' });
+
+	// Drag handle sits at the far left, grouped with the title so the header's
+	// space-between layout keeps the title left-aligned (not centered).
+	if (!Platform.isMobile) {
+		const grip = titleWrap.createDiv({ cls: 'dashboard-section-grip' });
+		grip.setAttribute('draggable', 'true');
+		grip.setAttribute('aria-label', t('renderer.dragSection'));
+		setIcon(grip, 'grip-vertical');
+	}
+
+	const titleEl = titleWrap.createEl('h3', { text: column.name, cls: 'dashboard-section-title' });
+
+	titleEl.addEventListener('dblclick', (e) => {
+		e.stopPropagation();
+		const currentName = titleEl.getText();
+		titleEl.empty();
+		const input = titleEl.createEl('input', {
+			cls: 'dashboard-section-rename-input',
+			attr: { type: 'text', value: currentName },
+		});
+		input.focus();
+		input.select();
+
+		const finish = (save: boolean) => {
+			const newName = input.value.trim();
+			if (save && newName && newName !== currentName) {
+				callbacks.onColumnRename(reference, newName, data ? data.columns.indexOf(column) : -1);
+			} else {
+				titleEl.empty();
+				titleEl.setText(currentName);
+			}
+		};
+
+		input.addEventListener('keydown', (ke: KeyboardEvent) => {
+			if (ke.key === 'Enter') {
+				ke.preventDefault();
+				finish(true);
+			} else if (ke.key === 'Escape') {
+				ke.preventDefault();
+				finish(false);
+			}
+		});
+
+		input.addEventListener('blur', () => {
+			finish(true);
+		});
+	});
+	titleEl.setCssProps({ cursor: 'pointer' });
+
+	// Collapse toggle sits right after the title (keeps it out of the header
+	// actions group, whose button count varies per section type).
+	const toggle = titleWrap.createDiv({ cls: 'dashboard-section-toggle' });
+	toggle.setAttribute('role', 'button');
+	toggle.setAttribute('aria-label', t('renderer.toggleSection'));
+	const persistCollapse = createSectionCollapseToggle(
+		() => callbacks.getCollapsedSections?.() ?? getCollapsedSections(app),
+		(next) => {
+			if (callbacks.onCollapsedSectionsChange) callbacks.onCollapsedSectionsChange(next);
+			else saveCollapsedSections(app, next);
+		},
+		reference,
+		column.name,
+	);
+	toggle.addEventListener('click', (e) => {
+		e.stopPropagation();
+		const isNowCollapsed = el.hasClass('dashboard-section-row--collapsed');
+		if (isNowCollapsed) {
+			el.removeClass('dashboard-section-row--collapsed');
+		} else {
+			el.addClass('dashboard-section-row--collapsed');
+		}
+		persistCollapse(!isNowCollapsed);
+	});
+
+		const headerActions = header.createDiv({ cls: 'dashboard-section-header-actions' });
+
+	const customDefinition = getSectionDefinition(sectionType);
+	if (customDefinition) {
+		const deleteSectionBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
+			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
+		});
+		setIcon(deleteSectionBtn, 'trash-2');
+		deleteSectionBtn.addEventListener('click', (event) => {
+			event.stopPropagation();
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
+		});
+
+		const body = el.createDiv({ cls: 'dashboard-custom-section' });
+		void Promise.resolve(customDefinition.render({
+			container: body,
+			column,
+			app,
+			callbacks,
+			setConfig: (config) => callbacks.onExtensionConfigChange(reference, config),
+		})).then((cleanup) => {
+			if (typeof cleanup !== 'function') return;
+			if (!body.isConnected) {
+				cleanup();
+				return;
+			}
+			callbacks.onCustomSectionCleanup?.(reference, cleanup);
+		}).catch((error: unknown) => {
+			console.error(`[apex-dashboard] custom section ${sectionType} failed`, error);
+			body.empty();
+			body.createDiv({
+				cls: 'dashboard-library-empty dashboard-section-compatibility',
+				text: `${customDefinition.label}加载失败，请查看开发者控制台。`,
+			});
+		});
+		return el;
+	}
+
+	if (!SUPPORTED_SECTION_TYPES.has(sectionType)) {
+		const deleteSectionBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
+			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
+		});
+		setIcon(deleteSectionBtn, 'trash-2');
+		deleteSectionBtn.addEventListener('click', (event) => {
+			event.stopPropagation();
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
+		});
+		el.createDiv({
+			cls: 'dashboard-library-empty dashboard-section-compatibility',
+			text: `此分区类型（${sectionType}）需要更新版本才能编辑；原始配置和正文会被保留。`,
+		});
+		return el;
+	}
+
+	// Sticky ("便利贴") sections mix memo and todo cards: they get the one-click
+	// archive button like todo sections, but NOT the task-template button — cards
+	// are always created through the type chooser (onCardAdd -> StickyCardTypeModal).
+	if (sectionType === 'todo' || sectionType === 'sticky') {
+		const archiveBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn',
+			attr: { 'aria-label': t('renderer.archiveTasks') },
+		});
+		setIcon(archiveBtn, 'archive');
+		archiveBtn.addEventListener('click', () => callbacks.onArchiveTasks(reference));
+	}
+
+	if (sectionType === 'todo') {
+		const templateBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn',
+			attr: { 'aria-label': t('template.addFromTemplate') },
+		});
+		setIcon(templateBtn, 'layout-template');
+		templateBtn.addEventListener('click', () => callbacks.onAddFromTemplate(reference));
+	}
+
+	// Library section: render differently
+	if (sectionType === 'library' || sectionType === 'folder') {
+		// A folder section with no folder set would otherwise list the entire vault
+		// (queryVaultFiles skips the folder filter when it is empty). In that state
+		// renderLibrarySection never runs, so the toolbar (which hosts the always-
+		// visible config button) does not exist yet — keep a header config button
+		// as the only entry point. For a configured folder or any library section,
+		// renderLibrarySection renders that toolbar config button, so we skip this
+		// header one to avoid a duplicate next to the delete button.
+		const folderUnconfigured = sectionType === 'folder' && !(column.libraryConfig?.folders && column.libraryConfig.folders.some(f => f.trim()));
+
+		if (folderUnconfigured) {
+			const configBtn = headerActions.createEl('button', {
+				cls: 'dashboard-section-add-btn',
+				attr: { 'aria-label': t('folder.configure') },
+			});
+			setIcon(configBtn, 'settings');
+			configBtn.addEventListener('click', () => {
+				const event = new CustomEvent('dashboard-library-config', { detail: { columnName: reference }, bubbles: true });
+				el.dispatchEvent(event);
+			});
+		}
+
+		const deleteSectionBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
+			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
+		});
+		setIcon(deleteSectionBtn, 'trash-2');
+		deleteSectionBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
+		});
+
+		if (folderUnconfigured) {
+			el.createDiv({ cls: 'dashboard-library-empty dashboard-folder-empty', text: t('folder.empty') });
+			return el;
+		}
+
+		renderLibrarySection(el, column, app, (config) => {
+			callbacks.onLibraryConfigChange(reference, config);
+		}, activeHoverParent, activeNoteOpener);
+		return el;
+	}
+
+	// Images / videos sections: full-vault media thumbnail wall; the config
+	// modal (gear) currently manages the excluded-folder set.
+	if (sectionType === 'images' || sectionType === 'videos') {
+		const configBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn',
+			attr: { 'aria-label': t('media.configure') },
+		});
+		setIcon(configBtn, 'settings');
+		configBtn.addEventListener('click', () => {
+			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: reference }, bubbles: true });
+			el.dispatchEvent(event);
+		});
+
+		const deleteSectionBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
+			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
+		});
+		setIcon(deleteSectionBtn, 'trash-2');
+		deleteSectionBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
+		});
+
+		renderMediaSection(el, column, app, activeHoverParent, callbacks.onOpenNoteInPopover, getMediaTagService() ?? undefined);
+		return el;
+	}
+
+	// Calendar section: the sidebar calendar's enlarged view (full month grid
+	// with multi-day bars / week time grid) embedded in the board. Shares the
+	// sidebar widget's scan (calendarExcludeFolders) and refreshes in place on
+	// vault task changes (see refreshCalendarSections).
+	if (sectionType === 'calendar') {
+		const deleteSectionBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
+			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
+		});
+		setIcon(deleteSectionBtn, 'trash-2');
+		deleteSectionBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
+		});
+
+		if (settings) {
+			renderCalendarSection(el, app, settings, callbacks.onOpenNoteAtLine);
+		} else {
+			el.createDiv({ cls: 'dashboard-library-empty', text: t('calendar.noEvents') });
+		}
+		return el;
+	}
+
+	// Weread section: reading data from the official API.
+	if (sectionType === 'weread') {
+		const configBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn',
+			attr: { 'aria-label': t('weread.configure') },
+		});
+		setIcon(configBtn, 'settings');
+		configBtn.addEventListener('click', () => {
+			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: reference }, bubbles: true });
+			el.dispatchEvent(event);
+		});
+
+		// Refresh button — same icon-button style as the other header actions,
+		// positioned just left of delete.
+		const refreshBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn',
+			attr: { 'aria-label': t('weread.refresh') },
+		});
+		setIcon(refreshBtn, 'refresh-cw');
+		let reload: (() => void) | null = null;
+		refreshBtn.addEventListener('click', () => reload?.());
+
+		const deleteSectionBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
+			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
+		});
+		setIcon(deleteSectionBtn, 'trash-2');
+		deleteSectionBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
+		});
+
+		const apiKey = (settings?.wereadApiKey ?? '').trim();
+		const importPath = settings?.wereadImportPath ?? 'Weread/划线';
+		renderWereadSection(el, column, app, apiKey, importPath, (fn) => { reload = fn; });
+		return el;
+	}
+
+	// TickTick section: tasks/habits from the unofficial V2 API (cookie auth).
+	if (sectionType === 'ticktick') {
+		const ttView = column.ticktickConfig?.view === 'lists' ? 'lists' : 'today';
+
+		// View toggle: Today
+		const todayBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn' + (ttView === 'today' ? ' active' : ''),
+			attr: { 'aria-label': t('ticktick.viewToday') },
+		});
+		setIcon(todayBtn, 'calendar-check');
+		todayBtn.addEventListener('click', () => {
+			el.dispatchEvent(new CustomEvent('dashboard-ticktick-view', { detail: { columnName: reference, view: 'today' }, bubbles: true }));
+		});
+
+		// View toggle: Lists
+		const listsBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn' + (ttView === 'lists' ? ' active' : ''),
+			attr: { 'aria-label': t('ticktick.viewLists') },
+		});
+		setIcon(listsBtn, 'list');
+		listsBtn.addEventListener('click', () => {
+			el.dispatchEvent(new CustomEvent('dashboard-ticktick-view', { detail: { columnName: reference, view: 'lists' }, bubbles: true }));
+		});
+
+		// Project filter (only in lists view)
+		if (ttView === 'lists') {
+			const filterBtn = headerActions.createEl('button', {
+				cls: 'dashboard-section-add-btn',
+				attr: { 'aria-label': t('ticktick.filterProjects') },
+			});
+			setIcon(filterBtn, 'filter');
+			filterBtn.addEventListener('click', () => {
+				el.dispatchEvent(new CustomEvent('dashboard-ticktick-filter', { detail: { columnName: reference }, bubbles: true }));
+			});
+		}
+
+		const refreshBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn',
+			attr: { 'aria-label': t('ticktick.refresh') },
+		});
+		setIcon(refreshBtn, 'refresh-cw');
+		let reload: (() => void) | null = null;
+		refreshBtn.addEventListener('click', () => reload?.());
+
+		const deleteSectionBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
+			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
+		});
+		setIcon(deleteSectionBtn, 'trash-2');
+		deleteSectionBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
+		});
+
+		const region = settings?.ticktickRegion === 'ticktick' ? 'ticktick' : 'dida365';
+		const cookie = (settings?.ticktickCookie ?? '').trim();
+		const csrf = (settings?.ticktickCsrf ?? '').trim();
+		const deviceVersion = settings?.ticktickDeviceVersion;
+		const tz = (settings?.ticktickTimezone ?? '').trim() || 'Asia/Shanghai';
+		renderTickTickSection(el, column, app, region, cookie, csrf, deviceVersion, tz, (fn) => { reload = fn; },
+			(projectId, width) => {
+				const cfg = column.ticktickConfig;
+				if (cfg) {
+					const newWidths = { ...(cfg.projectWidths ?? {}), [projectId]: width };
+					el.dispatchEvent(new CustomEvent('dashboard-ticktick-resize', { detail: { columnName: reference, projectWidths: newWidths }, bubbles: true }));
+				}
+			});
+		return el;
+	}
+
+	// Dataview section: DQL query results (TABLE/LIST/TASK/CALENDAR).
+	if (sectionType === 'dataview') {
+		setDataviewApp(app);
+
+		// Manual refresh (deliberately NOT wired to the vault-change debounce).
+		const refreshBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn',
+			attr: { 'aria-label': t('dataview.refresh') },
+		});
+		setIcon(refreshBtn, 'refresh-cw');
+		let reload: (() => void) | null = null;
+		refreshBtn.addEventListener('click', () => reload?.());
+
+		const configBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn',
+			attr: { 'aria-label': t('dataview.configure') },
+		});
+		setIcon(configBtn, 'settings');
+		configBtn.addEventListener('click', () => {
+			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: reference }, bubbles: true });
+			el.dispatchEvent(event);
+		});
+
+		const deleteSectionBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
+			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
+		});
+		setIcon(deleteSectionBtn, 'trash-2');
+		deleteSectionBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
+		});
+
+		renderDataviewSection(el, column, app, activeHoverParent, callbacks.onOpenNoteInPopover ?? null, (fn) => { reload = fn; },
+			(cfg) => callbacks.onDataviewConfigChange(reference, cfg));
+		return el;
+	}
+
+	// Web section: an embedded page. Frameable sites load as an iframe; sites
+	// whose headers refuse framing load in a desktop webview (see web-section).
+	if (sectionType === 'web') {
+		const refreshBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn',
+			attr: { 'aria-label': t('web.refresh') },
+		});
+		setIcon(refreshBtn, 'refresh-cw');
+		let reload: (() => void) | null = null;
+		refreshBtn.addEventListener('click', () => reload?.());
+
+		const configBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn',
+			attr: { 'aria-label': t('web.configure') },
+		});
+		setIcon(configBtn, 'settings');
+		configBtn.addEventListener('click', () => {
+			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: reference }, bubbles: true });
+			el.dispatchEvent(event);
+		});
+
+		const deleteSectionBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
+			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
+		});
+		setIcon(deleteSectionBtn, 'trash-2');
+		deleteSectionBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
+		});
+
+		renderWebSection(el, column, (fn) => { reload = fn; });
+		return el;
+	}
+
+	const addCardBtn = headerActions.createEl('button', {
+		cls: 'dashboard-section-add-btn',
+		attr: { 'aria-label': t('renderer.addCardTo', { column: column.name }) },
+	});
+	setIcon(addCardBtn, 'plus');
+	addCardBtn.addEventListener('click', () => callbacks.onCardAdd(reference));
+
+	// Notes sections: gear opens the per-section settings (show covers, new-note
+	// template + save folder). Same dispatch the library sections' config button
+	// uses; view.ts routes it by sectionType.
+	if (sectionType === 'projects') {
+		const notesCfgBtn = headerActions.createEl('button', {
+			cls: 'dashboard-section-add-btn',
+			attr: { 'aria-label': t('notesCfg.title') },
+		});
+		setIcon(notesCfgBtn, 'settings');
+		notesCfgBtn.addEventListener('click', () => {
+			const event = new CustomEvent('dashboard-library-config', { detail: { columnName: column.name }, bubbles: true });
+			el.dispatchEvent(event);
+		});
+	}
+
+	const deleteSectionBtn = headerActions.createEl('button', {
+		cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
+		attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
+	});
+	setIcon(deleteSectionBtn, 'trash-2');
+	deleteSectionBtn.addEventListener('click', (e) => {
+		e.stopPropagation();
+		callbacks.onColumnDelete(reference, data ? data.columns.indexOf(column) : -1);
+	});
+
+	const cardsContainer = el.createDiv({ cls: 'dashboard-section-cards' });
+
+	for (const card of column.cards) {
+		try {
+			const cardEl = renderCard(card, column.name, sectionType, callbacks, app, data, settings, column.showCover !== false);
+			cardsContainer.appendChild(cardEl);
+		} catch (err) {
+			console.error('[Dashboard] renderCard error:', card.id, card.type, err);
+		}
+	}
+
+	return el;
+}
+
+function renderCard(card: DashboardCard, columnName: string, sectionType: string, callbacks: RenderCallbacks, app: App, data?: DashboardData, settings?: DashboardSettings, sectionShowCover = true): HTMLElement {
+	const el = createDiv();
+	el.addClass('dashboard-card', `dashboard-card--${card.type}`);
+	el.dataset.cardId = card.id;
+	el.dataset.cardType = card.type;
+	el.setAttribute('role', 'article');
+	el.setAttribute('aria-label', card.title);
+
+	if (card.color) {
+		el.dataset.hasColor = 'true';
+		el.style.setProperty('--db-card-accent', card.color);
+	}
+
+	const isMemo = isMemoCard(sectionType, card);
+	const isTask = !isMemo && (card.type === 'task' || sectionType === 'todo');
+	const isWeather = card.type === 'weather';
+	const isTracker = card.type === 'tracker';
+	const isWidget = isWeather || isTracker;
+	const isProjectLike = !isMemo && !isTask && !isWidget;
+	const isDashboardSection = sectionType === 'dashboard';
+	// Projects cards show covers unless the section's 显示封面 toggle is off
+	// (the retired standalone no-cover type); sticky picks per card instead.
+	const showCover = isProjectLike && !isDashboardSection && sectionShowCover
+		&& (sectionType !== 'sticky' || card.noteStyle !== 'plain');
+
+	if (showCover) {
+		el.addClass('dashboard-card--cover');
+	}
+
+	if (card.coverImage && showCover) {
+		const resolved = resolveVaultImage(app, card.coverImage);
+		if (resolved) {
+			const cover = el.createDiv({ cls: 'dashboard-project-cover' });
+			cover.style.backgroundImage = `url("${resolved}")`;
+			// Saved focal point (coverPos): background-position percentages;
+			// absent stays the CSS default `center`.
+			if (card.coverPos && !isCenterFocal(card.coverPos)) {
+				cover.style.backgroundPosition = focalToBackgroundPosition(card.coverPos);
+			}
+			cover.setAttribute('draggable', 'true');
+		} else {
+			const cover = el.createDiv({ cls: 'dashboard-project-cover dashboard-project-cover--default' });
+			cover.setAttribute('draggable', 'true');
+		}
+	} else if (showCover) {
+		const cover = el.createDiv({ cls: 'dashboard-project-cover dashboard-project-cover--default' });
+		cover.setAttribute('draggable', 'true');
+	}
+
+	const header = el.createDiv({ cls: 'dashboard-card-header' });
+	header.setAttribute('draggable', 'true');
+
+	// Mobile: tap header to toggle card action buttons
+	header.addEventListener('touchstart', () => {
+		const wasActive = header.hasClass('dashboard-card-header--touched');
+		activeDocument.querySelectorAll('.dashboard-card-header--touched').forEach(el => {
+			el.removeClass('dashboard-card-header--touched');
+		});
+		if (!wasActive) {
+			header.addClass('dashboard-card-header--touched');
+		}
+	}, { passive: true });
+
+	const titleEl = header.createEl('h4', { text: card.title, cls: 'dashboard-card-title' });
+
+	const skipEditBtn = isMemo || isTask || (isWidget && isDashboardSection);
+
+	titleEl.addEventListener('dblclick', (e) => {
+		e.stopPropagation();
+		const currentTitle = titleEl.getText();
+		titleEl.empty();
+		const input = titleEl.createEl('input', {
+			cls: 'dashboard-title-edit-input',
+			attr: { type: 'text', value: currentTitle },
+		});
+		input.focus();
+		input.select();
+
+		const finish = (save: boolean) => {
+			const newTitle = input.value.trim();
+			if (save && newTitle && newTitle !== currentTitle) {
+				callbacks.onCardTitleEdit(card.id, newTitle);
+			} else {
+				titleEl.empty();
+				titleEl.setText(currentTitle);
+			}
+		};
+
+		input.addEventListener('keydown', (ke: KeyboardEvent) => {
+			if (ke.key === 'Enter') {
+				ke.preventDefault();
+				finish(true);
+			} else if (ke.key === 'Escape') {
+				ke.preventDefault();
+				finish(false);
+			}
+		});
+
+		input.addEventListener('blur', () => {
+			finish(true);
+		});
+	});
+	titleEl.setCssProps({ cursor: 'pointer' });
+
+	const actions = header.createDiv({ cls: 'dashboard-card-actions' });
+
+	// Dashboard grid layout for widget cards
+	if (isWidget && isDashboardSection) {
+		const currentSize: CardSize = card.size || 'M';
+		const sizeToGrid: Record<CardSize, { cols: number; rows: number }> = {
+			S: { cols: 1, rows: 1 },
+			M: { cols: 2, rows: 1 },
+			L: { cols: 2, rows: 2 },
+		};
+		const grid = sizeToGrid[currentSize];
+		el.style.gridColumn = `span ${grid.cols}`;
+		el.style.gridRow = `span ${grid.rows}`;
+
+		// Size selector button for dashboard widgets only
+		const sizeBtn = actions.createEl('button', {
+			cls: 'dashboard-card-btn dashboard-card-btn--size',
+			attr: { 'aria-label': 'Card size' },
+		});
+		sizeBtn.setText(t('widget.size' + currentSize));
+		sizeBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			const sizes: CardSize[] = ['S', 'M', 'L'];
+			const nextIdx = (sizes.indexOf(currentSize) + 1) % sizes.length;
+			const nextSize = sizes[nextIdx]!;
+			callbacks.onCardSizeChange(card.id, nextSize);
+		});
+	}
+
+	if (isMemo && (card.type === 'generic' || card.type === 'note') || isWidget) {
+		const colorBtn = actions.createEl('button', {
+			cls: 'dashboard-card-btn dashboard-card-btn--color',
+			attr: { 'aria-label': t('renderer.setMemoColor') },
+		});
+		setIcon(colorBtn, 'palette');
+		if (card.color) {
+			colorBtn.style.color = card.color;
+		}
+		colorBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			const input = createEl('input');
+			input.type = 'color';
+			input.value = card.color || '#f59e0b';
+			input.setCssProps({
+				position: 'absolute',
+				opacity: '0',
+				width: '0',
+				height: '0',
+			});
+			activeDocument.body.appendChild(input);
+			input.addEventListener('input', () => {
+				callbacks.onMemoColorChange(card, input.value);
+			});
+			input.addEventListener('change', () => {
+				if (input.value) {
+					callbacks.onMemoColorChange(card, input.value);
+				}
+				input.remove();
+			});
+			input.addEventListener('blur', () => {
+				input.remove();
+			});
+			input.click();
+		});
+	}
+
+	// Per-card "new note" (notes sections only): creates a note and attaches it
+	// to this card's doc list (view.handleCardNewNote). Rendered FIRST in the
+	// actions row so it sits left of edit + delete. The click point anchors the
+	// template menu when the section lists several templates.
+	if (isProjectLike && sectionType === 'projects') {
+		const newNoteBtn = actions.createEl('button', {
+			cls: 'dashboard-card-btn dashboard-card-btn--newnote',
+			attr: { 'aria-label': t('renderer.cardNewNote') },
+		});
+		setIcon(newNoteBtn, 'file-plus');
+		newNoteBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			callbacks.onCardNewNote(card.id, { x: e.clientX, y: e.clientY });
+		});
+	}
+
+	if (!skipEditBtn) {
+		const editBtn = actions.createEl('button', {
+			cls: 'dashboard-card-btn',
+			attr: { 'aria-label': t('renderer.editCard') },
+		});
+		setIcon(editBtn, 'pencil');
+		editBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			callbacks.onCardEdit(card);
+		});
+	}
+
+	if (isMemo) {
+		const saveBtn = actions.createEl('button', {
+			cls: 'dashboard-card-btn',
+			attr: { 'aria-label': t(getRegisteredApexHost()?.convertMemoToCapture ? 'renderer.moveMemoToInbox' : 'renderer.saveMemoAsNote') },
+		});
+		setIcon(saveBtn, 'file-down');
+		saveBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			callbacks.onMemoSaveAsNote(card);
+		});
+	}
+
+	if (isTask) {
+		const saveBtn = actions.createEl('button', {
+			cls: 'dashboard-card-btn',
+			attr: { 'aria-label': t('renderer.saveTasksToDaily') },
+		});
+		setIcon(saveBtn, 'save');
+		saveBtn.addEventListener('click', (e) => {
+			e.stopPropagation();
+			callbacks.onTaskSaveToDaily(card);
+		});
+	}
+
+	const deleteBtn = actions.createEl('button', {
+		cls: 'dashboard-card-btn dashboard-card-btn--danger',
+		attr: { 'aria-label': t('renderer.deleteCard') },
+	});
+	setIcon(deleteBtn, 'trash-2');
+	deleteBtn.addEventListener('click', (e) => {
+		e.stopPropagation();
+		callbacks.onCardDelete(card.id);
+	});
+
+	const body = el.createDiv({ cls: 'dashboard-card-body' });
+
+	// When this is a project-like card, allow dropping docs onto the card body
+	if (isProjectLike) {
+		body.addEventListener('dragover', (e) => {
+			if (!docDragSource) return;
+			if (docDragSource.cardId === card.id) return;
+			e.preventDefault();
+			if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+			body.addClass('dashboard-card-body--doc-drop');
+		});
+
+		body.addEventListener('dragleave', (e) => {
+			if (!body.contains(e.relatedTarget as Node)) {
+				body.removeClass('dashboard-card-body--doc-drop');
+			}
+		});
+
+		body.addEventListener('drop', (e) => {
+			body.removeClass('dashboard-card-body--doc-drop');
+			if (!docDragSource) return;
+			if (docDragSource.cardId === card.id) return;
+			if (e.defaultPrevented) return;
+			e.preventDefault();
+			const destPath = [card.docs.length];
+			callbacks.onDocMoveToCard(docDragSource.cardId, docDragSource.docPath, card.id, destPath, 'before');
+		});
+	}
+
+	renderCardBody(body, card, columnName, sectionType, callbacks, app, data, settings);
+
+	if (card.dueDate) {
+		const due = el.createDiv({ cls: 'dashboard-card-due' });
+		due.createSpan({ text: card.dueDate });
+	}
+
+	if (isMemo) {
+		if (card.width > 0) {
+			const w = Math.max(200, Math.min(600, card.width));
+			el.style.flex = `0 0 ${w}px`;
+			el.style.minWidth = `${w}px`;
+			el.style.maxWidth = `${w}px`;
+		}
+	}
+
+	// Dashboard grid layout for widget cards (styles only, button already created above)
+	if (isWidget && isDashboardSection) {
+		// grid styles already set above when creating the size button
+	} else if (isMemo || isTask || isProjectLike) {
+		const minW = 200;
+		const maxW = 600;
+		if (!isMemo && card.width > 0) {
+			const w = Math.max(minW, Math.min(500, card.width));
+			el.style.flex = `0 0 ${w}px`;
+			el.style.minWidth = `${w}px`;
+			el.style.maxWidth = `${w}px`;
+		}
+		const handle = el.createDiv({ cls: 'dashboard-card-resize-handle' });
+		handle.addEventListener('mousedown', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			const startX = e.clientX;
+			const startWidth = el.offsetWidth;
+			el.addClass('dashboard-card--resizing');
+
+			const onMove = (ev: MouseEvent) => {
+				const delta = ev.clientX - startX;
+				const newWidth = Math.max(minW, Math.min(maxW, startWidth + delta));
+				el.style.flex = `0 0 ${newWidth}px`;
+				el.style.minWidth = `${newWidth}px`;
+				el.style.maxWidth = `${newWidth}px`;
+			};
+
+			const onUp = (ev: MouseEvent) => {
+				activeDocument.removeEventListener('mousemove', onMove);
+				activeDocument.removeEventListener('mouseup', onUp);
+				el.removeClass('dashboard-card--resizing');
+				const finalWidth = Math.max(minW, Math.min(maxW, startWidth + (ev.clientX - startX)));
+				if (finalWidth !== card.width) {
+					callbacks.onCardWidthChange(card.id, finalWidth);
+				}
+			};
+
+			activeDocument.addEventListener('mousemove', onMove);
+			activeDocument.addEventListener('mouseup', onUp);
+		});
+	}
+
+	return el;
+}
+
+/**
+ * Whether a card renders as a memo card. In memo sections every card does;
+ * in sticky ("便利贴") sections only the generic/note cards do — task cards
+ * stay todo cards (checked before memo via `card.type === 'task'`).
+ */
+function isMemoCard(sectionType: string, card: DashboardCard): boolean {
+	if (sectionType === 'memo') return true;
+	return sectionType === 'sticky' && (card.type === 'generic' || card.type === 'note');
+}
+
+function renderCardBody(container: HTMLElement, card: DashboardCard, columnName: string, sectionType: string, callbacks: RenderCallbacks, app: App, data?: DashboardData, settings?: DashboardSettings): void {
+	if (card.type === 'weather') {
+		renderWeatherBody(container, card, app);
+		return;
+	}
+
+	if (card.type === 'tracker') {
+		renderTrackerBody(container, card, app, settings);
+		return;
+	}
+
+	const isMemo = isMemoCard(sectionType, card);
+	const isTaskCard = !isMemo && (card.type === 'task' || sectionType === 'todo');
+
+	if (isTaskCard) {
+		renderTaskBody(container, card, callbacks, app);
+		return;
+	}
+
+	if (isMemo) {
+		renderMemoBody(container, card, callbacks, app);
+		return;
+	}
+
+	// All non-memo, non-task cards render as project body
+	renderProjectBody(container, card, callbacks, app);
+}
+
+/**
+ * Whether `maybeChildPath` is a descendant of `parentPath` (a strict prefix in
+ * the path array). Used to find a collapsed item's DOM descendants for an
+ * in-place show/hide that avoids a full dashboard re-render.
+ */
+function isDescendantPath(parentPath: number[], maybeChildPath: number[]): boolean {
+	if (maybeChildPath.length <= parentPath.length) return false;
+	for (let i = 0; i < parentPath.length; i++) {
+		if (maybeChildPath[i] !== parentPath[i]) return false;
+	}
+	return true;
+}
+
+/**
+ * Parse the `data-task-path` / `data-doc-path` JSON attribute off a DOM node.
+ * Returns an empty array (never matches as a descendant) if absent or malformed.
+ */
+function readPathAttr(el: Element, attr: string): number[] {
+	try {
+		const raw = el.getAttribute(attr);
+		return raw ? (JSON.parse(raw) as number[]) : [];
+	} catch {
+		return [];
+	}
+}
+
+/**
+ * Toggle a collapsed parent's children visibility directly on the DOM, plus the
+ * chevron icon, WITHOUT triggering `notifyCallbacks` / a full `render()`.
+ *
+ * Why: collapsing/expanding is a pure visual state. Routing it through the sync
+ * engine's `writeToDisk` + `notifyCallbacks` tore down and rebuilt the whole
+ * board on every chevron click — the source of the long lag. Instead we flip a
+ * `--hidden` class on every descendant item here, and let the sync engine
+ * persist the `collapsed` flag on a debounced write with no re-render.
+ *
+ * DOM truth source: each parent item carries `aria-expanded` (set at render and
+ * flipped here on every toggle). After flipping the toggled parent, we recompute
+ * the `--hidden` class on EVERY descendant by walking its path prefix chain — a
+ * descendant is shown only if every ancestor on that chain is expanded. This
+ * handles nested collapse correctly: expanding A still keeps A's collapsed
+ * child B's subtree hidden, because B's `aria-expanded=false` is on C's prefix.
+ *
+ * Note: children must actually exist in the DOM for this to work, so the
+ * renderer creates them unconditionally (using `--hidden` for the collapsed
+ * case) rather than skipping them — otherwise an expand after a full re-render
+ * of a collapsed parent would find nothing to unhide.
+ */
+function toggleCollapseInPlace(
+	item: HTMLElement,
+	parentPath: number[],
+	pathAttr: string,
+	nowCollapsed: boolean,
+): void {
+	const list = item.parentElement;
+	if (!list) return;
+
+	// Flip the chevron icon + record the new state as the DOM truth source.
+	const toggle = item.querySelector(':scope > .dashboard-task-toggle');
+	if (toggle instanceof HTMLElement) {
+		setIcon(toggle, nowCollapsed ? 'chevron-right' : 'chevron-down');
+	}
+	item.setAttribute('aria-expanded', nowCollapsed ? 'false' : 'true');
+
+	// Build a path-keyed map of every item's expanded state ONCE, so the per-
+	// descendant ancestor walk is O(1) per step instead of re-querying the list
+	// (which made a single toggle O(n²) on large trees).
+	const expandedByPath = new Map<string, boolean>();
+	list.querySelectorAll<HTMLElement>(`:scope > [${pathAttr}]`).forEach((el) => {
+		expandedByPath.set(JSON.stringify(readPathAttr(el, pathAttr)), el.getAttribute('aria-expanded') !== 'false');
+	});
+
+	// Recompute visibility for every descendant: show only if every ancestor on
+	// its path prefix is currently expanded (read from the map above).
+	list.querySelectorAll<HTMLElement>(`:scope > [${pathAttr}]`).forEach((sibling) => {
+		if (sibling === item) return;
+		const siblingPath = readPathAttr(sibling, pathAttr);
+		if (!isDescendantPath(parentPath, siblingPath)) return;
+
+		let hidden = false;
+		// Walk every strict ancestor index of siblingPath (skip the node itself).
+		for (let len = parentPath.length; len < siblingPath.length; len++) {
+			const ancestorExpanded = expandedByPath.get(JSON.stringify(siblingPath.slice(0, len)));
+			// Fail-safe: a strict prefix should always be a parent that exists in a
+			// well-formed render. If it's missing, hide rather than risk leaking a
+			// subtree due to stale/DOM drift.
+			if (ancestorExpanded === false || ancestorExpanded === undefined) {
+				hidden = true;
+				break;
+			}
+		}
+		sibling.toggleClass('dashboard-task-item--hidden', hidden);
+		sibling.toggleClass('dashboard-project-doc-item--hidden', hidden);
+	});
+}
+
+
+function renderTaskItem(
+	list: HTMLElement,
+	task: TaskItem,
+	path: number[],
+	card: DashboardCard,
+	callbacks: RenderCallbacks,
+	app: App,
+	depth: number,
+	ancestorHidden = false,
+): void {
+	const item = list.createDiv({ cls: 'dashboard-task-item' });
+	if (depth > 0) item.addClass('dashboard-task-item--child');
+	if (ancestorHidden) item.addClass('dashboard-task-item--hidden');
+	item.style.marginLeft = `${depth * 18}px`;
+	item.setAttribute('draggable', 'true');
+	item.dataset.taskPath = JSON.stringify(path);
+	item.dataset.cardId = card.id;
+
+	const clearDragClasses = () => {
+		item.removeClass('dashboard-task-item--drag-top');
+		item.removeClass('dashboard-task-item--drag-bottom');
+		item.removeClass('dashboard-task-item--drag-nest');
+	};
+
+	// Mobile gestures: tap (show buttons), long-press (drag), quick-swipe (nest/unnest)
+	let touchState: {
+		startX: number;
+		startY: number;
+		startT: number;
+		moved: boolean;
+		dragging: boolean;
+		timer: number | null;
+	} | null = null;
+
+	item.addEventListener('touchstart', (e) => {
+		const tch = e.touches[0];
+		if (!tch) return;
+		touchState = {
+			startX: tch.clientX,
+			startY: tch.clientY,
+			startT: Date.now(),
+			moved: false,
+			dragging: false,
+			timer: null,
+		};
+		touchState.timer = window.setTimeout(() => {
+			if (touchState && !touchState.moved) {
+				touchState.dragging = true;
+				item.addClass('dashboard-task-item--dragging');
+			}
+		}, 500);
+	}, { passive: true });
+
+	item.addEventListener('touchmove', (e) => {
+		if (!touchState) return;
+		const tch = e.touches[0];
+		if (!tch) return;
+		const dx = tch.clientX - touchState.startX;
+		const dy = tch.clientY - touchState.startY;
+		if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+			touchState.moved = true;
+			if (touchState.timer) {
+				window.clearTimeout(touchState.timer);
+				touchState.timer = null;
+			}
+		}
+		if (!touchState.dragging && touchState.moved && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
+			item.style.transform = `translateX(${Math.max(-40, Math.min(40, dx * 0.5))}px)`;
+		}
+	}, { passive: true });
+
+	item.addEventListener('touchend', (e) => {
+		const ts = touchState;
+		touchState = null;
+		item.setCssProps({ transform: '' });
+		if (!ts) return;
+		if (ts.timer) window.clearTimeout(ts.timer);
+		if (ts.dragging) {
+			item.removeClass('dashboard-task-item--dragging');
+			return;
+		}
+		const tch = e.changedTouches[0];
+		const dx = tch ? tch.clientX - ts.startX : 0;
+		const dy = tch ? tch.clientY - ts.startY : 0;
+		const dt = Date.now() - ts.startT;
+		const isSwipe = dt < 500 && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5;
+		if (isSwipe) {
+			if (dx > 0) callbacks.onTaskNest(card.id, path);
+			else callbacks.onTaskUnnest(card.id, path);
+			return;
+		}
+		if (!ts.moved) {
+			const wasActive = item.hasClass('dashboard-task-item--touched');
+			activeDocument.querySelectorAll('.dashboard-task-item--touched').forEach(el => {
+				el.removeClass('dashboard-task-item--touched');
+			});
+			if (!wasActive) item.addClass('dashboard-task-item--touched');
+		}
+	}, { passive: true });
+
+	item.addEventListener('touchcancel', () => {
+		if (touchState?.timer) window.clearTimeout(touchState.timer);
+		touchState = null;
+		item.setCssProps({ transform: '' });
+		item.removeClass('dashboard-task-item--dragging');
+	}, { passive: true });
+
+	const hasChildren = (task.children?.length ?? 0) > 0;
+	if (hasChildren) {
+		item.setAttribute('aria-expanded', task.collapsed ? 'false' : 'true');
+		const toggle = item.createDiv({ cls: 'dashboard-task-toggle dashboard-task-toggle--active' });
+		toggle.setAttribute('role', 'button');
+		toggle.setAttribute('aria-label', task.collapsed ? t('renderer.expandTask') : t('renderer.collapseTask'));
+		setIcon(toggle, task.collapsed ? 'chevron-right' : 'chevron-down');
+		// Track collapse state locally. The quiet toggle path no longer rebuilds
+		// the DOM (no full re-render), so the closed-over `task` reference would
+		// stay frozen at its initial value and the chevron could only ever fold
+		// once. This mutable flag is the source of truth for the click handler.
+		let isCollapsed = task.collapsed;
+		toggle.addEventListener('click', (e) => {
+			e.stopPropagation();
+			// Optimistic in-place DOM update + debounced quiet persist. Avoids the
+			// full-board re-render the old collapse path triggered.
+			isCollapsed = !isCollapsed;
+			toggleCollapseInPlace(item, path, 'data-task-path', isCollapsed);
+			toggle.setAttribute('aria-label', isCollapsed ? t('renderer.expandTask') : t('renderer.collapseTask'));
+			callbacks.onTaskToggleCollapse(card.id, path);
+		});
+	}
+
+	const checkbox = item.createEl('input', {
+		cls: 'dashboard-task-checkbox',
+		attr: { type: 'checkbox' },
+	});
+	checkbox.checked = task.checked;
+	checkbox.addEventListener('change', () => {
+		callbacks.onCheckboxToggle(card.id, path, checkbox.checked);
+	});
+
+	const label = item.createSpan({
+		cls: task.checked ? 'dashboard-task-text dashboard-task-text--done' : 'dashboard-task-text',
+	});
+	renderTextWithLinks(label, task.text, app);
+	label.addEventListener('dblclick', (e) => {
+		e.stopPropagation();
+		const currentText = label.getText();
+		label.empty();
+		item.setAttribute('draggable', 'false');
+
+		const textarea = label.createEl('textarea', {
+			cls: 'dashboard-task-edit-textarea',
+			text: task.text,
+		});
+
+		const autoResize = () => {
+			textarea.setCssProps({ height: 'auto' });
+			textarea.style.height = textarea.scrollHeight + 'px';
+		};
+		autoResize();
+		textarea.focus();
+		textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+		const finish = (save: boolean) => {
+			const newText = textarea.value.trim();
+			if (save && newText && newText !== task.text) {
+				callbacks.onTaskEdit(card.id, path, newText);
+			} else {
+				label.empty();
+				label.setText(currentText);
+			}
+			item.setAttribute('draggable', 'true');
+		};
+
+		textarea.addEventListener('input', autoResize);
+		textarea.addEventListener('keydown', (ke) => {
+			if (ke.key === 'Enter' && !ke.shiftKey) {
+				ke.preventDefault();
+				finish(true);
+			} else if (ke.key === 'Escape') {
+				ke.preventDefault();
+				finish(false);
+			}
+		});
+		textarea.addEventListener('blur', () => finish(true));
+	});
+
+	const delBtn = item.createEl('button', {
+		cls: 'dashboard-task-delete',
+		attr: { 'aria-label': t('renderer.deleteTask') },
+	});
+	setIcon(delBtn, 'x');
+	delBtn.addEventListener('click', (e) => {
+		e.stopPropagation();
+		callbacks.onTaskDelete(card.id, path);
+	});
+
+	const reminderBtn = createReminderButton(item, card.id, path, task, callbacks);
+	item.appendChild(reminderBtn);
+
+	item.addEventListener('dragstart', (e) => {
+		e.stopPropagation();
+		taskDragSource = { cardId: card.id, taskPath: path };
+		item.addClass('dashboard-task-item--dragging');
+		if (e.dataTransfer) {
+			e.dataTransfer.effectAllowed = 'move';
+			e.dataTransfer.setData('text/plain', JSON.stringify(path));
+			// Marks this as an in-card item drag so the card-level file-drop
+			// layer (which would force dropEffect='link' and kill the drop)
+			// and the section-row handlers stand down.
+			e.dataTransfer.setData(ITEM_DRAG_TYPE, '1');
+		}
+	});
+
+	item.addEventListener('dragend', () => {
+		item.removeClass('dashboard-task-item--dragging');
+		activeDocument.querySelectorAll(
+			'.dashboard-task-item--drag-top,.dashboard-task-item--drag-bottom,.dashboard-task-item--drag-nest'
+		).forEach(el => el.removeClass('dashboard-task-item--drag-top', 'dashboard-task-item--drag-bottom', 'dashboard-task-item--drag-nest'));
+		taskDragSource = null;
+	});
+
+	item.addEventListener('dragover', (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		if (!taskDragSource) return;
+		const sameNode = taskDragSource.cardId === card.id &&
+			JSON.stringify(taskDragSource.taskPath) === JSON.stringify(path);
+		if (sameNode) return;
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		activeDocument.querySelectorAll(
+			'.dashboard-task-item--drag-top,.dashboard-task-item--drag-bottom,.dashboard-task-item--drag-nest'
+		).forEach(el => el.removeClass('dashboard-task-item--drag-top', 'dashboard-task-item--drag-bottom', 'dashboard-task-item--drag-nest'));
+		const rect = item.getBoundingClientRect();
+		const ratio = (e.clientY - rect.top) / rect.height;
+		if (ratio < 0.3) item.addClass('dashboard-task-item--drag-top');
+		else if (ratio > 0.7) item.addClass('dashboard-task-item--drag-bottom');
+		else item.addClass('dashboard-task-item--drag-nest');
+	});
+
+	item.addEventListener('dragleave', () => {
+		clearDragClasses();
+	});
+
+	item.addEventListener('drop', (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		clearDragClasses();
+		if (!taskDragSource) return;
+		const sameNode = taskDragSource.cardId === card.id &&
+			JSON.stringify(taskDragSource.taskPath) === JSON.stringify(path);
+		if (sameNode) return;
+
+		const rect = item.getBoundingClientRect();
+		const ratio = (e.clientY - rect.top) / rect.height;
+		const src = taskDragSource;
+
+		if (src.cardId === card.id) {
+			if (ratio < 0.3) callbacks.onTaskReorder(card.id, src.taskPath, path, true);
+			else if (ratio > 0.7) callbacks.onTaskReorder(card.id, src.taskPath, path, false);
+			else callbacks.onTaskNestInto(card.id, src.taskPath, path);
+		} else {
+			const mode: 'before' | 'after' | 'nest' = ratio < 0.3 ? 'before' : ratio > 0.7 ? 'after' : 'nest';
+			callbacks.onTaskMoveToCard(src.cardId, src.taskPath, card.id, path, mode);
+		}
+	});
+
+	// CONTRACT: always render children, even when collapsed. The in-place
+	// toggle (`toggleCollapseInPlace`) can only show/hide DOM that already
+	// exists — if collapsed subtrees were skipped here, an expand after any full
+	// re-render (e.g. checking a sibling task) would find nothing to unhide and
+	// the chevron would appear dead. Do NOT "optimize" this back to
+	// `!task.collapsed` — that was the bug. Collapsed subtrees are hidden via the
+	// `--hidden` class (driven by `ancestorHidden`), not by omitting the DOM.
+	// Trade-off: a deeply collapsed tree pays DOM-creation cost on full render;
+	// acceptable because full render is low-frequency (chevron clicks are O(n)
+	// in-place, not re-renders).
+	if (task.children && task.children.length > 0) {
+		const childHidden = ancestorHidden || task.collapsed;
+		for (let i = 0; i < task.children.length; i++) {
+			renderTaskItem(list, task.children[i]!, [...path, i], card, callbacks, app, depth + 1, childHidden);
+		}
+	}
+}
+
+/**
+ * Completion of a single task as a 0..1 fraction: a leaf is 0 or 1 by its
+ * checkbox; a task with subtasks takes the average of its subtasks'
+ * completion (recursively). Card progress is the average over top-level
+ * tasks: 1 done task + 1 task with 2/5 subtasks done = (1 + 0.4) / 2 = 70%.
+ */
+function taskCompletion(task: TaskItem): number {
+	if (!task.children || task.children.length === 0) return task.checked ? 1 : 0;
+	const sum = task.children.reduce((acc, child) => acc + taskCompletion(child), 0);
+	return sum / task.children.length;
+}
+
+function renderTaskBody(container: HTMLElement, card: DashboardCard, callbacks: RenderCallbacks, app: App): void {
+	const list = container.createDiv({ cls: 'dashboard-task-list' });
+	list.dataset.cardId = card.id;
+
+	// When the list is empty, make it a drop target so tasks can be dragged in
+	list.addEventListener('dragover', (e) => {
+		if (!taskDragSource) return;
+		if (taskDragSource.cardId === card.id) return;
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		list.addClass('dashboard-task-list--drop-target');
+	});
+
+	list.addEventListener('dragleave', (e) => {
+		if (!list.contains(e.relatedTarget as Node)) {
+			list.removeClass('dashboard-task-list--drop-target');
+		}
+	});
+
+	list.addEventListener('drop', (e) => {
+		e.preventDefault();
+		list.removeClass('dashboard-task-list--drop-target');
+		if (!taskDragSource) return;
+		if (taskDragSource.cardId === card.id) return;
+		callbacks.onTaskMoveToCard(taskDragSource.cardId, taskDragSource.taskPath, card.id, [card.tasks.length], 'before');
+	});
+
+	card.tasks.forEach((task, i) => renderTaskItem(list, task, [i], card, callbacks, app, 0));
+
+	const addRow = container.createDiv({ cls: 'dashboard-task-add' });
+	const input = addRow.createEl('input', {
+		cls: 'dashboard-task-input',
+		attr: { type: 'text', placeholder: t('renderer.addTask') },
+	});
+	const taskSuggest = attachFileSuggest(input, app);
+	input.addEventListener('keydown', (e) => {
+		if (taskSuggest.isActive()) return;
+		if (e.key === 'Enter' && input.value.trim()) {
+			callbacks.onTaskAdd(card.id, input.value.trim());
+			input.value = '';
+		}
+	});
+
+	if (card.tasks.length > 0) {
+		const sum = card.tasks.reduce((acc, task) => acc + taskCompletion(task), 0);
+		const percent = Math.round((sum / card.tasks.length) * 100);
+
+		const progressWrap = container.createDiv({ cls: 'dashboard-progress' });
+		const bar = progressWrap.createDiv({ cls: 'dashboard-progress-bar' });
+		bar.createDiv({
+			cls: 'dashboard-progress-fill',
+			attr: { style: `width: ${percent}%` },
+		});
+		progressWrap.createSpan({
+			cls: 'dashboard-progress-text',
+			text: `${percent}%`,
+		});
+	}
+}
+
+function renderMemoBody(container: HTMLElement, card: DashboardCard, callbacks: RenderCallbacks, app: App): void {
+	const text = memoCardText(card);
+	let dirty = false;
+
+	// View mode: rendered text with clickable links
+	const view = container.createDiv({ cls: 'dashboard-memo-view' });
+	renderMemoViewContent(view, text, app);
+	view.addEventListener('click', () => {
+		view.setCssProps({ display: 'none' });
+		textarea.setCssProps({ display: '' });
+		textarea.focus();
+	});
+
+	// Edit mode: textarea (hidden by default)
+	const textarea = container.createEl('textarea', {
+		cls: 'dashboard-memo-textarea',
+		text: text,
+		attr: { placeholder: t('renderer.writeThoughts') },
+	});
+	textarea.setCssProps({ display: 'none' });
+
+	attachFileSuggest(textarea, app);
+
+	textarea.addEventListener('input', () => {
+		dirty = true;
+	});
+
+	const save = () => {
+		if (!dirty) return;
+		dirty = false;
+		const value = textarea.value;
+		const parts = extractCardParts(value);
+		callbacks.onMemoUpdate(card, {
+			body: parts.cleanBody,
+			blockquote: parts.blockquote,
+			tasks: parts.tasks,
+			docs: parts.docs,
+			wikiLink: '',
+			url: '',
+			type: 'generic',
+		});
+	};
+
+	textarea.addEventListener('blur', () => {
+		save();
+		// If re-render didn't happen (not dirty), switch to view manually
+		if (activeDocument.body.contains(view)) {
+			renderMemoViewContent(view, textarea.value, app);
+			view.setCssProps({ display: '' });
+			textarea.setCssProps({ display: 'none' });
+		}
+	});
+}
+
+function renderMemoViewContent(container: HTMLElement, text: string, app: App): void {
+	container.empty();
+	container.removeClass('dashboard-memo-view--md');
+	if (!text) {
+		container.addClass('dashboard-memo-view--empty');
+		container.setText(t('renderer.writeThoughts'));
+		return;
+	}
+	container.removeClass('dashboard-memo-view--empty');
+
+	// Instant plain-lines paint so the card never flashes empty while the
+	// async markdown pass is in flight; renderMemoMarkdown swaps it out on
+	// success (and leaves this paint standing on failure).
+	renderMemoPlainLines(container, text, app);
+	const component = activeMarkdownComponent;
+	if (component) void renderMemoMarkdown(container, text, app, component);
+}
+
+/** The legacy line-per-line paint: blockquote lines + wikilink/URL lines.
+ *  Kept as the synchronous fallback under the markdown pass. */
+function renderMemoPlainLines(container: HTMLElement, text: string, app: App): void {
+	const lines = text.split('\n');
+	for (let i = 0; i < lines.length; i++) {
+		if (i > 0) container.createEl('br');
+		const line = lines[i]!;
+		if (line.startsWith('> ')) {
+			const quote = container.createDiv({ cls: 'dashboard-note-quote' });
+			quote.setText(line.slice(2));
+		} else {
+			renderTextWithLinks(container, line, app);
+		}
+	}
+}
+
+/**
+ * Adapt memo text (written line-per-line in a plain textarea) for markdown
+ * rendering without changing how existing memos read: every plain line becomes
+ * its own paragraph (markdown would otherwise soft-wrap them together), while
+ * consecutive list-item lines stay grouped so `-`/`1.` lists and task lines
+ * render as real lists. Code-fence interiors are passed through untouched.
+ */
+export function memoMarkdownSource(text: string): string {
+	const lines = text.split('\n');
+	const out: string[] = [];
+	let listBuf: string[] = [];
+	let inFence = false;
+	const flush = (): void => {
+		if (listBuf.length > 0) {
+			out.push(...listBuf, '');
+			listBuf = [];
+		}
+	};
+	for (const line of lines) {
+		if (/^\s*(```|~~~)/.test(line)) {
+			flush();
+			inFence = !inFence;
+			out.push(line);
+			continue;
+		}
+		if (inFence) {
+			out.push(line);
+			continue;
+		}
+		const isListItem = /^(\s*)([-*+]|\d+\.)\s+/.test(line);
+		const isContinuation = listBuf.length > 0 && /^\s+\S/.test(line);
+		if (isListItem || isContinuation) {
+			listBuf.push(line);
+		} else {
+			flush();
+			out.push(line, '');
+		}
+	}
+	flush();
+	return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * Render the memo view's text as real markdown (Obsidian's renderer), then
+ * wire the produced links to the dashboard's open/hover semantics. Swaps the
+ * container's legacy plain-lines paint in one step on success; on any failure
+ * the plain paint stays. Exported for the verify scripts.
+ */
+export function renderMemoMarkdown(
+	container: HTMLElement,
+	text: string,
+	app: App,
+	component: Component,
+): Promise<void> {
+	const host = createDiv();
+	return MarkdownRenderer.render(app, memoMarkdownSource(text), host, '', component)
+		.then(() => {
+			if (!container.isConnected || !host.hasChildNodes()) return;
+			container.empty();
+			container.addClass('dashboard-memo-view--md');
+			while (host.firstChild) container.appendChild(host.firstChild);
+			wireMemoMarkdownLinks(container, app);
+		})
+		.catch(() => {
+			// Keep the plain-lines paint — a render failure must not blank the card.
+		});
+}
+
+/** Attach open/click (and desktop hover) behavior to the anchors Obsidian's
+ *  markdown pass produced — the same semantics renderWikilink/renderExternalLink
+ *  give the plain paint, so internal links open through the note opener and
+ *  external ones open in the browser. */
+function wireMemoMarkdownLinks(container: HTMLElement, app: App): void {
+	container.querySelectorAll('a').forEach(raw => {
+		const a = raw as HTMLElement;
+		const href = a.getAttribute('href') ?? '';
+		if (a.hasClass('internal-link') || href === '' || href.startsWith('#')) {
+			const target = a.getAttribute('data-href') ?? a.getText();
+			const path = target.split('#')[0]!;
+			const file = resolveNoteFile(app, path);
+			if (file && !Platform.isMobile && activeHoverParent) {
+				attachNoteHover(app, a, file, activeHoverParent, target.includes('#') ? `#${target.split('#').pop()}` : undefined);
+			}
+			a.addEventListener('click', (e) => {
+				e.stopPropagation();
+				e.preventDefault();
+				if (!file) return;
+				activeNoteOpener?.(file, target.includes('#') ? `#${target.split('#').pop()}` : undefined);
+			});
+		} else if (/^https?:/i.test(href)) {
+			a.addEventListener('click', (e) => {
+				e.stopPropagation();
+				e.preventDefault();
+				window.open(href, '_blank');
+			});
+		}
+	});
+}
+
+	function renderProjectBody(container: HTMLElement, card: DashboardCard, callbacks: RenderCallbacks, app: App): void {
+		const collectDocPaths = (docs: DocNode[]): string[] => {
+			const out: string[] = [];
+			const walk = (nodes: DocNode[]) => {
+				for (const n of nodes) {
+					out.push(n.path);
+					if (n.children) walk(n.children);
+				}
+			};
+			walk(docs);
+			return out;
+		};
+
+		const clearDragClasses = () => {
+			activeDocument.querySelectorAll(
+				'.dashboard-task-item--drag-top,.dashboard-task-item--drag-bottom,.dashboard-task-item--drag-nest,.dashboard-task-item--drag-over,.dashboard-task-item--dragging'
+			).forEach(el => {
+				(el as HTMLElement).removeClass(
+					'dashboard-task-item--drag-top',
+					'dashboard-task-item--drag-bottom',
+					'dashboard-task-item--drag-nest',
+					'dashboard-task-item--drag-over',
+					'dashboard-task-item--dragging',
+				);
+			});
+		};
+
+		const docList = container.createDiv({ cls: 'dashboard-project-docs' });
+		docList.dataset.cardId = card.id;
+
+		// Empty list drop target so docs can be dragged in (appends at top-level end)
+		docList.addEventListener('dragover', (e) => {
+			if (!docDragSource) return;
+			if (docDragSource.cardId === card.id) return;
+			e.preventDefault();
+			if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+			docList.addClass('dashboard-project-docs--drop-target');
+		});
+
+		docList.addEventListener('dragleave', (e) => {
+			if (!docList.contains(e.relatedTarget as Node)) {
+				docList.removeClass('dashboard-project-docs--drop-target');
+			}
+		});
+
+		docList.addEventListener('drop', (e) => {
+			e.preventDefault();
+			docList.removeClass('dashboard-project-docs--drop-target');
+			if (!docDragSource) return;
+			if (docDragSource.cardId === card.id) return;
+			const destPath = [card.docs.length];
+			callbacks.onDocMoveToCard(docDragSource.cardId, docDragSource.docPath, card.id, destPath, 'before');
+		});
+
+		const renderDocItem = (doc: DocNode, path: number[], depth: number, ancestorHidden = false) => {
+			const docItem = docList.createDiv({ cls: 'dashboard-project-doc-item' });
+			if (depth > 0) docItem.addClass('dashboard-project-doc-item--child');
+			if (ancestorHidden) docItem.addClass('dashboard-project-doc-item--hidden');
+			docItem.style.marginLeft = `${depth * 18}px`;
+			docItem.setAttribute('draggable', 'true');
+			docItem.dataset.docPath = JSON.stringify(path);
+
+			const hasChildren = (doc.children?.length ?? 0) > 0;
+			if (hasChildren) {
+				docItem.setAttribute('aria-expanded', doc.collapsed ? 'false' : 'true');
+				const toggle = docItem.createDiv({ cls: 'dashboard-task-toggle dashboard-task-toggle--active' });
+				toggle.setAttribute('role', 'button');
+				toggle.setAttribute('aria-label', doc.collapsed ? t('renderer.expandDoc') : t('renderer.collapseDoc'));
+				setIcon(toggle, doc.collapsed ? 'chevron-right' : 'chevron-down');
+				// See task toggle: mutable local flag avoids the frozen closed-over
+				// value now that the quiet path skips the full re-render.
+				let isCollapsed = doc.collapsed;
+				toggle.addEventListener('click', (e) => {
+					e.stopPropagation();
+					// Optimistic in-place DOM update + debounced quiet persist. Avoids
+					// the full-board re-render the old collapse path triggered.
+					isCollapsed = !isCollapsed;
+					toggleCollapseInPlace(docItem, path, 'data-doc-path', isCollapsed);
+					toggle.setAttribute('aria-label', isCollapsed ? t('renderer.expandDoc') : t('renderer.collapseDoc'));
+					callbacks.onDocToggleCollapse(card.id, path);
+				});
+			}
+
+			const resolved = resolveNoteFile(app, doc.path);
+			const docIcon = docItem.createSpan({ cls: 'dashboard-project-doc-icon' });
+			setIcon(docIcon, iconForExtension(resolved?.extension ?? ''));
+			docItem.createSpan({ text: resolved?.basename ?? doc.path.split('/').pop() ?? doc.path, cls: 'dashboard-project-doc-name' });
+
+			if (resolved && !Platform.isMobile && activeHoverParent) {
+				attachNoteHover(app, docItem, resolved, activeHoverParent);
+			}
+
+			const removeBtn = docItem.createEl('button', {
+				cls: 'dashboard-project-doc-remove',
+				attr: { 'aria-label': t('renderer.removeDoc') },
+			});
+			setIcon(removeBtn, 'x');
+			removeBtn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				void (async () => {
+					const confirmed = await showConfirmDialog(app, {
+						title: t('common.confirmDelete'),
+						message: t('common.confirmDeleteMessage'),
+					});
+					if (!confirmed) return;
+					callbacks.onDocDelete(card.id, path);
+				})();
+			});
+
+			docItem.addEventListener('click', (e) => {
+				if ((e.target as HTMLElement).tagName === 'BUTTON') return;
+				if (!resolved) return;
+				activeNoteOpener?.(resolved);
+			});
+
+			docItem.addEventListener('dragstart', (e) => {
+				e.stopPropagation();
+				docDragSource = { cardId: card.id, docPath: path };
+				docItem.addClass('dashboard-task-item--dragging');
+				if (e.dataTransfer) {
+					e.dataTransfer.effectAllowed = 'move';
+					e.dataTransfer.setData('text/plain', JSON.stringify(path));
+					// Marks this as an in-card item drag so the card-level
+					// file-drop layer (dropEffect='link' override) stands down.
+					e.dataTransfer.setData(ITEM_DRAG_TYPE, '1');
+				}
+			});
+
+			docItem.addEventListener('dragend', () => {
+				docItem.removeClass('dashboard-task-item--dragging');
+				clearDragClasses();
+				docDragSource = null;
+			});
+
+			docItem.addEventListener('dragover', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				if (!docDragSource) return;
+				const sameNode = docDragSource.cardId === card.id &&
+					JSON.stringify(docDragSource.docPath) === JSON.stringify(path);
+				if (sameNode) return;
+				if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+				clearDragClasses();
+				const rect = docItem.getBoundingClientRect();
+				const ratio = (e.clientY - rect.top) / rect.height;
+				if (ratio < 0.3) docItem.addClass('dashboard-task-item--drag-top');
+				else if (ratio > 0.7) docItem.addClass('dashboard-task-item--drag-bottom');
+				else docItem.addClass('dashboard-task-item--drag-nest');
+			});
+
+			docItem.addEventListener('dragleave', () => {
+				docItem.removeClass('dashboard-task-item--drag-top');
+				docItem.removeClass('dashboard-task-item--drag-bottom');
+				docItem.removeClass('dashboard-task-item--drag-nest');
+			});
+
+			docItem.addEventListener('drop', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				clearDragClasses();
+				if (!docDragSource) return;
+				const sameNode = docDragSource.cardId === card.id &&
+					JSON.stringify(docDragSource.docPath) === JSON.stringify(path);
+				if (sameNode) return;
+
+				const rect = docItem.getBoundingClientRect();
+				const ratio = (e.clientY - rect.top) / rect.height;
+				const src = docDragSource;
+
+				if (src.cardId === card.id) {
+					if (ratio < 0.3) callbacks.onDocReorder(card.id, src.docPath, path, true);
+					else if (ratio > 0.7) callbacks.onDocReorder(card.id, src.docPath, path, false);
+					else callbacks.onDocNest(card.id, src.docPath);
+				} else {
+					const mode: 'before' | 'after' | 'nest' = ratio < 0.3 ? 'before' : ratio > 0.7 ? 'after' : 'nest';
+					callbacks.onDocMoveToCard(src.cardId, src.docPath, card.id, path, mode);
+				}
+			});
+
+			// CONTRACT: always render children, even when collapsed (see task
+			// branch for the full rationale). Do not gate on `!doc.collapsed`.
+			if (hasChildren) {
+				const childHidden = ancestorHidden || doc.collapsed;
+				doc.children!.forEach((child, i) => renderDocItem(child, [...path, i], depth + 1, childHidden));
+			}
+		};
+
+		card.docs.forEach((doc, i) => renderDocItem(doc, [i], 0));
+
+		const addDocRow = container.createDiv({ cls: 'dashboard-project-add-doc' });
+		const docInput = addDocRow.createEl('input', {
+			cls: 'dashboard-task-input',
+			attr: { type: 'text', placeholder: t('renderer.addDocument') },
+		});
+
+		const docResults = addDocRow.createDiv({ cls: 'dashboard-project-doc-results' });
+
+		docInput.addEventListener('input', () => {
+			docResults.empty();
+			const q = docInput.value.toLowerCase().trim();
+			if (!q) return;
+
+			const currentPaths = collectDocPaths(card.docs);
+			const files = getSearchableFiles(app)
+				.filter(f => !f.path.startsWith('.'))
+				.filter(f => f.path.toLowerCase().includes(q) || f.basename.toLowerCase().includes(q))
+				.filter(f => !currentPaths.includes(f.path))
+				.slice(0, 50);
+
+			for (const file of files) {
+				const item = docResults.createDiv({ cls: 'dashboard-project-doc-result' });
+				item.setText(file.basename);
+				item.addEventListener('click', () => {
+					callbacks.onDocAdd(card.id, file.path);
+				});
+			}
+		});
+
+		docInput.addEventListener('blur', () => {
+			window.setTimeout(() => docResults.empty(), 200);
+		});
+	}
+
+function getSectionType(column: DashboardColumn): string {
+	if (column.sectionType) return column.sectionType;
+	const lower = column.name.toLowerCase();
+	if (lower === 'memo') return 'memo';
+	if (lower === 'todo') return 'todo';
+	if (lower === 'sticky') return 'sticky';
+	if (lower === 'projects') return 'projects';
+	if (lower === 'dashboard') return 'dashboard';
+	if (lower === 'library') return 'library';
+	if (lower === 'folder') return 'folder';
+	if (lower === 'images') return 'images';
+	if (lower === 'videos') return 'videos';
+	if (lower === 'alltasks') return 'alltasks';
+	if (lower === 'calendar') return 'calendar';
+	if (lower === 'dataview') return 'dataview';
+	if (lower === 'weread') return 'weread';
+	if (lower === 'ticktick') return 'ticktick';
+	if (lower === 'web') return 'web';
+	if (column.cards.length > 0) {
+		const types = new Set(column.cards.map(c => c.type));
+		const dashboardTypes = new Set(['chart', 'weather', 'tracker']);
+		if ([...types].every(t => dashboardTypes.has(t)) && types.size > 0) return 'dashboard';
+		if (types.has('task') && types.size === 1) return 'todo';
+		if (types.has('task') && !types.has('project')) return 'todo';
+		if (types.has('project') && types.size === 1) return 'projects';
+		if (types.has('generic') && !types.has('project') && !types.has('task')) return 'memo';
+	}
+	return 'projects';
+}
+
+export function renderTextWithLinks(container: HTMLElement, text: string, app: App): void {
+	const parts = text.split(/(\[\[[^\]]+?\]\]|\[[^\]]+\]\([^)]+\))/g);
+	for (const part of parts) {
+		const wikiMatch = part.match(/^\[\[([^\]]+)\]\]$/);
+		if (wikiMatch) {
+			renderWikilink(container, wikiMatch[1]!, app);
+			continue;
+		}
+		const extMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+		if (extMatch) {
+			renderExternalLink(container, extMatch[1]!, extMatch[2]!);
+			continue;
+		}
+		if (part) {
+			container.appendText(part);
+		}
+	}
+}
+
+function renderWikilink(container: HTMLElement, content: string, app: App): void {
+	let alias: string | undefined;
+	let linkPart = content;
+
+	const pipeIdx = content.indexOf('|');
+	if (pipeIdx !== -1) {
+		alias = content.slice(pipeIdx + 1);
+		linkPart = content.slice(0, pipeIdx);
+	}
+
+	let path = linkPart;
+	let fragment: string | undefined;
+
+	const hashIdx = linkPart.indexOf('#');
+	if (hashIdx !== -1) {
+		path = linkPart.slice(0, hashIdx);
+		fragment = linkPart.slice(hashIdx + 1);
+	}
+
+	const noteName = path.split('/').pop()?.replace(/\.md$/, '') ?? path;
+	let displayName: string;
+	if (alias) {
+		displayName = alias;
+	} else if (fragment) {
+		displayName = `${noteName} > ${fragment}`;
+	} else {
+		displayName = noteName;
+	}
+
+	const link = container.createSpan({
+		cls: 'dashboard-wikilink',
+		text: displayName,
+	});
+
+	const file = resolveNoteFile(app, path);
+
+	if (file && !Platform.isMobile && activeHoverParent) {
+		attachNoteHover(app, link, file, activeHoverParent, fragment ? `#${fragment}` : undefined);
+	}
+
+	link.addEventListener('click', (e) => {
+		e.stopPropagation();
+		if (!file) return;
+		activeNoteOpener?.(file, fragment ? `#${fragment}` : undefined);
+	});
+}
+
+function renderExternalLink(container: HTMLElement, text: string, url: string): void {
+	const link = container.createSpan({
+		cls: 'dashboard-external-link',
+		text: text,
+	});
+	link.addEventListener('click', (e) => {
+		e.stopPropagation();
+		window.open(url, '_blank');
+	});
+}
+
+function isReminderOverdue(reminder: string): boolean {
+	const now = new Date();
+	const parts = reminder.trim().split(/\s+/);
+	if (parts.length < 2) return false;
+	const dateStr = parts[0]!;
+	const timeStr = parts[1]!;
+	const [year, month, day] = dateStr.split('-').map(Number);
+	const [hour, min] = timeStr.split(':').map(Number);
+	if (!year || !month || !day) return false;
+	const due = new Date(year, month - 1, day, hour ?? 0, min ?? 0);
+	return now >= due;
+}
+
+function createReminderButton(
+	taskItem: HTMLElement,
+	cardId: string,
+	taskPath: number[],
+	task: TaskItem,
+	callbacks: RenderCallbacks,
+): HTMLElement {
+	const btn = createEl('button');
+	btn.setAttribute('draggable', 'false');
+	btn.addClass('dashboard-task-reminder-btn');
+
+	if (task.reminder) {
+		btn.addClass('dashboard-task-reminder-btn--active');
+		setIcon(btn, 'bell-ring');
+		btn.setAttribute('aria-label', t('reminder.editReminder'));
+		if (!task.checked && isReminderOverdue(task.reminder)) {
+			btn.addClass('dashboard-task-reminder-btn--overdue');
+		}
+	} else {
+		setIcon(btn, 'bell');
+		btn.setAttribute('aria-label', t('reminder.setReminder'));
+	}
+
+	btn.addEventListener('click', (e) => {
+		e.stopPropagation();
+		e.preventDefault();
+		showReminderPopup(btn, cardId, taskPath, task, callbacks);
+	});
+
+	return btn;
+}
+
+function showReminderPopup(
+	anchorBtn: HTMLElement,
+	cardId: string,
+	taskPath: number[],
+	task: TaskItem,
+	callbacks: RenderCallbacks,
+): void {
+	closeAllReminderPopups();
+
+	const popup = activeDocument.body.createDiv({ cls: 'dashboard-task-reminder-popup' });
+
+	// Inherit theme variables from dashboard root (popup is on body, outside theme scope)
+	const dashboardRoot = anchorBtn.closest('.apex-dashboard-root') as HTMLElement;
+	if (dashboardRoot) {
+		const rs = getComputedStyle(dashboardRoot);
+		const themeVars = ['--db-bg', '--db-bg-card', '--db-bg-card-hover', '--db-border-card',
+			'--db-text', '--db-text-muted', '--db-accent', '--db-radius-md', '--db-radius-sm', '--db-font'];
+		themeVars.forEach(v => {
+			const val = rs.getPropertyValue(v).trim();
+			if (val) popup.style.setProperty(v, val);
+		});
+	}
+
+	const rect = anchorBtn.getBoundingClientRect();
+	popup.setCssProps({
+		position: 'fixed',
+		top: `${rect.bottom + 4}px`,
+	});
+
+	const popupWidth = 240;
+	if (rect.left + popupWidth > window.innerWidth) {
+		popup.style.right = `${window.innerWidth - rect.right}px`;
+	} else {
+		popup.style.left = `${rect.left}px`;
+	}
+
+	// Scroll & resize tracking — reposition popup when content moves
+	const updatePopupPosition = () => {
+		const r = anchorBtn.getBoundingClientRect();
+		if (r.height === 0 || r.bottom < 0 || r.top > window.innerHeight
+			|| r.right < 0 || r.left > window.innerWidth) {
+			closeAllReminderPopups();
+			return;
+		}
+		popup.style.top = `${r.bottom + 4}px`;
+		if (r.left + popupWidth > window.innerWidth) {
+			popup.setCssProps({
+				right: `${window.innerWidth - r.right}px`,
+				left: 'auto',
+			});
+		} else {
+			popup.setCssProps({
+				left: `${r.left}px`,
+				right: 'auto',
+			});
+		}
+	};
+	activeDocument.addEventListener('scroll', updatePopupPosition, { passive: true, capture: true });
+	window.addEventListener('resize', updatePopupPosition);
+	(popup as HTMLElement & { __reminderCleanup?: () => void }).__reminderCleanup = () => {
+		activeDocument.removeEventListener('scroll', updatePopupPosition, { capture: true });
+		window.removeEventListener('resize', updatePopupPosition);
+	};
+
+	// Parse initial values
+	let selectedYear: number;
+	let selectedMonth: number;
+	let selectedDay: number;
+	let selectedHour = 9;
+	let selectedMin = 0;
+
+	const now = new Date();
+	if (task.reminder) {
+		const parts = task.reminder.trim().split(/\s+/);
+		const dp = parts[0]?.split('-').map(Number) ?? [];
+		const tp = parts[1]?.split(':').map(Number) ?? [];
+		selectedYear = dp[0] ?? now.getFullYear();
+		selectedMonth = (dp[1] ?? now.getMonth() + 1) - 1;
+		selectedDay = dp[2] ?? now.getDate();
+		selectedHour = tp[0] ?? 9;
+		selectedMin = tp[1] ?? 0;
+	} else {
+		selectedYear = now.getFullYear();
+		selectedMonth = now.getMonth();
+		selectedDay = now.getDate();
+	}
+
+	const viewYear = { value: selectedYear };
+	const viewMonth = { value: selectedMonth };
+
+	const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+	// Calendar nav
+	const calNav = popup.createDiv({ cls: 'dashboard-task-reminder-calendar-nav' });
+	const prevBtn = calNav.createEl('button', { text: '<' });
+	const monthLabel = calNav.createSpan();
+	const nextBtn = calNav.createEl('button', { text: '>' });
+
+	// Calendar grid
+	const calGrid = popup.createDiv({ cls: 'dashboard-task-reminder-calendar' });
+
+	// Time picker
+	const timeRow = popup.createDiv({ cls: 'dashboard-task-reminder-time' });
+	const hourSelect = timeRow.createEl('select');
+	for (let h = 0; h < 24; h++) {
+		const opt = hourSelect.createEl('option', { text: String(h).padStart(2, '0'), attr: { value: String(h) } });
+		if (h === selectedHour) opt.selected = true;
+	}
+	timeRow.createSpan({ text: ':' });
+	const minSelect = timeRow.createEl('select');
+	for (let m = 0; m < 60; m++) {
+		const opt = minSelect.createEl('option', { text: String(m).padStart(2, '0'), attr: { value: String(m) } });
+		if (m === selectedMin) opt.selected = true;
+	}
+
+	// Action buttons
+	const btnRow = popup.createDiv({ cls: 'dashboard-task-reminder-popup-btns' });
+	const saveBtn = btnRow.createEl('button', { cls: 'mod-cta', text: t('common.save') });
+	if (task.reminder) {
+		btnRow.createEl('button', { cls: 'dashboard-task-reminder-clear', text: t('reminder.clearReminder') });
+	}
+
+	const renderCalendar = () => {
+		calGrid.empty();
+		const y = viewYear.value;
+		const m = viewMonth.value;
+		monthLabel.setText(`${y}-${String(m + 1).padStart(2, '0')}`);
+
+		for (const d of dayNames) {
+			calGrid.createDiv({ cls: 'dashboard-task-reminder-calendar-header', text: d });
+		}
+
+		const firstDay = new Date(y, m, 1).getDay();
+		const daysInMonth = new Date(y, m + 1, 0).getDate();
+		const daysInPrev = new Date(y, m, 0).getDate();
+
+		const today = new Date();
+		const isCurrentMonth = today.getFullYear() === y && today.getMonth() === m;
+
+		for (let i = firstDay - 1; i >= 0; i--) {
+			const d = daysInPrev - i;
+			calGrid.createEl('button', { cls: 'dashboard-task-reminder-calendar-day dashboard-task-reminder-calendar-day--other-month', text: String(d) });
+		}
+
+		for (let d = 1; d <= daysInMonth; d++) {
+			const cls = ['dashboard-task-reminder-calendar-day'];
+			if (isCurrentMonth && d === today.getDate()) cls.push('dashboard-task-reminder-calendar-day--today');
+			if (y === selectedYear && m === selectedMonth && d === selectedDay) cls.push('dashboard-task-reminder-calendar-day--selected');
+
+			const dayBtn = calGrid.createEl('button', { cls: cls.join(' '), text: String(d) });
+			dayBtn.addEventListener('click', (e) => {
+				e.stopPropagation();
+				selectedYear = y;
+				selectedMonth = m;
+				selectedDay = d;
+				renderCalendar();
+			});
+		}
+
+		const totalCells = firstDay + daysInMonth;
+		const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+		for (let d = 1; d <= remaining; d++) {
+			calGrid.createEl('button', { cls: 'dashboard-task-reminder-calendar-day dashboard-task-reminder-calendar-day--other-month', text: String(d) });
+		}
+	};
+
+	prevBtn.addEventListener('click', (e) => {
+		e.stopPropagation();
+		viewMonth.value--;
+		if (viewMonth.value < 0) { viewMonth.value = 11; viewYear.value--; }
+		renderCalendar();
+	});
+
+	nextBtn.addEventListener('click', (e) => {
+		e.stopPropagation();
+		viewMonth.value++;
+		if (viewMonth.value > 11) { viewMonth.value = 0; viewYear.value++; }
+		renderCalendar();
+	});
+
+	saveBtn.addEventListener('click', (e) => {
+		e.stopPropagation();
+		const h = parseInt(hourSelect.value, 10);
+		const m = parseInt(minSelect.value, 10);
+		const reminder = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(selectedDay).padStart(2, '0')} ${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+		callbacks.onTaskReminderEdit(cardId, taskPath, reminder);
+		closeAllReminderPopups();
+	});
+
+	btnRow.querySelector('.dashboard-task-reminder-clear')?.addEventListener('click', (e) => {
+		e.stopPropagation();
+		callbacks.onTaskReminderEdit(cardId, taskPath, undefined);
+		closeAllReminderPopups();
+	});
+
+	const outsideClick = (ev: MouseEvent) => {
+		if (!popup.contains(ev.target as Node)) {
+			closeAllReminderPopups();
+			activeDocument.removeEventListener('mousedown', outsideClick);
+		}
+	};
+	window.setTimeout(() => activeDocument.addEventListener('mousedown', outsideClick), 0);
+
+	renderCalendar();
+}
+
+function closeAllReminderPopups(): void {
+	activeDocument.querySelectorAll('.dashboard-task-reminder-popup').forEach(el => {
+		const popup = el as HTMLElement & { __reminderCleanup?: () => void };
+		popup.__reminderCleanup?.();
+		popup.remove();
+	});
+}
+
+
+function renderWeatherInto(el: HTMLElement, card: DashboardCard): void {
+	if (!card.weatherConfig) return;
+
+	const cached = getCachedWeather(card.weatherConfig);
+	if (cached) {
+		renderWeatherContent(el, cached, card.weatherConfig.cityName);
+	} else {
+		el.createDiv({ cls: 'dashboard-weather-loading', text: '...' });
+		fetchWeather(card.weatherConfig).then(data => {
+			el.empty();
+			renderWeatherContent(el, data, card.weatherConfig!.cityName);
+		}).catch(() => {
+			el.empty();
+			el.createDiv({ cls: 'dashboard-weather-error', text: t('weather.fetchError') });
+		});
+	}
+}
+
+function renderWeatherBody(container: HTMLElement, card: DashboardCard, app: App): void {
+	if (!card.weatherConfig) return;
+
+	const el = container.createDiv({ cls: 'dashboard-weather' });
+	renderWeatherInto(el, card);
+}
+
+// Locally refresh every weather card in place, without rebuilding the whole
+// dashboard. Caller must clearWeatherCache() first so cached data is refetched.
+export function refreshWeatherCards(root: HTMLElement, data: DashboardData): void {
+	for (const column of data.columns) {
+		for (const card of column.cards) {
+			if (card.type !== 'weather' || !card.weatherConfig) continue;
+			const cardEl = root.querySelector(`[data-card-id="${CSS.escape(card.id)}"]`);
+			if (!(cardEl instanceof HTMLElement)) continue;
+			const weatherEl = cardEl.querySelector('.dashboard-weather');
+			if (!(weatherEl instanceof HTMLElement)) continue;
+			weatherEl.empty();
+			renderWeatherInto(weatherEl, card);
+		}
+	}
+}
+
+function renderWeatherContent(el: HTMLElement, data: import('./types').WeatherData, cityName: string): void {
+	const current = el.createDiv({ cls: 'dashboard-weather-current' });
+	const tempWrap = current.createDiv({ cls: 'dashboard-weather-temp-wrap' });
+	tempWrap.createDiv({ cls: 'dashboard-weather-temp', text: `${Math.round(data.temperature)}\u00B0` });
+	tempWrap.createDiv({ cls: 'dashboard-weather-icon', text: getWeatherEmoji(data.weatherCode) });
+
+	const details = current.createDiv({ cls: 'dashboard-weather-details' });
+	details.createDiv({ cls: 'dashboard-weather-city', text: cityName });
+	details.createDiv({ cls: 'dashboard-weather-desc', text: getWeatherDescription(data.weatherCode) });
+	const metaLine = details.createDiv({ cls: 'dashboard-weather-wind' });
+	metaLine.createSpan({ text: `${t('weather.feelsLike')} ${Math.round(data.feelsLike)}\u00B0  ${t('weather.humidity')} ${Math.round(data.humidity)}%  ${t('weather.wind')} ${Math.round(data.windSpeed)} km/h` });
+
+	if (data.dailyDates.length > 0) {
+		const forecast = el.createDiv({ cls: 'dashboard-weather-forecast' });
+		const count = Math.min(data.dailyDates.length, 5);
+		for (let i = 0; i < count; i++) {
+			const day = forecast.createDiv({ cls: 'dashboard-weather-day' });
+			const d = new Date(data.dailyDates[i]! + 'T00:00:00');
+			const dayName = d.toLocaleDateString(getLanguage() === 'zh' ? 'zh-CN' : 'en', { weekday: 'short' });
+			day.createDiv({ cls: 'dashboard-weather-day-name', text: dayName });
+			day.createDiv({ cls: 'dashboard-weather-day-icon', text: getWeatherEmoji(data.dailyCodes[i]!) });
+			day.createDiv({ cls: 'dashboard-weather-day-temps', text: `${Math.round(data.dailyMax[i]!)}\u00B0 / ${Math.round(data.dailyMin[i]!)}\u00B0` });
+		}
+	}
+}
+
+function renderTrackerBody(container: HTMLElement, card: DashboardCard, app: App, settings?: import('./types').DashboardSettings): void {
+	if (!card.trackerConfig) return;
+
+	const config = card.trackerConfig;
+		const size: CardSize = card.size || 'M';
+	const style: TrackerStyle = config.style || 'line';
+	destroyChart(card.id);
+
+	const el = container.createDiv({ cls: `dashboard-tracker dashboard-tracker--${size}` });
+
+	const data = readTrackerData(app, '', config.key, config.days);
+	const validPoints = data.filter(p => p.value !== null);
+
+	if (validPoints.length === 0) {
+		el.createDiv({ cls: 'dashboard-tracker-empty', text: t('tracker.noData') + ': ' + config.key });
+		return;
+	}
+
+	const values = data.map(p => p.value);
+	const minVal = Math.min(...values.filter((v): v is number => v !== null));
+	const maxVal = Math.max(...values.filter((v): v is number => v !== null));
+	const sum = validPoints.reduce((s, p) => s + p.value!, 0);
+	const avg = (sum / validPoints.length).toFixed(1);
+	const latest = validPoints[validPoints.length - 1]!.value as number;
+	const prev = validPoints.length > 1 ? validPoints[validPoints.length - 2]!.value as number : latest;
+	const trendDir = latest > prev ? 'up' : latest < prev ? 'down' : 'flat';
+	const trendPct = prev !== 0 ? ((latest - prev) / Math.abs(prev) * 100).toFixed(1) : '0';
+
+	// Streak: consecutive days with data (from latest backward, today optional)
+	const streak = computeStreak(data);
+
+	if (size === 'S') {
+		const row = el.createDiv({ cls: 'dashboard-tracker-compact' });
+		row.createDiv({ cls: 'dashboard-tracker-compact-value', text: String(latest) });
+		const arrow = row.createDiv({ cls: `dashboard-tracker-trend dashboard-tracker-trend--${trendDir}` });
+		arrow.setText(trendDir === 'up' ? '↑' : trendDir === 'down' ? '↓' : '→');
+		if (config.key) {
+			row.createDiv({ cls: 'dashboard-tracker-compact-label', text: config.key });
+		}
+		return;
+	}
+
+	const accentColor = getCSSVar('--db-accent') || '#6366f1';
+
+	// Dispatch by style
+	if (style === 'heatmap') {
+		renderTrackerHeatmap(el, data, minVal, maxVal, size, accentColor);
+	} else if (style === 'bar') {
+		renderTrackerBarChart(el, data, size, accentColor, card.id);
+	} else {
+		renderTrackerLineChart(el, data, size, accentColor, card.id);
+	}
+
+	// Stats
+	const stats = el.createDiv({ cls: 'dashboard-tracker-stats' });
+	const addStat = (label: string, value: string | number) => {
+		const stat = stats.createDiv({ cls: 'dashboard-tracker-stat' });
+		stat.createSpan({ cls: 'dashboard-tracker-stat-label', text: label });
+		stat.createSpan({ cls: 'dashboard-tracker-stat-value', text: String(value) });
+	};
+	addStat(t('tracker.current'), latest);
+	addStat(t('tracker.avg'), avg);
+
+	if (size === 'M') {
+		addStat(t('tracker.trend'), `${trendDir === 'up' ? '+' : ''}${trendPct}%`);
+	}
+
+	if (size === 'L') {
+		addStat(t('tracker.trend'), `${trendDir === 'up' ? '+' : ''}${trendPct}%`);
+		addStat(t('tracker.streak'), `${streak}d`);
+		addStat(t('tracker.min'), minVal);
+		addStat(t('tracker.max'), maxVal);
+	}
+}
+
+function renderTrackerLineChart(el: HTMLElement, data: import('./types').TrackerDataPoint[], size: CardSize, accentColor: string, cardId: string): void {
+	const chartWrap = el.createDiv({ cls: 'dashboard-tracker-chart' });
+	const canvasEl = chartWrap.createEl('canvas', { cls: 'dashboard-chart-canvas' });
+	const ctx = canvasEl.getContext('2d');
+	if (!ctx) return;
+
+	const chart = new Chart(ctx, {
+		type: 'line',
+		data: {
+			labels: data.map(p => p.date.slice(5)),
+			datasets: [{
+				data: data.map(p => p.value),
+				borderColor: accentColor,
+				backgroundColor: `${accentColor}22`,
+				fill: true,
+				tension: 0.4,
+				pointRadius: size === 'L' ? 3 : 0,
+				pointHoverRadius: 5,
+				pointBackgroundColor: accentColor,
+				borderWidth: 2,
+			}],
+		},
+		options: {
+			responsive: true,
+			maintainAspectRatio: false,
+			plugins: { legend: { display: false }, tooltip: { enabled: true } },
+			scales: {
+				x: { display: false },
+				y: { display: false },
+			},
+			animation: { duration: 600 },
+		},
+	});
+	chartInstances.set(cardId, chart);
+}
+
+function renderTrackerBarChart(el: HTMLElement, data: import('./types').TrackerDataPoint[], size: CardSize, accentColor: string, cardId: string): void {
+	const chartWrap = el.createDiv({ cls: 'dashboard-tracker-chart' });
+	const canvasEl = chartWrap.createEl('canvas', { cls: 'dashboard-chart-canvas' });
+	const ctx = canvasEl.getContext('2d');
+	if (!ctx) return;
+
+	const textColor = getCSSVar('--db-text-muted') || '#888';
+	const validVals = data.filter(p => p.value !== null).map(p => p.value!);
+	const barMax = validVals.length > 0 ? Math.max(...validVals) : 1;
+
+	const chart = new Chart(ctx, {
+		type: 'bar',
+		data: {
+			labels: data.map(p => p.date.slice(5)),
+			datasets: [{
+				data: data.map(p => p.value ?? 0),
+				backgroundColor: data.map(p => {
+					if (p.value === null) return 'transparent';
+					const intensity = barMax > 0 ? p.value / barMax : 0;
+					return `${accentColor}${Math.round(40 + intensity * 180).toString(16).padStart(2, '0')}`;
+				}),
+				borderRadius: 2,
+				barPercentage: 0.8,
+			}],
+		},
+		options: {
+			responsive: true,
+			maintainAspectRatio: false,
+			plugins: { legend: { display: false }, tooltip: { enabled: true } },
+			scales: {
+				x: { display: false },
+				y: { display: size === 'L', grid: { display: false }, ticks: { color: textColor, font: { size: 10 } } },
+			},
+			animation: { duration: 600 },
+		},
+	});
+	chartInstances.set(cardId, chart);
+}
+
+function renderTrackerHeatmap(el: HTMLElement, data: import('./types').TrackerDataPoint[], minVal: number, maxVal: number, size: CardSize, accentColor: string): void {
+	const heatmap = el.createDiv({ cls: 'dashboard-tracker-heatmap' });
+
+	const range = maxVal - minVal || 1;
+	const cellSize = size === 'M' ? 10 : 14;
+	const gap = 2;
+
+	// Organize data into weeks (columns), days are rows (Mon-Sun)
+	// Each column = 1 week, from oldest to newest
+	const firstDate = data[0] ? new Date(data[0].date + 'T00:00:00') : new Date();
+	const startDayOfWeek = firstDate.getDay(); // 0=Sun, 1=Mon...
+	const mondayOffset = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1; // days from Monday
+
+	// Build week columns
+	const weeks: (import('./types').TrackerDataPoint | null)[][] = [];
+	let currentWeek: (import('./types').TrackerDataPoint | null)[] = [];
+
+	// Pad first week with nulls to align to Monday
+	for (let i = 0; i < mondayOffset; i++) {
+		currentWeek.push(null);
+	}
+
+	for (const point of data) {
+		currentWeek.push(point);
+		if (currentWeek.length === 7) {
+			weeks.push(currentWeek);
+			currentWeek = [];
+		}
+	}
+	if (currentWeek.length > 0) {
+		weeks.push(currentWeek);
+	}
+
+	// Limit visible weeks based on size
+	const maxWeeks = size === 'M' ? 15 : size === 'L' ? 26 : 52;
+	const visibleWeeks = weeks.slice(-maxWeeks);
+
+	const grid = heatmap.createDiv({ cls: 'dashboard-tracker-heatmap-grid' });
+	grid.setCssProps({
+		display: 'grid',
+		gridTemplateColumns: `repeat(${visibleWeeks.length}, ${cellSize}px)`,
+		gridTemplateRows: `repeat(7, ${cellSize}px)`,
+		gap: `${gap}px`,
+	});
+
+	// Day labels (Mon, Tue, ... Sun) for L size
+	if (size === 'L') {
+		const labels = heatmap.createDiv({ cls: 'dashboard-tracker-heatmap-labels' });
+		const dayNames = ['M', '', 'W', '', 'F', '', 'S'];
+		for (const name of dayNames) {
+			labels.createDiv({ cls: 'dashboard-tracker-heatmap-day-label', text: name });
+		}
+	}
+
+	for (const week of visibleWeeks) {
+		for (let dayIdx = 0; dayIdx < 7; dayIdx++) {
+			const point = week[dayIdx] ?? null;
+			const cell = grid.createDiv({ cls: 'dashboard-tracker-heatmap-cell' });
+			cell.style.width = `${cellSize}px`;
+			cell.style.height = `${cellSize}px`;
+			cell.style.borderRadius = `${Math.max(2, cellSize / 4)}px`;
+
+			if (point === null || point.value === null) {
+				cell.addClass('dashboard-tracker-heatmap-cell--empty');
+			} else {
+				const intensity = (point.value - minVal) / range;
+				const alpha = 0.15 + intensity * 0.85;
+				cell.style.backgroundColor = accentColor;
+				cell.style.opacity = String(alpha);
+				cell.title = `${point.date}: ${point.value}`;
+			}
+		}
+	}
+}

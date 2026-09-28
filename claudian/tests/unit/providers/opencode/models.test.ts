@@ -1,13 +1,9 @@
 import {
   buildOpencodeBaseModels,
-  combineOpencodeRawModelSelection,
   decodeOpencodeModelId,
   encodeOpencodeModelId,
   extractOpencodeModelVariantValue,
-  getOpencodeModelVariants,
-  groupOpencodeDiscoveredModels,
   isOpencodeModelSelectionId,
-  OPENCODE_DEFAULT_THINKING_LEVEL,
   resolveOpencodeBaseModelRawId,
   resolveOpencodeDefaultThinkingLevel,
   splitOpencodeModelLabel,
@@ -25,15 +21,14 @@ describe('OpenCode model identity', () => {
 });
 
 describe('OpenCode thinking defaults', () => {
-  it('falls back to the current provider level when high is unsupported', () => {
+  it('defaults to High instead of inheriting the native Medium default', () => {
     expect(resolveOpencodeDefaultThinkingLevel(
       [
         { label: 'Low', value: 'low' },
         { label: 'Medium', value: 'medium' },
       ],
       undefined,
-      'medium',
-    )).toBe('medium');
+    )).toBe('high');
   });
 });
 
@@ -86,7 +81,7 @@ describe('OpenCode base model derivation', () => {
     ]);
   });
 
-  it('extracts and combines thinking variants from discovered model ids', () => {
+  it('extracts thinking variants from discovered model ids', () => {
     expect(resolveOpencodeBaseModelRawId(
       'anthropic/claude-sonnet-4/high',
       discoveredModels,
@@ -95,27 +90,36 @@ describe('OpenCode base model derivation', () => {
       'anthropic/claude-sonnet-4/high',
       discoveredModels,
     )).toBe('high');
-    expect(getOpencodeModelVariants(
-      'anthropic/claude-sonnet-4',
-      discoveredModels,
-    )).toEqual([
-      { label: 'High', value: 'high' },
-      { label: 'Max', value: 'max' },
-    ]);
-    expect(combineOpencodeRawModelSelection(
-      'anthropic/claude-sonnet-4',
-      'high',
-      discoveredModels,
-    )).toBe('anthropic/claude-sonnet-4/high');
-    expect(combineOpencodeRawModelSelection(
-      'anthropic/claude-sonnet-4',
-      OPENCODE_DEFAULT_THINKING_LEVEL,
-      discoveredModels,
-    )).toBe('anthropic/claude-sonnet-4');
   });
 });
 
 describe('opencodeChatUIConfig', () => {
+  it('capitalizes cached native effort labels while preserving selection values', () => {
+    const options = opencodeChatUIConfig.getReasoningOptions('opencode:openai/gpt-5', {
+      providerConfigs: {
+        opencode: {
+          thinkingOptionsByModel: {
+            'openai/gpt-5': [
+              { label: 'none', value: 'none' },
+              { label: 'low', value: 'low' },
+              { label: 'high', value: 'high' },
+              { label: 'max', value: 'max' },
+              { label: 'default', value: 'default' },
+            ],
+          },
+        },
+      },
+    });
+
+    expect(options).toEqual([
+      { label: 'None', value: 'none' },
+      { label: 'Low', value: 'low' },
+      { label: 'High', value: 'high' },
+      { label: 'Max', value: 'max' },
+      { label: 'Default', value: 'default' },
+    ]);
+  });
+
   it('excludes saved variant selections when their base model is not enabled', () => {
     const options = opencodeChatUIConfig.getModelOptions({
       model: 'haiku',
@@ -196,7 +200,7 @@ describe('opencodeChatUIConfig', () => {
     })).toBe('opencode:anthropic/claude-sonnet-4');
   });
 
-  it('shows configured base model ids even before discovery finishes', () => {
+  it('requires metadata before offering configured base models', () => {
     expect(opencodeChatUIConfig.getModelOptions({
       providerConfigs: {
         opencode: {
@@ -205,13 +209,7 @@ describe('opencodeChatUIConfig', () => {
           ],
         },
       },
-    })).toEqual([
-      {
-        description: 'Configured model',
-        label: 'google/gemini-2.5-pro',
-        value: 'opencode:google/gemini-2.5-pro',
-      },
-    ]);
+    })).toEqual([]);
   });
 
   it('has no model fallback when no models are enabled', () => {
@@ -292,29 +290,5 @@ describe('OpenCode discovered model grouping', () => {
       modelLabel: 'standalone-model',
       providerLabel: 'Other',
     });
-  });
-
-  it('groups discovered models by provider label', () => {
-    expect(groupOpencodeDiscoveredModels([
-      { label: 'Google/Gemini 2.5 Flash', rawId: 'google/gemini-2.5-flash' },
-      { label: 'Anthropic/Claude Sonnet 4', rawId: 'anthropic/claude-sonnet-4' },
-      { label: 'Google/Gemini 2.5 Pro', rawId: 'google/gemini-2.5-pro' },
-    ])).toEqual([
-      {
-        models: [
-          { label: 'Anthropic/Claude Sonnet 4', rawId: 'anthropic/claude-sonnet-4' },
-        ],
-        providerKey: 'anthropic',
-        providerLabel: 'Anthropic',
-      },
-      {
-        models: [
-          { label: 'Google/Gemini 2.5 Flash', rawId: 'google/gemini-2.5-flash' },
-          { label: 'Google/Gemini 2.5 Pro', rawId: 'google/gemini-2.5-pro' },
-        ],
-        providerKey: 'google',
-        providerLabel: 'Google',
-      },
-    ]);
   });
 });

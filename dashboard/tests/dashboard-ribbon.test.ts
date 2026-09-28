@@ -6,6 +6,7 @@ import {
   DASHBOARD_COMMAND_ID,
   DASHBOARD_PLUGIN_ID,
   DASHBOARD_RIBBON_ICON,
+  DASHBOARD_RIBBON_REGISTRATION_TITLE,
   DASHBOARD_RIBBON_STORAGE_KEY,
   DASHBOARD_RIBBON_TITLE,
   registerDashboardRibbon,
@@ -45,7 +46,7 @@ describe("Dashboard ribbon entry", () => {
     expect(registered).toBe(ribbon);
     expect(addRibbonIcon).toHaveBeenCalledWith(
       DASHBOARD_RIBBON_ICON,
-      DASHBOARD_RIBBON_TITLE,
+      DASHBOARD_RIBBON_REGISTRATION_TITLE,
       openDashboard,
     );
     expect(addClass).toHaveBeenCalledWith("okf-workspace-dashboard-ribbon");

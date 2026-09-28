@@ -2,29 +2,15 @@ import type { ChatMessage, ToolCallInfo } from '@/core/types';
 import {
   buildContextFromHistory,
   buildPromptWithHistoryContext,
-  formatContextLine,
   formatToolCallForContext,
-  getLastUserMessage,
-  isSessionExpiredError,
   isSessionMissingError,
-  truncateToolResult,
 } from '@/utils/session';
 
 describe('session utilities', () => {
-  describe('isSessionExpiredError', () => {
-    it('returns true for "session expired" error', () => {
-      const error = new Error('Session expired');
-      expect(isSessionExpiredError(error)).toBe(true);
-    });
-
-    it('returns true for "session not found" error', () => {
-      const error = new Error('Session not found');
-      expect(isSessionExpiredError(error)).toBe(true);
-    });
+  describe('isSessionMissingError', () => {
 
     it('returns true for the Claude missing-conversation error', () => {
       const error = new Error('No conversation found with session ID: session-123');
-      expect(isSessionExpiredError(error)).toBe(true);
       expect(isSessionMissingError(error)).toBe(true);
       expect(isSessionMissingError(error, 'session-123')).toBe(true);
       expect(isSessionMissingError(error, 'different-session')).toBe(false);
@@ -33,53 +19,6 @@ describe('session utilities', () => {
     it('does not classify generic not-found wording as confirmed provider deletion', () => {
       expect(isSessionMissingError(new Error('Session not found'))).toBe(false);
       expect(isSessionMissingError(new Error('No conversation found'))).toBe(false);
-    });
-
-    it('returns true for "invalid session" error', () => {
-      const error = new Error('Invalid session');
-      expect(isSessionExpiredError(error)).toBe(true);
-    });
-
-    it('returns true for "session invalid" error', () => {
-      const error = new Error('Session invalid');
-      expect(isSessionExpiredError(error)).toBe(true);
-    });
-
-    it('returns true for "process exited with code" error', () => {
-      const error = new Error('Process exited with code 1');
-      expect(isSessionExpiredError(error)).toBe(true);
-    });
-
-    it('returns true for compound pattern "session" + "expired"', () => {
-      const error = new Error('The session has expired');
-      expect(isSessionExpiredError(error)).toBe(true);
-    });
-
-    it('returns true for compound pattern "resume" + "failed"', () => {
-      const error = new Error('Failed to resume session');
-      expect(isSessionExpiredError(error)).toBe(true);
-    });
-
-    it('returns true for compound pattern "resume" + "error"', () => {
-      const error = new Error('Resume error occurred');
-      expect(isSessionExpiredError(error)).toBe(true);
-    });
-
-    it('returns false for unrelated errors', () => {
-      const error = new Error('Network timeout');
-      expect(isSessionExpiredError(error)).toBe(false);
-    });
-
-    it('returns false for non-Error values', () => {
-      expect(isSessionExpiredError('string error')).toBe(false);
-      expect(isSessionExpiredError(null)).toBe(false);
-      expect(isSessionExpiredError(undefined)).toBe(false);
-      expect(isSessionExpiredError(42)).toBe(false);
-    });
-
-    it('is case-insensitive', () => {
-      const error = new Error('SESSION EXPIRED');
-      expect(isSessionExpiredError(error)).toBe(true);
     });
   });
 
@@ -157,64 +96,6 @@ describe('session utilities', () => {
       expect(result).not.toContain(longPath);
     });
 
-    it('truncates long error messages to default 500 chars', () => {
-      const longError = 'x'.repeat(700);
-      const toolCall: ToolCallInfo = {
-        id: 'tool-1',
-        name: 'Bash',
-        input: {},
-        status: 'error',
-        result: longError,
-      };
-
-      const result = formatToolCallForContext(toolCall);
-
-      expect(result).toContain('x'.repeat(500));
-      expect(result).toContain('(truncated)');
-    });
-
-    it('truncates to custom max length for errors', () => {
-      const toolCall: ToolCallInfo = {
-        id: 'tool-1',
-        name: 'Bash',
-        input: {},
-        status: 'error',
-        result: 'x'.repeat(500),
-      };
-
-      const result = formatToolCallForContext(toolCall, 100);
-
-      expect(result).toContain('x'.repeat(100));
-      expect(result).toContain('(truncated)');
-    });
-
-    it('defaults to "completed" status when status is undefined', () => {
-      const toolCall = {
-        id: 'tool-1',
-        name: 'Write',
-        input: {},
-        status: 'completed',
-      } as ToolCallInfo;
-
-      const result = formatToolCallForContext(toolCall);
-
-      expect(result).toBe('[Tool Write status=completed]');
-    });
-
-    it('handles empty result string for successful tool', () => {
-      const toolCall: ToolCallInfo = {
-        id: 'tool-1',
-        name: 'Edit',
-        input: {},
-        status: 'completed',
-        result: '',
-      };
-
-      const result = formatToolCallForContext(toolCall);
-
-      expect(result).toBe('[Tool Edit status=completed]');
-    });
-
     it('handles empty result string for failed tool', () => {
       const toolCall: ToolCallInfo = {
         id: 'tool-1',
@@ -228,172 +109,74 @@ describe('session utilities', () => {
 
       expect(result).toBe('[Tool Edit status=error]');
     });
-
-    it('handles whitespace-only result for successful tool', () => {
-      const toolCall: ToolCallInfo = {
-        id: 'tool-1',
-        name: 'Glob',
-        input: {},
-        status: 'completed',
-        result: '   \n\t  ',
-      };
-
-      const result = formatToolCallForContext(toolCall);
-
-      expect(result).toBe('[Tool Glob status=completed]');
-    });
-  });
-
-  describe('truncateToolResult', () => {
-    it('returns unchanged result when under max length', () => {
-      const result = truncateToolResult('short result', 100);
-      expect(result).toBe('short result');
-    });
-
-    it('returns unchanged result when exactly at max length', () => {
-      const result = truncateToolResult('x'.repeat(500), 500);
-      expect(result).toBe('x'.repeat(500));
-    });
-
-    it('truncates and adds indicator when over max length', () => {
-      const longResult = 'x'.repeat(700);
-      const result = truncateToolResult(longResult, 500);
-
-      expect(result).toBe('x'.repeat(500) + '... (truncated)');
-    });
-
-    it('uses default max length of 500', () => {
-      const longResult = 'x'.repeat(700);
-      const result = truncateToolResult(longResult);
-
-      expect(result).toBe('x'.repeat(500) + '... (truncated)');
-    });
-  });
-
-  describe('formatContextLine', () => {
-    it('returns formatted context line for message with currentNote', () => {
-      const message: ChatMessage = {
-        id: 'msg-1',
-        role: 'user',
-        content: 'Hello',
-        timestamp: Date.now(),
-        currentNote: 'notes/test.md',
-      };
-
-      const result = formatContextLine(message);
-
-      expect(result).toContain('notes/test.md');
-    });
-
-    it('returns null when currentNote is undefined', () => {
-      const message: ChatMessage = {
-        id: 'msg-1',
-        role: 'user',
-        content: 'Hello',
-        timestamp: Date.now(),
-      };
-
-      const result = formatContextLine(message);
-
-      expect(result).toBeNull();
-    });
-
-    it('returns null when currentNote is empty', () => {
-      const message: ChatMessage = {
-        id: 'msg-1',
-        role: 'user',
-        content: 'Hello',
-        timestamp: Date.now(),
-        currentNote: '',
-      };
-
-      const result = formatContextLine(message);
-
-      expect(result).toBeNull();
-    });
   });
 
   describe('buildContextFromHistory', () => {
-    it('builds context from simple user/assistant exchange', () => {
-      const messages: ChatMessage[] = [
-        { id: 'msg-1', role: 'user', content: 'Hello', timestamp: 1000 },
-        { id: 'msg-2', role: 'assistant', content: 'Hi there!', timestamp: 2000 },
-      ];
-
-      const result = buildContextFromHistory(messages);
-
-      expect(result).toContain('User: Hello');
-      expect(result).toContain('Assistant: Hi there!');
+    it.each([
+      ['short', 'short'],
+      ['x'.repeat(500), 'x'.repeat(500)],
+      ['x'.repeat(700), 'x'.repeat(500) + '... (truncated)'],
+    ])('bounds failed tool results in compact history (%#)', (result, expected) => {
+      const messages: ChatMessage[] = [{
+        id: 'assistant', role: 'assistant', content: '', timestamp: 1000,
+        toolCalls: [{ id: 'tool', name: 'Bash', input: {}, status: 'error', result }],
+      }];
+      expect(buildContextFromHistory(messages)).toBe(`Assistant:\n[Tool Bash status=error] error: ${expected}`);
     });
 
-    it('includes tool calls without results for successful tools', () => {
-      const messages: ChatMessage[] = [
-        { id: 'msg-1', role: 'user', content: 'Read file', timestamp: 1000 },
-        {
-          id: 'msg-2',
-          role: 'assistant',
-          content: 'Let me read that file.',
-          timestamp: 2000,
-          toolCalls: [
-            { id: 'tool-1', name: 'Read', input: {}, status: 'completed', result: 'file contents' },
-          ],
-        },
-      ];
-
-      const result = buildContextFromHistory(messages);
-
-      expect(result).toContain('User: Read file');
-      expect(result).toContain('Assistant: Let me read that file.');
-      expect(result).toContain('[Tool Read status=completed]');
-      // Successful tools don't include results (Claude can re-execute if needed)
-      expect(result).not.toContain('file contents');
+    it.each([undefined, ''])('omits absent Linked content from history (%#)', (linkedContentPath) => {
+      const messages: ChatMessage[] = [{
+        id: 'user', role: 'user', content: 'Hello', timestamp: 1000, linkedContentPath,
+      }];
+      expect(buildContextFromHistory(messages)).toBe('User: Hello');
     });
 
-    it('includes error messages for failed tool calls', () => {
-      const messages: ChatMessage[] = [
-        { id: 'msg-1', role: 'user', content: 'Read file', timestamp: 1000 },
-        {
-          id: 'msg-2',
-          role: 'assistant',
-          content: 'Let me read that file.',
-          timestamp: 2000,
-          toolCalls: [
-            { id: 'tool-1', name: 'Read', input: {}, status: 'error', result: 'File not found' },
-          ],
-        },
-      ];
+    it.each(['error', 'blocked'] as const)('preserves the full %s tool result in captured context', (status) => {
+      const diagnostic = `${'Diagnostic detail.\n'.repeat(40)}Recovery requires restoring project-48271.`;
+      const messages: ChatMessage[] = [{
+        id: 'msg-1',
+        role: 'assistant',
+        content: '',
+        timestamp: 1000,
+        toolCalls: [{ id: 'tool-1', name: 'Bash', input: {}, status, result: diagnostic }],
+      }];
 
-      const result = buildContextFromHistory(messages);
+      const captured = buildContextFromHistory(messages, { preserveCapturedContext: true });
+      const compact = buildContextFromHistory(messages);
 
-      expect(result).toContain('[Tool Read status=error] error: File not found');
+      expect(captured).toContain(diagnostic);
+      expect(compact).toContain('(truncated)');
+      expect(compact).not.toContain('Recovery requires restoring project-48271.');
     });
 
-    it('includes currentNote context for user messages', () => {
+    it('retains complete structured tool arguments in the initial captured context', () => {
+      const content = `${'original line\n'.repeat(30)}Keep project-48271`;
+      const history: ChatMessage[] = [{
+        id: 'assistant-1', role: 'assistant', content: '', timestamp: 1,
+        toolCalls: [{
+          id: 'tool-1', name: 'Write', status: 'completed', result: 'Written',
+          input: { content, operations: [{ replacement: 'nested-value', previous: null }] },
+        }],
+      }];
+      const context = buildContextFromHistory(history, { preserveCapturedContext: true });
+      expect(context).toContain('Keep project-48271');
+      expect(context).toContain('"operations":[{"replacement":"nested-value","previous":null}]');
+    });
+
+    it('includes canonical Linked content context for user messages', () => {
       const messages: ChatMessage[] = [
         {
           id: 'msg-1',
           role: 'user',
           content: 'Analyze this note',
           timestamp: 1000,
-          currentNote: 'notes/important.md',
+          linkedContentPath: 'notes/important.md',
         },
       ];
 
       const result = buildContextFromHistory(messages);
 
-      expect(result).toContain('notes/important.md');
-      expect(result).toContain('Analyze this note');
-    });
-
-    it('skips non-user/assistant messages', () => {
-      // buildContextFromHistory only processes 'user' and 'assistant' roles
-      const messages: ChatMessage[] = [
-        { id: 'msg-1', role: 'user', content: 'User message', timestamp: 2000 },
-      ];
-
-      const result = buildContextFromHistory(messages);
-
-      expect(result).toContain('User: User message');
+      expect(result).toBe('User: <linked_content path="notes/important.md" />\n\nAnalyze this note');
     });
 
     it('skips assistant messages with no content and no tool results', () => {
@@ -447,18 +230,6 @@ describe('session utilities', () => {
       expect(result).toContain('User:');
     });
 
-    it('separates messages with double newlines', () => {
-      const messages: ChatMessage[] = [
-        { id: 'msg-1', role: 'user', content: 'First', timestamp: 1000 },
-        { id: 'msg-2', role: 'assistant', content: 'Second', timestamp: 2000 },
-        { id: 'msg-3', role: 'user', content: 'Third', timestamp: 3000 },
-      ];
-
-      const result = buildContextFromHistory(messages);
-
-      expect(result).toContain('\n\n');
-    });
-
     it('shows all tool calls but only error results', () => {
       const messages: ChatMessage[] = [
         { id: 'msg-1', role: 'user', content: 'Test', timestamp: 1000 },
@@ -475,6 +246,8 @@ describe('session utilities', () => {
       ];
 
       const result = buildContextFromHistory(messages);
+
+      expect(result).toBe('User: Test\n\nAssistant: Response\n[Tool Success status=completed]\n[Tool Failed status=error] error: error msg');
 
       // Successful tool shows status only (no result)
       expect(result).toContain('[Tool Success status=completed]');
@@ -565,63 +338,28 @@ describe('session utilities', () => {
     });
   });
 
-  describe('getLastUserMessage', () => {
-    it('returns last user message from history', () => {
-      const messages: ChatMessage[] = [
-        { id: 'msg-1', role: 'user', content: 'First', timestamp: 1000 },
-        { id: 'msg-2', role: 'assistant', content: 'Response', timestamp: 2000 },
-        { id: 'msg-3', role: 'user', content: 'Second', timestamp: 3000 },
-        { id: 'msg-4', role: 'assistant', content: 'Response 2', timestamp: 4000 },
-      ];
-
-      const result = getLastUserMessage(messages);
-
-      expect(result?.id).toBe('msg-3');
-      expect(result?.content).toBe('Second');
-    });
-
-    it('returns undefined when no user messages exist', () => {
-      const messages: ChatMessage[] = [
-        { id: 'msg-1', role: 'assistant', content: 'Response', timestamp: 1000 },
-      ];
-
-      const result = getLastUserMessage(messages);
-
-      expect(result).toBeUndefined();
-    });
-
-    it('returns undefined for empty messages array', () => {
-      const result = getLastUserMessage([]);
-
-      expect(result).toBeUndefined();
-    });
-
-    it('returns the only user message when there is just one', () => {
-      const messages: ChatMessage[] = [
-        { id: 'msg-1', role: 'assistant', content: 'Welcome', timestamp: 1000 },
-        { id: 'msg-2', role: 'user', content: 'Only user msg', timestamp: 2000 },
-        { id: 'msg-3', role: 'assistant', content: 'Response', timestamp: 3000 },
-      ];
-
-      const result = getLastUserMessage(messages);
-
-      expect(result?.id).toBe('msg-2');
-    });
-
-    it('finds user message among assistant messages', () => {
-      const messages: ChatMessage[] = [
-        { id: 'msg-1', role: 'assistant', content: 'Welcome', timestamp: 1000 },
-        { id: 'msg-2', role: 'user', content: 'User', timestamp: 2000 },
-        { id: 'msg-3', role: 'assistant', content: 'Response', timestamp: 3000 },
-      ];
-
-      const result = getLastUserMessage(messages);
-
-      expect(result?.id).toBe('msg-2');
-    });
-  });
-
   describe('buildPromptWithHistoryContext', () => {
+    it('retains a repeated question when the previous occurrence already has an answer', () => {
+      const history: ChatMessage[] = [
+        { id: 'u1', role: 'user', content: 'Continue', timestamp: 1 },
+        { id: 'a1', role: 'assistant', content: 'Prior answer', timestamp: 2 },
+      ];
+      expect(buildPromptWithHistoryContext(
+        'User: Continue\n\nAssistant: Prior answer', 'Continue', 'Continue', history,
+      )).toBe('User: Continue\n\nAssistant: Prior answer\n\nUser: Continue');
+    });
+
+    it('does not duplicate the latest unanswered input followed by an empty assistant placeholder', () => {
+      const history: ChatMessage[] = [
+        { id: 'u0', role: 'user', content: 'Earlier question', timestamp: 0 },
+        { id: 'a0', role: 'assistant', content: 'Earlier answer', timestamp: 1 },
+        { id: 'u1', role: 'user', content: 'Continue', timestamp: 2 },
+        { id: 'a1', role: 'assistant', content: '', timestamp: 3 },
+      ];
+      expect(buildPromptWithHistoryContext('User: Continue', 'Continue', 'Continue', history))
+        .toBe('User: Continue');
+    });
+
     it('returns prompt unchanged when historyContext is null', () => {
       const prompt = '<query>\nhello\n</query>';
       const result = buildPromptWithHistoryContext(null, prompt, 'hello', []);
@@ -629,7 +367,7 @@ describe('session utilities', () => {
       expect(result).toBe(prompt);
     });
 
-    it('returns only history when actualPrompt matches last user message', () => {
+    it('appends the current prompt when the matching historical question already has an answer', () => {
       const messages: ChatMessage[] = [
         { id: 'msg-1', role: 'user', content: 'hello', timestamp: 1000 },
         { id: 'msg-2', role: 'assistant', content: 'hi', timestamp: 2000 },
@@ -640,8 +378,7 @@ describe('session utilities', () => {
 
       const result = buildPromptWithHistoryContext(historyContext, prompt, actualPrompt, messages);
 
-      // Should NOT append prompt since actualPrompt matches last user message
-      expect(result).toBe(historyContext);
+      expect(result).toBe(`${historyContext}\n\nUser: ${prompt}`);
     });
 
     it('appends prompt when actualPrompt differs from last user message', () => {
@@ -670,18 +407,17 @@ describe('session utilities', () => {
       expect(result).toBe(prompt);
     });
 
-    it('appends prompt when no user messages in history', () => {
-      const messages: ChatMessage[] = [
-        { id: 'msg-1', role: 'assistant', content: 'welcome', timestamp: 1000 },
-      ];
+    it.each<{ messages: ChatMessage[] }>([
+      { messages: [] },
+      { messages: [{ id: 'msg-1', role: 'assistant', content: 'welcome', timestamp: 1000 }] },
+    ])('appends prompt when no user messages in history (%#)', ({ messages }) => {
       const historyContext = 'Assistant: welcome';
       const prompt = '<query>\nhello\n</query>';
       const actualPrompt = 'hello';
 
       const result = buildPromptWithHistoryContext(historyContext, prompt, actualPrompt, messages);
 
-      expect(result).toContain(historyContext);
-      expect(result).toContain('User: <query>');
+      expect(result).toBe('Assistant: welcome\n\nUser: <query>\nhello\n</query>');
     });
 
     it('handles whitespace in comparison', () => {
@@ -695,48 +431,6 @@ describe('session utilities', () => {
       const result = buildPromptWithHistoryContext(historyContext, prompt, actualPrompt, messages);
 
       // Should match after trimming
-      expect(result).toBe(historyContext);
-    });
-
-    it('avoids duplication when legacy XML-wrapped content matches display content', () => {
-      const prompt = [
-        '<current_note>',
-        'notes/file.md',
-        '</current_note>',
-        '',
-        '<editor_selection path="notes/file.md">',
-        'selected text',
-        '</editor_selection>',
-        '',
-        '<query>',
-        'Follow up',
-        '</query>',
-      ].join('\n');
-
-      const actualPrompt = [
-        '<editor_selection path="notes/file.md">',
-        'selected text',
-        '</editor_selection>',
-        '',
-        '<query>',
-        'Follow up',
-        '</query>',
-      ].join('\n');
-
-      const messages: ChatMessage[] = [
-        {
-          id: 'msg-1',
-          role: 'user',
-          content: prompt,
-          displayContent: 'Follow up',
-          timestamp: 1000,
-        },
-      ];
-
-      const historyContext = 'User: Follow up';
-
-      const result = buildPromptWithHistoryContext(historyContext, prompt, actualPrompt, messages);
-
       expect(result).toBe(historyContext);
     });
 
@@ -880,8 +574,10 @@ describe('session utilities', () => {
 
       const result = formatToolCallForContext(toolCall);
 
-      // Total input string truncated to 200 chars
-      expect(result).toContain('...');
+      expect(result).toBe(
+        '[Tool Bash input: a=' + 'x'.repeat(80) + ', b=' + 'y'.repeat(80)
+        + ', c=' + 'z'.repeat(30) + '... status=completed]',
+      );
     });
 
     it('formats whitespace-only result for failed tool without error detail', () => {
