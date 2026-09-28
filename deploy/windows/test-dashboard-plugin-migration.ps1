@@ -63,6 +63,101 @@ $testRoot = Join-Path $temporaryRoot "okf-dashboard-migration-$([guid]::NewGuid(
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 
 try {
+    # The rollback snapshot reports only hashes/status. Volatile auth tokens,
+    # receipt timestamps, and copied->already-copied transitions normalize,
+    # while any native-data byte change must block acceptance.
+    $snapshotVault = Join-Path $testRoot 'snapshot-vault'
+    $snapshotPlugin = Join-Path $snapshotVault '.obsidian\plugins\okf-workspace-dashboard'
+    New-Item -ItemType Directory -Force -Path $snapshotPlugin | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $snapshotVault '.obsidian') | Out-Null
+    $snapshotScript = [System.IO.Path]::GetFullPath(
+        (Join-Path $PSScriptRoot '..\..\scripts\dashboard-rollback-snapshot.ps1')
+    )
+    [System.IO.File]::WriteAllText(
+        (Join-Path $snapshotPlugin 'manifest.json'),
+        '{"id":"okf-workspace-dashboard","version":"2"}'
+    )
+    [System.IO.File]::WriteAllText(
+        (Join-Path $snapshotPlugin 'data.json'),
+        '{"engineUrl":"http://localhost:18765","token":"first-secret"}'
+    )
+    [System.IO.File]::WriteAllText(
+        (Join-Path $snapshotVault '.obsidian\community-plugins.json'),
+        '["okf-workspace-dashboard"]'
+    )
+    foreach ($nativeFile in @('habits.json', 'expense.json', 'pomodoro.json', 'reading.json', 'weread-progress.json')) {
+        [System.IO.File]::WriteAllText((Join-Path $snapshotPlugin $nativeFile), '{"fixture":true}')
+    }
+    $receipt = [ordered]@{
+        version = 1
+        sourcePluginId = 'apex-dashboard'
+        targetPluginId = 'okf-workspace-dashboard'
+        completedAt = '2026-09-28T01:00:00Z'
+        entries = @([ordered]@{
+            file = 'reading.json'
+            status = 'copied'
+            sourceBytes = 15
+            targetBytes = 15
+        })
+    }
+    [System.IO.File]::WriteAllText(
+        (Join-Path $snapshotPlugin 'apex-native-data-takeover.json'),
+        (ConvertTo-Json -InputObject $receipt -Depth 10)
+    )
+    $snapshotBefore = Join-Path $testRoot 'rollback-before.json'
+    $snapshotAfter = Join-Path $testRoot 'rollback-after.json'
+    & $snapshotScript -Vault $snapshotVault -OutputPath $snapshotBefore | Out-Null
+    [System.IO.File]::WriteAllText(
+        (Join-Path $snapshotPlugin 'data.json'),
+        '{"engineUrl":"http://localhost:18765","token":"second-secret"}'
+    )
+    $receipt.completedAt = '2026-09-28T01:10:00Z'
+    $receipt.entries[0].status = 'already-copied'
+    [System.IO.File]::WriteAllText(
+        (Join-Path $snapshotPlugin 'apex-native-data-takeover.json'),
+        (ConvertTo-Json -InputObject $receipt -Depth 10)
+    )
+    $snapshotOutput = & $snapshotScript `
+        -Vault $snapshotVault `
+        -OutputPath $snapshotAfter `
+        -CompareTo $snapshotBefore | Out-String
+    Assert-Test -Condition ($snapshotOutput -match '"allPassed": true') `
+        -Message 'Equivalent rollback state failed its normalized snapshot comparison'
+    Assert-Test -Condition ($snapshotOutput -notmatch 'first-secret|second-secret') `
+        -Message 'Rollback snapshot output exposed a transient token'
+    [System.IO.File]::WriteAllText(
+        (Join-Path $snapshotVault '.obsidian\community-plugins.json'),
+        '["okf-workspace-dashboard","apex-dashboard"]'
+    )
+    Assert-Throws `
+        -Action {
+            & $snapshotScript `
+                -Vault $snapshotVault `
+                -OutputPath (Join-Path $testRoot 'rollback-conflicting-plugin.json') `
+                -CompareTo $snapshotBefore
+        } `
+        -MessagePattern 'comparison failed'
+    [System.IO.File]::WriteAllText(
+        (Join-Path $snapshotVault '.obsidian\community-plugins.json'),
+        '["okf-workspace-dashboard"]'
+    )
+    Assert-Throws `
+        -Action {
+            & $snapshotScript `
+                -Vault $snapshotVault `
+                -OutputPath (Join-Path $snapshotVault 'snapshot.json')
+        } `
+        -MessagePattern 'outside the Vault'
+    [System.IO.File]::WriteAllText((Join-Path $snapshotPlugin 'reading.json'), '{"fixture":false}')
+    Assert-Throws `
+        -Action {
+            & $snapshotScript `
+                -Vault $snapshotVault `
+                -OutputPath (Join-Path $testRoot 'rollback-drift.json') `
+                -CompareTo $snapshotBefore
+        } `
+        -MessagePattern 'comparison failed'
+
     # An upgrade replaces code as one staged directory swap and preserves the
     # target's user-owned data.json. Invalid source artifacts never touch it.
     $packageRoot = Join-Path $testRoot 'dashboard-package'

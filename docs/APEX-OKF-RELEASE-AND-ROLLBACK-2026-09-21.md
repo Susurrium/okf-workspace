@@ -1,9 +1,9 @@
 # OKF Apex Workbench release and rollback
 
-> **Release hold (2026-09-21):** do not deploy the current unified build as a replacement for the former
-> OKF Dashboard. Data-safety checks passed, but the functional-parity audit found missing reachable
-> Learning, Inbox, Knowledge, Project, Today, Life, System, and Reading behaviors. This document describes
-> the intended cutover only after gates P01–P08 in `APEX-OKF-ACCEPTANCE-LEDGER.md` pass.
+> **Status update (2026-09-28):** gates P01–P08 and the isolated rollback comparison pass; see
+> `APEX-OKF-ACCEPTANCE-LEDGER.md`. This clears the functional-parity hold for integration/release review.
+> Production cutover has not been performed. Use the steps below only for an explicitly scheduled Vault
+> deployment, with its backup and target-path checks completed first.
 
 ## Release identity
 

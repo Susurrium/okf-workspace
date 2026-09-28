@@ -1,7 +1,7 @@
 # Apex upstream sync candidate: 3.6.5
 
 Date: 2026-09-28
-Status: **candidate; automated Apex and full root verification passed, real Obsidian acceptance is pending**.
+Status: **P01–P08 acceptance passed in the isolated Vault; branch is ready for integration/release review. Production cutover has not been performed.**
 
 ## Baseline and upstream commits
 
@@ -78,11 +78,12 @@ complete root-script run passed.
    the settings JSON semantic snapshot and SHA-256 for the five native Apex JSON files. After loading the prior
    package, compare settings after excluding only the transient `token` field, compare native JSON hashes, and
    compare the takeover receipt after normalizing `completedAt` and `copied`/`already-copied` status. Retest
-   the settings comparison if any semantic fields differ.
+   the settings comparison if any semantic fields differ. `scripts/dashboard-rollback-snapshot.ps1` implements
+   this comparison and writes a redacted report outside the Vault; see the acceptance ledger for commands.
 5. Confirm managed Project/Source operations still obey OKF artifact edit rules, native Apex data remains
    readable, and no path creates or infers `studied_at`.
 
-Real Obsidian acceptance is partial and is recorded in `docs/APEX-OKF-ACCEPTANCE-LEDGER.md`.
+Real Obsidian acceptance is recorded in `docs/APEX-OKF-ACCEPTANCE-LEDGER.md`.
 On 2026-09-28, the disposable `OKF-Apex-Manual-Test` Vault loaded the candidate in an isolated profile.
 Schema-99 preservation, duplicate sections, two-pane updates, plugin hot reload, the single plugin identity,
 and unavailable-Engine behavior were exercised. A temporary Engine with a generated local token synced the
@@ -93,9 +94,10 @@ verified multiple note templates and variable replacement, table-column hide/res
 50-item progressive rendering. The banner editor persisted and cleared a 30%,70% focal point in the synthetic
 board. P08 passed. A Reading-section component regression now traverses source and edition cursor pages through
 the visible load-more controls, checking cursor arguments, overlapping-source deduplication, and exhaustion;
-Engine pagination integration tests cover the backend pages. The prior 3.6.0 package loaded during rollback.
-Its raw takeover-receipt hash changes by design when `completedAt` and copy status are refreshed, and the new
-test verifies the stable receipt projection and target data. The plugin `data.json` hash also changed, but no
-fresh pre-swap semantic snapshot was captured, so settings preservation remains unverified. Live producer sync
-and the focused settings snapshot comparison still need completion before changing the candidate status or
-advancing the locked baseline.
+Engine pagination integration tests cover the backend pages. Follow-up acceptance in the isolated test Vault
+completed live Producer and TreeHole sync, traversed all 39 editions of a registry-managed source across 10
+cursor pages, and exercised UI load-more from 4 to 8 editions. The prior 3.6.0 package loaded under the unified
+plugin identity; a fresh pre-swap snapshot compared after rollback passed identity, enabled state, semantic
+settings, native-data bytes, and normalized takeover receipt. The 3.6.5 candidate was restored and reloaded,
+and a second comparison against the baseline also passed. P07 and M9 are accepted for this isolated Vault;
+the evidence and exact limits are recorded in `docs/APEX-OKF-ACCEPTANCE-LEDGER.md`.

@@ -4,9 +4,9 @@
 > recorded data-safety and lifecycle scenarios remain valid, but the new Apex sections do not yet preserve
 > the full reachable behavior of the former OKF Dashboard. The subsequent shared-Surface implementation
 > restored M4–M6 and the desktop runtime portion of M8. M7 has authenticated fixture-sync evidence; live
-> producer sync remains; source and history cursor pagination is covered by component and Engine integration
-> tests. M9 remains open. P08 passed its reachable-surface
-> inventory in the isolated run. See `APEX-OKF-FUNCTIONAL-PARITY-IMPLEMENTATION-2026-09-21.md`.
+> producer sync and source/history pagination now pass in the isolated Obsidian run. M9 rollback comparison
+> also passes against a fresh pre-swap snapshot. P08 passed its reachable-surface inventory in the isolated
+> run. See `APEX-OKF-FUNCTIONAL-PARITY-IMPLEMENTATION-2026-09-21.md`.
 
 This ledger is the implementation authority for the staged work described in
 `APEX-DASHBOARD-DEVELOPMENT-PLAN-2026-09-21.md`. A row is complete only when its named automated evidence
@@ -46,14 +46,15 @@ Claudian v1 handoff. Each entry may move in the interface, but none may require 
 | M4 | Full Project experience and managed-artifact edit policy | **Complete after parity repair:** shared Project Surface restores contextual Capture/import, Claudian, catalog, metrics and state-aware actions, while retaining formal tasks, dates and Decision creation; nonempty real Obsidian run passed |
 | M5 | Unified task/calendar/Daily/Capture loop | **Complete after parity repair:** shared Today and Life Surfaces restore continuation, attention, Feed, reflection/review and global entry points; anchored task/date regression and nonempty real run passed |
 | M6 | Learning/Knowledge/Inbox/Import sections and details | **Complete after parity repair:** registered Apex types mount the complete shared Surfaces; scope/context, operation states, filters, verification, decisions, recovery and Claudian paths are reachable; nonempty real run passed |
-| M7 | Feed/Reading and default workbench presets | **Conditional:** complete Reading controller, presets, cache/scroll/request lifecycle and sync UI are mounted and automated tests pass; authenticated isolated fixture sync and source/history cursor pagination passed, while live producer sync remains |
+| M7 | Feed/Reading and default workbench presets | **Complete:** automated pagination/cache/scroll/request tests pass; isolated Obsidian completed authenticated live Producer and TreeHole sync, traversed all 39 editions for a registry-managed source over 10 pages, and loaded more history in the UI |
 | M8 | Native-data takeover, UX, capability, and performance work | **Complete for desktop implementation:** native takeover remains intact; eight shared Surfaces, Life/System access, custom-section cleanup and 9-to-9 rerender stability passed in real Obsidian |
-| M9 | Full release, rollback, real Obsidian, and upstream-update exercise | **Reopened:** P08 passed, but a fresh pre-rollback settings baseline is still needed to prove the observed `data.json` change is harmless; release remains blocked until that comparison and the full release gate pass |
+| M9 | Full release, rollback, real Obsidian, and upstream-update exercise | **Passed in isolated acceptance Vault:** loaded the prior 3.6.0 bundle and restored the 3.6.5 candidate under the single unified plugin ID; before/after snapshot comparison passed identity, enabled state, semantic settings, native-data bytes, and normalized takeover receipt. Final candidate reload and second comparison also passed |
 
 ## Final acceptance matrix
 
 The A01–A19 statuses below report only the named scenario. They are necessary regression evidence, not a
-claim of complete Dashboard replacement. The following additional release gate is currently open:
+claim of complete Dashboard replacement. P07 and M9 were completed in the isolated acceptance Vault; the
+following rows record the individual scenario evidence:
 
 | ID | Scenario | Required evidence | Status |
 | --- | --- | --- | --- |
@@ -63,7 +64,7 @@ claim of complete Dashboard replacement. The following additional release gate i
 | P04 | Project feature parity | Registered Apex section exposes contextual capture/import, Claudian, catalog, status-aware action, and precise related navigation | **Passed:** full action panel, formal task/date and nonempty real Project run |
 | P05 | Today/Life feature parity | Registered Apex sections expose continuation, attention, Feed, reflection/review, calendar, and capture organization | **Passed:** nonempty Today task/continuation run and real Life navigation |
 | P06 | System/global controls | Registered surface exposes diagnostics, task center, failed-operation recovery, settings, search, quick create, and Ask Notes | **Passed:** registered System Surface, embedded navigation and existing recovery tests |
-| P07 | Reading controller parity | Registered Apex section passes full-load, pagination, cache, stale-response, scroll, refresh-failure, and sync scenarios | **Conditional:** Engine pagination integration and a Reading-section UI-component test now traverse multiple source and history cursor pages, including overlap deduplication and load-more completion. Isolated Obsidian authenticated to a temporary Engine with a generated local token, synced checked-in Feed fixtures before and after a real process restart, rendered 12 synthetic papers, and restored a 220 px reading offset across workbench switches. Live producer sync remains pending |
+| P07 | Reading controller parity | Registered Apex section passes full-load, pagination, cache, stale-response, scroll, refresh-failure, and sync scenarios | **Passed:** Automated pagination and lifecycle coverage passed. In isolated Obsidian, the live Producer reported healthy streams and synced all four AI Daily streams plus TreeHole; UI showed the success notice, 12 Papers items rendered, and the source summary reported the latest editions. A registry-managed source with 39 learning editions traversed 10 API pages (4 per page, final page 3), with 39 unique editions and `has_more=false`; the UI load-more control advanced history from 4 to 8 editions. Existing source overview contained six cards, including cached legacy entries, so those cards are not all counted as live Producer evidence |
 | P08 | Reachable-surface acceptance | Nonempty real Obsidian run verifies every inventory action through the registered Apex surfaces | **Passed:** synthetic task-center walkthrough covers queued, generating, publishing, failed, cancelled, conversion fallback, cancel/retry/continue actions. Isolated Obsidian verified newer-schema preservation, duplicate sections, two-pane synchronization, authenticated synthetic Feed sync, repaired papers-scroll restoration, Calendar task times, multiple new-note templates and variable substitution, table-column hide/restore, card deletion, focal-point persistence, and 50-item progressive group rendering |
 
 | ID | Scenario | Required evidence | Status |
@@ -144,16 +145,42 @@ profile was not used. The isolated Vault contained only synthetic notes.
   workbench, and successfully authenticated to the temporary Engine for another two-feed sync. The token
   remained in memory only; the external token-file path and Engine URL persisted, and `data.json` had no
   `token` property.
-- Loaded the prior 3.6.0 package under the same unified plugin identity, then restored and loaded the 3.6.5
-  candidate. The rollback package loaded and the unified plugin identity remained. The plugin `data.json`
-  hash changed, but the run did not capture a fresh semantic baseline immediately before the package swap, so
-  settings preservation is not proven and M9 remains open. The takeover receipt hash is not a stable rollback
-  invariant: plugin startup rewrites `completedAt`, and copied entries legitimately change to
-  `already-copied`; the new regression verifies that the normalized receipt entries and copied native data
-  remain stable across a rerun.
-- The temporary Engine uses checked-in synthetic Feed fixtures, not an external producer account. Actual
-  producer-backed sync remains open. Source and history pagination are covered by Engine integration and
-  Reading-section UI-component tests.
-- The listed P08 reachable-surface inventory passed in this isolated run. Live producer-backed Feed sync and
-  byte-preserving UI rollback remain release gates; the run is evidence for P07 authenticated fixture handling,
-  pagination and scroll restoration, P08, and part of M9 only.
+- Immediately before rollback, captured a redacted snapshot outside the Vault. Loaded the prior 3.6.0 bundle
+  under the unified `okf-workspace-dashboard` identity, then compared the post-load snapshot with the baseline.
+  All five comparisons passed: identity, exactly-once enabled state, semantic settings excluding the transient
+  token, native data bytes, and normalized takeover receipt. The isolated Vault had none of the five optional
+  native JSON files, and that absence was unchanged.
+- Restored and reloaded the 3.6.5 candidate. CDP confirmed Obsidian, the unified plugin, and workspace were
+  ready; the main bundle hash matched the candidate build. A second snapshot against the same baseline passed
+  all comparisons. Snapshot reports and the candidate backup remain outside the Vault.
+- Connected the isolated Engine to the configured remote Producer aliases and ran the Obsidian sync command.
+  The Producer probe reported healthy streams; AI Daily and TreeHole sync completed, the UI displayed
+  “订阅内容已同步”, Papers showed 12 items, and the latest issue dates were 2026-09-28. The live source's
+  39 learning editions were paged through 10 API requests with no duplicates or remaining cursor. The UI
+  history load-more action increased the visible editions from 4 to 8. The six-card overview also includes
+  legacy cached sources and is not treated as six live sources.
+- P08's reachable-surface inventory passed in the isolated run. Together with the live sync and rollback
+  comparison above, P07 and M9 now pass for this isolated acceptance Vault. No production Vault was used.
+
+### M9 rollback snapshot procedure
+
+Run these commands from the repository root in the isolated test setup. Keep both report files outside the
+Vault. Capture the first snapshot immediately before replacing the candidate package with the prior package;
+after the prior package is loaded, capture the second snapshot with `-CompareTo`:
+
+```powershell
+.\scripts\dashboard-rollback-snapshot.ps1 `
+  -Vault 'D:\ObsidianTests\OKF-Apex-Manual-Test' `
+  -OutputPath 'C:\Temp\apex-rollback-before.json'
+
+# Load the prior package under the same unified plugin identity, then run:
+.\scripts\dashboard-rollback-snapshot.ps1 `
+  -Vault 'D:\ObsidianTests\OKF-Apex-Manual-Test' `
+  -OutputPath 'C:\Temp\apex-rollback-after.json' `
+  -CompareTo 'C:\Temp\apex-rollback-before.json'
+```
+
+The comparison exits with an error if plugin identity/enabled state, semantic settings, any of the five native
+JSON file hashes, or the normalized takeover receipt differs. The report excludes settings content and the
+transient token; preserve it as acceptance evidence. A failed semantic-settings check requires investigation
+and explicit review of the differing setting fields before M9 can pass.
