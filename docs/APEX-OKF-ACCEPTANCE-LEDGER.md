@@ -87,7 +87,7 @@ following rows record the individual scenario evidence:
 | A16 | Feed return, note update, or theme switch | Unrelated web/music/timer state survives; reading page and position survive | Passed: real theme cycle preserved exact Feed position and Pomodoro bytes; UI-state tests passed |
 | A17 | Unknown field/section/free prose/newer board version | Data is retained and compatibility limit is visible; save never silently drops it | Passed: real schema-99 warning and repeated save preservation plus format tests |
 | A18 | Re-run interrupted legacy Apex-data takeover | Original format remains, manual changes are not overwritten, no Vault notes are created, one writer remains | Passed: real disabled-legacy copy/rerun/conflict run plus takeover tests |
-| A19 | Apply an upstream update | Native Apex and integrated OKF scenarios pass after a real subtree update exercise | Passed: isolated 2.5.4 → 3.6.0 subtree merge, 29 upstream scripts/lint/build, and 208 unified tests/check/build |
+| A19 | Apply an upstream update | Native Apex and integrated OKF scenarios pass after a real subtree update exercise | **Passed:** isolated 2.5.4 → 3.6.0 → 3.6.5 subtree updates; 44 Apex scripts/lint/build, root check, P01–P08 acceptance, and upgrade/rollback comparison; see `docs/upstream/apex-sync-3.6.5-plan.md` |
 
 ## Synthetic Vault scenarios
 
