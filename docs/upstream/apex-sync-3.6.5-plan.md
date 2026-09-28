@@ -73,6 +73,9 @@ complete root-script run passed.
 5. Confirm managed Project/Source operations still obey OKF artifact edit rules, native Apex data remains
    readable, and no path creates or infers `studied_at`.
 
-Real Obsidian acceptance is not recorded as passed. The runtime's execution policy rejected launching
-`D:\Obsidian\Obsidian.exe` with an isolated profile, so the UI gates above must be run in an authorized
-Obsidian acceptance environment before changing the candidate status or advancing the locked baseline.
+Real Obsidian acceptance is partial and is recorded in `docs/APEX-OKF-ACCEPTANCE-LEDGER.md`.
+On 2026-09-28, the disposable `OKF-Apex-Manual-Test` Vault loaded the candidate in an isolated profile.
+Schema-99 preservation, duplicate sections, two-pane updates, plugin hot reload, the single plugin identity,
+and unavailable-Engine behavior were exercised. Authenticated Feed sync, the full upstream-control
+walkthrough, an Obsidian process restart, and UI package rollback still need completion before changing the
+candidate status or advancing the locked baseline.

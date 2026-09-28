@@ -61,8 +61,8 @@ claim of complete Dashboard replacement. The following additional release gate i
 | P04 | Project feature parity | Registered Apex section exposes contextual capture/import, Claudian, catalog, status-aware action, and precise related navigation | **Passed:** full action panel, formal task/date and nonempty real Project run |
 | P05 | Today/Life feature parity | Registered Apex sections expose continuation, attention, Feed, reflection/review, calendar, and capture organization | **Passed:** nonempty Today task/continuation run and real Life navigation |
 | P06 | System/global controls | Registered surface exposes diagnostics, task center, failed-operation recovery, settings, search, quick create, and Ask Notes | **Passed:** registered System Surface, embedded navigation and existing recovery tests |
-| P07 | Reading controller parity | Registered Apex section passes full-load, pagination, cache, stale-response, scroll, refresh-failure, and sync scenarios | **Conditional:** all automated scenarios pass and real offline/401 behavior is correct; authenticated sync rerun pending |
-| P08 | Reachable-surface acceptance | Nonempty real Obsidian run verifies every inventory action through the registered Apex surfaces | **Partial:** synthetic task-center walkthrough now covers queued, generating, publishing, failed, cancelled, conversion fallback, cancel/retry/continue actions; live Feed and real Obsidian walkthrough remain |
+| P07 | Reading controller parity | Registered Apex section passes full-load, pagination, cache, stale-response, scroll, refresh-failure, and sync scenarios | **Conditional:** automated scenarios pass; isolated Obsidian verified unavailable-Engine messaging and retained local-note access. Engine was unavailable at `127.0.0.1:8765`; authenticated Feed sync, pagination and real cache/scroll behavior remain pending |
+| P08 | Reachable-surface acceptance | Nonempty real Obsidian run verifies every inventory action through the registered Apex surfaces | **Partial:** synthetic task-center walkthrough covers queued, generating, publishing, failed, cancelled, conversion fallback, cancel/retry/continue actions. Isolated Obsidian verified the newer-schema warning, duplicate sections, add/delete, and two-pane synchronization; full inventory walkthrough and live Feed remain pending |
 
 | ID | Scenario | Required evidence | Status |
 | --- | --- | --- | --- |
@@ -96,3 +96,23 @@ conflicting native-data directories for takeover recovery.
 
 For each completed row, replace `Pending` with the test/fixture path and the recorded disposable-Vault run.
 No status may be inferred from a nearby unit test that does not execute the complete scenario.
+
+## Apex 3.6.5 isolated Obsidian run (2026-09-28)
+
+Runtime: disposable `OKF-Apex-Manual-Test` Vault opened with the isolated Obsidian profile and CDP on
+`127.0.0.1:9337`; plugin `okf-workspace-dashboard` 1.15.0 was loaded. The separate default Obsidian
+profile was not used. The isolated Vault contained only synthetic notes.
+
+- Opened both configured workbenches and confirmed the unified plugin rendered the OKF shared surfaces.
+- Added and deleted temporary sections through the rendered UI. The two dashboard panes observed the same
+  update and deletion. After each save, the newer `workbench_schema: 99`, unknown YAML, duplicate section IDs,
+  and both anchored prose blocks remained intact.
+- Disabled and re-enabled the plugin in Obsidian. The plugin reloaded, one dashboard plugin ID remained
+  enabled, and the installed plugin `data.json` SHA-256 stayed
+  `8C64634DF56415A2392F2F74172729360D4BFF6859BE7CCFA03163AAA12AAD17`.
+- Opened Reading and clicked “同步最新内容”. The UI returned the expected local-service-unavailable state
+  without affecting local note access. `127.0.0.1:8765/health` was unavailable, and this disposable install
+  had no Engine token; authenticated Feed behavior could not be exercised.
+- This run did not restart the Obsidian process, perform a package rollback in the UI, or exercise every
+  upstream 3.6.5 control. Those release gates remain open; the run is evidence for P07 offline handling,
+  P08 surface integrity, and part of M9 only.
