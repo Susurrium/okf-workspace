@@ -23,10 +23,15 @@ import type {
   FeedSubscriptionSourceItemsPage,
   FeedSubscriptionSourceItemsQuery,
 } from "./types.js";
+import { assertMatchingVault, VAULT_FINGERPRINT_HEADER, VAULT_MISMATCH_MESSAGE } from "../api/vault-identity.js";
 
 export interface OpenedFeedDigest {
   vault_path: string;
   markdown: string;
+}
+
+export interface PreparedFeedDigest extends OpenedFeedDigest {
+  vault_fingerprint: string;
 }
 
 export interface FeedApi {
@@ -57,6 +62,8 @@ export interface FeedApi {
     request: FeedSubscriptionRemoveRequest,
   ): Promise<FeedSubscriptionRemoveResult>;
   openDigest(kind: FeedKind, digestId: string): Promise<OpenedFeedDigest>;
+  prepareDigest(kind: FeedKind, digestId: string): Promise<PreparedFeedDigest>;
+  vaultIdentity(): Promise<{ vault_fingerprint: string }>;
   decide(
     kind: FeedKind,
     itemId: string,
@@ -77,6 +84,7 @@ export class HttpFeedApi implements FeedApi {
   public constructor(
     private readonly baseUrl: string,
     private readonly token: string,
+    private readonly expectedVaultFingerprint?: string,
   ) {}
 
   public listDigests(kind: FeedKind): Promise<FeedDigestSummary[]> {
@@ -181,6 +189,16 @@ export class HttpFeedApi implements FeedApi {
     });
   }
 
+  public prepareDigest(kind: FeedKind, digestId: string): Promise<PreparedFeedDigest> {
+    return this.request(`/feeds/${kind}/digests/${encodeURIComponent(digestId)}/prepare`, {
+      method: "POST",
+    });
+  }
+
+  public vaultIdentity(): Promise<{ vault_fingerprint: string }> {
+    return this.request("/workspace/identity");
+  }
+
   public decide(
     kind: FeedKind,
     itemId: string,
@@ -225,14 +243,21 @@ export class HttpFeedApi implements FeedApi {
   }
 
   private async request<T>(path: string, init?: RequestInit, timeout = 20_000): Promise<T> {
+    const mutating = !["GET", "HEAD"].includes((init?.method ?? "GET").toUpperCase());
+    if (mutating && this.expectedVaultFingerprint) {
+      const identity = await this.vaultIdentity();
+      assertMatchingVault(identity.vault_fingerprint, this.expectedVaultFingerprint);
+    }
+    const headers = new Headers(init?.headers);
+    headers.set("Authorization", `Bearer ${this.token}`);
+    if (mutating && this.expectedVaultFingerprint) {
+      headers.set(VAULT_FINGERPRINT_HEADER, this.expectedVaultFingerprint);
+    }
     let response: Response;
     try {
       response = await fetch(`${this.baseUrl.replace(/\/$/u, "")}${path}`, {
         ...init,
-        headers: {
-          Authorization: `Bearer ${this.token}`,
-          ...init?.headers,
-        },
+        headers,
         signal: init?.signal ?? AbortSignal.timeout(timeout),
       });
     } catch (error) {
@@ -244,7 +269,11 @@ export class HttpFeedApi implements FeedApi {
       });
     }
     if (!response.ok) {
-      throw new FeedHttpError(response.status, await response.text());
+      const detail = await response.text();
+      if (response.status === 409 && detail.includes("Vault identity mismatch")) {
+        throw new Error(VAULT_MISMATCH_MESSAGE);
+      }
+      throw new FeedHttpError(response.status, detail);
     }
     return (await response.json()) as T;
   }

@@ -12,7 +12,13 @@ from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
-from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
+from okf_workspace.okf.file_io import atomic_write_bytes
+from okf_workspace.okf.frontmatter import (
+    OkfDocument,
+    read_document,
+    render_document,
+    write_document,
+)
 from okf_workspace.okf.paths import slugify
 
 from .markdown import markdown_link
@@ -202,6 +208,19 @@ def edition_relative_path(edition: FeedEdition) -> Path:
     return Path("feeds") / "treehole" / year / f"{slugify(edition.edition_id)}.md"
 
 
+def prepare_edition(vault: Path, edition: FeedEdition) -> tuple[Path, str]:
+    """Render a Digest for an Obsidian-owned first write without replacing existing notes."""
+    target = vault.resolve() / edition_relative_path(edition)
+    if target.is_file():
+        return target, target.read_text(encoding="utf-8")
+    body = (
+        _ai_daily_body(edition)
+        if edition.feed is FeedKind.AI_DAILY
+        else _treehole_body(vault, edition)
+    )
+    return target, render_document(_edition_frontmatter(edition), body)
+
+
 def materialize_edition(vault: Path, edition: FeedEdition) -> Path:
     """Create/update the derived edition; this never creates Source records."""
     target = vault.resolve() / edition_relative_path(edition)
@@ -254,17 +273,9 @@ def materialize_edition(vault: Path, edition: FeedEdition) -> Path:
                     OkfDocument(existing.frontmatter, _treehole_body(vault, edition)),
                 )
         return target
+    target, markdown = prepare_edition(vault, edition)
     with suppress(FileExistsError):
-        write_document(
-            target,
-            OkfDocument(
-                _edition_frontmatter(edition),
-                _ai_daily_body(edition)
-                if edition.feed is FeedKind.AI_DAILY
-                else _treehole_body(vault, edition),
-            ),
-            create_only=True,
-        )
+        atomic_write_bytes(target, markdown.encode("utf-8"), create_only=True)
     return target
 
 

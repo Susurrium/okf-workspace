@@ -21,6 +21,12 @@ Foundation -> no upper module
 - Sources is the only owner of Source and Source Text publication, lookup, canonical identity, and pair transactions.
 - Intake and Feeds do not import one another's implementation.
 - Dashboard does not implement conversion, publication, or semantic-operation state machines.
+- For an Obsidian-initiated Feed Digest open, Engine supplies the path and rendered Markdown;
+  Dashboard creates a missing note through Obsidian's Vault API and never overwrites an existing note.
+  Engine retains Digest rendering, existing-note refresh, and non-Obsidian materialization.
+- Dashboard-originated Engine writes carry the current Vault fingerprint, which Engine checks before
+  accepting a mutation. Engine retains ownership of Source pairs, Capture routing, imports, and
+  background semantic publication; Dashboard reports disk/index divergence without recreating them.
 - Dashboard may host Apex-native widget services for habits, expenses, reading, focus, media, and other
   workbench utilities. Those services retain their existing data models and do not become Engine or Vault
   artifact authorities.

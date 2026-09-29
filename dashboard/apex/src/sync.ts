@@ -992,6 +992,9 @@ export class SyncEngine {
 			this.file = existing;
 			return;
 		}
+		if ((await this.app.vault.adapter.stat(path))?.type === 'file') {
+			throw new Error(`工作台文件在磁盘中，但 Obsidian 尚未识别；请重新加载后重试：${path}`);
+		}
 
 		const content = getRegisteredApexHost()?.createDefaultWorkspaceMarkdown?.()
 			?? generateDefaultMarkdown();

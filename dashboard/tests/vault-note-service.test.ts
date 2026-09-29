@@ -9,9 +9,15 @@ describe("VaultNoteService", () => {
     const markdown = new Map<string, string>();
     const files = new Map<string, TFile>();
     const folders = new Set<string>();
+    const diskOnly = new Set<string>();
     const frontmatterByPath = new Map<string, Record<string, unknown>>();
     const vault = {
       getAbstractFileByPath: (path: string) => files.get(path) ?? (folders.has(path) ? { path } : null),
+      adapter: {
+        stat: async (path: string) => files.has(path) || diskOnly.has(path)
+          ? { type: "file" }
+          : folders.has(path) ? { type: "folder" } : null,
+      },
       createFolder: async (path: string) => {
         folders.add(path);
       },
@@ -164,5 +170,9 @@ describe("VaultNoteService", () => {
     ]);
     const inbox = await new VaultDashboardReader(app).inbox();
     expect(inbox.captures[0]?.ingested_via).toBe("direct-entry");
+    diskOnly.add("life/daily/2026/10/2026-10-01.md");
+    await expect(notes.createDaily("2026-10-01"))
+      .rejects.toThrow("文件在磁盘中已存在");
+    expect(files.has("life/daily/2026/10/2026-10-01.md")).toBe(false);
   });
 });

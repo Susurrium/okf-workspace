@@ -18,6 +18,8 @@ function fixture() {
   };
   const vault = {
     getAbstractFileByPath: (path: string) => files.get(path) ?? (folders.has(path) ? { path } : null),
+    adapter: { stat: async (path: string) => files.has(path)
+      ? { type: "file" } : folders.has(path) ? { type: "folder" } : null },
     getMarkdownFiles: () => [...files.values()], getFiles: () => [...files.values()],
     createFolder: async (path: string) => { folders.add(path); },
     create: async (path: string, content: string) => {

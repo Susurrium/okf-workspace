@@ -2,7 +2,7 @@
 
 from .cache import FeedCache
 from .decisions import FeedDecisionService
-from .editions import materialize_edition
+from .editions import materialize_edition, prepare_edition
 from .models import (
     DecisionAction,
     FeedComment,
@@ -23,4 +23,5 @@ __all__ = [
     "FeedSyncFailure",
     "FeedSyncer",
     "materialize_edition",
+    "prepare_edition",
 ]

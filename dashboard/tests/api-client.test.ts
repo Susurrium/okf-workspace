@@ -34,4 +34,21 @@ describe("LocalApi", () => {
       "http://127.0.0.1:8765/system/status?refresh_services=true",
     ]);
   });
+  it("checks the service Vault before a write and sends an identity guard", async () => {
+    const fetch = vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => new Response(
+      JSON.stringify(String(url).endsWith("/workspace/identity")
+        ? { vault_fingerprint: "correct" }
+        : { path: "inbox/captures/test.md" }),
+      { status: 200 },
+    ));
+    vi.stubGlobal("fetch", fetch);
+    const wrong = new LocalApi("http://127.0.0.1:8765", "token", "wrong");
+    await expect(wrong.createCapture("test", "content")).rejects.toThrow("另一个 Vault");
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    const correct = new LocalApi("http://127.0.0.1:8765", "token", "correct");
+    await correct.createCapture("test", "content");
+    const headers = new Headers(fetch.mock.calls.at(-1)?.[1]?.headers);
+    expect(headers.get("X-OKF-Vault-Fingerprint")).toBe("correct");
+  });
 });

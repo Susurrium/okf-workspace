@@ -44,4 +44,17 @@ describe("HttpDocumentImportApi", () => {
       generate: false,
     })).rejects.toThrow("文档上传超时");
   });
+
+  it("does not upload an Original to a different Vault", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ vault_fingerprint: "other" })));
+    vi.stubGlobal("fetch", fetch);
+    const api = new HttpDocumentImportApi("http://127.0.0.1:8765", "token", 5_000, "current");
+    await expect(api.importDocument(new File(["pdf"], "paper.pdf"), {
+      intent: "source",
+      quality: "quick",
+      parser: "mineru",
+      generate: false,
+    })).rejects.toThrow("另一个 Vault");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
 });

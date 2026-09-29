@@ -52,7 +52,9 @@ it("keeps a failed generation handoff actionable in the real Inbox card", async 
   const watchDocumentConversion = vi.fn();
   const openVaultPath = vi.fn();
   const view = new OkfDashboardView(
-    new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App),
+    new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({
+      vault: { getAbstractFileByPath: () => null },
+    } as unknown as App),
     { getDashboardUiState: () => normalizeDashboardUiState(undefined),
       ensureLocalServiceAvailable: async () => undefined, watchDocumentConversion, openVaultPath } as never,
   );
@@ -63,7 +65,7 @@ it("keeps a failed generation handoff actionable in the real Inbox card", async 
   (view as unknown as { renderInboxConversionCard(parent: HTMLElement, record: ConversionRecord): void })
     .renderInboxConversionCard(container as unknown as HTMLElement, record);
   expect(container.descendants().some((item) => item.textContent.includes("生成入队失败"))).toBe(true);
-  container.descendants().find((item) => item.textContent === "打开结果")!.click();
+  container.descendants().find((item) => item.textContent === "打开转换正文")!.click();
   expect(openVaultPath).toHaveBeenCalledWith("sources/text/fixture.md");
   container.descendants().find((item) => item.textContent === "重试生成入队")!.click();
   await vi.waitFor(() => expect(retryConversion).toHaveBeenCalledWith("conv-handoff"));
@@ -115,7 +117,9 @@ it("walks mixed active, publishing, failed, cancelled, and conversion fallback s
     watchDocumentConversion,
   };
   const view = new OkfDashboardView(
-    new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App),
+    new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({
+      vault: { getAbstractFileByPath: () => null },
+    } as unknown as App),
     plugin as never,
   );
   const runtime = view as unknown as {
@@ -2147,15 +2151,18 @@ describe("real Dashboard View source handoff", () => {
       }],
     ]);
     const markdown = new Map<string, string>([
+      ["learning/guides/topic.md", "---\nsources:\n  - resource: /sources/records/web/topic.md\n---\n"],
       [
         "sources/records/web/topic.md",
-        "[正文](/sources/text/web/topic.md)\n[旧摘录](/sources/extracts/web/legacy-topic.md)",
+        "---\ntext: /sources/text/web/topic.md\nextract: /sources/extracts/web/legacy-topic.md\n---\n[正文](/sources/text/web/topic.md)\n[旧摘录](/sources/extracts/web/legacy-topic.md)",
       ],
     ]);
     const app = {
       vault: {
         getAbstractFileByPath: (path: string) => byPath.get(path) ?? null,
         cachedRead: async (file: TFile) => markdown.get(file.path) ?? "",
+        read: async (file: TFile) => markdown.get(file.path) ?? "",
+        adapter: { stat: async (path: string) => byPath.has(path) ? { type: "file" } : null },
       },
       metadataCache: {
         getFileCache: (file: TFile) => ({ frontmatter: frontmatter.get(file.path) }),
@@ -2171,6 +2178,30 @@ describe("real Dashboard View source handoff", () => {
       "sources/text/web/topic.md",
       "sources/extracts/web/legacy-topic.md",
     ]);
+  });
+
+  it("stops generation when a declared source exists on disk but is absent from Obsidian", async () => {
+    const note = new (TFile as unknown as new (path: string) => TFile)("learning/guides/topic.md");
+    const app = {
+      vault: {
+        getAbstractFileByPath: (path: string) => path === note.path ? note : null,
+        read: async () => "---\nsources:\n  - resource: /sources/records/web/unindexed.md\n---\n",
+        adapter: { stat: async () => ({ type: "file" }) },
+      },
+    } as unknown as App;
+    await expect(resolveDashboardLearningSources(app, note.path))
+      .rejects.toThrow("磁盘存在但 Obsidian 未识别");
+  });
+
+  it("does not treat an unindexed target note as a source-free guide", async () => {
+    const app = {
+      vault: {
+        getAbstractFileByPath: () => null,
+        adapter: { stat: async () => ({ type: "file" }) },
+      },
+    } as unknown as App;
+    await expect(resolveDashboardLearningSources(app, "learning/guides/unindexed.md"))
+      .rejects.toThrow("目标笔记在磁盘中");
   });
 
   it("shows TreeHole favorites before likes regardless of payload key order", () => {

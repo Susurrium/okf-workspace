@@ -15,7 +15,7 @@ import okf_workspace.feeds.cache as feed_cache_module
 from okf_workspace.dashboard.feeds import subscription_sources_dashboard
 from okf_workspace.feeds.cache import FeedCache, FeedEditionIndex
 from okf_workspace.feeds.decisions import FeedDecisionService
-from okf_workspace.feeds.editions import materialize_edition
+from okf_workspace.feeds.editions import materialize_edition, prepare_edition
 from okf_workspace.feeds.models import (
     UNATTRIBUTED_SOURCE_ID,
     DecisionAction,
@@ -309,6 +309,13 @@ def test_cache_is_outside_vault_and_edition_is_lazy(vault: Path, tmp_path: Path)
     assert cache_path.is_file()
     assert not expected.exists()
 
+    prepared_path, prepared_markdown = prepare_edition(
+        vault, FeedCache(state).get(FeedKind.AI_DAILY, edition.edition_id)
+    )
+    assert prepared_path == expected
+    assert "这是完整 Markdown，而不是摘要" in prepared_markdown
+    assert not expected.exists()
+
     actual = materialize_edition(vault, FeedCache(state).get(FeedKind.AI_DAILY, edition.edition_id))
 
     assert actual == expected
@@ -317,6 +324,8 @@ def test_cache_is_outside_vault_and_edition_is_lazy(vault: Path, tmp_path: Path)
     assert "^feed-" in rendered
     assert not (vault / "sources" / "records" / "ai-daily" / "AI-工具更新.md").exists()
     actual.write_text(rendered + "\n我的阅读批注。\n", encoding="utf-8")
+    _, existing_markdown = prepare_edition(vault, edition)
+    assert existing_markdown.endswith("我的阅读批注。\n")
     assert (
         materialize_edition(vault, edition).read_text(encoding="utf-8").endswith("我的阅读批注。\n")
     )
@@ -931,6 +940,10 @@ def test_treehole_data_uri_is_materialized_as_excluded_asset(vault: Path) -> Non
         items=(item,),
     )
 
+    prepared_path, prepared_markdown = prepare_edition(vault, edition)
+    assert not prepared_path.exists()
+    assert "data:image" not in prepared_markdown
+    assert "^treehole-456" in prepared_markdown
     rendered = materialize_edition(vault, edition).read_text(encoding="utf-8")
 
     assert "data:image" not in rendered

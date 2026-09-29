@@ -9,11 +9,13 @@ import type {
   WebCapturePublishResult,
 } from "./types.js";
 import type { FeedSyncResult } from "../feeds/types.js";
+import { assertMatchingVault, VAULT_FINGERPRINT_HEADER, VAULT_MISMATCH_MESSAGE } from "./vault-identity.js";
 
 export class LocalApi {
   public constructor(
     public readonly baseUrl: string,
     private readonly token: string,
+    private readonly expectedVaultFingerprint?: string,
   ) {}
 
   public today(date?: string): Promise<TodayView> {
@@ -326,8 +328,16 @@ export class LocalApi {
   }
 
   private async request<T>(path: string, init?: RequestInit, timeout = 15_000): Promise<T> {
+    const mutating = !["GET", "HEAD"].includes((init?.method ?? "GET").toUpperCase());
+    if (mutating && this.expectedVaultFingerprint) {
+      const identity = await this.request<{ vault_fingerprint: string }>("/workspace/identity");
+      assertMatchingVault(identity.vault_fingerprint, this.expectedVaultFingerprint);
+    }
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${this.token}`);
+    if (mutating && this.expectedVaultFingerprint) {
+      headers.set(VAULT_FINGERPRINT_HEADER, this.expectedVaultFingerprint);
+    }
     if (init?.body !== undefined) headers.set("content-type", "application/json");
     let response: Response;
     try {
@@ -347,6 +357,9 @@ export class LocalApi {
     }
     if (!response.ok) {
       const detail = await response.text();
+      if (response.status === 409 && detail.includes("Vault identity mismatch")) {
+        throw new Error(VAULT_MISMATCH_MESSAGE);
+      }
       const messages: Record<number, string> = {
         400: "操作未完成，请检查输入后重试。",
         401: "本地服务认证失败，请在连接设置中检查凭据。",

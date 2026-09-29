@@ -227,6 +227,19 @@ def test_obsidian_renderer_cors_preflight_allows_local_authenticated_api(
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "app://obsidian.md"
 
+    write_preflight = client.options(
+        "/captures",
+        headers={
+            "Origin": "app://obsidian.md",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type,x-okf-vault-fingerprint",
+        },
+    )
+    assert write_preflight.status_code == 200
+    assert "x-okf-vault-fingerprint" in write_preflight.headers[
+        "access-control-allow-headers"
+    ].casefold()
+
     denied = client.options(
         "/today",
         headers={
@@ -237,6 +250,27 @@ def test_obsidian_renderer_cors_preflight_allows_local_authenticated_api(
     )
     assert denied.status_code == 400
     assert "access-control-allow-origin" not in denied.headers
+
+
+def test_dashboard_vault_guard_rejects_mismatched_writes(
+    vault: Path,
+    tmp_path: Path,
+) -> None:
+    client, headers, _paths = _client(vault, tmp_path)
+    fingerprint = client.get("/workspace/identity", headers=headers).json()["vault_fingerprint"]
+    wrong = client.post(
+        "/captures",
+        headers={**headers, "X-OKF-Vault-Fingerprint": "0" * 64},
+        json={"title": "wrong Vault", "content": "must not write"},
+    )
+    assert wrong.status_code == 409
+    assert not list((vault / "inbox" / "captures").rglob("*.md"))
+    accepted = client.post(
+        "/captures",
+        headers={**headers, "X-OKF-Vault-Fingerprint": fingerprint},
+        json={"title": "right Vault", "content": "written"},
+    )
+    assert accepted.status_code == 200
 
 
 def test_feed_api_lists_previews_opens_and_applies_human_decisions_without_absolute_paths(
@@ -285,8 +319,20 @@ def test_feed_api_lists_previews_opens_and_applies_human_decisions_without_absol
         item.title,
         second_item.title,
     ]
+    identity = client.get("/workspace/identity", headers=headers)
+    assert identity.status_code == 200
+    assert client.get("/workspace/identity").status_code == 401
+    prepared = client.post(f"/feeds/ai-daily/digests/{item.edition_id}/prepare", headers=headers)
+    assert prepared.status_code == 200
+    assert prepared.json()["vault_path"] == "feeds/ai-daily/2026/2026-08-17-news.md"
+    assert prepared.json()["markdown"].startswith("---\n")
+    assert len(prepared.json()["vault_fingerprint"]) == 64
+    assert prepared.json()["vault_fingerprint"] == identity.json()["vault_fingerprint"]
+    assert not (vault / prepared.json()["vault_path"]).exists()
+
     opened = client.post(f"/feeds/ai-daily/digests/{item.edition_id}/open", headers=headers)
     assert opened.json()["vault_path"] == "feeds/ai-daily/2026/2026-08-17-news.md"
+    assert "完整技术文档与配置指南" in opened.json()["markdown"]
     removed_recommendation = client.get(
         f"/feeds/ai-daily/items/{item.item_id}/recommend", headers=headers
     )

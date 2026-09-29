@@ -1,8 +1,9 @@
 import { noteStatusLabel } from "../ui/display-labels.js";
-import { Notice, Plugin, TFile, type WorkspaceLeaf } from "obsidian";
+import { FileSystemAdapter, Notice, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
 import { readFileSync } from "node:fs";
 
 import { LocalApi } from "../api/client.js";
+import { assertMatchingVault, currentVaultFingerprint } from "../api/vault-identity.js";
 import {
   relationVaultPath,
   routeCaptureUsingLinkedContext,
@@ -19,6 +20,7 @@ import type {
   WebCaptureAction,
 } from "../api/types.js";
 import { FeedTransportError, HttpFeedApi } from "../feeds/service.js";
+import { normalizedDigestPath, openPreparedDigest, vaultFingerprint } from "../feeds/open-digest.js";
 import { evictUnresolvedFeedDecisions } from "../feeds/decision-cache.js";
 import type {
   FeedDashboardDigest,
@@ -544,11 +546,12 @@ export default class OkfBrainPlugin extends Plugin {
         console.warn("[okf-workspace] could not copy Claudian fallback", error);
       }
       const firstContext = request.contextPaths?.[0];
-      if (firstContext) await this.openVaultPath(firstContext);
+      const opened = firstContext ? await this.tryOpenVaultPath(firstContext) : undefined;
+      if (firstContext && opened !== "opened") this.noticeVaultOpenFailure(opened!, firstContext);
       new Notice(
         copied
-          ? "Claudian 未启用；提示词和上下文路径已复制，并已打开首个上下文文件。"
-          : "Claudian 未启用；已打开首个上下文文件。请启用 Claudian 插件 后重试 AI 操作。",
+          ? `Claudian 未启用；提示词和上下文路径已复制${opened === "opened" ? "，并已打开首个上下文文件" : ""}。`
+          : `Claudian 未启用${opened === "opened" ? "；已打开首个上下文文件" : ""}。请启用 Claudian 插件后重试 AI 操作。`,
         10_000,
       );
       return;
@@ -637,8 +640,12 @@ export default class OkfBrainPlugin extends Plugin {
       "选择复盘周期",
       async (period) => {
         const result = await this.notes().createReview(period);
-        new Notice(result.created ? "已创建本期复盘" : "已打开已有复盘", 6_000);
-        await this.openVaultPath(result.path);
+        const opened = await this.tryOpenVaultPath(result.path);
+        if (opened === "opened") {
+          new Notice(result.created ? "已创建并打开本期复盘" : "已打开已有复盘", 6_000);
+        } else {
+          this.noticeVaultOpenFailure(opened, result.path);
+        }
       },
     ).open();
   }
@@ -1091,13 +1098,17 @@ export default class OkfBrainPlugin extends Plugin {
       if (result.semantic_operation) {
         this.watchSemanticOperation(result.semantic_operation.operation_id);
       }
-      const target = result.routed_target ?? result.source_text;
+      const target = result.semantic_operation?.status === "completed"
+        ? result.routed_target ?? result.source_text
+        : result.source_text;
       const notice = new Notice("", 20_000);
       notice.noticeEl.empty();
       notice.noticeEl.createEl("strong", {
         text: result.semantic_operation ? "已归类并进入后台生成" : "资料已归类",
       });
-      const open = notice.noticeEl.createEl("button", { text: "打开结果" });
+      const open = notice.noticeEl.createEl("button", {
+        text: target === result.routed_target ? "打开生成结果" : "打开已保存资料",
+      });
       open.addEventListener("click", () => {
         notice.hide();
         void this.openVaultPath(target);
@@ -1201,12 +1212,62 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public async openFeedDigest(feed: FeedKind, digestId: string): Promise<void> {
+    await this.openFeedEdition(feed, digestId);
+  }
+
+  private async openFeedEdition(
+    feed: FeedKind,
+    digestId: string,
+    blockId?: string,
+  ): Promise<void> {
     await this.ensureLocalServiceAvailable();
-    const opened = await new HttpFeedApi(
-      this.settings.baseUrl,
-      this.settings.token,
-    ).openDigest(feed, digestId);
-    await this.openVaultPath(opened.vault_path);
+    const adapter = this.app.vault.adapter;
+    if (!(adapter instanceof FileSystemAdapter)) {
+      throw new Error("当前 Vault 不支持验证本地服务的 Vault 路径");
+    }
+    const api = this.feedApi();
+    const expectedFingerprint = vaultFingerprint(adapter.getBasePath());
+    const identity = await api.vaultIdentity();
+    assertMatchingVault(identity.vault_fingerprint, expectedFingerprint);
+    const prepared = await api.prepareDigest(feed, digestId);
+    await openPreparedDigest(prepared, expectedFingerprint, {
+      getFile: (path) => {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        return file instanceof TFile ? file : undefined;
+      },
+      hasFolder: (path) => this.app.vault.getAbstractFileByPath(path) instanceof TFolder,
+      stat: async (path) => (await adapter.stat(path))?.type,
+      createFolder: (path) => this.app.vault.createFolder(path).then(() => undefined),
+      create: (path, markdown) => this.app.vault.create(path, markdown),
+      refreshExisting: async () => {
+        const opened = await api.openDigest(feed, digestId);
+        if (normalizedDigestPath(opened.vault_path) !== normalizedDigestPath(prepared.vault_path)) {
+          throw new Error("本期汇总路径在创建期间发生变化，请重试");
+        }
+      },
+      open: async (file, targetBlockId) => {
+        if (targetBlockId) {
+          await this.app.workspace.openLinkText(`${file.path}#^${targetBlockId}`, "", false);
+        } else {
+          await this.app.workspace.getLeaf(false).openFile(file);
+        }
+      },
+      waitForFile: (path) => this.waitForVaultFile(path),
+      describePath: (path) => adapter.getFullPath(path),
+    }, blockId).catch(async (error: unknown) => {
+      const diskType = await adapter.stat(prepared.vault_path)
+        .then((stat) => stat?.type)
+        .catch(() => undefined);
+      console.warn("[okf-workspace] Feed Digest could not be opened", {
+        feed,
+        digestId,
+        path: prepared.vault_path,
+        diskType,
+        indexed: this.app.vault.getAbstractFileByPath(prepared.vault_path) instanceof TFile,
+        error,
+      });
+      throw error;
+    });
   }
 
   public async loadFeedDashboardDigest(): Promise<FeedDashboardDigest> {
@@ -1214,7 +1275,7 @@ export default class OkfBrainPlugin extends Plugin {
       return this.feedDigestCache.value;
     }
     if (this.feedDigestRequest) return this.feedDigestRequest;
-    const api = new HttpFeedApi(this.settings.baseUrl, this.settings.token);
+    const api = this.feedApi();
     const revision = this.feedProjectionRevision;
     const request = (async () => {
       try {
@@ -1262,7 +1323,7 @@ export default class OkfBrainPlugin extends Plugin {
   public async loadFeedSubscriptions(
     query: FeedSubscriptionPageQuery = {},
   ): Promise<FeedSubscriptionPage> {
-    const api = new HttpFeedApi(this.settings.baseUrl, this.settings.token);
+    const api = this.feedApi();
     try {
       return await api.listSubscriptions(query);
     } catch (error) {
@@ -1275,7 +1336,7 @@ export default class OkfBrainPlugin extends Plugin {
   public async loadFeedSubscriptionSources(
     query: FeedSubscriptionSourcePageQuery = {},
   ): Promise<FeedSubscriptionSourcePage> {
-    const api = new HttpFeedApi(this.settings.baseUrl, this.settings.token);
+    const api = this.feedApi();
     try {
       return await api.listSubscriptionSources(query);
     } catch (error) {
@@ -1289,7 +1350,7 @@ export default class OkfBrainPlugin extends Plugin {
     sourceId: string,
     query: FeedSubscriptionSourceItemsQuery = {},
   ): Promise<FeedSubscriptionSourceItemsPage> {
-    const api = new HttpFeedApi(this.settings.baseUrl, this.settings.token);
+    const api = this.feedApi();
     try {
       return await api.listSubscriptionSourceItems(sourceId, query);
     } catch (error) {
@@ -1367,7 +1428,7 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   private async withFeedApi<T>(operation: (api: HttpFeedApi) => Promise<T>): Promise<T> {
-    const api = new HttpFeedApi(this.settings.baseUrl, this.settings.token);
+    const api = this.feedApi();
     try {
       return await operation(api);
     } catch (error) {
@@ -1402,16 +1463,15 @@ export default class OkfBrainPlugin extends Plugin {
     digestId: string,
     blockId: string,
   ): Promise<void> {
-    await this.ensureLocalServiceAvailable();
-    const opened = await new HttpFeedApi(
-      this.settings.baseUrl,
-      this.settings.token,
-    ).openDigest(feed, digestId);
-    await this.openVaultPath(opened.vault_path, blockId);
+    await this.openFeedEdition(feed, digestId, blockId);
   }
 
-  private api(): LocalApi {
-    return new LocalApi(this.settings.baseUrl, this.settings.token);
+  public api(): LocalApi {
+    return new LocalApi(this.settings.baseUrl, this.settings.token, currentVaultFingerprint(this.app));
+  }
+
+  private feedApi(): HttpFeedApi {
+    return new HttpFeedApi(this.settings.baseUrl, this.settings.token, currentVaultFingerprint(this.app));
   }
 
   public createDaily(): Promise<{ path: string }> {
@@ -1554,13 +1614,15 @@ export default class OkfBrainPlugin extends Plugin {
           ? "可在对应内容页或系统状态中重新生成。"
           : (operation.error ?? "可以打开目标笔记查看状态。"),
     });
-    const open = notice.noticeEl.createEl("button", {
-      text: isWiki ? "打开知识笔记" : "打开学习材料",
-    });
-    open.addEventListener("click", () => {
-      notice.hide();
-      void this.openVaultPath(operation.target);
-    });
+    if (completed) {
+      const open = notice.noticeEl.createEl("button", {
+        text: isWiki ? "打开知识笔记" : "打开学习材料",
+      });
+      open.addEventListener("click", () => {
+        notice.hide();
+        void this.openVaultPath(operation.target);
+      });
+    }
   }
 
   private async initializeConversionMonitor(): Promise<void> {
@@ -1792,7 +1854,12 @@ export default class OkfBrainPlugin extends Plugin {
     relation: Pick<DocumentImportOptions, "course" | "project"> = {},
     origin: ImportOrigin = "command",
   ): void {
-    const api = new HttpDocumentImportApi(this.settings.baseUrl, this.settings.token);
+    const api = new HttpDocumentImportApi(
+      this.settings.baseUrl,
+      this.settings.token,
+      120_000,
+      currentVaultFingerprint(this.app),
+    );
     let serviceReady: Promise<void> | undefined;
     new DocumentImportModal(
       this.app, files, relation, origin,
@@ -1910,7 +1977,7 @@ export default class OkfBrainPlugin extends Plugin {
     action: FeedDecisionAction,
   ): Promise<FeedDecisionResult> {
     await this.ensureLocalServiceAvailable();
-    const api = new HttpFeedApi(this.settings.baseUrl, this.settings.token);
+    const api = this.feedApi();
     let result: FeedDecisionResult;
     try {
       result = await api.decide(feed, itemId, action);
@@ -1950,7 +2017,7 @@ export default class OkfBrainPlugin extends Plugin {
     }
     const pending = this.feedDecisionRequests.get(key);
     if (pending) return pending;
-    const request = new HttpFeedApi(this.settings.baseUrl, this.settings.token)
+    const request = this.feedApi()
       .getDecision(feed, itemId)
       .then((result) => {
         this.feedDecisionCache.set(key, result);
@@ -2001,33 +2068,71 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public async openVaultPath(path: string, blockId?: string): Promise<void> {
+    try {
+      const result = await this.tryOpenVaultPath(path, blockId ? `^${blockId}` : undefined);
+      if (result !== "opened") this.noticeVaultOpenFailure(result, path);
+    } catch (error) {
+      console.warn("[okf-workspace] could not open Vault path", { path, error });
+      new Notice(error instanceof Error ? error.message : `无法打开文件：${path}`, 10_000);
+    }
+  }
+
+  private async tryOpenVaultPath(
+    path: string,
+    fragment?: string,
+  ): Promise<"opened" | "unindexed" | "missing" | "unavailable"> {
     const normalized = path.replace(/\\/gu, "/").replace(/^\/+|\/+$/gu, "");
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const file = this.app.vault.getAbstractFileByPath(normalized);
-      if (file instanceof TFile) {
-        if (blockId) {
-          await this.app.workspace.openLinkText(`${normalized}#^${blockId}`, "", false);
-        } else {
-          await this.app.workspace.getLeaf(false).openFile(file);
-        }
-        return;
+    const file = await this.waitForVaultFile(normalized);
+    if (file) {
+      if (fragment) {
+        await this.app.workspace.openLinkText(`${normalized}#${fragment}`, "", false);
+      } else {
+        await this.app.workspace.getLeaf(false).openFile(file);
       }
+      return "opened";
+    }
+    let diskType: "file" | "folder" | undefined;
+    try {
+      diskType = (await this.app.vault.adapter.stat(normalized))?.type;
+    } catch (error) {
+      console.warn("[okf-workspace] could not inspect missing Vault path", { path: normalized, error });
+      return "unavailable";
+    }
+    console.warn("[okf-workspace] Vault path could not be opened", {
+      path: normalized,
+      diskType,
+      indexed: false,
+    });
+    return diskType === "file" ? "unindexed" : "missing";
+  }
+
+  private noticeVaultOpenFailure(
+    status: "unindexed" | "missing" | "unavailable",
+    path: string,
+  ): void {
+    const normalized = path.replace(/\\/gu, "/").replace(/^\/+|\/+$/gu, "");
+    const location = this.app.vault.adapter instanceof FileSystemAdapter
+      ? this.app.vault.adapter.getFullPath(normalized)
+      : normalized;
+    new Notice(status === "unindexed"
+      ? `文件在当前 Vault 的磁盘中，但 Obsidian 尚未识别；请重新加载 Obsidian 后打开：${location}`
+      : status === "missing"
+        ? `当前 Vault 中尚无该文件；若正在后台生成请等待，若任务已完成请检查服务连接的 Vault：${location}`
+        : `Obsidian 无法核查文件状态；请检查当前 Vault：${location}`, 10_000);
+  }
+
+  private async waitForVaultFile(path: string): Promise<TFile | undefined> {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (file instanceof TFile) return file;
       await new Promise<void>((resolve) => window.setTimeout(resolve, 100));
     }
-    new Notice("文件已创建，但 Obsidian 尚未显示；可在文件区打开：" + normalized, 10_000);
+    return undefined;
   }
 
   private async openVaultHeading(path: string, heading: string): Promise<void> {
-    const normalized = path.replace(/\\/gu, "/").replace(/^\/+|\/+$/gu, "");
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const file = this.app.vault.getAbstractFileByPath(normalized);
-      if (file instanceof TFile) {
-        await this.app.workspace.openLinkText(`${normalized}#${heading}`, "", false);
-        return;
-      }
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 100));
-    }
-    new Notice("今日日记已创建，但 Obsidian 尚未显示：" + normalized, 10_000);
+    const result = await this.tryOpenVaultPath(path, heading);
+    if (result !== "opened") this.noticeVaultOpenFailure(result, path);
   }
 
   public async ensureLocalServiceAvailable(): Promise<void> {

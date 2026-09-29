@@ -534,6 +534,9 @@ export class VaultNoteService {
   private async create(path: string, content: string): Promise<void> {
     const parent = path.split("/").slice(0, -1).join("/");
     await this.ensureFolder(parent);
+    if ((await this.app.vault.adapter.stat(path))?.type === "file") {
+      throw new Error(`文件在磁盘中已存在，但 Obsidian 尚未识别或文件刚被其他操作创建：${path}`);
+    }
     await this.app.vault.create(path, content);
   }
 
@@ -542,6 +545,9 @@ export class VaultNoteService {
     for (const part of path.split("/").filter(Boolean)) {
       current = current ? `${current}/${part}` : part;
       if (!this.app.vault.getAbstractFileByPath(current)) {
+        if ((await this.app.vault.adapter.stat(current))?.type === "folder") {
+          throw new Error(`目录在磁盘中已存在，但 Obsidian 尚未识别；请重新加载后重试：${current}`);
+        }
         try { await this.app.vault.createFolder(current); }
         catch (error) {
           if (!this.app.vault.getAbstractFileByPath(current)) throw error;

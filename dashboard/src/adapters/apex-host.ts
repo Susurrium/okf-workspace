@@ -267,6 +267,13 @@ export class ApexHostAdapter implements ApexHost {
         (candidate) => this.workspaceFileExists(candidate),
       );
       try {
+        const onDisk = await this.workspaceFileOnDisk(path);
+        if (onDisk !== false) {
+          new Notice(onDisk
+            ? `工作台文件在磁盘中，但 Obsidian 尚未识别；请重新加载后重试：${path}.md`
+            : `无法核查工作台文件是否存在；请稍后重试：${path}.md`);
+          return undefined;
+        }
         const markdown = this.workspaceMarkdownFactory?.(presetId) ?? generateDefaultMarkdown();
         await this.app.vault.create(path.endsWith(".md") ? path : `${path}.md`, markdown);
       } catch (error) {
@@ -349,7 +356,10 @@ export class ApexHostAdapter implements ApexHost {
         return;
       }
       if (!this.workspaceFileExists(next)) {
-        new Notice(t("workspace.pathNotFound", { file: `${next}.md` }));
+        const onDisk = await this.workspaceFileOnDisk(next);
+        new Notice(onDisk
+          ? `工作台文件在磁盘中，但 Obsidian 尚未识别；请重新加载后重试：${next}.md`
+          : t("workspace.pathNotFound", { file: `${next}.md` }));
         return;
       }
       const activeChanged = normalizeWorkspacePath(this.settings.dashboardFile) === target;
@@ -377,6 +387,15 @@ export class ApexHostAdapter implements ApexHost {
     return !!this.app.vault.getFileByPath(path.endsWith(".md") ? path : `${path}.md`);
   }
 
+  private async workspaceFileOnDisk(path: string): Promise<boolean | undefined> {
+    try {
+      return (await this.app.vault.adapter.stat(path.endsWith(".md") ? path : `${path}.md`))?.type === "file";
+    } catch (error) {
+      console.warn("[okf-workspace] could not inspect workspace file", { path, error });
+      return undefined;
+    }
+  }
+
   private async repointRemovedWorkspace(path: string, fallback: string): Promise<void> {
     for (const leaf of this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE)) {
       if (leaf.view instanceof DashboardView) await leaf.view.handleWorkspaceRemoved(path, fallback);
@@ -390,12 +409,34 @@ export class ApexHostAdapter implements ApexHost {
   }
 
   private async pruneWorkspaceRegistry(): Promise<void> {
+    const originalFiles = [...this.settings.workspaceFiles];
     const active = normalizeWorkspacePath(this.settings.dashboardFile);
+    const retained = new Set<string>();
+    const missing: string[] = [];
+    for (const path of this.settings.workspaceFiles) {
+      if (this.workspaceFileExists(path) || await this.workspaceFileOnDisk(path) !== false) {
+        retained.add(path);
+      } else if (path !== active) {
+        missing.push(path);
+      }
+    }
+    if (!missing.length) return;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
+    for (const path of missing) {
+      if (this.workspaceFileExists(path) || await this.workspaceFileOnDisk(path) !== false) {
+        retained.add(path);
+      }
+    }
+    if (
+      normalizeWorkspacePath(this.settings.dashboardFile) !== active ||
+      this.settings.workspaceFiles.length !== originalFiles.length ||
+      this.settings.workspaceFiles.some((path, index) => path !== originalFiles[index])
+    ) return;
     const pruned = pruneMissingWorkspaces(
       this.settings.workspaceFiles,
       alignWorkspaceNames(this.settings.workspaceFiles, this.settings.workspaceNames),
       active,
-      (path) => this.workspaceFileExists(path),
+      (path) => retained.has(path),
     );
     if (pruned.files.length === this.settings.workspaceFiles.length) return;
     this.settings = { ...this.settings, workspaceFiles: pruned.files, workspaceNames: pruned.names };

@@ -4,10 +4,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import threading
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -25,6 +26,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
@@ -56,6 +58,7 @@ from okf_workspace.feeds import (
     FeedKind,
     FeedSyncer,
     materialize_edition,
+    prepare_edition,
 )
 from okf_workspace.feeds.adapters import ai_daily_from_v1, treehole_from_v1
 from okf_workspace.feeds.subscriptions import SubscriptionError, SubscriptionService
@@ -269,6 +272,13 @@ def _relative(path: Path, root: Path) -> str:
         return path.name
 
 
+def _vault_fingerprint(vault: Path) -> str:
+    canonical = str(vault.resolve()).replace("\\", "/").rstrip("/")
+    if os.name == "nt":
+        canonical = canonical.lower()
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _optional_relative(path: Path | None, root: Path) -> str | None:
     return _relative(path, root) if path is not None else None
 
@@ -396,6 +406,20 @@ def create_app(
             semantic_process.stop()
 
     app = FastAPI(title="Workspace Local API", version=__version__, lifespan=lifespan)
+
+    @app.middleware("http")
+    async def verify_dashboard_vault(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        expected = request.headers.get("x-okf-vault-fingerprint")
+        if (
+            expected is not None
+            and request.method not in {"GET", "HEAD", "OPTIONS"}
+            and expected != _vault_fingerprint(configured.vault)
+        ):
+            return JSONResponse(status_code=409, content={"detail": "Vault identity mismatch"})
+        return await call_next(request)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -406,7 +430,7 @@ def create_app(
             "null",
         ],
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type", "X-OKF-Vault-Fingerprint"],
         allow_credentials=False,
         max_age=600,
     )
@@ -505,6 +529,10 @@ def create_app(
     @app.get("/health")
     async def health() -> dict[str, object]:
         return {"status": "ok", "service": "okf-workspace", "pairing_required": True}
+
+    @app.get("/workspace/identity", dependencies=protected)
+    def workspace_identity() -> dict[str, str]:
+        return {"vault_fingerprint": _vault_fingerprint(configured.vault)}
 
     @app.get("/today", dependencies=protected)
     def get_today(target_date: Date | None = None) -> dict[str, object]:
@@ -1014,6 +1042,16 @@ def create_app(
         return {
             "vault_path": _relative(path, configured.vault),
             "markdown": path.read_text(encoding="utf-8"),
+        }
+
+    @app.post("/feeds/{feed}/digests/{digest_id}/prepare", dependencies=protected)
+    def prepare_feed_digest(feed: str, digest_id: str) -> dict[str, str]:
+        edition = FeedCache(configured.state).get(_feed(feed), digest_id)
+        path, markdown = prepare_edition(configured.vault, edition)
+        return {
+            "vault_path": _relative(path, configured.vault),
+            "markdown": markdown,
+            "vault_fingerprint": _vault_fingerprint(configured.vault),
         }
 
     @app.post("/feeds/{feed}/items/{item_id}/decision", dependencies=protected)

@@ -8,6 +8,7 @@ await esbuild.build({
     "@codemirror/state",
     "@codemirror/view",
     "node:fs",
+    "node:crypto",
     "node:child_process",
   ],
   format: "cjs",

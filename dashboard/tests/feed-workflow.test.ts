@@ -4,12 +4,39 @@ import { aiDailyPreviewStreamTitle } from "../src/domain/ai-daily-preview.js";
 import { evictUnresolvedFeedDecisions } from "../src/feeds/decision-cache.js";
 import { feedItemMappings } from "../src/feeds/mappings.js";
 import { FeedHttpError, HttpFeedApi } from "../src/feeds/service.js";
+import type { FeedDecisionResult } from "../src/feeds/types.js";
 import {
   FEED_DECISION_ACTIONS,
   feedDecisionFeedback,
 } from "../src/ui/ai-daily-inline-decision.js";
 
 describe("Dashboard Feed workflow", () => {
+  it("checks the service Vault before preparing a Digest", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response(JSON.stringify({
+      vault_fingerprint: "vault-id",
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const api = new HttpFeedApi("http://127.0.0.1:8765", "token");
+      expect(await api.vaultIdentity()).toEqual({ vault_fingerprint: "vault-id" });
+      expect(fetchMock.mock.calls[0]?.[0]).toBe("http://127.0.0.1:8765/workspace/identity");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("rejects a Feed write before publishing into another Vault", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ vault_fingerprint: "other" })));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const api = new HttpFeedApi("http://127.0.0.1:8765", "token", "current");
+      await expect(api.openDigest("treehole", "digest-1")).rejects.toThrow("另一个 Vault");
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it.each([
     ["queued", "排队"], ["running", "正在生成"], ["failed", "失败"],
     ["cancelled", "取消"], ["orphaned", "中断"], ["completed", "已生成"],
@@ -276,10 +303,11 @@ describe("Dashboard Feed workflow", () => {
       item_id: "news-2",
       action: "learn-later",
       study_guide: "learning/guides/news-2.md",
+      source_text: "sources/text/ai-daily/news-2.md",
     })).toEqual({
       message: "资料已保存到待学习列表；可在学习页生成辅助学习材料。",
-      target: "learning/guides/news-2.md",
-      targetLabel: "打开学习笔记",
+      target: "sources/text/ai-daily/news-2.md",
+      targetLabel: "打开已保存资料",
     });
     expect(feedDecisionFeedback({
       item_id: "news-2",
@@ -290,5 +318,16 @@ describe("Dashboard Feed workflow", () => {
       target: "sources/records/ai-daily/news-2.md",
       targetLabel: "打开旧资料",
     });
+  });
+  it("opens saved source text while a future knowledge target is still queued", () => {
+    const feedback = feedDecisionFeedback({
+      item_id: "news-queued",
+      action: "wiki-now",
+      source_text: "sources/text/ai-daily/news-queued.md",
+      wiki: "knowledge/wiki/news-queued.md",
+      semantic_operation: { status: "queued" } as FeedDecisionResult["semantic_operation"],
+    });
+    expect(feedback.target).toBe("sources/text/ai-daily/news-queued.md");
+    expect(feedback.targetLabel).toBe("打开已保存资料");
   });
 });

@@ -1,5 +1,6 @@
 import { noteTypeLabel, captureDestinationLabel } from "../ui/display-labels.js";
 import { ItemView, Notice, TFile, WorkspaceLeaf, type App, type ViewStateResult } from "obsidian";
+import { parse as parseYaml } from "yaml";
 import {
   collectVaultTasks,
   invalidatePath,
@@ -199,39 +200,77 @@ export async function resolveDashboardLearningSources(
   notePath: string,
 ): Promise<string[]> {
   const note = app.vault.getAbstractFileByPath(notePath);
-  if (!(note instanceof TFile)) return [];
+  if (!(note instanceof TFile)) {
+    const onDisk = (await app.vault.adapter.stat(notePath))?.type === "file";
+    throw new Error(onDisk
+      ? `目标笔记在磁盘中，但 Obsidian 尚未识别；请重新加载后重试：${notePath}`
+      : `目标笔记不存在，无法核对来源：${notePath}`);
+  }
   const candidates = new Set<string>();
+  const unresolved = new Set<string>();
   const add = (value: unknown): void => {
-    if (typeof value !== "string") return;
+    if (value === undefined || value === null) return;
+    if (typeof value !== "string") throw new Error(`来源路径不是字符串：${notePath}`);
     const normalized = value.replace(/^\/+|\/+$/gu, "");
-    if (normalized && app.vault.getAbstractFileByPath(normalized) instanceof TFile) {
+    if (!normalized) return;
+    if (normalized.split("/").some((part) => !part || part === "." || part === ".." || part.includes(":"))) {
+      throw new Error(`来源路径无效：${value}`);
+    }
+    if (app.vault.getAbstractFileByPath(normalized) instanceof TFile) {
       candidates.add(normalized);
+    } else {
+      unresolved.add(normalized);
     }
   };
-  const frontmatter = app.metadataCache.getFileCache(note)?.frontmatter;
+  const frontmatter = await currentFrontmatter(app, note);
   // A pending Source is itself the Learning row; its paired Source Text must
   // be handed to Claudian just as explicitly as it is for an existing Guide.
   add(frontmatter?.text);
   add(frontmatter?.extract);
   const sources = frontmatter?.sources;
+  if (sources !== undefined && !Array.isArray(sources)) {
+    throw new Error(`来源列表格式无效：${notePath}`);
+  }
   if (Array.isArray(sources)) {
     for (const source of sources) {
-      if (source && typeof source === "object") add((source as { resource?: unknown }).resource);
+      if (source && typeof source === "object") {
+        const resource = (source as { resource?: unknown }).resource;
+        if (resource === undefined) throw new Error(`来源条目缺少 resource：${notePath}`);
+        add(resource);
+      }
       else add(source);
     }
   }
   for (const sourcePath of [...candidates]) {
     const source = app.vault.getAbstractFileByPath(sourcePath);
     if (!(source instanceof TFile)) continue;
-    const sourceFrontmatter = app.metadataCache.getFileCache(source)?.frontmatter;
+    const sourceFrontmatter = await currentFrontmatter(app, source);
     add(sourceFrontmatter?.text);
     add(sourceFrontmatter?.extract);
-    const markdown = await app.vault.cachedRead(source);
+    const markdown = await app.vault.read(source);
     for (const match of markdown.matchAll(/\]\(\/?(sources\/(?:text|extracts)\/[^)]+\.md)\)/gu)) {
       add(match[1]);
     }
   }
+  if (unresolved.size) {
+    const details = await Promise.all([...unresolved].map(async (path) => {
+      const onDisk = (await app.vault.adapter.stat(path))?.type === "file";
+      return `${path}（${onDisk ? "磁盘存在但 Obsidian 未识别" : "磁盘不存在"}）`;
+    }));
+    throw new Error(`以下声明的来源无法读取，已停止生成，避免遗漏资料：${details.join("；")}`);
+  }
   return [...candidates];
+}
+
+async function currentFrontmatter(app: App, file: TFile): Promise<Record<string, unknown>> {
+  const markdown = await app.vault.read(file);
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(markdown);
+  if (!match) return {};
+  const parsed: unknown = parseYaml(match[1] ?? "");
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`笔记 frontmatter 无法解析为字段：${file.path}`);
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export class OkfDashboardView {
@@ -476,7 +515,7 @@ export class OkfDashboardView {
   }
 
   private api(): LocalApi {
-    return new LocalApi(this.plugin.settings.baseUrl, this.plugin.settings.token);
+    return this.plugin.api();
   }
 
   private async render(preserveScroll = false): Promise<void> {
@@ -695,10 +734,15 @@ export class OkfDashboardView {
         card.createDiv({ cls: "okf-dashboard__muted", text: operation.stage_detail });
       }
       if (operation.error) card.createDiv({ text: operation.error });
-      const open = card.createEl("button", {
-        text: operation.status === "completed" ? "打开结果" : "打开目标笔记",
-      });
-      open.addEventListener("click", () => void this.openPath(operation.target));
+      if (
+        operation.status === "completed" ||
+        this.app.vault.getAbstractFileByPath(operation.target) instanceof TFile
+      ) {
+        const open = card.createEl("button", {
+          text: operation.status === "completed" ? "打开结果" : "打开已有目标笔记",
+        });
+        open.addEventListener("click", () => void this.openPath(operation.target));
+      }
       if (
         isSemanticOperationActive(operation.status) &&
         !["publishing", "indexing"].includes(operation.stage ?? "")
@@ -754,12 +798,9 @@ export class OkfDashboardView {
       for (const warning of conversion.warnings ?? []) {
         card.createDiv({ cls: "okf-dashboard__muted", text: warning });
       }
-      const target =
-        (hasPendingGeneration(conversion) ? undefined : conversion.outputs.routed_target) ??
-        conversion.outputs.source_text ??
-        conversion.outputs.source;
+      const target = conversion.outputs.source_text ?? conversion.outputs.source;
       if (target) {
-        const open = card.createEl("button", { text: "打开结果" });
+        const open = card.createEl("button", { text: "打开转换正文" });
         open.addEventListener("click", () => void this.openPath(target));
       }
       if (readyToPublish || hasPendingGeneration(conversion)) {
@@ -3261,11 +3302,9 @@ export class OkfDashboardView {
     card.createDiv({ cls: "okf-dashboard__muted", text: conversionStatusLabel(conversion) });
     if (conversion.error) card.createDiv({ text: conversion.error });
     const actions = card.createDiv({ cls: "okf-dashboard__actions" });
-    const target = hasPendingGeneration(conversion)
-      ? conversion.outputs.source_text ?? conversion.outputs.source
-      : conversion.outputs.routed_target ?? conversion.outputs.source_text ?? conversion.outputs.source;
+    const target = conversion.outputs.source_text ?? conversion.outputs.source;
     if (target) {
-      const open = actions.createEl("button", { text: "打开结果" });
+      const open = actions.createEl("button", { text: "打开转换正文" });
       open.addEventListener("click", () => void this.openPath(target));
     }
     if (hasPendingGeneration(conversion)) {

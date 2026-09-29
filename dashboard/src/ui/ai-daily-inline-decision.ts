@@ -39,20 +39,24 @@ export function feedDecisionFeedback(result: FeedDecisionResult): FeedDecisionFe
     case "learn-now":
       return {
         message: generationFeedback(result, "辅助学习材料"),
-        target: result.study_guide,
-        targetLabel: "打开学习笔记",
+        target: result.semantic_operation?.status === "completed"
+          ? result.study_guide : result.source_text ?? result.source,
+        targetLabel: result.semantic_operation?.status === "completed"
+          ? "打开学习笔记" : "打开已保存资料",
       };
     case "learn-later":
       return {
         message: "资料已保存到待学习列表；可在学习页生成辅助学习材料。",
-        target: result.study_guide ?? result.source_text ?? result.source,
-        targetLabel: result.study_guide ? "打开学习笔记" : "打开已保存资料",
+        target: result.source_text ?? result.source,
+        targetLabel: "打开已保存资料",
       };
     case "wiki-now":
       return {
         message: generationFeedback(result, "知识笔记"),
-        target: result.wiki,
-        targetLabel: "打开知识笔记",
+        target: result.semantic_operation?.status === "completed"
+          ? result.wiki : result.source_text ?? result.source,
+        targetLabel: result.semantic_operation?.status === "completed"
+          ? "打开知识笔记" : "打开已保存资料",
       };
     case "source-only":
       return {
