@@ -9,8 +9,8 @@ $files = [ordered]@{}
 foreach ($component in @('dashboard', 'claudian')) {
     $pluginId = if ($component -eq 'dashboard') { 'okf-workspace-dashboard' } else { 'okf-claudian' }
     foreach ($name in @('main.js', 'manifest.json', 'styles.css')) {
-        $source = if ($component -eq 'dashboard' -and $name -eq 'main.js') {
-            Join-Path $root 'dashboard\dist\main.js'
+        $source = if ($component -eq 'dashboard' -and $name -ne 'manifest.json') {
+            Join-Path $root "dashboard\dist\$name"
         } else {
             Join-Path $root "$component\$name"
         }

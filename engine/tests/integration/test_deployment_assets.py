@@ -121,13 +121,17 @@ def test_deployment_receipt_verifies_real_artifact_layout_and_rejects_mismatch(
     ):
         for name in ("main.js", "styles.css", "manifest.json"):
             build = repository / component / name
-            if component == "dashboard" and name == "main.js":
+            if component == "dashboard" and name != "manifest.json":
                 build = repository / component / "dist" / name
             build.parent.mkdir(parents=True, exist_ok=True)
             build.write_text(f"{component}/{name}\n", encoding="utf-8")
             installed = vault / ".obsidian/plugins" / plugin_id / name
             installed.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(build, installed)
+    (repository / "dashboard/styles.css").write_text("unbundled styles\n", encoding="utf-8")
+    (repository / "dashboard/dist/manifest.json").write_text(
+        "copied manifest decoy\n", encoding="utf-8"
+    )
     engine_file = repository / "engine/src/okf_workspace/__init__.py"
     engine_file.parent.mkdir(parents=True)
     engine_file.write_text('__version__ = "test"\n', encoding="utf-8")
@@ -163,13 +167,17 @@ def test_deployment_receipt_verifies_real_artifact_layout_and_rejects_mismatch(
     assert "okf_workspace/__init__.py" in receipt["engine_source_sha256"]
     assert receipt["tracked_worktree_dirty"] is False
 
-    (vault / ".obsidian/plugins/okf-workspace-dashboard/main.js").write_text(
-        "stale installed build\n", encoding="utf-8"
-    )
-    rejected = _run_powershell(command)
-    assert rejected.returncode != 0
-    assert "Installed artifact differs from build" in rejected.stderr
-    assert receipt_path.read_bytes() == receipt_bytes
+    for name in ("main.js", "manifest.json", "styles.css"):
+        installed = vault / ".obsidian/plugins/okf-workspace-dashboard" / name
+        original = installed.read_bytes()
+        installed.write_text("stale installed build\n", encoding="utf-8")
+        rejected = _run_powershell(command)
+        assert rejected.returncode != 0
+        assert f"Installed artifact differs from build: okf-workspace-dashboard/{name}" in (
+            rejected.stderr
+        )
+        assert receipt_path.read_bytes() == receipt_bytes
+        installed.write_bytes(original)
 
 
 @pytest.mark.parametrize("executable", _available_powershells())
