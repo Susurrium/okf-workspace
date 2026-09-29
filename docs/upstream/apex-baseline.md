@@ -23,8 +23,8 @@ upstream implementations and must not import OKF domain modules directly.
 The 3.6.5 subtree candidate passed Apex lint, TypeScript/esbuild production build, and all 44 Apex
 `test:*` scripts. The unified Dashboard checks and root `scripts/check.ps1` passed. P01–P08, including
 isolated Obsidian acceptance and upgrade/rollback comparison, are recorded in the update record and
-acceptance ledger. This promotes the source baseline for integration/release review; production cutover
-has not been performed.
+acceptance ledger. This promotes the source baseline for integration/release review. Production cutover
+completed on 2026-09-29; see the update record and acceptance ledger for installed-runtime evidence.
 
 The original 2.5.4 import and 3.6.0 rehearsal remain historical provenance. The 3.6.0 rehearsal is
 documented in `apex-update-exercise-2026-09-21.md`.
@@ -38,5 +38,8 @@ documented in `apex-update-exercise-2026-09-21.md`.
 4. Run the upstream build/scripts, the unified Dashboard checks, shared fixture tests, and the acceptance
    scenarios in `docs/APEX-OKF-ACCEPTANCE-LEDGER.md`.
 5. Exercise the critical flows in a disposable Obsidian Vault and update this file with the accepted commit.
+6. After acceptance or production cutover, update this baseline and the acceptance ledger with the resulting
+   status. Keep dated audit and test reports as historical evidence, and add a pointer to their later outcome
+   when their original status is no longer current.
 
 Passing a Git merge or TypeScript compilation alone is not an accepted upstream update.

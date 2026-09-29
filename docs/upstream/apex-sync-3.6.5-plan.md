@@ -1,7 +1,7 @@
 # Apex upstream sync candidate: 3.6.5
 
 Date: 2026-09-28
-Status: **P01–P08 acceptance passed in the isolated Vault; the integration was merged into `main` and release `v0.8.0` was published. Production Vault cutover has not been performed.**
+Status: **P01–P08 acceptance passed in the isolated Vault; the integration was merged into `main`, release `v0.8.0` was published, and production Vault cutover completed on 2026-09-29. See the production record in `../APEX-OKF-ACCEPTANCE-LEDGER.md`.**
 
 ## Baseline and upstream commits
 

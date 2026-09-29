@@ -3,9 +3,10 @@
 日期：2026-09-21  
 审计时结论状态：阻断当时版本发布，重新打开 M4–M9
 
-> **实施进展：** 八个正式 Apex Section 已在后续修复中改为挂载完整共享 Surface，P01–P06
-> 已通过，P07 已通过自动化但仍需有效 Engine token 的真实同步复验，P08 仍待最终全状态走查。
-> 详见 `APEX-OKF-FUNCTIONAL-PARITY-IMPLEMENTATION-2026-09-21.md`。
+> **历史状态说明：** 本审计记录的是 2026-09-21 发现的功能差距与当时的发布阻断结论。后续共享
+> Surface 修复已完成；P01–P08 和 M0–M9 的隔离验收结果，以及 2026-09-29 的生产切换证据，见
+> `APEX-OKF-FUNCTIONAL-PARITY-IMPLEMENTATION-2026-09-21.md` 和 `APEX-OKF-ACCEPTANCE-LEDGER.md`。
+> 下文保留原始差距与代码证据，不代表当前发布门槛仍未通过。
 
 ## 1. 结论
 

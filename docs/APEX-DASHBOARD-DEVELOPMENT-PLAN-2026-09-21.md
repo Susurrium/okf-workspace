@@ -1,8 +1,8 @@
 # Apex × OKF 统一 Dashboard 开发方案
 
-日期：2026-09-21。状态：待实施的详细开发计划。关联：[架构提案 v2](APEX-DASHBOARD-INTEGRATION-PROPOSAL-2026-09-21.md)。
+日期：2026-09-21。状态：M0–M9 隔离验收已完成；v0.8.0 已于 2026-09-29 切换到生产 Vault，并在 Obsidian 1.13.7 验证 Dashboard、Claudian 与 Engine 加载。本文件保留原始开发范围和验收方案；当前实施与生产证据见[验收台账](APEX-OKF-ACCEPTANCE-LEDGER.md)。关联：[架构提案 v2](APEX-DASHBOARD-INTEGRATION-PROPOSAL-2026-09-21.md)。
 
-本方案采用上一轮已检查的 Apex 2.5.4 / `dc7a7098689485f51a8b6195a691f8acc453b79a` 为分析基线；实施导入前再次核对选定 SHA。它描述目标实现与验收要求，不表示所列接口、目录或功能已经存在。
+本方案最初采用 Apex 2.5.4 / `dc7a7098689485f51a8b6195a691f8acc453b79a` 作为分析基线；后续导入前重新核对了选定 SHA。下文描述当时确定的目标实现与验收要求，完成状态以验收台账和上游基线中的记录为准。
 
 实施状态与逐项证据记录在 [验收台账](APEX-OKF-ACCEPTANCE-LEDGER.md)，锁定的上游来源和更新流程记录在 [Apex 上游基线](upstream/apex-baseline.md)。
 

@@ -8,6 +8,10 @@
 > also passes against a fresh pre-swap snapshot. P08 passed its reachable-surface inventory in the isolated
 > run. See `APEX-OKF-FUNCTIONAL-PARITY-IMPLEMENTATION-2026-09-21.md`.
 
+> **Production cutover update (2026-09-29):** release v0.8.0 is installed in the production Vault. The
+> backup, installer acceptance, live plugin load, Engine health, plugin identity, and scheduled-task checks
+> are recorded below. The isolated M0–M9 and P01–P08 evidence remains separate from production runtime evidence.
+
 This ledger is the implementation authority for the staged work described in
 `APEX-DASHBOARD-DEVELOPMENT-PLAN-2026-09-21.md`. A row is complete only when its named automated evidence
 passes and, where required, its disposable-Vault interaction has been recorded. Production user data is
@@ -161,6 +165,32 @@ profile was not used. The isolated Vault contained only synthetic notes.
   legacy cached sources and is not treated as six live sources.
 - P08's reachable-surface inventory passed in the isolated run. Together with the live sync and rollback
   comparison above, P07 and M9 now pass for this isolated acceptance Vault. No production Vault was used.
+
+## Production cutover (2026-09-29)
+
+- Release: `v0.8.0`, repository revision `7a9ea715a9169809d47d1b19204ea7d2756a4325`.
+- Before installation, copied the complete production Vault and separate Apex, unified Dashboard, and
+  Claudian plugin directories to `E:\ObsidianData\Backups\okf-pre-cutover-20260928T234914`. The Vault
+  snapshot contains 247 files / 36,326,700 bytes; source and snapshot SHA-256 values matched for every file.
+- `scripts/check.ps1`: passed (Engine 450, cross-component 8, Dashboard 246, Claudian 6,316 passed / 3
+  skipped, plus type, lint, architecture, and build checks). `scripts/build.ps1`: passed.
+- Dashboard `npm audit --omit=dev`: 0 production dependency vulnerabilities. `npm ci` reported two
+  moderate advisories in the development dependency tree; production install/build was unaffected.
+- `deploy/windows/install.ps1`: completed. It synchronized managed Vault resources and Skills, installed
+  Dashboard 1.16.0 and Claudian 2.3.6-okf.4, rebuilt the index (83 notes, 676 chunks), and passed the
+  installer acceptance suite (450 Python tests, synthetic Vault, performance checks, and one-session UAT).
+  `okf validate` passed with 82 Markdown files checked.
+- Obsidian 1.13.7 opened the production Vault. The unified Dashboard and Claudian loaded; the only active
+  Dashboard ID is `okf-workspace-dashboard`, while `apex-dashboard` remains disabled. The Dashboard view
+  rendered, and the local Engine `/health` endpoint returned HTTP 200.
+- The Apex native-data takeover receipt contains five `source-missing` entries. No existing Apex native JSON
+  files were present to copy. The maintenance and Feed Sync scheduled tasks are registered and Ready.
+- `scripts/record-deployment.ps1` verified installed Dashboard and Claudian artifact hashes. Its Dashboard
+  artifact path reads the built `dashboard/dist/` files; that script correction is included in commit
+  `cdb2a246`. The receipt's `tracked_worktree_dirty` value records the repository state when the receipt was
+  generated and does not describe the current checkout. The installed plugin hashes match the release build.
+- No production business notes were created or edited during runtime verification. Detailed Project/Today/
+  Calendar, Reading, two-pane, and rollback scenarios remain covered by the synthetic acceptance Vault above.
 
 ### M9 rollback snapshot procedure
 

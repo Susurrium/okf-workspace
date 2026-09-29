@@ -1,9 +1,9 @@
 # OKF Apex Workbench release and rollback
 
-> **Status update (2026-09-28):** gates P01–P08 and the isolated rollback comparison pass; see
-> `APEX-OKF-ACCEPTANCE-LEDGER.md`. This clears the functional-parity hold for integration/release review.
-> Production cutover has not been performed. Use the steps below only for an explicitly scheduled Vault
-> deployment, with its backup and target-path checks completed first.
+> **Status update (2026-09-29):** gates P01–P08 and the isolated rollback comparison passed, then release
+> v0.8.0 was installed and loaded in the production Vault. The backup, installer acceptance, and runtime
+> checks are recorded in `APEX-OKF-ACCEPTANCE-LEDGER.md`. The cutover steps below describe the completed
+> procedure and remain the rollback reference.
 
 ## Release identity
 
