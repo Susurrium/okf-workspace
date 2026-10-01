@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .models import ConversionMethod
+
 
 @dataclass(frozen=True, slots=True)
 class ImportSettings:
@@ -18,12 +20,20 @@ class ImportSettings:
     mineru_ssh_remote_port: int = 8000
     markitdown_url: str = "http://127.0.0.1:18010"
     markitdown_token_file: Path | None = None
+    default_conversion_method: ConversionMethod = ConversionMethod.MINERU_CLOUD
+    mineru_self_hosted_enabled: bool = False
 
     @classmethod
     def from_env(cls) -> ImportSettings:
         token = os.environ.get("OKF_MARKITDOWN_TOKEN_FILE", "").strip()
         mineru_token = os.environ.get("OKF_MINERU_TOKEN_FILE", "").strip()
         return cls(
+            default_conversion_method=ConversionMethod(os.environ.get(
+                "OKF_DEFAULT_CONVERSION_METHOD", "mineru-cloud",
+            ).strip()),
+            mineru_self_hosted_enabled=os.environ.get(
+                "OKF_MINERU_SELF_HOSTED_ENABLED", "false",
+            ).strip().casefold() in {"1", "true", "yes", "on"},
             mineru_token_file=Path(mineru_token).resolve() if mineru_token else None,
             mineru_model=os.environ.get("OKF_MINERU_MODEL", "vlm").strip(),
             mineru_url=os.environ.get(

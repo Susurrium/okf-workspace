@@ -25,7 +25,7 @@ from .adaptive_ocr import (
     visible_characters,
 )
 from .archive import normalize_zip
-from .clients import MAX_RESULT_BYTES, ParserClientError
+from .clients import MAX_RESULT_BYTES, ParserClientError, RetryableConversionError
 from .models import ParserExport, ParserName
 
 _UPLOAD_HOSTS = {"mineru.oss-cn-shanghai.aliyuncs.com", "oss-mineru.openxlab.org.cn"}
@@ -36,7 +36,7 @@ _MAX_OCR_PAGES = 40
 _MAX_IMAGES_PER_PAGE = 4
 
 
-class RetryableMinerUError(ParserClientError):
+class RetryableMinerUError(RetryableConversionError):
     """The cloud task can be queried or submitted again after a delay."""
 
 

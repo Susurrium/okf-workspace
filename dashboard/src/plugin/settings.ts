@@ -22,7 +22,6 @@ export interface OkfBrainSettings {
   pythonExecutable: string;
   deploymentConfig: string;
   serviceLogDirectory: string;
-  documentParserPolicy: "mineru-cloud";
   dashboardUiState: DashboardUiState;
   /** Compatibility mirror for settings written before Dashboard UI state v1. */
   feedReadingPositions: Partial<Record<"ai-daily" | "treehole", FeedReadingPosition>>;
@@ -38,7 +37,6 @@ export const DEFAULT_SETTINGS: OkfBrainSettings = {
   pythonExecutable: "",
   deploymentConfig: "",
   serviceLogDirectory: "",
-  documentParserPolicy: "mineru-cloud",
   dashboardUiState: createDefaultDashboardUiState(),
   feedReadingPositions: {},
   apex: normalizeApexSettings(undefined),

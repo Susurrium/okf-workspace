@@ -1,11 +1,120 @@
 import type { App } from "obsidian";
 import { describe, expect, it, vi } from "vitest";
 
-import { DocumentImportModal } from "../src/plugin/document-import-modal.js";
-import type { DocumentImportOptions, DocumentImportResult } from "../src/imports/types.js";
+import { DocumentConversionResultModal, DocumentImportModal, DocumentReconversionModal } from "../src/plugin/document-import-modal.js";
+import type { ConverterCatalogue, DocumentImportOptions, DocumentImportResult } from "../src/imports/types.js";
 import { TestElement } from "./obsidian-runtime.js";
 
+const catalogue: ConverterCatalogue = {
+  default_method: "mineru-cloud",
+  methods: ["mineru-cloud", "markitdown-service", "mineru-self-hosted"].map((id) => ({
+    id: id as ConverterCatalogue["default_method"], label: id,
+    parser: id === "markitdown-service" ? "markitdown" : "mineru",
+    enabled: true, configured: id !== "mineru-self-hosted", status: "configured",
+    location: "fixture", reason: "", limitations: "fixture capability limits",
+    extensions: id === "markitdown-service" ? [".pdf", ".docx"] : [".pdf", ".docx", ".png"],
+    max_upload_bytes: 64 * 1024 * 1024,
+    capabilities: { ocr: false, page_map: false, pdf_images: false, office_images: true },
+  })),
+};
+
 describe("shared document import window", () => {
+  it("allows configured alternatives when the default cloud credentials are missing", async () => {
+    const methods = catalogue.methods.map((entry) => ({ ...entry,
+      configured: entry.id === "markitdown-service", reason: "fixture configuration hint" }));
+    const importFile = vi.fn(async (_file: File, _options: DocumentImportOptions): Promise<DocumentImportResult> => ({
+      conversion_id: "alternative", status: "queued", parser: "markitdown",
+    }));
+    const modal = new DocumentImportModal({} as App,
+      [{ file: new File(["pdf"], "manual.pdf"), relativePath: "manual.pdf" }],
+      { course: "course" }, "learning", importFile, async () => ({ ...catalogue, methods }));
+    modal.open();
+    const content = modal.contentEl as unknown as TestElement;
+    await vi.waitFor(() => expect(content.descendants().some((item) => item.textContent.includes("fixture configuration hint"))).toBe(true));
+    const submit = content.descendants().find((item) => item.textContent === "开始导入")!;
+    expect(submit.disabled).toBe(true);
+    const method = content.descendants().filter((item) => item.tagName === "select")[1]!;
+    method.value = "markitdown-service";
+    method.dispatch("change");
+    expect(submit.disabled).toBe(false);
+    submit.click();
+    await vi.waitFor(() => expect(importFile).toHaveBeenCalledOnce());
+    expect(importFile.mock.calls[0]![1].method).toBe("markitdown-service");
+  });
+
+  it("keeps unsupported and unconfigured choices visible in the re-conversion window", async () => {
+    const convert = vi.fn(async () => {});
+    const modal = new DocumentReconversionModal({} as App, "picture.png", async () => catalogue, convert);
+    modal.open();
+    const content = modal.contentEl as unknown as TestElement;
+    await vi.waitFor(() => expect(content.descendants().filter((item) => item.tagName === "button")).toHaveLength(3));
+    const buttons = content.descendants().filter((item) => item.tagName === "button");
+    expect(buttons.map((item) => item.disabled)).toEqual([false, true, true]);
+    buttons[0]!.click();
+    await vi.waitFor(() => expect(convert).toHaveBeenCalledWith("mineru-cloud"));
+  });
+
+  it("shows re-conversion text and QC warnings in a read-only window", () => {
+    const modal = new DocumentConversionResultModal({} as App, {
+      method: "markitdown-service", markdown: "# Preserved new result",
+      asset_paths: [], qc: { passed: true, warnings: ["PDF 图片完整性未验证"], errors: [] },
+    });
+    modal.open();
+    const content = modal.contentEl as unknown as TestElement;
+    expect(content.descendants().some((item) => item.textContent === "PDF 图片完整性未验证")).toBe(true);
+    const text = content.descendants().find((item) => item.tagName === "textarea")!;
+    expect(text.value).toBe("# Preserved new result");
+    expect(text.attributes.get("readonly")).toBe("");
+  });
+
+  it("preserves the selected conversion method when strict checks change", async () => {
+    const importFile = vi.fn(async (_file: File, _options: DocumentImportOptions): Promise<DocumentImportResult> => ({
+      conversion_id: "selected", status: "queued", parser: "markitdown",
+    }));
+    const modal = new DocumentImportModal({} as App,
+      [{ file: new File(["pdf"], "manual.pdf"), relativePath: "manual.pdf" }],
+      { course: "course" }, "learning", importFile, async () => catalogue);
+    modal.open();
+    const content = modal.contentEl as unknown as TestElement;
+    await vi.waitFor(() => expect(content.descendants().some((item) => item.textContent.includes("fixture capability limits"))).toBe(true));
+    const selects = content.descendants().filter((item) => item.tagName === "select");
+    selects[1]!.value = "markitdown-service";
+    selects[1]!.dispatch("change");
+    selects[2]!.value = "high";
+    selects[2]!.dispatch("change");
+    content.descendants().find((item) => item.textContent === "开始导入")!.click();
+    await vi.waitFor(() => expect(importFile).toHaveBeenCalledOnce());
+    expect(importFile.mock.calls[0]).toEqual([
+      expect.any(File), expect.objectContaining({ method: "markitdown-service", quality: "high", parser: "auto" }),
+    ]);
+  });
+
+  it("requires an explicit choice before skipping files unsupported by a method", async () => {
+    const importFile = vi.fn(async (_file: File, _options: DocumentImportOptions): Promise<DocumentImportResult> => ({
+      conversion_id: "mixed", status: "queued", parser: "markitdown",
+    }));
+    const modal = new DocumentImportModal({} as App, [
+      { file: new File(["pdf"], "document.pdf"), relativePath: "document.pdf" },
+      { file: new File(["image"], "picture.png"), relativePath: "picture.png" },
+    ], { course: "course" }, "learning", importFile, async () => catalogue);
+    modal.open();
+    const content = modal.contentEl as unknown as TestElement;
+    await vi.waitFor(() => expect(content.descendants().some((item) => item.textContent.includes("fixture capability limits"))).toBe(true));
+    const method = content.descendants().filter((item) => item.tagName === "select")[1]!;
+    method.value = "markitdown-service";
+    method.dispatch("change");
+    const submit = content.descendants().find((item) => item.textContent === "开始导入")!;
+    expect(submit.disabled).toBe(true);
+    expect(content.descendants().some((item) => item.textContent.includes("不支持 .png"))).toBe(true);
+    const skip = content.descendants().find((item) => item.tagName === "label"
+      && item.children.some((child) => child.textContent.startsWith("仅提交支持的文件")))!.children[0]!;
+    (skip as unknown as HTMLInputElement).checked = true;
+    skip.dispatch("change");
+    expect(submit.disabled).toBe(false);
+    submit.click();
+    await vi.waitFor(() => expect(importFile).toHaveBeenCalledOnce());
+    expect(importFile.mock.calls[0]![0].name).toBe("document.pdf");
+  });
   it("requests generation when the user selects Wiki", async () => {
     const importFile = vi.fn(async (_file: File, _options: DocumentImportOptions): Promise<DocumentImportResult> => ({
       conversion_id: "wiki", status: "queued", parser: "markitdown",
@@ -43,8 +152,8 @@ describe("shared document import window", () => {
 
     await vi.waitFor(() => expect(importFile).toHaveBeenCalledTimes(2));
     expect(importFile.mock.calls.map(([file, options]) => [file.name, options.course, options.intent, options.parser])).toEqual([
-      ["one.pdf", "algebra", "learn", "mineru"],
-      ["two.docx", "algebra", "learn", "mineru"],
+      ["one.pdf", "algebra", "learn", "auto"],
+      ["two.docx", "algebra", "learn", "auto"],
     ]);
   });
 

@@ -88,10 +88,12 @@ Templater、QuickAdd、Dataview 等推荐社区插件如果已被用户禁用，
 
 ## 4. MinerU 与 MarkItDown
 
-- 所有默认文档导入直接使用 MarkItDown，不自动启动或探测 MinerU。
-- 质量检查级别与解析器选择分开；历史隐式 `high` 请求也默认使用 MarkItDown。
-- 仅显式指定 `parser=mineru` 的高级调用保留 MinerU 能力；当前暂停其专项维护。
+- 默认文档导入使用 MinerU 云端；导入窗口、API 和 CLI 可选择 MarkItDown 或显式启用的自建 MinerU。
+- 质量检查级别与转换方式分开；`high` 仅开启严格检查图片，不切换服务。
+- 读取转换方式目录与 System 状态只检查配置，不探测或启动转换服务；自建 SSH 生命周期仅在执行时启动。
 - 转换器只返回 Markdown bundle；Source/Source Text 发布由 Engine 统一完成。
+
+默认方式、凭据、自建启用参数与重新转换流程见 [文档转换方式](DOCUMENT-CONVERSION.md)。
 
 MarkItDown 源码位于 `services/markitdown/`，服务器部署资产位于
 `deploy/markitdown/`。生成可传输部署包：
@@ -100,7 +102,7 @@ MarkItDown 源码位于 `services/markitdown/`，服务器部署资产位于
 .\scripts\package-markitdown-deployment.ps1
 ```
 
-MinerU 是共享外部服务；本仓库只保存 `integrations/mineru/` 中的客户端约定和部署运维
+自建 MinerU 是可选的外部服务；本仓库只保存 `integrations/mineru/` 中的客户端约定和部署运维
 资产，不复制服务运行数据。
 
 ## 5. 开发期插件快速部署

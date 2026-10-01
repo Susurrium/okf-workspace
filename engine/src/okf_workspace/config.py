@@ -79,6 +79,8 @@ def apply_deployment_config(path: Path) -> BrainPaths:
         "OKF_BRAIN_ORIGINALS": config.get("originals"),
         "OKF_BRAIN_STATE": config.get("state"),
         "OKF_MINERU_URL": config.get("mineru_url"),
+        "OKF_DEFAULT_CONVERSION_METHOD": config.get("default_conversion_method"),
+        "OKF_MINERU_SELF_HOSTED_ENABLED": config.get("mineru_self_hosted_enabled"),
         "OKF_MINERU_TOKEN_FILE": config.get("mineru_token_file"),
         "OKF_MINERU_MODEL": config.get("mineru_model"),
         "OKF_MINERU_SSH_MANAGED": config.get("mineru_ssh_managed"),
@@ -99,6 +101,8 @@ def apply_deployment_config(path: Path) -> BrainPaths:
         "OKF_SEMANTIC_RETRIEVAL_TIMEOUT_SECONDS": config.get("semantic_retrieval_timeout_seconds"),
     }
     for name, value in variables.items():
-        if value is not None and str(value).strip():
+        if value is not None and (
+            str(value).strip() or name.startswith(("OKF_MINERU_", "OKF_MARKITDOWN_"))
+        ):
             os.environ[name] = str(value)
     return BrainPaths.from_env()

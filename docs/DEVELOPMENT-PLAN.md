@@ -19,7 +19,7 @@ AI 共读写的语义权威，Dashboard 是人类工作台，Claudian 是 Obsidi
 5. **Intake**：Capture、Web Clipper、文件上传、转换和 Source 发布。
 
 工程上只有三个应用构建单元：`engine/`、`dashboard/`、`claudian/`。Feeds 与 Intake
-是 Engine 内部强边界模块；文档转换使用 MinerU 官方云 API。这样既保留
+是 Engine 内部强边界模块；文档转换默认使用 MinerU 官方云 API，允许选择 MarkItDown 与配置好的自建 MinerU。这样既保留
 用户能够理解的功能边界，又避免把同一 Vault 事务拆成难以维护的微服务。
 
 Engine 内的依赖方向固定为：
@@ -49,8 +49,8 @@ okf-workspace/
 │  └─ workspace/               # Contracts、模板、Skills、Policies、Views、Vault seed
 ├─ dashboard/                  # 独立 Obsidian Dashboard 构建
 ├─ claudian/                   # Claudian fork 与 OKF adapter
-├─ services/markitdown/        # 停用的旧服务资产
-├─ integrations/mineru/        # 停用的自建 MinerU 部署资产
+├─ services/markitdown/        # 可选的 MarkItDown 转换服务
+├─ integrations/mineru/        # 可选的自建 MinerU 部署资产
 ├─ deploy/                     # 主机与服务器部署
 ├─ scripts/                    # 根级 bootstrap/check/build/deploy
 ├─ tests/e2e/                  # 跨组件契约与完整用户流程
@@ -86,7 +86,7 @@ Dashboard 与 Claudian 各自保留 lockfile 和发布节奏；统一 Git 仓库
 ### 阶段 C：Intake 与转换
 
 - Capture、Web Clipper、文件上传统一进入 Intake，但保留真实渠道字段。
-- 默认使用 MinerU 官方云 API；质量档位只控制导入检查，不切换解析服务。
+- 默认使用 MinerU 官方云 API；可明确选择 MarkItDown 或启用的自建 MinerU；质量档位独立控制导入检查。
 - 修复 parser 切换重试 ID、原始文件名、上传超时/取消、转换完成通知与目标跳转。
 - 识别转换结果中的无效图片占位；快速转换丢图时明确降级质量而非静默通过。
 - 导入前选择已有 Course/Project 或不关联；关系传给后续目标而不污染 Source 身份。

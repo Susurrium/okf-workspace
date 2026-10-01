@@ -152,7 +152,7 @@ def test_system_status_requires_cloud_token_file(
     items = {item["item_id"]: item for item in cast(list[dict[str, object]], status["items"])}
 
     assert items["mineru"]["status"] == "not-configured"
-    assert items["mineru"]["action"] == "配置本机 MinerU token 文件"
+    assert items["mineru"]["action"] == "请配置 MinerU token 文件"
 
 
 def test_system_status_refresh_does_not_submit_cloud_tasks(

@@ -51,6 +51,7 @@ import { importFilesFromDrop, type ImportFile } from "../imports/drop.js";
 import type {
   DocumentImportOptions,
 } from "../imports/types.js";
+import { methodLabels } from "../imports/types.js";
 import { renderFeedDecisionFlow } from "../ui/feed-decision-flow.js";
 import { DashboardSettingTab } from "../../apex/src/settings.js";
 import { DashboardView, DASHBOARD_VIEW_TYPE } from "../../apex/src/view.js";
@@ -80,7 +81,7 @@ import { feedLivePreviewExtension } from "./live-preview.js";
 import { LocalServiceManager } from "./local-service.js";
 import { ChoiceModal, FieldsPromptModal, ProjectLogModal, TextPromptModal } from "./prompts.js";
 import { QuickCaptureModal } from "./quick-capture-modal.js";
-import { DocumentImportModal, type ImportOrigin } from "./document-import-modal.js";
+import { DocumentConversionResultModal, DocumentImportModal, DocumentReconversionModal, type ImportOrigin } from "./document-import-modal.js";
 import { hasPendingGeneration } from "../domain/inbox-work-queue.js";
 import {
   FeedSubscriptionAddModal,
@@ -312,7 +313,6 @@ export default class OkfBrainPlugin extends Plugin {
       pythonExecutable: this.settings.pythonExecutable,
       deploymentConfig: this.settings.deploymentConfig,
       serviceLogDirectory: this.settings.serviceLogDirectory,
-      documentParserPolicy: this.settings.documentParserPolicy,
       dashboardUiState,
       feedReadingPositions,
       apex: this.settings.apex,
@@ -1635,6 +1635,7 @@ export default class OkfBrainPlugin extends Plugin {
       "queued",
       "converting",
       "waiting-for-mineru",
+      "waiting-for-parser",
     ]);
     const hasActiveCached = [...this.conversionRecords.values()]
       .some((record) => activeStatuses.has(record.status) || hasPendingGeneration(record));
@@ -1691,7 +1692,12 @@ export default class OkfBrainPlugin extends Plugin {
     const notice = new Notice("", 30_000);
     notice.noticeEl.empty();
     notice.noticeEl.createEl("strong", { text: "文档转换完成" });
-    notice.noticeEl.createDiv({ text: `${record.source_filename} · ${record.parser}` });
+    notice.noticeEl.createDiv({ text: `${record.source_filename} · ${record.method ? methodLabels[record.method] : record.parser}` });
+    for (const warning of record.warnings ?? []) notice.noticeEl.createDiv({ text: warning });
+    notice.noticeEl.createEl("button", { text: "重新转换…" }).addEventListener("click", () => {
+      notice.hide();
+      this.promptDocumentReconversion(record);
+    });
     if (target) {
       const open = notice.noticeEl.createEl("button", { text: "打开转换结果" });
       open.addEventListener("click", () => {
@@ -1867,12 +1873,43 @@ export default class OkfBrainPlugin extends Plugin {
         serviceReady ??= this.ensureLocalServiceAvailable();
         await serviceReady;
         const result = await api.importDocument(file, options);
+        if (result.reused_existing) new Notice("已复用已有导入；如需更换转换正文，请使用重新转换。");
         this.watchDocumentConversion(result.conversion_id);
         if (result.semantic_operation) this.watchSemanticOperation(result.semantic_operation.operation_id);
         this.refreshDashboardViews();
         return result;
       },
+      async () => {
+        serviceReady ??= this.ensureLocalServiceAvailable();
+        await serviceReady;
+        return this.api().converters();
+      },
     ).open();
+  }
+
+  public promptDocumentReconversion(record: ConversionRecord): void {
+    new DocumentReconversionModal(
+      this.app, record.source_filename,
+      async () => {
+        await this.ensureLocalServiceAvailable();
+        return this.api().converters();
+      },
+      async (method) => {
+        const retried = await this.api().retryConversion(record.conversion_id, method);
+        this.watchDocumentConversion(retried.conversion_id);
+        this.refreshDashboardViews();
+        new Notice("已按指定方式重新排队；沿用原件与资料身份");
+      },
+    ).open();
+  }
+
+  public async showDocumentConversionResult(record: ConversionRecord): Promise<void> {
+    try {
+      const result = await this.api().conversionResult(record.conversion_id);
+      new DocumentConversionResultModal(this.app, result).open();
+    } catch (error) {
+      new Notice(error instanceof Error ? error.message : String(error));
+    }
   }
 
   private registerReadingViewControls(): void {

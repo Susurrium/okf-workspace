@@ -8,6 +8,15 @@ param(
     [int]$ApiPort = 8765,
     [string]$MinerUTokenFile = '',
     [ValidateSet('vlm', 'pipeline')][string]$MinerUModel = 'vlm',
+    [ValidateSet('mineru-cloud', 'markitdown-service', 'mineru-self-hosted')]
+    [string]$DefaultConversionMethod = 'mineru-cloud',
+    [string]$MarkItDownUrl = 'http://127.0.0.1:18010',
+    [string]$MarkItDownTokenFile = '',
+    [bool]$MinerUSelfHostedEnabled = $false,
+    [string]$MinerUUrl = 'http://127.0.0.1:18000',
+    [bool]$MinerUSshManaged = $true,
+    [string]$MinerUSshHost = 'bjmu-inner',
+    [int]$MinerUSshRemotePort = 8000,
     [ValidateSet('codex', 'provider')][string]$AIMode = 'codex',
     [string]$CodexCommand = '',
     [string]$CodexModel = '',
@@ -60,6 +69,22 @@ if (Test-Path -LiteralPath $configPath -PathType Leaf) {
     }
     if (-not $PSBoundParameters.ContainsKey('MinerUModel') -and $existingConfig.PSObject.Properties.Name -contains 'mineru_model') {
         $MinerUModel = [string]$existingConfig.mineru_model
+    }
+    $conversionParameters = @{
+        DefaultConversionMethod = 'default_conversion_method'
+        MarkItDownUrl = 'markitdown_url'
+        MarkItDownTokenFile = 'markitdown_token_file'
+        MinerUSelfHostedEnabled = 'mineru_self_hosted_enabled'
+        MinerUUrl = 'mineru_url'
+        MinerUSshManaged = 'mineru_ssh_managed'
+        MinerUSshHost = 'mineru_ssh_host'
+        MinerUSshRemotePort = 'mineru_ssh_remote_port'
+    }
+    foreach ($parameter in $conversionParameters.Keys) {
+        $field = $conversionParameters[$parameter]
+        if (-not $PSBoundParameters.ContainsKey($parameter) -and $existingConfig.PSObject.Properties.Name -contains $field) {
+            Set-Variable -Name $parameter -Value $existingConfig.$field
+        }
     }
     if (-not $PSBoundParameters.ContainsKey('BackupRepository') -and
         $existingConfig.PSObject.Properties.Name -contains 'backup_repository' -and
@@ -223,6 +248,14 @@ $config = [ordered]@{
     api_port = $ApiPort
     mineru_token_file = $(if ($MinerUTokenFile) { Resolve-OkfPath $MinerUTokenFile } else { '' })
     mineru_model = $MinerUModel
+    default_conversion_method = $DefaultConversionMethod
+    markitdown_url = $MarkItDownUrl.Trim()
+    markitdown_token_file = $(if ($MarkItDownTokenFile) { Resolve-OkfPath $MarkItDownTokenFile } else { '' })
+    mineru_self_hosted_enabled = $MinerUSelfHostedEnabled
+    mineru_url = $MinerUUrl.Trim()
+    mineru_ssh_managed = $MinerUSshManaged
+    mineru_ssh_host = $MinerUSshHost.Trim()
+    mineru_ssh_remote_port = $MinerUSshRemotePort
     ai_mode = $AIMode
     codex_command = $(if ($CodexCommand) { Resolve-OkfPath $CodexCommand } else { '' })
     codex_model = $CodexModel.Trim()

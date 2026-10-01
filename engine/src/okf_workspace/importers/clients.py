@@ -20,8 +20,25 @@ MARKITDOWN_ASSET_PROFILE = "fallback-assets-v2"
 MARKITDOWN_LEGACY_PROFILE = "fallback-text-v1"
 
 
+def _conversion_identity(digest: str, working: Path) -> str:
+    """Explicit re-conversion must not reuse a vendor's previous successful task."""
+    status = working.parent / "status.json"
+    if not status.is_file():
+        return digest
+    loaded = cast(object, json.loads(status.read_text(encoding="utf-8")))
+    revision = (
+        cast(Mapping[str, object], loaded).get("generation_revision")
+        if isinstance(loaded, dict) else None
+    )
+    return hashlib.sha256(f"{digest}:{revision}".encode()).hexdigest() if revision else digest
+
+
 class ParserClientError(RuntimeError):
     """A parser was unreachable, failed, or violated its API contract."""
+
+
+class RetryableConversionError(ParserClientError):
+    """A conversion can resume or be submitted again after a delay."""
 
 
 class ParserClient(Protocol):
@@ -59,7 +76,11 @@ def _required_string(
 
 def _error(response: httpx.Response, operation: str) -> ParserClientError:
     detail = response.text.strip()[:1000] or "<empty response>"
-    return ParserClientError(f"{operation} failed with HTTP {response.status_code}: {detail}")
+    error_type = (
+        RetryableConversionError if response.status_code == 429 or response.status_code >= 500
+        else ParserClientError
+    )
+    return error_type(f"{operation} failed with HTTP {response.status_code}: {detail}")
 
 
 def _write_result(response: httpx.Response, target: Path) -> None:
@@ -154,7 +175,7 @@ class _AsyncClient:
                     f"{self.parser.value} returned unknown task status {status!r}"
                 )
             if time.monotonic() >= deadline:
-                raise ParserClientError(
+                raise RetryableConversionError(
                     f"{self.parser.value} conversion exceeded {timeout_seconds} seconds"
                 )
             time.sleep(self.poll_seconds)
@@ -216,7 +237,11 @@ class MinerUClient(_AsyncClient):
                 self._url("/tasks"),
                 data=form,
                 files={"files": (source.name, handle, content_type)},
-                headers={"Idempotency-Key": f"okf-mineru-{digest}"},
+                headers={
+                    "Idempotency-Key": (
+                        f"okf-mineru-{_conversion_identity(digest, working_directory)}"
+                    ),
+                },
             )
         if response.status_code not in {200, 202}:
             raise _error(response, "submitting MinerU")
@@ -288,7 +313,10 @@ class MarkItDownClient(_AsyncClient):
         media_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
         headers = {
             **self.request_headers,
-            "Idempotency-Key": f"okf-markitdown-{profile}-{build_key}-{digest}",
+            "Idempotency-Key": (
+                f"okf-markitdown-{profile}-{build_key}-"
+                f"{_conversion_identity(digest, working_directory)}"
+            ),
             "X-Source-SHA256": digest,
             "X-Filename": source.name,
             "X-MarkItDown-Profile": profile,

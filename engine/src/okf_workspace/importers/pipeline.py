@@ -12,13 +12,17 @@ from pathlib import Path
 from typing import Protocol, cast
 from urllib.parse import quote
 
+import httpx
+
 from okf_workspace.git import GitCheckpointError, checkpointing_enabled, create_checkpoint
 
-from .clients import MarkItDownClient, ParserClient
+from .clients import MarkItDownClient, MinerUClient, ParserClient, RetryableConversionError
 from .cloud_mineru import CloudMinerUClient
 from .config import ImportSettings
 from .export import load_export_contract, write_export_contract
+from .managed_mineru import managed_mineru_client
 from .models import (
+    ConversionMethod,
     ConversionStatus,
     ImportIntent,
     ImportQuality,
@@ -33,7 +37,8 @@ from .models import (
 from .originals import OriginalStore
 from .publish import publish_import
 from .qc import inspect_export
-from .routing import choose_parser
+from .routing import choose_method
+from .ssh_transport import SSHTransportError
 from .state import ConversionStore
 from .word import OfficeComConverter
 
@@ -76,6 +81,7 @@ class DocumentImporter:
         state: Path,
         settings: ImportSettings | None = None,
         clients: Mapping[ParserName, ParserClient] | None = None,
+        method_clients: Mapping[ConversionMethod, ParserClient] | None = None,
         doc_converter: LegacyDocConverter | None = None,
     ) -> None:
         self.vault = vault.resolve()
@@ -84,16 +90,19 @@ class DocumentImporter:
         self.store = ConversionStore(self.state_root)
         self.settings = settings or ImportSettings.from_env()
         self.clients = dict(clients or {})
+        self.method_clients = dict(method_clients or {})
         self.doc_converter = doc_converter or OfficeComConverter()
 
-    def _default_client(self, parser: ParserName) -> ParserClient:
-        if parser is ParserName.MINERU:
+    def _default_client(self, method: ConversionMethod) -> ParserClient:
+        if method is ConversionMethod.MINERU_CLOUD:
             if self.settings.mineru_token_file is None:
                 raise RuntimeError("MinerU cloud token file is not configured")
             return CloudMinerUClient(
                 self.settings.mineru_token_file,
                 model=self.settings.mineru_model,
             )
+        if method is ConversionMethod.MINERU_SELF_HOSTED:
+            return MinerUClient(self.settings.mineru_url)
         return MarkItDownClient(
             self.settings.markitdown_url,
             self.settings.markitdown_token(),
@@ -101,14 +110,38 @@ class DocumentImporter:
 
     def _convert(
         self,
-        parser: ParserName,
+        method: ConversionMethod,
         source: Path,
         working: Path,
     ) -> ParserExport:
-        injected = self.clients.get(parser)
-        client = injected or self._default_client(parser)
+        injected = self.method_clients.get(method) or (
+            self.clients.get(method.parser) if method is not ConversionMethod.MINERU_SELF_HOSTED
+            else None
+        )
+        if injected is None and method is ConversionMethod.MINERU_SELF_HOSTED:
+            if not self.settings.mineru_self_hosted_enabled:
+                raise ValueError("请启用并配置自建 MinerU 服务")
+            if self.settings.mineru_ssh_managed:
+                try:
+                    with managed_mineru_client(self.settings) as managed:
+                        export = managed.convert(source, working)
+                        if export.parser is not method.parser:
+                            raise ValueError(
+                                "conversion result parser does not match selected method"
+                            )
+                        return replace(export, method=method)
+                except (httpx.TransportError, SSHTransportError) as exc:
+                    raise RetryableConversionError(
+                        f"{method.value} connection is unavailable"
+                    ) from exc
+        client = injected or self._default_client(method)
         try:
-            return client.convert(source, working)
+            export = client.convert(source, working)
+            if export.parser is not method.parser:
+                raise ValueError("conversion result parser does not match selected method")
+            return replace(export, method=method)
+        except httpx.TransportError as exc:
+            raise RetryableConversionError(f"{method.value} connection is unavailable") from exc
         finally:
             close = getattr(client, "close", None)
             if injected is None and callable(close):
@@ -117,18 +150,19 @@ class DocumentImporter:
     def _convert_recorded(
         self,
         conversion_id: str,
-        parser: ParserName,
+        method: ConversionMethod,
         source: Path,
         working: Path,
     ) -> ParserExport:
         started_at = datetime.now(UTC).isoformat(timespec="seconds")
         started = time.perf_counter()
         try:
-            export = self._convert(parser, source, working)
+            export = self._convert(method, source, working)
         except Exception as exc:
             self.store.record_parser_attempt(
                 conversion_id,
-                parser=parser,
+                parser=method.parser,
+                method=method,
                 status="failed",
                 started_at=started_at,
                 duration_ms=round((time.perf_counter() - started) * 1000),
@@ -137,7 +171,8 @@ class DocumentImporter:
             raise
         self.store.record_parser_attempt(
             conversion_id,
-            parser=parser,
+            parser=method.parser,
+            method=method,
             status="completed",
             started_at=started_at,
             duration_ms=round((time.perf_counter() - started) * 1000),
@@ -165,6 +200,7 @@ class DocumentImporter:
             parser=export.parser,
             outputs={"export": str(export_directory)},
             stages={"conversion": "completed", "quality": "passed", "routing": "pending"},
+            warnings=qc.warnings,
         )
         checkpoints_enabled = checkpointing_enabled(self.vault)
         if checkpoints_enabled:
@@ -183,6 +219,10 @@ class DocumentImporter:
         source, source_text, routed_target = (
             published.source, published.source_text, published.routed_target,
         )
+        if published.reused_existing:
+            checkpoint_warnings.append(
+                "已沿用已有转换正文；如需采用本次转换结果，请使用指定方式重新转换。"
+            )
         checkpoint_status = "disabled"
         if checkpoints_enabled:
             checkpoint_status = "completed"
@@ -216,7 +256,7 @@ class DocumentImporter:
                     request.intent, request.generate,
                 ) else "not-requested",
             },
-            warnings=checkpoint_warnings,
+            warnings=(*qc.warnings, *checkpoint_warnings),
         )
         return ImportResult(
             conversion_id=identifier,
@@ -228,22 +268,44 @@ class DocumentImporter:
             source_text=source_text,
             routed_target=routed_target,
             qc=qc,
+            method=export.method,
         )
 
     def import_document(
         self, request: ImportRequest, *, replace_existing: bool = False,
         expected_text_sha256: str | None = None,
     ) -> ImportResult:
+        selected_method = self.resolve_method(request)
         original = self.original_store.ingest(
             request.source,
             filename=request.source_filename,
         )
-        selected_parser = choose_parser(
-            request.source,
-            request.quality,
-            request.parser,
-        )
+        selected_parser = selected_method.parser
+        request = replace(request, method=selected_method)
         identifier = conversion_id(original.sha256, request, selected_parser)
+        with self.store.execution(identifier):
+            return self._import_original(
+                request, original, identifier,
+                replace_existing=replace_existing, expected_text_sha256=expected_text_sha256,
+            )
+
+    def resolve_method(self, request: ImportRequest) -> ConversionMethod:
+        selected = choose_method(
+            request.source, request.method, request.parser,
+            default=self.settings.default_conversion_method,
+        )
+        if selected is ConversionMethod.MINERU_SELF_HOSTED and not (
+            self.settings.mineru_self_hosted_enabled or selected in self.method_clients
+        ):
+            raise ValueError("请启用并配置自建 MinerU 服务")
+        return selected
+
+    def _import_original(
+        self, request: ImportRequest, original: OriginalRecord, identifier: str, *,
+        replace_existing: bool, expected_text_sha256: str | None,
+    ) -> ImportResult:
+        selected_method = cast(ConversionMethod, request.method)
+        selected_parser = selected_method.parser
         conversion_root = self.store.directory(identifier)
         working = conversion_root / "working"
         export_directory = conversion_root / "export"
@@ -256,6 +318,7 @@ class DocumentImporter:
             stages={"upload": "completed", "conversion": "queued"},
         )
         export: ParserExport | None = None
+        qc: QCReport | None = None
         try:
             prepared = original.stored_path
             if original.extension == ".doc":
@@ -274,9 +337,11 @@ class DocumentImporter:
                 request=request,
                 original=original,
                 parser=selected_parser,
-                stages={"conversion": "running"},
+                stages={
+                    "conversion": "running", "quality": "not-started", "routing": "not-started",
+                },
             )
-            export = self._convert_recorded(identifier, selected_parser, prepared, working)
+            export = self._convert_recorded(identifier, selected_method, prepared, working)
             qc = inspect_export(
                 export,
                 strict_assets=request.quality is ImportQuality.HIGH,
@@ -311,28 +376,40 @@ class DocumentImporter:
                 outputs=({"export": str(export_directory)} if export_directory.is_dir() else None),
                 stages={
                     "conversion": "completed" if export is not None else "failed",
-                    "routing": "failed" if export is not None else "not-started",
+                    "quality": "passed" if qc and qc.passed else "failed" if qc else "not-started",
+                    "routing": "failed" if qc and qc.passed else "not-started",
                 },
+                warnings=qc.warnings if qc else (),
             )
             raise
 
     def enqueue(self, request: ImportRequest) -> dict[str, object]:
+        selected_method = self.resolve_method(request)
+        request = replace(request, method=selected_method)
         original = self.original_store.ingest(
             request.source,
             filename=request.source_filename,
         )
-        selected_parser = choose_parser(request.source, request.quality, request.parser)
+        selected_parser = selected_method.parser
         queued_request = replace(request, source=original.stored_path)
         identifier = conversion_id(original.sha256, queued_request, selected_parser)
+        with self.store.execution(identifier):
+            return self._enqueue_original(identifier, original, queued_request, selected_parser)
+
+    def _enqueue_original(
+        self, identifier: str, original: OriginalRecord,
+        queued_request: ImportRequest, selected_parser: ParserName,
+    ) -> dict[str, object]:
         if self.store.record_path(identifier).is_file():
             existing = self.store.load(identifier)
             if existing.get("status") in {
                 ConversionStatus.QUEUED.value,
                 ConversionStatus.CONVERTING.value,
                 ConversionStatus.WAITING_FOR_MINERU.value,
+                ConversionStatus.WAITING_FOR_PARSER.value,
                 ConversionStatus.IMPORTED.value,
             }:
-                return existing
+                return {**existing, "reused_existing": True}
         self.store.update(
             identifier,
             status=ConversionStatus.QUEUED,
@@ -348,11 +425,29 @@ class DocumentImporter:
         identifier: str,
         *,
         parser: ParserName | None = None,
+        method: ConversionMethod | None = None,
     ) -> ImportResult:
-        if parser is not None:
-            self.store.queue_retry(identifier, parser=parser)
+        with self.store.execution(identifier):
+            if parser is not None or method is not None:
+                self.queue_retry(identifier, parser=parser, method=method)
+            return self._retry(identifier)
+
+    def queue_retry(
+        self, identifier: str, *, parser: ParserName | None = None,
+        method: ConversionMethod | None = None,
+    ) -> dict[str, object]:
+        with self.store.execution(identifier):
+            record = self.store.load(identifier)
+            if method is not None or parser is not None:
+                self.resolve_method(ImportRequest(
+                    source=Path(str(record["original_path"])), intent=ImportIntent.SOURCE,
+                    method=method, parser=parser,
+                ))
+            return self.store.queue_retry(identifier, parser=parser, method=method)
+
+    def _retry(self, identifier: str) -> ImportResult:
         record = self.store.load(identifier)
-        reparse = parser is not None or record.get("reparse") is True
+        reparse = record.get("reparse") is True
         output_values = record.get("outputs")
         previous_hash = (
             cast(dict[str, object], output_values).get("source_text_sha256")
@@ -382,7 +477,10 @@ class DocumentImporter:
             intent=intent,
             source_filename=required_string("source_filename"),
             quality=quality,
-            parser=parser if parser is not None else stored_parser,
+            method=(
+                ConversionMethod(str(record["method"])) if record.get("method") else
+                ConversionMethod.from_parser(stored_parser or ParserName(required_string("parser")))
+            ),
             course=course_value if isinstance(course_value, str) else None,
             project=project_value if isinstance(project_value, str) else None,
             generate=bool(generate_value),
@@ -390,12 +488,15 @@ class DocumentImporter:
         export_directory = self.store.directory(identifier) / "export"
         stages = record.get("stages")
         resume_reparse = (
-            parser is None and isinstance(stages, dict)
+            isinstance(stages, dict)
             and cast(dict[str, object], stages).get("conversion") == "completed"
+            and cast(dict[str, object], stages).get("quality") == "passed"
         )
         if (not reparse or resume_reparse) and (export_directory / "manifest.json").is_file():
             export, qc = load_export_contract(export_directory)
-            if qc.passed and (request.parser is None or export.parser is request.parser):
+            if qc.passed and (export.method or ConversionMethod.from_parser(export.parser)) is (
+                self.resolve_method(request)
+            ):
                 original_path = Path(required_string("original_path"))
                 source_sha256 = required_string("source_sha256")
                 source_filename = required_string("source_filename")

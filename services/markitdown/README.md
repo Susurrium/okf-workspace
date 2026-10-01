@@ -5,7 +5,7 @@ PPTX, or DOCX request body, never accepts a URI or server-side path, disables pl
 conversion in a time-limited child process owned by the network-isolated worker container.
 
 The API contract is documented in [`../../deploy/markitdown/README.md`](../../deploy/markitdown/README.md).
-MarkItDown is currently the workstation's default parser; MinerU-specific work is deferred.
+MarkItDown is an explicitly selectable workstation conversion method; MinerU cloud is the default.
 The service is not a durable source of record: uploaded documents, results, and task rows are
 deleted by TTL. The calling workstation must retain the source document and downloaded result.
 

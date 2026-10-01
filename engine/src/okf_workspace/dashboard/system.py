@@ -15,6 +15,7 @@ from typing import cast
 from okf_workspace.feeds import FeedKind
 from okf_workspace.governance import scan_governance
 from okf_workspace.importers.config import ImportSettings
+from okf_workspace.importers.methods import method_catalogue
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,19 +139,14 @@ def system_status(
     root = vault.resolve()
     runtime = state.resolve()
     settings = ImportSettings.from_env()
-    token_file = settings.mineru_token_file
-    token_present = bool(token_file and token_file.is_file() and token_file.stat().st_size)
-    mineru = SystemItem(
-        "mineru",
-        "MinerU 云解析",
-        "configured" if token_present else "not-configured",
-        (
-            f"已配置本机 token 文件；模型：{settings.mineru_model}。连接状态由解析任务验证。"
-            if token_present else "尚未配置 MinerU token 文件，文档导入无法开始。"
-        ),
-        None if token_present else "配置本机 MinerU token 文件",
-    )
-    items = [mineru]
+    methods = cast(list[dict[str, object]], method_catalogue(settings)["methods"])
+    items = [SystemItem(
+        "mineru" if method["id"] == "mineru-cloud" else str(method["id"]),
+        str(method["label"]), str(method["status"]),
+        f"{method['location']}；{method['limitations']}。连接状态由转换任务验证。"
+        if method["configured"] else str(method["reason"]) + "；可选择其他已配置的方式。",
+        None if method["configured"] else str(method["reason"]),
+    ) for method in methods]
     ai_mode = os.environ.get("OKF_AI_MODE", "codex").strip().casefold()
     if ai_mode == "codex":
         configured_command = os.environ.get("OKF_CODEX_COMMAND", "").strip()

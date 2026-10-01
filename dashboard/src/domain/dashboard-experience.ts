@@ -48,6 +48,7 @@ const ACTIVE_CONVERSION_STATUSES = new Set<ConversionRecord["status"]>([
   "queued",
   "converting",
   "waiting-for-mineru",
+  "waiting-for-parser",
 ]);
 
 /** Counts actionable Today work without assigning storage ownership to the UI. */

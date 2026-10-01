@@ -250,6 +250,17 @@ export class LocalApi {
     return this.request(`/documents/conversions/${encodeURIComponent(conversionId)}`);
   }
 
+  public converters(): Promise<import("../imports/types.js").ConverterCatalogue> {
+    return this.request("/documents/converters");
+  }
+
+  public conversionResult(conversionId: string): Promise<{
+    markdown: string; method: import("../imports/types.js").ConversionMethod;
+    asset_paths: string[]; qc: { passed: boolean; warnings: string[]; errors: string[] };
+  }> {
+    return this.request(`/documents/conversions/${encodeURIComponent(conversionId)}/result`);
+  }
+
   public routeImportedSource(
     path: string,
     options: {
@@ -273,11 +284,11 @@ export class LocalApi {
 
   public retryConversion(
     conversionId: string,
-    parser?: "mineru" | "markitdown",
+    parser?: "mineru" | "markitdown" | import("../imports/types.js").ConversionMethod,
   ): Promise<ConversionRecord> {
     return this.request(`/documents/conversions/${encodeURIComponent(conversionId)}/retry`, {
       method: "POST",
-      body: JSON.stringify({ parser }),
+      body: JSON.stringify(parser?.includes("-") ? { method: parser } : { parser }),
     });
   }
 

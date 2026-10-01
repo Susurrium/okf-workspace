@@ -1,11 +1,39 @@
 export type ImportIntent = "learn" | "wiki" | "source" | "later";
 export type ImportQuality = "high" | "quick";
 export type ImportParser = "auto" | "mineru" | "markitdown";
+export type ConversionMethod = "mineru-cloud" | "markitdown-service" | "mineru-self-hosted";
+
+export interface ConversionMethodInfo {
+  id: ConversionMethod;
+  label: string;
+  parser: "mineru" | "markitdown";
+  enabled: boolean;
+  configured: boolean;
+  status: "configured" | "not-configured";
+  location: string;
+  reason: string;
+  limitations: string;
+  extensions: string[];
+  max_upload_bytes: number;
+  capabilities: { ocr: boolean; page_map: boolean; pdf_images: boolean; office_images: boolean };
+}
+
+export interface ConverterCatalogue {
+  default_method: ConversionMethod;
+  methods: ConversionMethodInfo[];
+}
+
+export const methodLabels: Record<ConversionMethod, string> = {
+  "mineru-cloud": "MinerU 云解析",
+  "markitdown-service": "MarkItDown",
+  "mineru-self-hosted": "MinerU 自建服务",
+};
 
 export interface DocumentImportOptions {
   intent: ImportIntent;
   quality: ImportQuality;
   parser: ImportParser;
+  method?: ConversionMethod | "auto";
   course?: string;
   project?: string;
   generate: boolean;
@@ -13,8 +41,10 @@ export interface DocumentImportOptions {
 
 export interface DocumentImportResult {
   conversion_id: string;
-  status: "queued" | "converting" | "waiting-for-mineru" | "ready" | "imported" | "failed";
+  status: "queued" | "converting" | "waiting-for-mineru" | "waiting-for-parser" | "ready" | "imported" | "failed";
   parser: "mineru" | "markitdown";
+  method?: ConversionMethod;
+  reused_existing?: boolean;
   source?: string;
   source_text?: string;
   routed_target?: string;
@@ -35,12 +65,12 @@ export const intentLabels: Record<ImportIntent, string> = {
 };
 
 export const qualityLabels: Record<ImportQuality, string> = {
-  high: "高级完整解析",
-  quick: "MinerU 云解析（默认）",
+  high: "严格检查图片",
+  quick: "标准检查",
 };
 
 export const parserLabels: Record<ImportParser, string> = {
-  auto: "按质量和文件类型选择",
-  mineru: "指定 MinerU",
+  auto: "使用默认转换方式",
+  mineru: "指定 MinerU 云解析",
   markitdown: "指定 MarkItDown",
 };

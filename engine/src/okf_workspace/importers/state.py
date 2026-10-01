@@ -6,14 +6,19 @@ import json
 import os
 import tempfile
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
 from okf_workspace.okf.file_io import document_lock
 
-from .models import ConversionStatus, ImportRequest, OriginalRecord, ParserName
+from .models import ConversionMethod, ConversionStatus, ImportRequest, OriginalRecord, ParserName
+
+
+class ConversionBusyError(RuntimeError):
+    """An execution owns this conversion; retry after it finishes."""
 
 
 class ConversionStore:
@@ -25,6 +30,16 @@ class ConversionStore:
 
     def record_path(self, conversion_id: str) -> Path:
         return self.directory(conversion_id) / "status.json"
+
+    @contextmanager
+    def execution(self, conversion_id: str) -> Generator[None]:
+        try:
+            with document_lock(self.directory(conversion_id) / "execution", timeout=0.01):
+                yield
+        except TimeoutError as exc:
+            if str(exc).startswith("Timed out waiting to write"):
+                raise ConversionBusyError("转换正在执行，请完成后再重试或更换方式") from exc
+            raise
 
     def update(
         self,
@@ -62,6 +77,9 @@ class ConversionStore:
                 "quality": request.quality.value,
                 "parser": parser.value,
                 "requested_parser": request.parser.value if request.parser is not None else "auto",
+                "method": (
+                    request.method or ConversionMethod.from_parser(parser)
+                ).value,
                 "course": request.course,
                 "project": request.project,
                 "generate": request.generate,
@@ -145,6 +163,7 @@ class ConversionStore:
         started_at: str,
         duration_ms: int,
         error: str | None = None,
+        method: ConversionMethod | None = None,
     ) -> None:
         target = self.record_path(conversion_id)
         with document_lock(target):
@@ -154,6 +173,7 @@ class ConversionStore:
             attempts.append(
                 {
                     "parser": parser.value,
+                    "method": (method or ConversionMethod.from_parser(parser)).value,
                     "status": status,
                     "started_at": started_at,
                     "duration_ms": duration_ms,
@@ -171,11 +191,19 @@ class ConversionStore:
                 ConversionStatus.CONVERTING.value, ConversionStatus.READY.value,
             }:
                 continue
-            self.transition(
-                str(record["conversion_id"]),
-                ConversionStatus.QUEUED,
-                error="conversion was interrupted and has been queued again",
-            )
+            identifier = str(record["conversion_id"])
+            try:
+                with self.execution(identifier):
+                    if self.load(identifier).get("status") not in {
+                        ConversionStatus.CONVERTING.value, ConversionStatus.READY.value,
+                    }:
+                        continue
+                    self.transition(
+                        identifier, ConversionStatus.QUEUED,
+                        error="conversion was interrupted and has been queued again",
+                    )
+            except ConversionBusyError:
+                continue
             changed += 1
         return changed
 
@@ -184,13 +212,23 @@ class ConversionStore:
         conversion_id: str,
         *,
         parser: ParserName | None = None,
+        method: ConversionMethod | None = None,
     ) -> dict[str, object]:
         target = self.record_path(conversion_id)
-        with document_lock(target):
+        with self.execution(conversion_id), document_lock(target):
             payload = self.load(conversion_id)
+            if payload.get("status") == ConversionStatus.CONVERTING.value:
+                raise ConversionBusyError("转换正在执行，请完成后再重试或更换方式")
+            if (
+                method is not None
+                and parser is not None
+                and method is not ConversionMethod.from_parser(parser)
+            ):
+                raise ValueError("method conflicts with legacy parser")
+            selected = method or (ConversionMethod.from_parser(parser) if parser else None)
             stages = payload.get("stages")
             if (
-                parser is None and payload.get("status") == ConversionStatus.IMPORTED.value
+                selected is None and payload.get("status") == ConversionStatus.IMPORTED.value
                 and isinstance(stages, dict)
                 and cast(dict[str, object], stages).get("semantic") in {"pending", "failed"}
             ):
@@ -198,9 +236,10 @@ class ConversionStore:
                 payload["next_retry_at"] = None
                 self._write(target, payload)
                 return payload
-            if parser is not None:
-                payload["requested_parser"] = parser.value
-                payload["parser"] = parser.value
+            if selected is not None:
+                payload["requested_parser"] = parser.value if parser else "auto"
+                payload["method"] = selected.value
+                payload["parser"] = selected.parser.value
                 payload["reparse"] = True
                 payload["generation_revision"] = uuid.uuid4().hex
                 outputs = payload.get("outputs")
@@ -211,8 +250,9 @@ class ConversionStore:
             payload["next_retry_at"] = None
             payload["stages"] = (
                 {**cast(dict[str, object], stages), "routing": "pending"}
-                if parser is None and isinstance(stages, dict)
+                if selected is None and isinstance(stages, dict)
                 and cast(dict[str, object], stages).get("conversion") == "completed"
+                and cast(dict[str, object], stages).get("quality") == "passed"
                 else {"upload": "completed", "conversion": "queued"}
             )
             payload["updated_at"] = datetime.now(UTC).isoformat(timespec="seconds")

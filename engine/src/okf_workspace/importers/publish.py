@@ -26,6 +26,7 @@ class PublishedImport:
     source_text: Path
     routed_target: Path | None
     text_sha256: str | None
+    reused_existing: bool = False
 
 
 def _title(export: ParserExport, original: OriginalRecord) -> str:
@@ -161,7 +162,7 @@ def _publish_import_locked(
             )
             publisher.publish_pair(source, source_text, source_document, text_document)
             return PublishedImport(
-                source, source_text, _route_draft(vault, request, slug=slug), None,
+                source, source_text, _route_draft(vault, request, slug=slug), None, True,
             )
     markdown, assets = _copy_assets(vault, slug, export, publish=False)
     now = datetime.now().astimezone().isoformat(timespec="seconds")

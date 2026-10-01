@@ -38,7 +38,8 @@ AUTHORIZED_TAILNET_IDENTITIES=REPLACE_ME
 
 ## 2. 服务定位与能力边界
 
-MarkItDown 是当前默认的文本优先解析器；暂不使用 MinerU，但这不改变其能力边界：
+Engine 默认使用 MinerU 云端，MarkItDown 保留为可选的文本优先转换方式。
+客户端选择与配置见 [文档转换方式](../../docs/DOCUMENT-CONVERSION.md)，其能力边界如下：
 
 - 适合有数字文本层的普通 PDF 和结构化 PPTX；
 - 二进制旧 PPT 必须由 Windows 客户端先转换并验证为派生 PPTX；
@@ -48,7 +49,8 @@ MarkItDown 是当前默认的文本优先解析器；暂不使用 MinerU，但�
 - 不提供页级内容映射；
 - 公式、复杂表格、双栏布局和阅读顺序只做尽力转换；
 - 客户端必须继续执行严格规范化、QC 和人工复核；
-- MarkItDown 结果默认进入 `review_required`，不能因手动选择解析器而绕过质量门禁。
+- MarkItDown 结果与其他方式一样经过 Engine QC；标准检查和严格检查图片都不会改变其解析能力。
+  PDF 图片完整性无法验证时必须提示，不得因手动选择方式而宣称图片完整。
 
 服务端 SQLite、上传暂存和结果 ZIP 都是有 TTL 的可丢弃状态。服务端损坏或重建时，不应造成
 正式资料丢失。

@@ -72,6 +72,7 @@ import type {
 import { FeedHttpError } from "../feeds/service.js";
 import { bindDocumentDropTarget, type ImportFile } from "../imports/drop.js";
 import type { DocumentImportOptions } from "../imports/types.js";
+import { methodLabels } from "../imports/types.js";
 import type { ImportOrigin } from "./document-import-modal.js";
 import { DASHBOARD_VERSION } from "../version.js";
 import type OkfBrainPlugin from "./main.js";
@@ -655,7 +656,7 @@ export class OkfDashboardView {
     const active = operations.filter((operation) => isSemanticOperationActive(operation.status));
     const interrupted = operations.filter((operation) => operation.status === "orphaned");
     const activeConversions = conversions.filter((conversion) =>
-      ["queued", "converting", "waiting-for-mineru"].includes(conversion.status)
+      ["queued", "converting", "waiting-for-mineru", "waiting-for-parser"].includes(conversion.status)
       || hasPendingGeneration(conversion),
     );
     const recentCutoff = Date.now() - 30 * 60_000;
@@ -777,15 +778,18 @@ export class OkfDashboardView {
       const readyToPublish =
         conversion.status === "failed" &&
         conversion.stages?.conversion === "completed" &&
+        conversion.stages.quality === "passed" &&
         conversion.stages.routing === "failed";
       const label = hasPendingGeneration(conversion)
         ? conversionStatusLabel(conversion)
         : conversion.status === "queued"
           ? "已排队"
           : conversion.status === "converting"
-            ? `正在使用 ${conversion.parser} 转换`
+            ? `正在使用 ${conversionMethodLabel(conversion)} 转换`
             : conversion.status === "waiting-for-mineru"
               ? "等待 MinerU"
+              : conversion.status === "waiting-for-parser"
+                ? "等待转换服务"
               : conversion.status === "imported"
                 ? "已导入"
                 : readyToPublish
@@ -814,6 +818,7 @@ export class OkfDashboardView {
           }, true, "已继续保存；不会重新转换文档");
         });
       }
+      if (conversion.status !== "converting") this.renderConversionMethodActions(card, conversion);
     }
   }
 
@@ -3317,6 +3322,7 @@ export class OkfDashboardView {
       });
     } else if (conversion.status === "ready" || (
       conversion.status === "failed" && conversion.stages?.conversion === "completed"
+      && conversion.stages.quality === "passed"
     )) {
       const resume = actions.createEl("button", { text: "继续保存（不重新转换）" });
       resume.addEventListener("click", () => {
@@ -3325,21 +3331,27 @@ export class OkfDashboardView {
           this.plugin.watchDocumentConversion(record.conversion_id);
         }, true, "已继续保存转换结果，无需重新转换");
       });
-    } else if (conversion.status === "failed") {
-      for (const parser of this.availableImportParsers()) {
-        const retry = actions.createEl("button", { text: `用 ${parser} 重试` });
-        retry.addEventListener("click", () => {
-          void this.runButtonAction(retry, async () => {
-            const record = await this.api().retryConversion(conversion.conversion_id, parser);
-            this.plugin.watchDocumentConversion(record.conversion_id);
-          }, true, "转换已重新排队");
-        });
-      }
     }
+    if (conversion.status !== "converting") this.renderConversionMethodActions(actions, conversion);
   }
 
-  private availableImportParsers(): readonly "mineru"[] {
-    return ["mineru"];
+  private renderConversionMethodActions(parent: HTMLElement, conversion: ConversionRecord): void {
+    if (conversion.stages?.conversion === "completed") {
+      parent.createEl("button", { text: "查看本次转换结果" }).addEventListener("click", () => {
+        void this.plugin.showDocumentConversionResult(conversion);
+      });
+    }
+    if (conversion.status === "failed" || conversion.status.startsWith("waiting-for-")) {
+      const retry = parent.createEl("button", { text: "原方式重试" });
+      retry.addEventListener("click", () => {
+        void this.runButtonAction(retry, async () => {
+          const record = await this.api().retryConversion(conversion.conversion_id);
+          this.plugin.watchDocumentConversion(record.conversion_id);
+        }, true, "已按原方式重新排队");
+      });
+    }
+    const change = parent.createEl("button", { text: "更换方式重新转换…" });
+    change.addEventListener("click", () => this.plugin.promptDocumentReconversion(conversion));
   }
 
   private async renderLearning(container: HTMLElement): Promise<void> {
@@ -4573,6 +4585,13 @@ export class OkfDashboardView {
     latest: { checkpoint: string; message: string; files: string[] } | null,
     latestStatus: "loading" | "confirmed" | "unavailable" = "confirmed",
   ): void {
+    this.renderActiveConversions(container);
+    const imported = this.plugin.conversionSnapshot().filter((item) => item.status === "imported").slice(0, 10);
+    if (imported.length) {
+      const history = container.createEl("details");
+      history.createEl("summary", { text: "最近导入的资料与重新转换" });
+      for (const conversion of imported) this.renderInboxConversionCard(history, conversion);
+    }
     if (!status.actionable.length) {
       container.createDiv({
         cls: "okf-dashboard__health-summary is-healthy",
@@ -4696,7 +4715,7 @@ export class OkfDashboardView {
     for (const failure of failures) {
       const card = parent.createDiv({ cls: "okf-dashboard__card" });
       card.createEl("h3", { text: failure.source_filename || failure.conversion_id });
-      if (failure.stages?.conversion === "completed") {
+      if (failure.stages?.conversion === "completed" && failure.stages.quality === "passed") {
         card.createDiv({
           cls: "okf-dashboard__muted",
           text: "Markdown 转换和质检已经完成；失败发生在归档或版本记录阶段。",
@@ -4706,11 +4725,11 @@ export class OkfDashboardView {
       for (const attempt of failure.parser_attempts ?? []) {
         card.createDiv({
           cls: "okf-dashboard__muted",
-          text: `${attempt.parser} · ${attempt.status} · ${attempt.duration_ms} ms${attempt.error ? ` · ${attempt.error}` : ""}`,
+          text: `${attempt.method ? methodLabels[attempt.method] : attempt.parser} · ${attempt.status} · ${attempt.duration_ms} ms${attempt.error ? ` · ${attempt.error}` : ""}`,
         });
       }
       const actions = card.createDiv({ cls: "okf-dashboard__actions" });
-      if (failure.stages?.conversion === "completed") {
+      if (failure.stages?.conversion === "completed" && failure.stages.quality === "passed") {
         const resume = actions.createEl("button", { text: "继续保存（不重新转换）" });
         resume.addEventListener("click", () => {
           resume.disabled = true;
@@ -4729,31 +4748,13 @@ export class OkfDashboardView {
             });
         });
       }
-      for (const parser of this.availableImportParsers()) {
-        const retry = actions.createEl("button", { text: "用 " + parser + " 重试" });
-        retry.addEventListener("click", () => {
-          retry.disabled = true;
-          void this.api()
-            .retryConversion(failure.conversion_id, parser)
-            .then((record) => {
-              this.plugin.watchDocumentConversion(record.conversion_id);
-              new Notice("转换已重新排队");
-              return this.render();
-            })
-            .catch((error: unknown) => {
-              new Notice(error instanceof Error ? error.message : "重试失败");
-            })
-            .finally(() => {
-              retry.disabled = false;
-            });
-        });
-      }
+      this.renderConversionMethodActions(actions, failure);
     }
   }
 
   private renderActiveConversions(parent: HTMLElement): void {
     const active = this.plugin.conversionSnapshot().filter((conversion) =>
-      ["queued", "converting", "waiting-for-mineru"].includes(conversion.status),
+      ["queued", "converting", "waiting-for-mineru", "waiting-for-parser"].includes(conversion.status),
     );
     if (!active.length) return;
     const section = this.dashboardSection(
@@ -4770,10 +4771,13 @@ export class OkfDashboardView {
         text:
           conversion.status === "waiting-for-mineru"
             ? "等待 MinerU；后台会自动重试"
+            : conversion.status === "waiting-for-parser"
+              ? "等待转换服务；后台会自动重试，也可更换方式"
             : conversion.status === "converting"
-              ? `正在使用 ${conversion.parser} 转换`
+              ? `正在使用 ${conversionMethodLabel(conversion)} 转换`
               : "已排队",
       });
+      if (conversion.status !== "converting") this.renderConversionMethodActions(card, conversion);
     }
   }
 
@@ -5155,15 +5159,21 @@ function semanticStageLabel(operation: SemanticOperationRecord): string {
   return labels[operation.stage ?? ""] ?? "后台任务正在处理";
 }
 
+function conversionMethodLabel(conversion: ConversionRecord): string {
+  return conversion.method ? methodLabels[conversion.method] : conversion.parser;
+}
+
 function conversionStatusLabel(conversion: ConversionRecord): string {
   if (hasPendingGeneration(conversion)) return conversion.error
     ? "转换已完成，生成入队失败；后台会重试，也可手动重试"
     : "转换已完成，等待生成入队";
   if (conversion.status === "queued") return "已排队";
-  if (conversion.status === "converting") return `正在使用 ${conversion.parser} 转换`;
+  if (conversion.status === "converting") return `正在使用 ${conversionMethodLabel(conversion)} 转换`;
   if (conversion.status === "waiting-for-mineru") return "等待 MinerU；后台会自动重试";
+  if (conversion.status === "waiting-for-parser") return "等待转换服务；后台会自动重试，也可更换方式";
   if (conversion.status === "ready") return "转换已完成，等待保存";
-  if (conversion.stages?.conversion === "completed") return "转换已完成，保存需要处理";
+  if (conversion.stages?.quality === "failed") return "质量检查未通过，可更换方式重新转换";
+  if (conversion.stages?.conversion === "completed" && conversion.stages.quality === "passed") return "转换已完成，保存需要处理";
   return "转换失败，需要处理";
 }
 

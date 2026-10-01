@@ -114,6 +114,21 @@ function Set-OkfEnvironment {
     $env:OKF_BRAIN_VAULT = [string]$Config.vault
     $env:OKF_BRAIN_ORIGINALS = [string]$Config.originals
     $env:OKF_BRAIN_STATE = [string]$Config.state
+    $conversionEnvironment = @{
+        default_conversion_method = 'OKF_DEFAULT_CONVERSION_METHOD'
+        markitdown_url = 'OKF_MARKITDOWN_URL'
+        markitdown_token_file = 'OKF_MARKITDOWN_TOKEN_FILE'
+        mineru_self_hosted_enabled = 'OKF_MINERU_SELF_HOSTED_ENABLED'
+        mineru_url = 'OKF_MINERU_URL'
+        mineru_ssh_managed = 'OKF_MINERU_SSH_MANAGED'
+        mineru_ssh_host = 'OKF_MINERU_SSH_HOST'
+        mineru_ssh_remote_port = 'OKF_MINERU_SSH_REMOTE_PORT'
+    }
+    foreach ($field in $conversionEnvironment.Keys) {
+        if ($Config.PSObject.Properties.Name -contains $field) {
+            [Environment]::SetEnvironmentVariable($conversionEnvironment[$field], [string]$Config.$field, 'Process')
+        }
+    }
     if ($Config.PSObject.Properties.Name -contains 'mineru_token_file') {
         $env:OKF_MINERU_TOKEN_FILE = [string]$Config.mineru_token_file
     }

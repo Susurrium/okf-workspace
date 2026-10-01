@@ -23,6 +23,8 @@ def _embedded_image_complete(value: str) -> bool:
 def inspect_export(export: ParserExport, *, strict_assets: bool = False) -> QCReport:
     markdown = export.markdown.strip()
     warnings = list(export.warnings)
+    if "pdf_text_only_images_not_extracted" in export.warnings:
+        warnings.append("PDF 图片完整性未验证：此方式只提取文本，不提供图片和 OCR")
     errors: list[str] = []
     checks: dict[str, bool] = {}
 

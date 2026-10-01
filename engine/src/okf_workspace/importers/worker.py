@@ -10,13 +10,21 @@ from typing import cast
 
 from okf_workspace.semantic import SemanticKind, SemanticOperationService
 
-from .cloud_mineru import RetryableMinerUError
-from .models import ConversionStatus, ImportIntent, requires_semantic_generation
+from .clients import RetryableConversionError
+from .models import (
+    ConversionMethod,
+    ConversionStatus,
+    ImportIntent,
+    ParserName,
+    requires_semantic_generation,
+)
 from .pipeline import DocumentImporter
+from .state import ConversionBusyError
 
 _ACTIVE = {
     ConversionStatus.QUEUED.value,
     ConversionStatus.WAITING_FOR_MINERU.value,
+    ConversionStatus.WAITING_FOR_PARSER.value,
 }
 
 
@@ -41,6 +49,17 @@ class DocumentImportWorker:
         if record is None:
             return False
         conversion_id = str(record["conversion_id"])
+        try:
+            with self.store.execution(conversion_id):
+                current = self.store.load(conversion_id)
+                if not self._eligible(current):
+                    return False
+                return self._run_record(current)
+        except ConversionBusyError:
+            return False
+
+    def _run_record(self, record: dict[str, object]) -> bool:
+        conversion_id = str(record["conversion_id"])
         if record.get("status") == ConversionStatus.IMPORTED.value:
             self.enqueue_semantic(conversion_id)
             return True
@@ -54,10 +73,16 @@ class DocumentImportWorker:
             self.enqueue_semantic(result.conversion_id)
         except Exception as exc:
             message = str(exc)
-            if isinstance(exc, RetryableMinerUError):
+            if isinstance(exc, RetryableConversionError):
+                method = (
+                    ConversionMethod(str(record["method"])) if record.get("method") else
+                    ConversionMethod.from_parser(ParserName(str(record.get("parser", "mineru"))))
+                )
                 self.store.transition(
                     conversion_id,
-                    ConversionStatus.WAITING_FOR_MINERU,
+                    ConversionStatus.WAITING_FOR_MINERU
+                    if method is ConversionMethod.MINERU_CLOUD
+                    else ConversionStatus.WAITING_FOR_PARSER,
                     error=message[:2000],
                     retry_after_seconds=self.retry_seconds,
                 )
@@ -66,7 +91,6 @@ class DocumentImportWorker:
                     conversion_id,
                     ConversionStatus.FAILED,
                     error=message[:2000],
-                    stages={"routing": "failed"},
                 )
         return True
 

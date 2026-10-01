@@ -78,8 +78,11 @@ from okf_workspace.importers import (
     ImportRequest,
     ParserName,
 )
+from okf_workspace.importers.export import load_export_contract
+from okf_workspace.importers.methods import method_catalogue
+from okf_workspace.importers.models import ConversionMethod
 from okf_workspace.importers.publish import route_existing_import
-from okf_workspace.importers.state import ConversionStore
+from okf_workspace.importers.state import ConversionBusyError, ConversionStore
 from okf_workspace.notes import NoteService
 from okf_workspace.notes.captures import (
     batch_discard_captures,
@@ -247,6 +250,7 @@ class SubscriptionRemoveRequest(SubscriptionMutationRequest):
 
 class RetryRequest(BaseModel):
     parser: Literal["mineru", "markitdown"] | None = None
+    method: Literal["mineru-cloud", "markitdown-service", "mineru-self-hosted"] | None = None
 
 
 class SemanticCreateRequest(BaseModel):
@@ -511,6 +515,10 @@ def create_app(
     @app.exception_handler(ValueError)
     def invalid_request(_request: Request, error: ValueError) -> JSONResponse:
         return JSONResponse(status_code=400, content={"detail": str(error)[:300]})
+
+    @app.exception_handler(ConversionBusyError)
+    def conversion_busy(_request: Request, error: ConversionBusyError) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": str(error)})
 
     @app.exception_handler(SubscriptionError)
     def subscription_error(_request: Request, error: SubscriptionError) -> JSONResponse:
@@ -866,12 +874,17 @@ def create_app(
     def recommend_capture(capture_path: str) -> dict[str, str]:
         return recommend_capture_destination(configured.vault, capture_path)
 
+    @app.get("/documents/converters", dependencies=protected)
+    def document_converters() -> dict[str, object]:
+        return method_catalogue(configured_importer.settings)
+
     @app.post("/documents/import", dependencies=protected)
     async def import_document(
         file: Annotated[UploadFile, File()],
         intent: Annotated[str, Form()],
         quality: Annotated[str, Form()] = "quick",
         parser: Annotated[str, Form()] = "auto",
+        method: Annotated[str, Form()] = "auto",
         course: Annotated[str | None, Form()] = None,
         project: Annotated[str | None, Form()] = None,
         generate: Annotated[bool, Form()] = False,
@@ -901,6 +914,7 @@ def create_app(
                 source_filename=filename,
                 quality=ImportQuality(quality),
                 parser=None if parser == "auto" else ParserName(parser),
+                method=None if method == "auto" else ConversionMethod(method),
                 course=course,
                 project=project,
                 generate=generate,
@@ -972,6 +986,19 @@ def create_app(
             configured.vault,
         )
 
+    @app.get("/documents/conversions/{conversion_id}/result", dependencies=protected)
+    def get_conversion_result(conversion_id: str) -> dict[str, object]:
+        configured_importer.store.load(conversion_id)
+        with configured_importer.store.execution(conversion_id):
+            export, qc = load_export_contract(
+                configured_importer.store.directory(conversion_id) / "export",
+            )
+            return {
+                "markdown": export.markdown, "qc": asdict(qc),
+                "method": (export.method or ConversionMethod.from_parser(export.parser)).value,
+                "asset_paths": sorted(export.assets),
+            }
+
     @app.get("/documents/conversions", dependencies=protected)
     def list_conversions(status: str | None = None) -> list[dict[str, object]]:
         selected = None
@@ -988,14 +1015,18 @@ def create_app(
     @app.post("/documents/conversions/{conversion_id}/retry", dependencies=protected)
     def retry_conversion(conversion_id: str, request: RetryRequest) -> dict[str, object]:
         selected = ParserName(request.parser) if request.parser else None
+        selected_method = ConversionMethod(request.method) if request.method else None
         if document_worker is not None:
             return _conversion_public(
-                configured_importer.store.queue_retry(conversion_id, parser=selected),
+                configured_importer.queue_retry(
+                    conversion_id, parser=selected, method=selected_method,
+                ),
                 configured.vault,
             )
         result = configured_importer.retry(
             conversion_id,
             parser=selected,
+            method=selected_method,
         )
         return _conversion_public(
             ConversionStore(configured.state).load(result.conversion_id),

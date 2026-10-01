@@ -1,6 +1,7 @@
 import { Modal, Notice, type App } from "obsidian";
 
 import type { DocumentImportOptions, DocumentImportResult, ImportIntent } from "../imports/types.js";
+import { methodLabels, type ConversionMethod, type ConverterCatalogue } from "../imports/types.js";
 import {
   bindDocumentDropTarget,
   importFilesFromPicker,
@@ -22,7 +23,14 @@ export class DocumentImportModal extends Modal {
   private intent: ImportIntent;
   private generate = false;
   private quality: DocumentImportOptions["quality"] = "quick";
-  private parser: DocumentImportOptions["parser"] = "mineru";
+  private method: ConversionMethod = "mineru-cloud";
+  private catalogue?: ConverterCatalogue;
+  private loadingMethods = false;
+  private catalogueError?: string;
+  private methodSelect?: HTMLSelectElement;
+  private methodDetail?: HTMLElement;
+  private skipUnsupported = false;
+  private skipField?: HTMLElement;
   private fileList?: HTMLElement;
   private status?: HTMLElement;
   private submitButton?: HTMLButtonElement;
@@ -34,6 +42,7 @@ export class DocumentImportModal extends Modal {
     initialRelation: Relation,
     origin: ImportOrigin,
     private readonly importFile: (file: File, options: DocumentImportOptions) => Promise<DocumentImportResult>,
+    private readonly loadConverters?: () => Promise<ConverterCatalogue>,
   ) {
     super(app);
     this.files = files;
@@ -61,11 +70,17 @@ export class DocumentImportModal extends Modal {
       ["learn", "用于学习"], ["wiki", "生成知识笔记"],
       ["source", "只保存资料"], ["later", "暂不确定，进入待归类"],
     ], this.intent, (value) => { this.intent = value as ImportIntent; this.renderGeneration(); });
-    this.select(settings, "解析", [["quick", "MinerU 云解析"], ["high", "MinerU 云解析（严格检查图片）"]],
+    this.methodSelect = this.select(settings, "转换方式", Object.entries(methodLabels), this.method, (value) => {
+      this.method = value as ConversionMethod;
+      this.skipUnsupported = false;
+      this.renderMethod();
+    });
+    this.methodDetail = settings.createDiv({ cls: "okf-dashboard__muted" });
+    this.select(settings, "质量检查", [["quick", "标准检查"], ["high", "严格检查图片"]],
     this.quality, (value) => {
       this.quality = value as DocumentImportOptions["quality"];
-      this.parser = "mineru";
     });
+    this.skipField = settings.createDiv();
     const generation = settings.createDiv();
     this.generationContainer = generation;
     this.renderGeneration();
@@ -76,6 +91,8 @@ export class DocumentImportModal extends Modal {
     this.submitButton = actions.createEl("button", { cls: "mod-cta", text: "开始导入", attr: { type: "button" } });
     this.submitButton.addEventListener("click", () => void this.submit());
     this.updateSubmit();
+    if (this.loadConverters) void this.fetchConverters();
+    else this.renderMethod();
   }
 
   private generationContainer?: HTMLElement;
@@ -164,11 +181,74 @@ export class DocumentImportModal extends Modal {
     new Notice(error instanceof Error ? error.message : String(error), 8_000);
   };
 
+  private async fetchConverters(): Promise<void> {
+    this.loadingMethods = true;
+    this.catalogueError = undefined;
+    this.renderMethod();
+    try {
+      const catalogue = await this.loadConverters!();
+      if (this.closed) return;
+      this.catalogue = catalogue;
+      this.method = catalogue.default_method;
+    } catch (error) {
+      this.catalogueError = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.loadingMethods = false;
+      if (!this.closed) this.renderMethod();
+    }
+  }
+
+  private renderMethod(): void {
+    const info = this.catalogue?.methods.find((item) => item.id === this.method);
+    if (this.methodSelect) {
+      this.methodSelect.value = this.method;
+      this.methodSelect.disabled = this.running || this.loadingMethods;
+      for (const option of Array.from(this.methodSelect.children) as HTMLOptionElement[]) {
+        const entry = this.catalogue?.methods.find((item) => item.id === option.value);
+        option.textContent = (entry?.label ?? methodLabels[option.value as ConversionMethod])
+          + (option.value === this.catalogue?.default_method ? "（默认）" : "")
+          + (entry && !entry.configured ? "（未配置）" : "");
+      }
+    }
+    this.methodDetail?.empty();
+    this.methodDetail?.createDiv({ text: this.loadingMethods ? "正在读取转换方式…"
+      : this.catalogueError ? `无法读取转换方式：${this.catalogueError}`
+        : info ? `${info.location}；${info.limitations}${info.reason ? ` ${info.reason}` : ""}`
+          : "MinerU 云解析默认；可选择其他已配置的转换方式。" });
+    if (this.catalogueError) {
+      this.methodDetail?.createEl("button", { text: "重新读取转换方式" })
+        .addEventListener("click", () => void this.fetchConverters());
+    }
+    this.skipField?.empty();
+    if (this.files.some((item) => this.unsupportedReason(item))) {
+      const label = this.skipField?.createEl("label");
+      const input = label?.createEl("input", { attr: { type: "checkbox" } });
+      label?.createSpan({ text: "仅提交支持的文件，跳过清单中无法转换的文件" });
+      if (input) {
+        input.checked = this.skipUnsupported;
+        input.addEventListener("change", () => {
+          this.skipUnsupported = input.checked;
+          this.updateSubmit();
+        });
+      }
+    }
+    this.renderFiles();
+    this.updateSubmit();
+  }
+
+  private unsupportedReason(item: ImportFile): string | undefined {
+    if (!isSupportedDocument(item.file)) return "不支持的文件格式";
+    const info = this.catalogue?.methods.find((entry) => entry.id === this.method);
+    if (item.file.size > (info?.max_upload_bytes ?? MAX_DOCUMENT_BYTES)) return "文件超过上传大小限制";
+    const extension = "." + item.file.name.split(".").pop()!.toLowerCase();
+    if (info && !info.extensions.includes(extension)) return `${info.label} 不支持 ${extension}`;
+    return undefined;
+  }
+
   private addFiles(incoming: ImportFile[]): void {
     if (this.running) return;
     this.files.push(...incoming);
-    this.renderFiles();
-    this.updateSubmit();
+    this.renderMethod();
   }
 
   private renderFiles(): void {
@@ -176,33 +256,37 @@ export class DocumentImportModal extends Modal {
     this.fileList.empty();
     const accepted = this.files.filter((item) => this.isPending(item));
     this.fileList.createDiv({
-      text: `待提交 ${accepted.length} 个；跳过 ${this.files.filter((item) => !isSupportedDocument(item.file) || item.file.size > MAX_DOCUMENT_BYTES).length} 个不支持或超过 64 MB 的文件`,
+      text: `待提交 ${accepted.length} 个；${this.files.filter((item) => this.unsupportedReason(item)).length} 个文件无法使用当前方式转换`,
     });
     const list = this.fileList.createEl("ul");
     for (const item of this.files.slice(0, 200)) {
-      const valid = isSupportedDocument(item.file) && item.file.size <= MAX_DOCUMENT_BYTES;
-      list.createEl("li", { text: `${this.fileStates.get(item) ?? (valid ? "待提交" : "跳过")} · ${item.relativePath}` });
+      list.createEl("li", { text: `${this.unsupportedReason(item) ?? this.fileStates.get(item) ?? "待提交"} · ${item.relativePath}` });
     }
     if (this.files.length > 200) this.fileList.createDiv({ text: `另有 ${this.files.length - 200} 个文件未展开显示` });
   }
 
   private updateSubmit(): void {
-    if (this.submitButton) this.submitButton.disabled = this.running || !this.files.some((item) => this.isPending(item));
+    const info = this.catalogue?.methods.find((item) => item.id === this.method);
+    if (this.submitButton) this.submitButton.disabled = this.running || this.loadingMethods
+      || Boolean(this.catalogueError) || Boolean(this.catalogue && (!info || !info.configured))
+      || !this.files.some((item) => this.isPending(item))
+      || !this.skipUnsupported && this.files.some((item) => this.unsupportedReason(item));
   }
 
   private isPending(item: ImportFile): boolean {
-    return isSupportedDocument(item.file) && item.file.size <= MAX_DOCUMENT_BYTES
+    return !this.unsupportedReason(item)
       && this.fileStates.get(item) !== "已提交";
   }
 
   private async submit(): Promise<void> {
     if (this.running) return;
+    if (this.submitButton?.disabled) return;
     const files = this.files.filter((item) => this.isPending(item));
     if (!files.length) return;
     this.running = true;
-    this.updateSubmit();
+    this.renderMethod();
     const options: DocumentImportOptions = {
-      intent: this.intent, quality: this.quality, parser: this.parser,
+      intent: this.intent, quality: this.quality, parser: "auto", method: this.method,
       generate: this.intent === "wiki" || this.intent === "learn" && this.generate, ...this.relation,
     };
     let completed = 0;
@@ -229,6 +313,72 @@ export class DocumentImportModal extends Modal {
     if (this.status) this.status.setText(`已提交 ${completed} 个，失败 ${failed} 个。后台转换进度可在待处理查看。`);
     this.running = false;
     if (this.submitButton && failed) this.submitButton.setText("重试失败项");
-    this.updateSubmit();
+    this.renderMethod();
   }
+}
+
+export class DocumentReconversionModal extends Modal {
+  public constructor(
+    app: App,
+    private readonly filename: string,
+    private readonly loadConverters: () => Promise<ConverterCatalogue>,
+    private readonly convert: (method: ConversionMethod) => Promise<void>,
+  ) { super(app); }
+
+  public onOpen(): void {
+    this.titleEl.setText("重新转换资料");
+    this.contentEl.createDiv({ text: this.filename });
+    this.contentEl.createDiv({ text: "沿用原件和资料身份；已有正文包含人工修改时会保留正文，新结果可单独查看。" });
+    const choices = this.contentEl.createDiv();
+    choices.createDiv({ text: "正在读取转换方式…" });
+    void this.loadConverters().then((catalogue) => {
+      if (!this.contentEl.isConnected) return;
+      choices.empty();
+      const extension = "." + this.filename.split(".").pop()!.toLowerCase();
+      for (const method of catalogue.methods) {
+        const supported = method.extensions.includes(extension);
+        const row = choices.createDiv();
+        const button = row.createEl("button", { text: `使用 ${method.label} 重新转换` });
+        button.disabled = !method.configured || !supported;
+        row.createDiv({ text: `${method.location}；${!supported ? `不支持 ${extension}` : method.reason || method.limitations}` });
+        button.addEventListener("click", () => {
+          if (button.disabled) return;
+          for (const element of Array.from(choices.querySelectorAll("button"))) element.disabled = true;
+          void this.convert(method.id).then(() => this.close()).catch((error: unknown) => {
+            new Notice(error instanceof Error ? error.message : String(error));
+            this.close();
+          });
+        });
+      }
+    }).catch((error: unknown) => {
+      choices.empty();
+      choices.createDiv({ text: error instanceof Error ? error.message : String(error) });
+      choices.createEl("button", { text: "重试读取" }).addEventListener("click", () => {
+        this.contentEl.empty();
+        this.onOpen();
+      });
+    });
+  }
+
+  public onClose(): void { this.contentEl.empty(); }
+}
+
+export class DocumentConversionResultModal extends Modal {
+  public constructor(app: App, private readonly result: {
+    markdown: string; method: ConversionMethod; asset_paths: string[];
+    qc: { passed: boolean; warnings: string[]; errors: string[] };
+  }) { super(app); }
+
+  public onOpen(): void {
+    this.titleEl.setText("本次转换结果（只读）");
+    this.contentEl.createDiv({ text: `${methodLabels[this.result.method]} · ${this.result.qc.passed ? "质量检查通过" : "质量检查未通过"}` });
+    for (const message of [...this.result.qc.errors, ...this.result.qc.warnings]) {
+      this.contentEl.createDiv({ text: message });
+    }
+    this.contentEl.createDiv({ text: `包含 ${this.result.asset_paths.length} 个附件；下方显示本次转换的 Markdown 源文。` });
+    const source = this.contentEl.createEl("textarea", { attr: { readonly: "", rows: "20", "aria-label": "本次转换的 Markdown 源文" } });
+    source.value = this.result.markdown;
+    source.setAttr("style", "width: 100%;");
+  }
+  public onClose(): void { this.contentEl.empty(); }
 }

@@ -8,7 +8,7 @@ OKF Workspace is one private monorepo for a Vault-native personal workspace. Cod
 - `dashboard/`: Obsidian workbench plugin.
 - `claudian/`: customized Claudian/Codex Obsidian plugin.
 - `services/`: retained service deployment assets; no service is required for document conversion.
-- `integrations/`: external-system assets, including the retired self-hosted MinerU deployment.
+- `integrations/`: external-system assets, including the optional self-hosted MinerU deployment.
 - `tests/`: cross-component fixtures and end-to-end verification.
 
 Production Vault, Runtime State, Originals, indexes, secrets, and sessions live outside this repository.
@@ -22,6 +22,7 @@ Production Vault, Runtime State, Originals, indexes, secrets, and sessions live 
 - [Data model](docs/DATA-MODEL.md)
 - [Test plan](docs/TEST-PLAN.md)
 - [MinerU cloud setup](docs/MINERU-CLOUD.md)
+- [Document conversion methods and configuration](docs/DOCUMENT-CONVERSION.md)
 
 ## Development
 

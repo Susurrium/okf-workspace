@@ -34,6 +34,7 @@ export class HttpDocumentImportApi implements DocumentImportApi {
     form.set("intent", options.intent);
     form.set("quality", options.quality);
     form.set("parser", options.parser);
+    if (options.method) form.set("method", options.method);
     form.set("generate", String(options.generate));
     if (options.course) form.set("course", options.course);
     if (options.project) form.set("project", options.project);

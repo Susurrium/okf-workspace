@@ -138,6 +138,7 @@ export type ConversionStatus =
   | "queued"
   | "converting"
   | "waiting-for-mineru"
+  | "waiting-for-parser"
   | "ready"
   | "imported"
   | "failed";
@@ -149,11 +150,14 @@ export interface ConversionRecord {
   intent: string;
   quality: string;
   parser: string;
+  method?: import("../imports/types.js").ConversionMethod;
+  reused_existing?: boolean;
   error?: string | null;
   warnings?: string[];
   stages?: Record<string, string>;
   parser_attempts?: {
     parser: string;
+    method?: import("../imports/types.js").ConversionMethod;
     status: string;
     started_at: string;
     duration_ms: number;

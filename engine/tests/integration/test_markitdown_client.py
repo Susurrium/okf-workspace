@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from okf_workspace.importers.clients import MarkItDownClient
+from okf_workspace.importers.clients import MarkItDownClient, RetryableConversionError
 
 
 def test_parser_client_does_not_inherit_unrelated_desktop_proxies(
@@ -39,6 +39,51 @@ def result_zip() -> bytes:
             "# Converted\n\nThis is complete converted Markdown content.\n",
         )
     return stream.getvalue()
+
+
+def test_explicit_reparse_starts_new_vendor_task_but_retries_keep_identity(tmp_path: Path) -> None:
+    source = tmp_path / "manual.docx"
+    source.write_bytes(b"docx-fixture")
+    working = tmp_path / "conversion" / "working"
+    working.mkdir(parents=True)
+    submissions: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/health":
+            return httpx.Response(200, json={"engine_version": "1.2.3"})
+        if request.method == "POST":
+            submissions.append(
+                (request.headers["idempotency-key"], request.headers["x-source-sha256"])
+            )
+            return httpx.Response(202, json={"task_id": "task-1"})
+        if request.url.path.endswith("/result"):
+            return httpx.Response(
+                200, content=result_zip(), headers={"content-type": "application/zip"}
+            )
+        return httpx.Response(200, json={"status": "completed"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        client = MarkItDownClient("http://127.0.0.1:18010", "secret", client=http)
+        client.convert(source, working)
+        status = working.parent / "status.json"
+        status.write_text(json.dumps({"generation_revision": "explicit-reparse"}), encoding="utf-8")
+        client.convert(source, working)
+        client.convert(source, working)
+    assert submissions[0][0] != submissions[1][0]
+    assert submissions[1] == submissions[2]
+    assert {digest for _, digest in submissions} == {
+        hashlib.sha256(source.read_bytes()).hexdigest()
+    }
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_temporary_service_failures_are_retryable(tmp_path: Path, status: int) -> None:
+    source = tmp_path / "document.pdf"
+    source.write_bytes(b"%PDF fixture")
+    with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(status))) as http:
+        client = MarkItDownClient("http://127.0.0.1:18010", "secret", client=http)
+        with pytest.raises(RetryableConversionError):
+            client.convert(source, tmp_path / "working")
 
 
 def test_reused_markitdown_contract_submits_polls_and_exports(tmp_path: Path) -> None:

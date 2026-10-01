@@ -37,7 +37,8 @@ describe("DocumentImportPageModel", () => {
     expect(api.options).toEqual({
       intent: "wiki",
       quality: "quick",
-      parser: "mineru",
+      parser: "auto",
+      method: "auto",
       generate: false,
     });
     expect(result.status).toBe("imported");

@@ -12,6 +12,23 @@ class ParserName(StrEnum):
     MARKITDOWN = "markitdown"
 
 
+class ConversionMethod(StrEnum):
+    MINERU_CLOUD = "mineru-cloud"
+    MARKITDOWN_SERVICE = "markitdown-service"
+    MINERU_SELF_HOSTED = "mineru-self-hosted"
+
+    @property
+    def parser(self) -> ParserName:
+        return (
+            ParserName.MARKITDOWN
+            if self is ConversionMethod.MARKITDOWN_SERVICE else ParserName.MINERU
+        )
+
+    @classmethod
+    def from_parser(cls, parser: ParserName) -> ConversionMethod:
+        return cls.MARKITDOWN_SERVICE if parser is ParserName.MARKITDOWN else cls.MINERU_CLOUD
+
+
 class ImportQuality(StrEnum):
     HIGH = "high"
     QUICK = "quick"
@@ -38,6 +55,7 @@ class ConversionStatus(StrEnum):
     IMPORTED = "imported"
     FAILED = "failed"
     WAITING_FOR_MINERU = "waiting-for-mineru"
+    WAITING_FOR_PARSER = "waiting-for-parser"
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +68,7 @@ class ImportRequest:
     course: str | None = None
     project: str | None = None
     generate: bool = False
+    method: ConversionMethod | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +93,7 @@ class ParserExport:
     output_image_references: int | None = None
     bundle_schema: str | None = None
     profile: str | None = None
+    method: ConversionMethod | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,3 +115,4 @@ class ImportResult:
     source_text: Path | None
     routed_target: Path | None
     qc: QCReport
+    method: ConversionMethod | None = None

@@ -1,6 +1,8 @@
 # MinerU 云解析
 
-文档导入由 Engine 调用 MinerU 官方精准解析 API。Dashboard 只提交文件和显示进度，
+MinerU 云解析是默认转换方式；还可选择 MarkItDown 或配置好的自建 MinerU，见
+[转换方式与配置](DOCUMENT-CONVERSION.md)。选择云解析时由 Engine 调用官方精准解析 API。
+Dashboard 只提交文件和显示进度，
 不会读取 MinerU token。默认模型是 `vlm`，`quick` 与 `high` 只区别本地图片完整性检查。
 自动补 OCR 的路由与这两个质量选项无关。
 

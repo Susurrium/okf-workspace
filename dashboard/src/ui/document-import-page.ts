@@ -5,6 +5,7 @@ import type {
   ImportIntent,
   ImportParser,
   ImportQuality,
+  ConversionMethod,
 } from "../imports/types.js";
 
 export interface DocumentImportPageState {
@@ -20,7 +21,8 @@ export class DocumentImportPageModel {
     options: {
       intent: "source",
       quality: "quick",
-      parser: "mineru",
+      parser: "auto",
+      method: "auto",
       generate: false,
     },
     running: false,
@@ -53,8 +55,12 @@ export class DocumentImportPageModel {
   public setParser(parser: ImportParser): void {
     this.state = {
       ...this.state,
-      options: { ...this.state.options, parser },
+      options: { ...this.state.options, parser, method: "auto" },
     };
+  }
+
+  public setMethod(method: ConversionMethod | "auto"): void {
+    this.state = { ...this.state, options: { ...this.state.options, parser: "auto", method } };
   }
 
   public setGenerate(generate: boolean): void {

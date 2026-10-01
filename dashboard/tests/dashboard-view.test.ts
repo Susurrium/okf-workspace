@@ -86,7 +86,7 @@ it("walks mixed active, publishing, failed, cancelled, and conversion fallback s
   const failedPublish: ConversionRecord = {
     conversion_id: "conv-publish", status: "failed", source_filename: "publish.pdf",
     intent: "learn", quality: "quick", parser: "mineru",
-    stages: { conversion: "completed", routing: "failed" }, error: "fixture publish failure",
+    stages: { conversion: "completed", quality: "passed", routing: "failed" }, error: "fixture publish failure",
     outputs: { source_text: "sources/text/publish.md" },
   };
   const failedHandoff: ConversionRecord = {

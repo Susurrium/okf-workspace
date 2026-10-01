@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import cast
 
 from .archive_paths import contained_output_path, safe_relative_path
-from .models import OriginalRecord, ParserExport, ParserName, QCReport
+from .models import ConversionMethod, OriginalRecord, ParserExport, ParserName, QCReport
 
 
 def _io_path(path: Path) -> Path:
@@ -58,6 +58,7 @@ def write_export_contract(
         "source_filename": original.filename,
         "parser": export.parser.value,
         "parser_version": export.parser_version,
+        "method": (export.method or ConversionMethod.from_parser(export.parser)).value,
         "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "markdown": "document.md",
         "assets": asset_paths,
@@ -137,6 +138,7 @@ def load_export_contract(directory: Path) -> tuple[ParserExport, QCReport]:
             assets=assets,
             parser=ParserName(str(manifest["parser"])),
             parser_version=str(manifest.get("parser_version", "unknown")),
+            method=ConversionMethod(str(manifest["method"])) if manifest.get("method") else None,
             degraded_from=ParserName(str(degraded)) if isinstance(degraded, str) else None,
             warnings=tuple(str(value) for value in cast(list[object], parser_warnings))
             if isinstance(parser_warnings, list)

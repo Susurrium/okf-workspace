@@ -62,8 +62,10 @@ Dashboard 分为“读取面”和“命令面”：
 | `POST /ai/knowledge/create` | 从明确选择的材料创建 `status: draft` 的 Wiki；同名目标返回 409 |
 | `POST /ai/section/rewrite` | 只改写指定章节；目标在生成期间变化时返回 409 |
 | `POST /documents/import` | 上传并执行 Original → 转换 → Source 发布 |
+| `GET /documents/converters` | 读取默认方式、支持格式、配置状态与能力限制；不探测或启动服务 |
 | `GET /documents/conversions?status=failed` | 列出转换失败任务 |
-| `POST /documents/conversions/{id}/retry` | 指定转换器重试 |
+| `POST /documents/conversions/{id}/retry` | 不指定方式恢复原任务；指定 `method` 重新转换，执行中返回 409 |
+| `GET /documents/conversions/{id}/result` | 只读返回本次 Markdown、QC、具体方式与附件路径 |
 | `POST /semantic/operations` | 快速持久化一个后台学习材料或 Wiki 生成任务 |
 | `GET /semantic/operations/{id}` | 读取真实阶段：`queued/retrieving/generating/publishing/indexing` |
 | `POST /semantic/operations/{id}/cancel` | 停止检索或 Codex 子进程；进入发布阶段后不再接受取消 |
@@ -87,7 +89,7 @@ npm --workspace dashboard test -- --run
 npm --workspace dashboard run build
 ```
 
-不需要为每次普通读取做重复健康检查。增量索引是 single-flight：上一轮未完成时只合并为下一轮一次同步；根 `index.md` 是稳定人工目录，不写入最近活动或任务投影，也不是 AI 检索依赖。MinerU、MarkItDown、索引和备份状态在打开 System 或运行 `okf doctor` 时检查一次；具体动作失败时保留失败记录并提供重试。
+不需要为每次普通读取做重复健康检查。增量索引是 single-flight：上一轮未完成时只合并为下一轮一次同步；根 `index.md` 是稳定人工目录，不写入最近活动或任务投影，也不是 AI 检索依赖。转换服务在 System 中只展示配置状态，实际连接在执行转换时检查；索引和备份显示各自运行状态。具体动作失败时保留失败记录并提供重试。转换参数与旧 `parser` 兼容规则见 [文档转换方式](DOCUMENT-CONVERSION.md)。
 
 语义 Worker 不用心跳伪装进度：心跳只表示进程存活，Operation Record 的 `stage` 和
 `stage_detail` 才表示当前步骤。每次检索和 Codex 生成都在可终止的子进程中执行；默认整项上限

@@ -71,6 +71,7 @@ const PENDING_CONVERSIONS = new Set<ConversionRecord["status"]>([
   "queued",
   "converting",
   "waiting-for-mineru",
+  "waiting-for-parser",
   "ready",
   "failed",
 ]);

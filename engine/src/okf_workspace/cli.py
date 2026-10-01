@@ -37,6 +37,7 @@ from okf_workspace.feeds.adapters import ai_daily_from_v1, treehole_from_v1
 from okf_workspace.fixtures import generate_fixture_vault
 from okf_workspace.git import create_checkpoint, initialize_repository, undo_last_checkpoint
 from okf_workspace.importers import (
+    ConversionMethod,
     DocumentImporter,
     ImportIntent,
     ImportQuality,
@@ -328,6 +329,10 @@ def build_parser() -> argparse.ArgumentParser:
         default="auto",
     )
     document_import.add_argument("--course")
+    document_import.add_argument(
+        "--method", choices=("auto", "mineru-cloud", "markitdown-service", "mineru-self-hosted"),
+        default="auto", help="conversion method; independent of quality checks",
+    )
     document_import.add_argument("--project")
     document_import.add_argument("--vault", type=Path, default=defaults.vault)
     document_import.add_argument("--originals", type=Path, default=defaults.originals)
@@ -341,6 +346,9 @@ def build_parser() -> argparse.ArgumentParser:
     retry = conversion_commands.add_parser("retry")
     retry.add_argument("conversion_id")
     retry.add_argument("--parser", choices=("mineru", "markitdown"))
+    retry.add_argument(
+        "--method", choices=("mineru-cloud", "markitdown-service", "mineru-self-hosted"),
+    )
     retry.add_argument("--vault", type=Path, default=defaults.vault)
     retry.add_argument("--originals", type=Path, default=defaults.originals)
     retry.add_argument("--state", type=Path, default=defaults.state)
@@ -735,6 +743,7 @@ def main(argv: list[str] | None = None) -> int:
                     intent=_import_intent(args.intent),
                     quality=ImportQuality(args.quality),
                     parser=(None if args.parser == "auto" else ParserName(args.parser)),
+                    method=None if args.method == "auto" else ConversionMethod(args.method),
                     course=args.course,
                     project=args.project,
                 )
@@ -750,6 +759,7 @@ def main(argv: list[str] | None = None) -> int:
             retry_result = importer.retry(
                 args.conversion_id,
                 parser=ParserName(args.parser) if args.parser else None,
+                method=ConversionMethod(args.method) if args.method else None,
             )
             _print_json(asdict(retry_result), stringify_unknown=True)
             return 0
