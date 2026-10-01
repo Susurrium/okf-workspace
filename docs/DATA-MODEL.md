@@ -9,6 +9,11 @@
 
 这就是“宽容消费、严格生产”。唯一格式权威是 Vault 的 `system/contracts/base.yaml` 与 `system/contracts/<artifact>.yaml`。模板、Skills、Dashboard 和 Python/TypeScript 写入器都必须引用这套语义，不能各自发明 YAML。
 
+本节的字段和 Contract 适用于 OKF Artifact。Apex 工作台是 Dashboard 管理的文档，使用
+`dashboard: true` 和独立的 `workbench_schema`，不要求笔记 `type`、`title`、`created_at`
+或 H1。它仍可保存用户便签和真实任务，也需要备份；文件角色与各消费边界见
+[数据所有权](architecture/data-ownership.md)。
+
 ## 2. 公共字段
 
 所有受管 Artifact 只强制三个公共字段：

@@ -6,6 +6,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from okf_workspace.okf.document_role import DocumentRole, document_role, is_workbench_backup
+from okf_workspace.okf.frontmatter import FrontmatterError, read_document
+
 _TASK = re.compile(r"^\s*-\s+\[ \]\s+(.+?)\s*$")
 _FORMAL_TASK = re.compile(r"(?:^|\s)#task(?:\s|$)", re.IGNORECASE)
 _TYPE = re.compile(r'^type:\s*["\']?([^"\']+?)["\']?\s*$', re.IGNORECASE)
@@ -79,8 +82,17 @@ def collect_tasks(vault: Path) -> list[TaskItem]:
         # task section mirrors tasks from authoritative notes and must never
         # become a task source itself.
         if path.name == "index.md":
-            continue
+            if path == vault / "index.md":
+                continue
+            try:
+                document = read_document(path)
+            except (FrontmatterError, OSError):
+                continue
+            if document_role(document) is not DocumentRole.WORKBENCH:
+                continue
         relative = path.relative_to(vault)
+        if is_workbench_backup(relative.as_posix()):
+            continue
         if path.name == "AGENTS.md" and len(relative.parts) == 1:
             continue
         if any(part in _SKIPPED_DIRECTORIES for part in relative.parts):

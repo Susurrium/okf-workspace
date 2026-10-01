@@ -9,6 +9,12 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import cast
 
+from okf_workspace.okf.document_role import (
+    DocumentRole,
+    document_role,
+    is_workbench_backup,
+    workbench_issue,
+)
 from okf_workspace.okf.frontmatter import FrontmatterError, OkfDocument, read_document
 from okf_workspace.retrieval.links import extract_links
 
@@ -27,13 +33,27 @@ def scan_governance(vault: Path) -> list[GovernanceIssue]:
     issues: list[GovernanceIssue] = []
     for path in sorted(root.rglob("*.md")):
         relative = path.relative_to(root).as_posix()
+        if is_workbench_backup(relative):
+            continue
         if any(part in {".git", ".obsidian", ".trash"} for part in path.relative_to(root).parts):
             continue
-        if path.name in {"index.md", "log.md"}:
+        if path == root / "index.md":
             continue
         try:
             document = read_document(path)
-        except (FrontmatterError, OSError):
+        except FrontmatterError as exc:
+            lines = path.read_text(encoding="utf-8").splitlines()
+            if lines and lines[0].strip() == "---":
+                issues.append(GovernanceIssue("frontmatter", relative, str(exc), "error"))
+            continue
+        except OSError:
+            continue
+        role_issue = workbench_issue(document)
+        if role_issue is not None:
+            issues.append(GovernanceIssue(role_issue[0], relative, role_issue[1], "error"))
+        if document_role(document) in {DocumentRole.WORKBENCH, DocumentRole.INVALID_WORKBENCH}:
+            continue
+        if path.name in {"index.md", "log.md"}:
             continue
         documents.append((relative, document))
         legacy_types = {
@@ -127,8 +147,7 @@ def scan_governance(vault: Path) -> list[GovernanceIssue]:
                 )
             if (
                 isinstance(generated, Mapping)
-                and cast(Mapping[object, object], generated).get("by")
-                != "process:codex-background"
+                and cast(Mapping[object, object], generated).get("by") != "process:codex-background"
             ):
                 issues.append(
                     GovernanceIssue(

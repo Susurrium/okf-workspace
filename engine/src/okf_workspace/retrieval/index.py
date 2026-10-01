@@ -15,7 +15,7 @@ from okf_workspace.okf.frontmatter import FrontmatterError, parse_document
 from .chunks import chunk_markdown
 from .links import extract_links
 from .models import IndexUpdate, MarkdownChunk, SearchHit
-from .scanner import file_hash, iter_markdown
+from .scanner import file_hash, is_retrievable_markdown, iter_markdown
 
 _CJK_RUN = re.compile(r"[\u3400-\u9fff]+")
 _WORD = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.+-]*")
@@ -177,6 +177,10 @@ class SearchIndex:
     def index_path(self, path: Path, *, force: bool = False) -> tuple[bool, int]:
         absolute = path.resolve()
         relative = absolute.relative_to(self.vault).as_posix()
+        if not is_retrievable_markdown(absolute, self.vault):
+            with self.connect() as connection:
+                self._delete_document(connection, relative)
+            return False, 0
         stat = absolute.stat()
         with self.connect() as connection:
             existing = connection.execute(

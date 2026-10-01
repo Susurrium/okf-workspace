@@ -22,6 +22,7 @@ from okf_workspace.ingestion import (
     WEB_CLIP,
     normalize_ingested_via,
 )
+from okf_workspace.okf.document_role import protects_workbench_file
 from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
 from okf_workspace.okf.paths import resolve_bundle_path, slugify
 from okf_workspace.okf.relations import (
@@ -42,12 +43,6 @@ _DEFAULT_WEB_CLIPPER_FIELDS = frozenset(
     {"title", "source", "author", "published", "created", "description", "tags"}
 )
 _CANONICAL_CAPTURE_FIELDS = frozenset({"type", "created_at", "ingested_via", "resource"})
-
-
-def _is_dashboard_layout_markdown(relative: str) -> bool:
-    """Keep Apex's UI layout and rollback copies outside OKF artifact migration."""
-
-    return relative == "dashboard.md" or relative.startswith(".dashboard-backup/")
 
 
 def _read_json_object(path: Path) -> dict[str, object]:
@@ -168,6 +163,8 @@ def _migrate_default_web_clippings(root: Path) -> list[str]:
 
     changes: list[str] = []
     for source in sorted(directory.glob("*.md")):
+        if protects_workbench_file(source, root):
+            continue
         try:
             document = read_document(source)
         except (OSError, ValueError):
@@ -248,6 +245,8 @@ def _migrate_legacy_knowledge(root: Path) -> tuple[list[str], dict[str, str]]:
         if not directory.is_dir():
             continue
         for source in sorted(directory.glob("*.md")):
+            if protects_workbench_file(source, root):
+                continue
             if source.name == "index.md":
                 continue
             document = read_document(source)
@@ -272,7 +271,7 @@ def _migrate_legacy_knowledge(root: Path) -> tuple[list[str], dict[str, str]]:
             links[old_relative] = new_relative
             changes.append(f"{old_relative} -> {new_relative}")
         index = directory / "index.md"
-        if index.is_file():
+        if index.is_file() and not protects_workbench_file(index, root):
             index.unlink()
             changes.append(f"{index.relative_to(root).as_posix()} (removed legacy index)")
         with suppress(OSError):
@@ -285,7 +284,7 @@ def _rewrite_links(root: Path, mapping: dict[str, str]) -> list[str]:
     if not mapping:
         return changes
     for path in root.rglob("*.md"):
-        if _is_dashboard_layout_markdown(path.relative_to(root).as_posix()):
+        if protects_workbench_file(path, root):
             continue
         original = path.read_text(encoding="utf-8")
         updated = original
@@ -301,7 +300,7 @@ def _remove_nested_indexes(root: Path) -> list[str]:
     changes: list[str] = []
     preserved_directories = frozenset(VAULT_DYNAMIC_DIRECTORIES)
     for path in sorted(root.rglob("index.md")):
-        if path == root / "index.md":
+        if path == root / "index.md" or protects_workbench_file(path, root):
             continue
         relative = path.relative_to(root)
         if any(part in {".git", ".obsidian", ".trash"} for part in relative.parts):
@@ -543,7 +542,7 @@ def _repair_legacy_structure(root: Path) -> list[str]:
     changes: list[str] = []
     for path in sorted(root.rglob("*.md")):
         relative = path.relative_to(root).as_posix()
-        if _is_dashboard_layout_markdown(relative):
+        if protects_workbench_file(path, root):
             continue
         if any(part in {".agents", ".git", ".obsidian", ".trash"} for part in path.parts):
             continue
@@ -647,7 +646,7 @@ def _normalize_contract_v2(root: Path, state: Path | None) -> list[str]:
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     for path in sorted(root.rglob("*.md")):
         relative = path.relative_to(root).as_posix()
-        if _is_dashboard_layout_markdown(relative):
+        if protects_workbench_file(path, root):
             continue
         if any(
             part in {".agents", ".claudian", ".git", ".obsidian", ".trash"}
@@ -830,6 +829,8 @@ def _move_profile_v3_paths(root: Path) -> tuple[list[str], dict[str, str]]:
         if not source_root.is_dir():
             continue
         for source in sorted(path for path in source_root.rglob("*") if path.is_file()):
+            if source.suffix == ".md" and protects_workbench_file(source, root):
+                continue
             old_relative = source.relative_to(root).as_posix()
             target = root / new_root / source.relative_to(source_root)
             if target.exists():
@@ -867,7 +868,7 @@ def _rewrite_profile_v3_legacy_path_prefixes(root: Path) -> list[str]:
     changes: list[str] = []
     for path in sorted(root.rglob("*.md")):
         relative = path.relative_to(root)
-        if _is_dashboard_layout_markdown(relative.as_posix()):
+        if protects_workbench_file(path, root):
             continue
         if any(part in {".agents", ".git", ".obsidian", ".trash"} for part in relative.parts):
             continue
@@ -1053,7 +1054,7 @@ def _normalize_profile_v3(root: Path) -> list[str]:
     changes: list[str] = []
     for path in sorted(root.rglob("*.md")):
         relative = path.relative_to(root).as_posix()
-        if _is_dashboard_layout_markdown(relative):
+        if protects_workbench_file(path, root):
             continue
         if any(
             part in {".agents", ".claudian", ".git", ".obsidian", ".trash"}
@@ -1184,6 +1185,8 @@ def _ensure_source_pairs(root: Path) -> list[str]:
     if not records.is_dir():
         return changes
     for source in sorted(records.rglob("*.md")):
+        if protects_workbench_file(source, root):
+            continue
         with suppress(OSError, ValueError):
             source_document = read_document(source)
             if source_document.type != "Source":
@@ -1223,6 +1226,8 @@ def _ensure_source_text_h1(root: Path) -> list[str]:
     if not directory.is_dir():
         return changes
     for path in sorted(directory.rglob("*.md")):
+        if protects_workbench_file(path, root):
+            continue
         try:
             document = read_document(path)
         except (OSError, ValueError):
@@ -1245,6 +1250,8 @@ def _clean_legacy_logs(root: Path) -> list[str]:
     changes: list[str] = []
     legacy_headings = {"# Directory Update Log", "# 目录更新日志"}
     for log in sorted(root.rglob("log.md")):
+        if protects_workbench_file(log, root):
+            continue
         relative = log.relative_to(root)
         if any(part in {".git", ".obsidian", ".trash"} for part in relative.parts):
             continue
@@ -1304,9 +1311,7 @@ def _capture_targets_exist(root: Path, value: object) -> bool:
     return False
 
 
-_LEGACY_CAPTURE_SOURCE = (
-    r"来源：\[Capture\]\(/archive/captures/[^)\r\n]+\)"
-)
+_LEGACY_CAPTURE_SOURCE = r"来源：\[Capture\]\(/archive/captures/[^)\r\n]+\)"
 _LEGACY_DUPLICATE_PROJECT_CAPTURE_ENTRY = re.compile(
     rf"(?m)^(?P<bullet>[ \t]*-[ \t]+(?P<title>[^\r\n]*\S))[ \t]*\r?\n"
     rf"[ \t]*\r?\n"
@@ -1336,6 +1341,8 @@ def _remove_legacy_project_capture_links(root: Path) -> list[str]:
     if not projects.is_dir():
         return changes
     for path in sorted(projects.glob("*/log.md")):
+        if protects_workbench_file(path, root):
+            continue
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
@@ -1362,7 +1369,7 @@ def _remove_legacy_capture_links(root: Path) -> list[str]:
     source_line = re.compile(r"(?m)^\s*来源：\[Capture\]\(/archive/captures/[^)]+\)\s*\n?")
     for path in sorted(root.rglob("*.md")):
         relative = path.relative_to(root).as_posix()
-        if _is_dashboard_layout_markdown(relative):
+        if protects_workbench_file(path, root):
             continue
         if relative.startswith(("system/contracts/", "system/templates/")):
             continue
@@ -1409,7 +1416,7 @@ def _normalize_capture_lifecycle(root: Path) -> list[str]:
     captures: list[tuple[Path, OkfDocument]] = []
     for path in sorted(root.rglob("*.md")):
         relative = path.relative_to(root)
-        if _is_dashboard_layout_markdown(relative.as_posix()):
+        if protects_workbench_file(path, root):
             continue
         if any(
             part in {".agents", ".claudian", ".git", ".obsidian", ".trash"}
@@ -1465,6 +1472,8 @@ def _backfill_study_guide_context(root: Path) -> list[str]:
     if not learning.is_dir():
         return changes
     for path in sorted(learning.rglob("*.md")):
+        if protects_workbench_file(path, root):
+            continue
         relative = path.relative_to(root).as_posix()
         if path.name == "index.md":
             continue
@@ -1529,7 +1538,7 @@ def migrate_current_layout(
     changes.extend(_rewrite_links(root, link_mapping))
 
     queue = root / "learning" / "queue.md"
-    if queue.is_file():
+    if queue.is_file() and not protects_workbench_file(queue, root):
         document = read_document(queue)
         if _EMPTY_QUEUE_MARKER in document.body and "[[" not in document.body:
             queue.unlink()
@@ -1580,9 +1589,11 @@ def migrate_current_layout(
     root_index = root / "index.md"
     canonical_index = (templates / "index.md").read_text(encoding="utf-8")
     current_index = root_index.read_text(encoding="utf-8")
-    navigation_titles = ('# Workspace 总目录', '# 笔记导航')
+    navigation_titles = ("# Workspace 总目录", "# 笔记导航")
     current_navigation = any(title in current_index for title in navigation_titles)
-    if not current_navigation or 'name="current-activity"' in current_index:
+    if not protects_workbench_file(root_index, root) and (
+        not current_navigation or 'name="current-activity"' in current_index
+    ):
         root_index.write_text(canonical_index, encoding="utf-8", newline="\n")
         changes.append("index.md：已更新根目录导航")
     rebuild_root_index(root)

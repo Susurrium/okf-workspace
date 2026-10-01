@@ -13,6 +13,7 @@
 | Semantic and conversion state | Operations | Dashboard, workers |
 | Contracts, templates, views, policies, Skills | Engine Workspace resources | Engine, deployed Vault, Dashboard, Claudian |
 | Apex habits, expenses, reading history, completed focus sessions, and widget state | Apex native services and their existing JSON/plugin data | Unified Dashboard widgets and their existing export/sync adapters |
+| Workbench Markdown layout, inline memos and tasks, and workbench safety copies | Dashboard/Apex workbench format | Dashboard, explicit AI attachments; live embedded tasks may participate in task projections |
 
 `Source.resource`, `kind`, and `text` describe a context-neutral input identity. Provenance such as
 `ingested_via` records how the input first entered the Workspace; neither identity nor provenance says
@@ -38,3 +39,23 @@ native services keep their existing formats, semantics, and export/sync behavior
 may require a repeatable path takeover, but it must not create corresponding Markdown/YAML notes, merge two
 stores by guesswork, or leave two active writers. Physical storage below `.obsidian/plugins/` does not make
 these records part of the Workspace semantic model.
+
+Workbench Markdown is user-owned Dashboard data, not an OKF Artifact or disposable cache. A parsed
+top-level YAML boolean `dashboard: true` identifies it independently of its filename, directory, or
+plugin registry. An absent `workbench_schema` is compatible with legacy boards; any positive integer
+is an identity-compatible version, while Dashboard owns layout compatibility and preservation of
+unknown configuration/body. Empty legacy `type` fields are tolerated. A nonempty Artifact `type`
+together with `dashboard: true` is an identity conflict, never a validation exemption. String/numeric
+dashboard markers and invalid schema values are diagnosed without rewriting the file.
+
+Engine bundle/changed-file validation does not impose Artifact fields or headings on workbenches.
+Engine Artifact publishers still reject workbench candidates. Artifact migrations preserve board
+bytes, including conflicting/invalid board identities and malformed YAML, and never normalize their
+fields, move them as legacy notes, or rewrite their body. The bundle-root `index.md` remains reserved
+for human navigation and cannot be repurposed as a workbench.
+
+Default lexical/vector retrieval excludes workbenches and root `.dashboard-backup/` safety copies;
+index sync removes prior entries. Explicitly selected workbench attachments are read from current
+Markdown without entering the default index. Live workbench tasks retain the normal embedded-task
+rules; backup copies never contribute duplicate tasks or semantic governance findings. Workbenches
+remain included in backup/restore, and moving a memo into Capture remains an explicit user action.

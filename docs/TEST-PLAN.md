@@ -25,6 +25,10 @@ cd E:\code\okf-workspace
 ## 2. Engine 关键矩阵
 
 - Contract：所有 Workspace 写入器产生合法 YAML，并保留未知扩展字段。
+- 工作台边界：使用 Apex 实际序列化器与六种预设生成合成工作台；任意名称、中文路径、
+  旧版与未来版本不要求 Artifact 字段，身份冲突、非布尔标记及异常 YAML 明确报错。
+  笔记迁移逐字节保留工作台；检索清理旧布局索引，显式附件读取最新正文；真实任务保留，
+  工作台备份不重复参与检索、任务或笔记治理，备份恢复仍保留工作台。
 - Sources：Source/Source Text 成对原子发布；Web/Feed 双向 URL 去重；文件哈希去重。
 - Intake：所有默认入口使用 MinerU 云 API；本地 token 文件不进入仓库或 Vault；失败不隐式降级到旧服务。
 - Retry：切换 parser 不残留永远 queued 的旧 conversion。

@@ -16,6 +16,7 @@ from .contracts import (
     load_contract_catalog,
     matches_contract_path,
 )
+from .document_role import DocumentRole, document_role, is_workbench_backup, workbench_issue
 from .frontmatter import FrontmatterError, OkfDocument, parse_document, read_document
 
 _DATE_HEADING = re.compile(r"^## (\d{4}-\d{2}-\d{2})\s*$")
@@ -61,8 +62,7 @@ def _is_skipped(path: Path, vault: Path) -> bool:
         path.name in _CONTROL_FILES
         or any(part in _SKIPPED_DIRECTORIES for part in parts)
         or (len(parts) >= 2 and parts[0] == "system" and parts[1] in _SKIPPED_SYSTEM_SECTIONS)
-        or relative == "dashboard.md"
-        or relative.startswith(".dashboard-backup/")
+        or is_workbench_backup(relative)
     )
 
 
@@ -97,6 +97,14 @@ def _validate_index(
     except FrontmatterError as exc:
         _issue(report, relative, "root-index-frontmatter", str(exc))
         return
+    if document_role(root) is not DocumentRole.ARTIFACT:
+        _validate_workbench(root, relative, report)
+        _issue(
+            report,
+            relative,
+            "reserved-workbench",
+            "bundle-root index.md is reserved for navigation",
+        )
     if profile and str(root.frontmatter.get("okf_version")) != "0.2":
         _issue(report, relative, "okf-version", 'root index must declare okf_version: "0.2"')
     if not any(line.startswith("# ") for line in root.body.splitlines()):
@@ -348,6 +356,8 @@ def _validate_document_artifact(
     report: ValidationReport,
     catalog: ContractCatalog,
 ) -> None:
+    if _validate_workbench(document, relative, report):
+        return
     if not document.type:
         _issue(report, relative, "missing-type", "frontmatter requires a non-empty type")
         return
@@ -453,8 +463,35 @@ def _validate_standard_artifact(
     except (FrontmatterError, OSError) as exc:
         _issue(report, relative, "frontmatter", str(exc))
         return
+    if _validate_workbench(document, relative, report):
+        return
     if not document.type:
         _issue(report, relative, "missing-type", "frontmatter requires a non-empty type")
+
+
+def _validate_workbench(document: OkfDocument, relative: str, report: ValidationReport) -> bool:
+    role = document_role(document)
+    issue = workbench_issue(document)
+    if issue is not None:
+        _issue(report, relative, *issue)
+    # Conflicting identities still undergo the normal Artifact checks.
+    return role is DocumentRole.WORKBENCH or (
+        role is DocumentRole.INVALID_WORKBENCH and not document.type
+    )
+
+
+def _validate_reserved_workbench(path: Path, root: Path, report: ValidationReport) -> bool:
+    # The bundle-root index retains its reserved navigation contract.
+    if path == root / "index.md":
+        return False
+    try:
+        document = read_document(path)
+    except (FrontmatterError, OSError):
+        return False
+    if document_role(document) is DocumentRole.ARTIFACT:
+        return False
+    _validate_workbench(document, _relative(path, root), report)
+    return True
 
 
 def _catalog(vault: Path, report: ValidationReport) -> ContractCatalog | None:
@@ -491,13 +528,17 @@ def validate_paths(
             _issue(report, value, "missing-file", "validation target does not exist")
             continue
         report.files_checked += 1
+        if _is_skipped(path, root):
+            continue
+        if path.name in {"index.md", "log.md"} and _validate_reserved_workbench(path, root, report):
+            continue
         if path.name == "index.md":
             _validate_index(path, root, report, profile=profile)
         elif path.name == "log.md":
             _validate_log(path, root, report)
-        elif not _is_skipped(path, root) and catalog is not None:
+        elif catalog is not None:
             _validate_artifact(path, root, report, catalog)
-        elif not _is_skipped(path, root):
+        else:
             _validate_standard_artifact(path, root, report)
     return report
 
@@ -517,6 +558,13 @@ def validate_document(vault: Path, path: Path, document: OkfDocument) -> Validat
     if catalog is not None:
         report.files_checked = 1
         _validate_document_artifact(document, relative, root, report, catalog)
+        if document_role(document) is DocumentRole.WORKBENCH:
+            _issue(
+                report,
+                relative,
+                "non-artifact-publication",
+                "Engine Artifact publishers cannot publish Dashboard-owned workbench documents",
+            )
     return report
 
 
@@ -535,6 +583,8 @@ def validate_bundle(vault: Path, *, profile: bool = True) -> ValidationReport:
         if _is_skipped(path, root):
             continue
         report.files_checked += 1
+        if path.name in {"index.md", "log.md"} and _validate_reserved_workbench(path, root, report):
+            continue
         if path.name == "index.md":
             _validate_index(path, root, report, profile=profile)
         elif path.name == "log.md":

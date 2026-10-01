@@ -1,10 +1,19 @@
 import { TFile, type App } from "obsidian";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { VaultDashboardReader } from "../src/plugin/vault-dashboard.js";
 import { VaultNoteService } from "../src/plugin/vault-note-service.js";
 
 describe("VaultNoteService", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 7, 17, 12));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("creates user-authored notes directly in the Vault and projects them immediately", async () => {
     const markdown = new Map<string, string>();
     const files = new Map<string, TFile>();

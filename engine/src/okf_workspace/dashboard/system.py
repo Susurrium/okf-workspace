@@ -16,6 +16,7 @@ from okf_workspace.feeds import FeedKind
 from okf_workspace.governance import scan_governance
 from okf_workspace.importers.config import ImportSettings
 from okf_workspace.importers.methods import method_catalogue
+from okf_workspace.retrieval.scanner import iter_markdown
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +96,7 @@ def _semantic_worker_available(state: Path) -> bool:
 
 
 def _latest_markdown_mtime(vault: Path) -> float:
-    return max((path.stat().st_mtime for path in vault.rglob("*.md")), default=0.0)
+    return max((path.stat().st_mtime for path in iter_markdown(vault)), default=0.0)
 
 
 def _read_completed_at(path: Path) -> datetime | None:

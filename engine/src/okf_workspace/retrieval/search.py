@@ -6,8 +6,12 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Literal
 
+from okf_workspace.okf.paths import resolve_bundle_path
+
+from .chunks import chunk_markdown
 from .index import SearchIndex
 from .models import SearchHit
+from .scanner import is_retrievable_markdown
 from .scope import path_in_scope
 from .vector import Embedder, VectorIndex
 
@@ -155,6 +159,14 @@ class HybridSearcher:
         for raw in explicit_paths:
             value = PurePosixPath(raw.lstrip("/")).as_posix()
             chunks = self.index.chunks_for_paths([value])
+            if not chunks:
+                path = resolve_bundle_path(self.index.vault, value)
+                if path.is_file():
+                    chunks = chunk_markdown(
+                        value,
+                        path.read_text(encoding="utf-8"),
+                        fallback_title=path.stem,
+                    )
             explicit.extend(
                 SearchHit(
                     path=chunk.path,
@@ -198,7 +210,12 @@ class HybridSearcher:
             if vectors:
                 rankings.append(("vector", vectors))
 
-        merged = _merge_rankings(rankings)
+        merged = [
+            hit
+            for hit in _merge_rankings(rankings)
+            if "explicit path" in hit.retrieval_reasons
+            or is_retrievable_markdown(self.index.vault / hit.path, self.index.vault)
+        ]
         primary = _diverse(merged, limit)
         if mode != "hybrid":
             return primary
@@ -208,6 +225,7 @@ class HybridSearcher:
             hit
             for path in sorted(related - existing_paths)
             if path_in_scope(path, boundaries.include_prefixes, boundaries.exclude_prefixes)
+            if is_retrievable_markdown(self.index.vault / path, self.index.vault)
             if (hit := self.index.first_chunk(path)) is not None
         ]
         reserved = min(2, len(expanded), max(0, limit - 1))

@@ -7,10 +7,10 @@ from pathlib import Path
 
 from okf_workspace.okf.paths import resolve_bundle_path
 
-from .chunks import text_hash
+from .chunks import chunk_markdown, text_hash
 from .index import SearchIndex
 from .models import ContextItem, MarkdownChunk, SearchHit
-from .scanner import file_hash
+from .scanner import file_hash, is_retrievable_markdown
 
 
 def _actual_text(path: Path, start_line: int, end_line: int) -> str:
@@ -43,6 +43,30 @@ class ContextReader:
         path = resolve_bundle_path(self.index.vault, hit.path)
         if not path.is_file():
             raise FileNotFoundError(path)
+        if "explicit path" in hit.retrieval_reasons:
+            chunks = chunk_markdown(
+                hit.path,
+                path.read_text(encoding="utf-8"),
+                fallback_title=path.stem,
+            )
+            current = _replacement(hit, chunks)
+            if current is None:
+                raise RuntimeError(f"no readable Markdown section remains in {hit.path}")
+            actual = _actual_text(path, current.start_line, current.end_line)
+            current_hash = text_hash(actual)
+            return ContextItem(
+                path=hit.path,
+                heading=current.heading,
+                start_line=current.start_line,
+                end_line=current.end_line,
+                actual_text=actual,
+                read_at=datetime.now(UTC),
+                current_text_hash=current_hash,
+                retrieval_reasons=hit.retrieval_reasons,
+                refreshed_after_change=current_hash != hit.text_hash,
+            )
+        if not is_retrievable_markdown(path, self.index.vault):
+            raise ValueError(f"{hit.path} is no longer a default retrieval source")
         indexed_file_hash = self.index.get_file_hash(hit.path)
         changed = indexed_file_hash != file_hash(path)
         current_hit = hit
