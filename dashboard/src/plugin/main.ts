@@ -1884,6 +1884,13 @@ export default class OkfBrainPlugin extends Plugin {
         await serviceReady;
         return this.api().converters();
       },
+      async (kind, title, slug) => {
+        const result = kind === "course"
+          ? await this.notes().createCourse(title, slug)
+          : await this.notes().createProject(title, slug);
+        this.refreshDashboardViews();
+        return result;
+      },
     ).open();
   }
 

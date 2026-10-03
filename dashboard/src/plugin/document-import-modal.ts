@@ -13,6 +13,10 @@ import { VaultDashboardReader } from "./vault-dashboard.js";
 
 export type ImportOrigin = "today" | "inbox" | "learning" | "context" | "command";
 type Relation = Pick<DocumentImportOptions, "course" | "project">;
+export type ImportRelationKind = "course" | "project";
+export type CreateImportRelation = (
+  kind: ImportRelationKind, title: string, slug?: string,
+) => Promise<{ path: string }>;
 
 export class DocumentImportModal extends Modal {
   private files: ImportFile[];
@@ -35,6 +39,14 @@ export class DocumentImportModal extends Modal {
   private status?: HTMLElement;
   private submitButton?: HTMLButtonElement;
   private unbindDrop?: () => void;
+  private relationSelect?: HTMLSelectElement;
+  private relationHint?: HTMLElement;
+  private relationForm?: HTMLElement;
+  private readonly relationCreateButtons: HTMLButtonElement[] = [];
+  private readonly createdRelations = new Map<string, string>();
+  private creatingRelation = false;
+  private savingRelation = false;
+  private relationLoadVersion = 0;
 
   public constructor(
     app: App,
@@ -43,6 +55,7 @@ export class DocumentImportModal extends Modal {
     origin: ImportOrigin,
     private readonly importFile: (file: File, options: DocumentImportOptions) => Promise<DocumentImportResult>,
     private readonly loadConverters?: () => Promise<ConverterCatalogue>,
+    private readonly createRelation?: CreateImportRelation,
   ) {
     super(app);
     this.files = files;
@@ -148,33 +161,146 @@ export class DocumentImportModal extends Modal {
   }
 
   private renderRelation(parent: HTMLElement): void {
-    if (this.relation.course || this.relation.project) {
-      parent.createDiv({
-        cls: "okf-document-import__fixed-relation",
-        text: `关联 ${this.relation.course ? `Course：${this.relation.course}` : `Project：${this.relation.project}`}`,
-      });
-      return;
-    }
-    const select = this.select(parent, "归属", [["", "独立资料"]], "", (value) => {
-      delete this.relation.course;
-      delete this.relation.project;
-      if (value.startsWith("course:")) this.relation.course = value.slice(7);
-      if (value.startsWith("project:")) this.relation.project = value.slice(8);
+    const section = parent.createDiv({ cls: "okf-document-import__relation" });
+    const initial = this.relationValue();
+    const choices: [string, string][] = [["", "独立资料"]];
+    if (initial) choices.push([initial, this.relationLabel(initial)]);
+    this.relationSelect = this.select(section, "归属", choices, initial, (value) => {
+      if (this.running || this.creatingRelation) {
+        this.relationSelect!.value = this.relationValue();
+        return;
+      }
+      this.setRelation(value);
     });
-    void new VaultDashboardReader(this.app).learning().then((data) => {
+    this.relationHint = section.createDiv({ cls: "okf-dashboard__muted", attr: { "aria-live": "polite" } });
+    if (this.createRelation) {
+      const actions = section.createDiv({ cls: "okf-document-import__relation-actions" });
+      for (const kind of ["course", "project"] as const) {
+        const button = actions.createEl("button", {
+          text: kind === "course" ? "新建课程…" : "新建项目…", attr: { type: "button" },
+        });
+        button.addEventListener("click", () => this.beginCreateRelation(kind));
+        this.relationCreateButtons.push(button);
+      }
+    }
+    this.relationForm = section.createDiv();
+    void this.refreshRelations();
+  }
+
+  private relationValue(): string {
+    return this.relation.course ? `course:${this.relation.course}`
+      : this.relation.project ? `project:${this.relation.project}` : "";
+  }
+
+  private relationLabel(value: string): string {
+    return `${value.startsWith("course:") ? "Course" : "Project"}：${value.slice(value.indexOf(":") + 1)}`;
+  }
+
+  private setRelation(value: string): void {
+    delete this.relation.course;
+    delete this.relation.project;
+    if (value.startsWith("course:")) this.relation.course = value.slice(7);
+    if (value.startsWith("project:")) this.relation.project = value.slice(8);
+  }
+
+  private async refreshRelations(): Promise<void> {
+    const version = ++this.relationLoadVersion;
+    this.relationHint?.empty();
+    this.relationHint?.setText("正在读取已有课程和项目…");
+    try {
+      const data = await new VaultDashboardReader(this.app).learning();
+      if (this.closed || version !== this.relationLoadVersion) return;
+      const choices = new Map<string, string>();
       for (const course of data.courses) {
         const slug = course.path.split("/")[2];
-        if (!slug) continue;
-        const option = select.createEl("option", { text: `Course：${course.title}` });
-        option.value = `course:${slug}`;
+        if (slug) choices.set(`course:${slug}`, `Course：${course.title}`);
       }
       for (const project of data.projects) {
         const slug = project.path.split("/")[1];
-        if (!slug) continue;
-        const option = select.createEl("option", { text: `Project：${project.title}` });
-        option.value = `project:${slug}`;
+        if (slug) choices.set(`project:${slug}`, `Project：${project.title}`);
       }
-    }).catch(this.showError);
+      for (const [value, title] of this.createdRelations) {
+        if (!choices.has(value)) choices.set(value, title);
+      }
+      const selected = this.relationValue();
+      if (selected && !choices.has(selected)) choices.set(selected, this.relationLabel(selected));
+      const select = this.relationSelect!;
+      select.empty();
+      select.createEl("option", { text: "独立资料" }).value = "";
+      for (const [value, title] of choices) select.createEl("option", { text: title }).value = value;
+      select.value = selected;
+      this.relationHint?.setText(choices.size ? "没有合适的归属时，可以新建课程或项目。"
+        : "还没有课程或项目，可以新建，也可以保持独立资料。");
+    } catch (error) {
+      if (this.closed || version !== this.relationLoadVersion) return;
+      this.relationHint?.empty();
+      this.relationHint?.createDiv({ text: `无法读取已有归属：${error instanceof Error ? error.message : String(error)}` });
+      this.relationHint?.createEl("button", { text: "重新读取归属", attr: { type: "button" } })
+        .addEventListener("click", () => void this.refreshRelations());
+    }
+  }
+
+  private beginCreateRelation(kind: ImportRelationKind): void {
+    if (!this.createRelation || this.running || this.creatingRelation || this.closed) return;
+    this.creatingRelation = true;
+    this.updateSubmit();
+    const name = kind === "course" ? "课程" : "项目";
+    const form = this.relationForm!.createEl("form", { cls: "okf-document-import__create-relation" });
+    form.createEl("strong", { text: `新建${name}` });
+    const titleField = form.createEl("label", { cls: "okf-document-import__field" });
+    titleField.createSpan({ text: `${name}名称` });
+    const titleInput = titleField.createEl("input", { attr: { type: "text", required: "" } });
+    const slugField = form.createEl("label", { cls: "okf-document-import__field" });
+    slugField.createSpan({ text: "目录名（可留空）" });
+    const slugInput = slugField.createEl("input", { attr: { type: "text" } });
+    const error = form.createDiv({ cls: "okf-document-import__relation-error", attr: { role: "alert" } });
+    const actions = form.createDiv({ cls: "okf-document-import__relation-actions" });
+    const save = actions.createEl("button", { text: "创建并选中", cls: "mod-cta", attr: { type: "submit" } });
+    const cancel = actions.createEl("button", { text: "取消新建", attr: { type: "button" } });
+    cancel.addEventListener("click", () => {
+      if (this.savingRelation) return;
+      this.creatingRelation = false;
+      this.relationForm?.empty();
+      this.updateSubmit();
+      this.relationSelect?.focus();
+    });
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (this.savingRelation || this.closed) return;
+      const title = titleInput.value.trim();
+      if (!title) {
+        error.setText(`请填写${name}名称`);
+        titleInput.focus();
+        return;
+      }
+      this.savingRelation = true;
+      titleInput.disabled = slugInput.disabled = save.disabled = cancel.disabled = true;
+      error.empty();
+      void this.createRelation!(kind, title, slugInput.value.trim() || undefined).then((result) => {
+        if (this.closed) return;
+        const match = (kind === "course" ? /^learning\/courses\/([^/]+)\/course\.md$/u
+          : /^projects\/([^/]+)\/project\.md$/u).exec(result.path);
+        if (!match?.[1]) throw new Error(`无法识别新建${name}的路径：${result.path}`);
+        const value = `${kind}:${match[1]}`;
+        const label = `${kind === "course" ? "Course" : "Project"}：${title}`;
+        this.createdRelations.set(value, label);
+        this.setRelation(value);
+        this.relationSelect!.createEl("option", { text: label }).value = value;
+        this.relationSelect!.value = value;
+        this.creatingRelation = false;
+        this.relationForm?.empty();
+        void this.refreshRelations();
+        this.relationSelect?.focus();
+      }).catch((failure: unknown) => {
+        if (!this.closed) error.setText(failure instanceof Error ? failure.message : String(failure));
+      }).finally(() => {
+        this.savingRelation = false;
+        if (this.closed) return;
+        titleInput.disabled = slugInput.disabled = save.disabled = cancel.disabled = false;
+        this.updateSubmit();
+      });
+    });
+    titleInput.focus();
   }
 
   private readonly showError = (error: unknown): void => {
@@ -266,8 +392,11 @@ export class DocumentImportModal extends Modal {
   }
 
   private updateSubmit(): void {
+    const relationDisabled = this.running || this.creatingRelation;
+    if (this.relationSelect) this.relationSelect.disabled = relationDisabled;
+    for (const button of this.relationCreateButtons) button.disabled = relationDisabled;
     const info = this.catalogue?.methods.find((item) => item.id === this.method);
-    if (this.submitButton) this.submitButton.disabled = this.running || this.loadingMethods
+    if (this.submitButton) this.submitButton.disabled = this.running || this.creatingRelation || this.loadingMethods
       || Boolean(this.catalogueError) || Boolean(this.catalogue && (!info || !info.configured))
       || !this.files.some((item) => this.isPending(item))
       || !this.skipUnsupported && this.files.some((item) => this.unsupportedReason(item));
