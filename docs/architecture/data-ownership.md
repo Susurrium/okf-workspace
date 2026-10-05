@@ -54,6 +54,14 @@ bytes, including conflicting/invalid board identities and malformed YAML, and ne
 fields, move them as legacy notes, or rewrite their body. The bundle-root `index.md` remains reserved
 for human navigation and cannot be repurposed as a workbench.
 
+Dashboard preserves Unicode letters in new workbench filenames. Display-name changes do not rename
+files, and unregistering a workbench does not delete its Markdown. On startup, a missing registry is
+recovered from valid workbench frontmatter on disk before a default board can be created; hidden
+directories (including safety copies) and root `index.md` are excluded. Recovery registers all discovered
+boards in path order and prefers `dashboard` as active when present, otherwise the first path. Explicit
+registry paths are preserved even if files have not synced yet. Storage failures abort recovery rather
+than being interpreted as an empty Vault.
+
 Default lexical/vector retrieval excludes workbenches and root `.dashboard-backup/` safety copies;
 index sync removes prior entries. Explicitly selected workbench attachments are read from current
 Markdown without entering the default index. Live workbench tasks retain the normal embedded-task

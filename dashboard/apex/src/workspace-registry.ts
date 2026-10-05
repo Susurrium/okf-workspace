@@ -27,7 +27,7 @@ export function normalizeWorkspacePath(path: unknown): string {
     'dashboard') when nothing survives, and guarantee the active file is
     listed. Names stay index-aligned through de-duplication. */
 export function migrateWorkspaces(raw: Record<string, unknown>): WorkspaceRegistry {
-	const active = normalizeWorkspacePath(raw.dashboardFile) || 'dashboard';
+	const requestedActive = normalizeWorkspacePath(raw.dashboardFile);
 	const rawNames = Array.isArray(raw.workspaceNames) ? raw.workspaceNames : [];
 	const rawFiles = Array.isArray(raw.workspaceFiles) ? raw.workspaceFiles : [];
 	const files: string[] = [];
@@ -38,6 +38,7 @@ export function migrateWorkspaces(raw: Record<string, unknown>): WorkspaceRegist
 		files.push(p);
 		names.push(typeof rawNames[i] === 'string' ? rawNames[i] as string : '');
 	}
+	const active = requestedActive || files[0] || 'dashboard';
 	if (!files.includes(active)) {
 		files.push(active);
 		names.push('');
@@ -72,14 +73,15 @@ export function pruneMissingWorkspaces(
 	return { files: keptFiles, names: keptNames, active };
 }
 
-/** Keep only filesystem-safe characters; CJK/emoji-only names yield ''. */
+/** Preserve Unicode letters/numbers; never turn localized names into bare numbers. */
 export function slugifyWorkspaceName(name: string): string {
-	return name.replace(/[^A-Za-z0-9_-]/g, '');
+	const slug = name.trim().replace(/\s+/gu, '-').replace(/[^\p{L}\p{N}\p{M}_-]/gu, '');
+	return /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(slug) ? `workspace-${slug}` : slug;
 }
 
 /** Next free workspace path, placed in the same folder as the first registry
     entry: `<dir>/<slug>` when free, else `<dir>/<slug>-<n>` on collision.
-    CJK/emoji-only names yield an empty slug and fall back to auto-numbered
+    Names without letters/numbers (such as emoji) fall back to auto-numbered
     `<base>-<n>` siblings of the first workspace. `exists` receives the
     extensionless path. */
 export function nextWorkspacePath(

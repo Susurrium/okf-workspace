@@ -105,6 +105,7 @@ import {
   type OkfBrainSettings,
 } from "./settings.js";
 import { normalizeApexSettings } from "./apex-settings.js";
+import { recoverWorkspaceRegistry } from "./workspace-recovery.js";
 import {
   buildClaudianFallbackText,
   ClaudianBridgeAdapter,
@@ -2204,6 +2205,7 @@ export default class OkfBrainPlugin extends Plugin {
         console.warn("[okf-workspace] could not read legacy Apex settings", error);
       }
     }
+    const recoveredWorkspace = await recoverWorkspaceRegistry(apexSettings, this.app.vault.adapter);
     this.settings = {
       ...DEFAULT_SETTINGS,
       ...loaded,
@@ -2212,10 +2214,10 @@ export default class OkfBrainPlugin extends Plugin {
         loaded?.feedReadingPositions,
       ),
       feedReadingPositions: { ...DEFAULT_SETTINGS.feedReadingPositions, ...loaded?.feedReadingPositions },
-      apex: normalizeApexSettings(apexSettings),
+      apex: normalizeApexSettings(recoveredWorkspace.settings),
     };
     await this.reloadLocalToken();
-    if (importedLegacyApexSettings) await this.saveSettings();
+    if (importedLegacyApexSettings || recoveredWorkspace.recovered) await this.saveSettings();
   }
 }
 

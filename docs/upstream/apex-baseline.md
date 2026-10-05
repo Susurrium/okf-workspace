@@ -43,3 +43,12 @@ documented in `apex-update-exercise-2026-09-21.md`.
    when their original status is no longer current.
 
 Passing a Git merge or TypeScript compilation alone is not an accepted upstream update.
+
+## Workspace registry integration behavior
+
+The local registry helper preserves Unicode letters in new filenames (`工作台 2` becomes
+`工作台-2.md`) and uses the first registered path when the active-path setting is absent.
+The OKF startup adapter additionally recovers a missing registry from existing workbench Markdown
+before opening a view. Existing filenames are not automatically renamed or deleted. Preserve these
+behaviors during subtree updates; regression coverage is in
+`dashboard/tests/workspace-recovery.test.ts`.
