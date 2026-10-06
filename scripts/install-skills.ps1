@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$Vault = 'E:\ObsidianData\OKF-Brain'
+    [string]$Vault = 'E:\ObsidianData\OKF-Brain',
+    [string]$SourceRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -8,7 +9,7 @@ Set-StrictMode -Version Latest
 
 $repository = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 . (Join-Path $repository 'deploy\windows\common.ps1')
-$sourceRoot = Join-Path $repository 'engine\workspace\skills'
+$sourceRoot = if ($SourceRoot) { [IO.Path]::GetFullPath($SourceRoot) } else { Join-Path $repository 'engine\workspace\skills' }
 $vaultRoot = [System.IO.Path]::GetFullPath($Vault)
 if (-not (Test-Path -LiteralPath $vaultRoot -PathType Container)) {
     throw "Vault does not exist: $vaultRoot"

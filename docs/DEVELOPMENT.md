@@ -21,6 +21,48 @@ cd E:\code\okf-workspace
 Dashboard 与 Claudian 有各自的 lockfile；Engine 与 MarkItDown 也有各自的 uv 环境。根脚本
 只是统一调度，不在组件之间共享隐式依赖。
 
+## 正式发布后的继续开发
+
+源码、正式程序和测试数据分别维护。正式程序通过版本包部署，例如 `D:\OKF-Workspace`；
+开发仍在本仓库进行。修改源码不会改变已安装的正式 Engine，构建插件时只部署到测试 Vault。
+
+保留一个按当前 Contracts 初始化的 `E:\ObsidianData\OKF-Test`，配套独立
+`OKF-Test-State`、本地端口 `8766`、本地 token 和远端 `okf-test` 数据库及专用账户。
+旧 `OKF-Brain`、`OKF-Workspace` 和 `okf-workspace` 数据库继续作为历史档案，
+不整体复制到新的测试或正式环境。测试内容使用合成资料；自动化测试仍自行建立临时 fixture Vault。
+
+源码安装测试环境时显式指定这些路径、`-ApiPort 8766 -SkipScheduledTasks`；
+测试不持有正式环境的全局计划任务。安装后在测试 State 的 `config/test-environment.json`
+记录 `environment: test`、对应安装身份、Vault、State 和端口，供控制脚本校验。
+默认关闭 Engine 自动启动和 LiveSync。已有测试环境可使用：
+
+```powershell
+.\scripts\test-workspace.ps1 -Action Start
+.\scripts\test-workspace.ps1 -Action Stop
+.\scripts\test-workspace.ps1 -Action Status
+# 只有开发同步功能时才接入测试数据库：
+.\scripts\test-workspace.ps1 -Action Start -EnableSync
+```
+
+Start 打开测试 Vault 并启动其 Engine；Stop 关闭测试窗口、关闭 Engine 自动启动和 LiveSync，
+不影响正式 Vault。脚本要求有效的测试环境标识，拒绝正式端口和不匹配的 Dashboard 配置。
+CouchDB 可以同时保留正式和测试库；平时停用测试客户端即可，不能停止正式库共用的容器。
+测试 CouchDB 版本或服务器配置时使用独立容器。
+
+更新插件时显式指定测试环境：
+
+```powershell
+.\scripts\install-dashboard.ps1 -Vault E:\ObsidianData\OKF-Test -State E:\ObsidianData\OKF-Test-State
+.\scripts\install-okf-claudian.ps1 -Vault E:\ObsidianData\OKF-Test
+```
+
+Claudian 的本地 `.env.local` 若启用自动复制，只能指向测试 Vault。
+测试结束执行 Stop，避免自动同步和后台 AI 写入继续运行。
+
+后续流程为：提交当前发布基线 → 新分支开发 → 相关自动化检查 → 测试 Vault 验证 →
+更新版本并打包 → 安装正式环境。保留上一个版本包以便回退；涉及数据 schema 的回退先恢复匹配数据。
+已经完成且与本次改动无关的 LiveSync／平板验收可以沿用。
+
 ## 检查与构建
 
 根目录执行 `scripts/check.ps1`，覆盖 Engine pytest/Ruff/Pyright、`tests/e2e` fixture-Vault 测试与 Ruff、Dashboard TypeScript/Vitest/build、Claudian typecheck/lint/完整测试/build，以及 Windows 插件身份迁移检查。`scripts/build.ps1` 生成 Engine wheel 和两套插件产物。

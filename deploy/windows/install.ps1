@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
+    [string]$ProgramRoot = 'E:\Apps\OKF-Workspace',
     [string]$DataRoot = 'E:\ObsidianData',
     [string]$Vault = '',
     [string]$Originals = '',
@@ -27,6 +28,7 @@ param(
     [string]$AIApiKeyFile = '',
     [string]$BackupRepository = 'E:\backups\OKF-Brain-Restic',
     [string]$ResticPasswordFile = '',
+    [string]$ResticExecutable = '',
     [string]$LiveSyncPluginSource = '',
     [string]$ClaudianRepository = '',
     [bool]$LiveSyncRequired = $false,
@@ -39,6 +41,12 @@ param(
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 $repo = Resolve-OkfPath $RepositoryRoot
+$packaged = Test-Path -LiteralPath (Join-Path $repo 'runtime-manifest.json') -PathType Leaf
+if ($packaged) {
+    if ($ClaudianRepository) { throw 'Packaged installation must use its bundled Claudian artifacts.' }
+    . (Join-Path $PSScriptRoot 'release.ps1')
+    $repo = Install-OkfReleaseFiles -PackageRoot $repo -ProgramRoot $ProgramRoot
+}
 $claudianRepo = Resolve-OkfPath $(if ($ClaudianRepository) {
     $ClaudianRepository
 } else {
@@ -93,6 +101,9 @@ if (Test-Path -LiteralPath $configPath -PathType Leaf) {
     }
     if (-not $PSBoundParameters.ContainsKey('ResticPasswordFile') -and $existingConfig.PSObject.Properties.Name -contains 'restic_password_file') {
         $ResticPasswordFile = [string]$existingConfig.restic_password_file
+    }
+    if (-not $PSBoundParameters.ContainsKey('ResticExecutable') -and $existingConfig.PSObject.Properties.Name -contains 'restic_executable') {
+        $ResticExecutable = [string]$existingConfig.restic_executable
     }
     if (-not $PSBoundParameters.ContainsKey('AIBaseUrl') -and $existingConfig.PSObject.Properties.Name -contains 'ai_base_url') {
         $AIBaseUrl = [string]$existingConfig.ai_base_url
@@ -188,34 +199,38 @@ if ($AIApiKeyFile -and -not (Test-Path -LiteralPath $AIApiKeyFile -PathType Leaf
     throw "AI API key file not found: $AIApiKeyFile"
 }
 
-foreach ($name in @('uv', 'node', 'npm', 'git', 'obsidian')) { Assert-OkfCommand $name | Out-Null }
-if ($EnableBackupSetup) { Assert-OkfCommand 'restic' | Out-Null }
+foreach ($name in $(if ($packaged) { @('uv') } else { @('uv', 'node', 'npm', 'git', 'obsidian') })) { Assert-OkfCommand $name | Out-Null }
+if ($EnableBackupSetup) {
+    $ResticExecutable = if ($ResticExecutable) { Resolve-OkfPath $ResticExecutable } else { Assert-OkfCommand 'restic' }
+    if (-not (Test-Path -LiteralPath $ResticExecutable -PathType Leaf)) { throw "Restic executable not found: $ResticExecutable" }
+}
 & uv python find 3.12 | Out-Null
 
 New-Item -ItemType Directory -Force -Path $vaultPath, $originalsPath, $statePath | Out-Null
-Write-OkfOwnershipMarker -Target $vaultPath -Role vault -InstallationId $installationId
-Write-OkfOwnershipMarker -Target $originalsPath -Role originals -InstallationId $installationId
-Write-OkfOwnershipMarker -Target $statePath -Role state -InstallationId $installationId
 
-Push-Location (Join-Path $repo 'engine')
-try {
-    & uv sync --frozen --extra dev --extra vector
-    if ($LASTEXITCODE -ne 0) { throw 'Engine dependency installation failed' }
-} finally {
-    Pop-Location
+if ($packaged) {
+    $python = Install-OkfReleaseEngine -Root $repo -SkipVectorIndex:$SkipVectorIndex
+} else {
+    Push-Location (Join-Path $repo 'engine')
+    try {
+        & uv sync --frozen --extra dev --extra vector
+        if ($LASTEXITCODE -ne 0) { throw 'Engine dependency installation failed' }
+    } finally {
+        Pop-Location
+    }
+
+    Push-Location (Join-Path $repo 'dashboard')
+    try {
+        & npm ci
+        if ($LASTEXITCODE -ne 0) { throw 'Dashboard dependency installation failed' }
+        & npm run build
+        if ($LASTEXITCODE -ne 0) { throw 'Dashboard build failed' }
+    } finally {
+        Pop-Location
+    }
+
+    $python = Join-Path $repo 'engine\.venv\Scripts\python.exe'
 }
-
-Push-Location (Join-Path $repo 'dashboard')
-try {
-    & npm ci
-    if ($LASTEXITCODE -ne 0) { throw 'Dashboard dependency installation failed' }
-    & npm run build
-    if ($LASTEXITCODE -ne 0) { throw 'Dashboard build failed' }
-} finally {
-    Pop-Location
-}
-
-$python = Join-Path $repo 'engine\.venv\Scripts\python.exe'
 $okf = Join-Path $repo 'engine\.venv\Scripts\okf.exe'
 if (-not (Test-Path -LiteralPath (Join-Path $vaultPath 'index.md'))) {
     & $okf init --vault $vaultPath
@@ -223,8 +238,13 @@ if (-not (Test-Path -LiteralPath (Join-Path $vaultPath 'index.md'))) {
 }
 & $okf migrate --vault $vaultPath --state $statePath
 if ($LASTEXITCODE -ne 0) { throw 'Vault layout migration failed' }
+Write-OkfOwnershipMarker -Target $vaultPath -Role vault -InstallationId $installationId
+Write-OkfOwnershipMarker -Target $originalsPath -Role originals -InstallationId $installationId
+Write-OkfOwnershipMarker -Target $statePath -Role state -InstallationId $installationId
 
-& (Join-Path $repo 'scripts\install-skills.ps1') -Vault $vaultPath
+$skillArguments = @{ Vault = $vaultPath }
+if ($packaged) { $skillArguments['SourceRoot'] = Join-Path $repo 'engine\.venv\Lib\site-packages\okf_workspace\resources\skills' }
+& (Join-Path $repo 'scripts\install-skills.ps1') @skillArguments
 if ($LASTEXITCODE -ne 0) { throw 'Codex Skill installation failed' }
 
 $tokenFile = Join-Path $statePath 'secrets\local-api-token'
@@ -242,6 +262,9 @@ if ($EnableBackupSetup -and -not (Test-Path -LiteralPath $passwordPath)) {
 $config = [ordered]@{
     installation_id = $installationId
     repository_root = $repo
+    runtime_root = $repo
+    engine_python = $python
+    engine_runtime = $(if ($packaged) { 'wheel' } else { 'editable-source' })
     vault = $vaultPath
     originals = $originalsPath
     state = $statePath
@@ -269,6 +292,7 @@ $config = [ordered]@{
     livesync_required = $LiveSyncRequired
     backup_repository = $(if ($EnableBackupSetup) { Resolve-OkfPath $BackupRepository } else { '' })
     restic_password_file = $(if ($EnableBackupSetup) { $passwordPath } else { '' })
+    restic_executable = $(if ($EnableBackupSetup) { $ResticExecutable } else { '' })
     ownership_markers = [ordered]@{
         vault = $(Get-OkfOwnershipMarkerPath $vaultPath)
         originals = $(Get-OkfOwnershipMarkerPath $originalsPath)
@@ -305,7 +329,8 @@ if ((Test-Path -LiteralPath $templaterManifest -PathType Leaf) -and
 # Read and validate every existing JSON input before replacing Dashboard artifacts.
 & (Join-Path $repo 'scripts\install-okf-claudian.ps1') `
     -Vault $vaultPath `
-    -ClaudianRepository $claudianRepo
+    -ClaudianRepository $claudianRepo `
+    -SkipBuild:$packaged
 if ($LASTEXITCODE -ne 0) { throw 'OKF Claudian installation failed' }
 $dashboardMigration = Get-OkfDashboardPluginMigrationPlan -Vault $vaultPath
 Install-OkfDashboardPluginAtomic `
@@ -369,8 +394,17 @@ if ($LASTEXITCODE -ne 0) { throw 'Initial index build failed' }
 
 if (-not $SkipAcceptance) {
     $acceptanceReport = Join-Path $statePath 'reports\install-acceptance.json'
-    & $okf test all --quick-performance --report $acceptanceReport
-    if ($LASTEXITCODE -ne 0) { throw 'OKF Brain acceptance suite failed' }
+    if ($packaged) {
+        Assert-OkfReleaseEngine -Root $repo -Python $python
+        Write-OkfJson -Path $acceptanceReport -Value ([ordered]@{
+            passed = $true
+            scope = 'installed release integrity; full source checks run before packaging'
+            completed_at = [DateTimeOffset]::Now.ToString('o')
+        })
+    } else {
+        & $okf test all --quick-performance --report $acceptanceReport
+        if ($LASTEXITCODE -ne 0) { throw 'OKF Brain acceptance suite failed' }
+    }
     & $okf validate --vault $vaultPath
     if ($LASTEXITCODE -ne 0) { throw 'Production Vault validation failed' }
     Write-Host "Acceptance: passed ($acceptanceReport)"
@@ -387,7 +421,7 @@ if (-not $SkipScheduledTasks) {
         Unregister-ScheduledTask -TaskName 'OKF Brain Local Service' -Confirm:$false
     }
 
-    $maintenanceAction = New-ScheduledTaskAction -Execute $maintenanceShell -Argument "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot 'maintenance.ps1')`" -Config `"$configPath`""
+    $maintenanceAction = New-ScheduledTaskAction -Execute $maintenanceShell -Argument "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $repo 'deploy\windows\maintenance.ps1')`" -Config `"$configPath`""
     $maintenanceTrigger = New-ScheduledTaskTrigger -Daily -At '02:30'
     $maintenanceSettings = New-ScheduledTaskSettingsSet `
         -StartWhenAvailable `
@@ -396,7 +430,7 @@ if (-not $SkipScheduledTasks) {
         -MultipleInstances IgnoreNew
     Register-ScheduledTask -TaskName 'OKF Workspace Daily Maintenance' -Action $maintenanceAction -Trigger $maintenanceTrigger -Settings $maintenanceSettings -Description 'Refresh indexes; catch up missed runs and retry transient failures; run optional backup and restore checks when enabled.' -Force | Out-Null
 
-    $feedSyncAction = New-ScheduledTaskAction -Execute $maintenanceShell -Argument "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $PSScriptRoot 'feed-sync.ps1')`" -Config `"$configPath`""
+    $feedSyncAction = New-ScheduledTaskAction -Execute $maintenanceShell -Argument "-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $repo 'deploy\windows\feed-sync.ps1')`" -Config `"$configPath`""
     $feedSyncTrigger = New-ScheduledTaskTrigger -Daily -At '06:50'
     $feedSyncSettings = New-ScheduledTaskSettingsSet `
         -StartWhenAvailable `
@@ -406,6 +440,10 @@ if (-not $SkipScheduledTasks) {
 }
 
 Write-Host 'OKF Workspace installation complete.'
+if ($packaged) {
+    & (Join-Path $repo 'scripts\record-deployment.ps1') -Config $configPath
+    if ($LASTEXITCODE -ne 0) { throw 'Release deployment receipt failed' }
+}
 Write-Host "Vault: $vaultPath"
 Write-Host "Dashboard: $pluginTarget"
 Write-Host "Local API: http://127.0.0.1:$ApiPort (started and stopped by the Obsidian plugin)"

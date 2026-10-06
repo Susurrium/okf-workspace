@@ -2,11 +2,57 @@
 
 [文档索引](README.md) · [开发准备](DEVELOPMENT.md) · [日常使用](USER-GUIDE.md)
 
-按需阅读：[安装](#install) · [转换服务](#conversion) · [同步与备份](#sync-backup) · [原件迁移](#original-migration) · [服务器迁移](#server-migration) · [插件更新](#plugin-deployment) · [卸载](#uninstall)。
+按需阅读：[正式启用](#production-cutover) · [安装](#install) · [转换服务](#conversion) · [同步与备份](#sync-backup) · [原件迁移](#original-migration) · [服务器迁移](#server-migration) · [插件更新](#plugin-deployment) · [卸载](#uninstall)。
+
+<a id="production-cutover"></a>
+
+## 从测试环境启用正式 Vault
+
+功能开发完成后，先固定发布版本、核对实际运行文件，再初始化正式数据环境。安装器默认路径、历史验收中的“生产”措辞和已同步的测试数据库，都不能代替用户对正式 Vault 的指定。
+
+1. **固定发布版本。** 完成根检查、构建与一次当前版本的短实机验收，核对 `release-manifest.yaml` 和组件版本。保留同一提交的 Engine 包、两套插件成品及发布记录；后续修复重新生成版本与验收证据。
+2. **准备独立运行程序。** 使用下文的正式版本包安装；Engine、插件、Skills、计划任务与部署回执来自同一版本包。源码安装仅用于开发，运行副本不混入未提交改动。
+3. **初始化正式数据。** 使用新 Vault 和新 State，部署当前 Contracts、模板、Policies、Skills 与插件。配置新的本地 API token，并按需配置外部转换/AI 凭据和 Feed 来源。只迁入用户明确选择的笔记、原件和插件数据，不整体复制测试 State、会话或旧同步设置。
+4. **启用独立同步。** 多设备使用时为正式 Vault 创建独立 CouchDB 数据库与专用账户，从一台设备开始接入，再逐台接入其他设备。现有服务器可复用，测试数据库保持隔离。服务器已有 Tailscale Serve 时先核对现有路由；`deploy/server/compose.yml` 是 CouchDB + Caddy 部署方案，不能直接套用为现有 Tailscale 部署的现场配置。
+5. **完成上线验收。** 验证 Obsidian 重启、Engine 生命周期、原件保存与打开、明确转换、AI 生成和检索。多设备验收覆盖离线保存、乱序同步、重复申请、回执及目标移动设备的实际原件查看。用户已确认完成的 LiveSync/CouchDB 与平板验收可以沿用，无需逐项重复；新建立的本地加密备份仍需验证恢复。需要 CouchDB 恢复证据时，归档哈希或压缩包可读性检查不能替代数据库恢复。之后记录新部署回执。
+6. **退役测试环境。** 核对计划任务指向正式 State，停用旧 Vault 的自动写入与同步，再归档测试 Vault、配套 State、旧 Originals 和需要保留的测试数据库快照。记录用途、日期与版本，确认归档可读取后再决定删除；保留一个与正式数据隔离的测试环境用于后续升级。
+
+当前 Windows 安装器与卸载器使用同一组全局 Workspace 计划任务名称，不提供多安装实例的独立任务命名。切换时只能让指定环境持有这组后台任务；对旧 Vault 执行卸载也可能注销新环境使用的同名任务。历史数据清理应先核对所有活动路径，不能直接套用旧配置的 `-RemoveData`。
 
 <a id="install"></a>
 
 ## Windows 安装
+
+### 正式版本包
+
+在开发仓库完成根检查后构建并打包：
+
+```powershell
+.\scripts\package-workspace-deployment.ps1
+```
+
+输出为 `dist/workspace/<版本>-<清单哈希>/`、同名 ZIP 与 ZIP 的 SHA-256 文件。版本包只包含 Engine wheel、两组带哈希的依赖锁文件、两套插件成品与安装运维脚本；不包含开发源码、Node 依赖、Vault、运行状态或凭据。
+
+解压到临时目录，进入包目录执行：
+
+```powershell
+.\deploy\windows\install.ps1 `
+  -ProgramRoot 'D:\OKF-Workspace' `
+  -Vault 'E:\ObsidianData\OKF' `
+  -State 'E:\ObsidianData\OKF-State' `
+  -Originals 'E:\ObsidianData\OKF-Legacy-Originals'
+```
+
+安装器先校验包文件，再将程序部署到 `<ProgramRoot>/releases/<版本>-<清单哈希>/`。安装时需要 uv、Python 3.12 和依赖下载能力；不需要 Node/npm 或源码检出。日常 Engine 运行不需要 uv；Claudian 仍使用独立安装并已登录的 Codex CLI。初始化、迁移与 Skills 安装使用 wheel 内的 Workspace 资源。
+
+程序目录迁移使用保留的版本包、新的 `-ProgramRoot` 和原 Vault／State／兼容 Originals 路径重新安装，
+并显式传入新位置的 `-ResticExecutable`。先暂停正式计划任务并退出 Obsidian，再执行切换；
+安装器重建新目录的 Python 环境并更新插件、任务和回执。不要直接移动 `.venv`：
+Windows CLI 启动器包含 Python 的绝对路径。确认新位置运行及备份正常后，再处理旧程序副本。
+
+已有部署的升级使用同一 Vault、State 和兼容 Originals 路径，保留用户设置及 token；程序与插件切换到新包并生成回执。回退时重新执行保留的旧版本包安装器，复用上述数据路径；跨 Workspace schema 的回退应先依据该版本说明恢复匹配的数据，不能假定程序回退等于数据回退。运行目录的已安装 Engine 会逐文件与 wheel 校验，发现差异时安装失败，不覆盖已修改的运行程序。
+
+### 开发源码安装
 
 ```powershell
 cd E:\code\okf-workspace
@@ -27,7 +73,7 @@ cd E:\code\okf-workspace
 
 安装器会：
 
-1. 安装 Engine、Dashboard 与 Claudian 依赖并构建；
+1. 正式包安装锁定的 Engine 依赖和 wheel，源码安装则安装三组件开发依赖并构建；
 2. 初始化或同步 Engine 内的 Workspace Kit；
 3. 安装 Dashboard、Claudian、Contracts 和 Skills；
 4. 在 Vault 外创建本地 API token；
@@ -35,7 +81,7 @@ cd E:\code\okf-workspace
 6. 构建全文及可选向量索引；
 7. 注册两个相互独立的计划任务：02:30 的每日维护负责索引、可选备份与恢复检查；06:50 的 Feed Sync 在远端发布窗口后执行增量同步，支持错过启动后补跑和 10 分钟间隔的三次临时故障重试。
 
-每日维护同样支持错过时间后补跑、10 分钟间隔三次重试，并禁止同任务重叠运行。
+每日维护同样支持错过时间后补跑、10 分钟间隔三次重试，并禁止同任务重叠运行。启用备份后先备份和检查恢复，再更新可重建的索引，避免索引故障阻止当天备份。
 
 安装器不会创建登录常驻 API 任务。Dashboard 插件在 Obsidian 加载后启动自己持有的本地
 Engine 子进程，Obsidian 退出后服务随之停止。
@@ -145,6 +191,12 @@ token 不进入仓库、Vault、Dashboard 插件设置或日志。更换 token �
   -BackupRepository 'F:\Backups\OKF-Workspace'
 ```
 
+Restic 未在计划任务的 PATH 中时，增加 `-ResticExecutable '绝对路径\restic.exe'`。
+每日备份包含 Vault、保留的旧 Originals、正式程序文件、State 的配置和服务凭据；
+排除可重建的虚拟环境、缓存和 `restic-password`。备份密码需另外保管在密码管理器或离线介质，
+恢复备份时也需要它。保留策略为每日 7 份、每周 8 份、每月 12 份；按安装标识隔离，
+历史 Vault 的单独归档不受正式环境的保留策略影响。
+
 LiveSync 在单机流程稳定后单独启用。它同步包含完整原件的 Vault，不同步 Runtime State、旧 Originals 回退副本、
 本地服务或源码；移动端仅阅读和编辑 Markdown 时不要求主机 Obsidian 在线。
 传入 `-LiveSyncPluginSource` 时，安装器会先完整检查 `main.js`、`manifest.json`、
@@ -175,7 +227,7 @@ LiveSync 同步生产 Vault 中的 Markdown、必要 Obsidian 配置和完整原
 LiveSync 会同步正确编辑，也会同步误删和损坏。恢复层分三部分：
 
 - 可选 Vault Git checkpoint：用户显式选入后，为自动化写入提供本地版本恢复；不是默认安装或备份前提；
-- Windows Restic：加密增量备份包含完整原件的 Vault、部署配置与保留中的旧 Original Store 回退副本；
+- Windows Restic：加密增量备份包含完整原件的 Vault、正式程序、部署配置、服务凭据与保留中的旧 Original Store 回退副本；
 - 服务器 Restic：备份 CouchDB 逻辑快照和服务器部署配置。
 
 Runtime State、全文索引和向量索引不作为必须恢复对象；恢复 Markdown 后可重建。
@@ -239,10 +291,10 @@ Runtime State、全文索引和向量索引不作为必须恢复对象；恢复 
 完成后在 Obsidian 中重新加载应用。生产切换应使用完整安装器，以保证 Python 路径、token
 文件和 plugin settings 一致。
 
-发布后运行 `scripts/record-deployment.ps1 -Config <deployment.json>`：逐项核对两插件
-实际安装文件与构建 SHA-256，记录 Engine Python 源码哈希和 Git 版本到 State 的
-`reports/deployment-receipt.json`。当前本地 Engine 仍采用 editable-source 运行，回执是
-部署时证据，不把其伪装成不可变镜像；之后的源码修改需要重新验收并记录回执。
+正式包安装完成后自动生成 State 的 `reports/deployment-receipt.json`，校验已安装 Engine
+与 wheel 的内容、两插件文件与包内构建 SHA-256，并记录版本、运行目录和发布清单哈希。
+源码安装或单独更新插件后运行 `scripts/record-deployment.ps1 -Config <deployment.json>`；
+源码运行回执记录部署时的 Python 源码哈希和 Git 版本，之后的源码修改需要重新验收与记录。
 
 插件安装器只管理 `okf-workspace-dashboard`、`okf-claudian` 以及历史误复制目录
 `.obsidian/plugins/claudian`。官方社区插件 `realclaudian` 的启用状态和文件不会被修改；如两者
