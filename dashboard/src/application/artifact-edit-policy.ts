@@ -17,6 +17,9 @@ export class ArtifactEditPolicy {
   public constructor(private readonly actions: ManagedArtifactActions) {}
 
   public async mutate(mutation: ArtifactMutation): Promise<ArtifactMutationResult> {
+    if (["Document Import Request", "Document Import Receipt"].includes(mutation.artifactType)) {
+      return { outcome: "deny", message: "资料申请和回执不能在表格中修改；更改处理选择请重新提交资料。" };
+    }
     if (mutation.artifactType === "Project") return this.project(mutation);
     if (["Source", "Source Text"].includes(mutation.artifactType)) {
       return {

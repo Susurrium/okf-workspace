@@ -18,7 +18,51 @@ const catalogue: ConverterCatalogue = {
   })),
 };
 
+function selectMode(content: TestElement, value: "store" | "convert"): void {
+  const mode = content.descendants().find((item) => item.tagName === "select")!;
+  mode.value = value;
+  mode.dispatch("change");
+}
+
 describe("shared document import window", () => {
+  it("retries Wiki generation using existing text without exposing conversion settings", async () => {
+    const save = vi.fn(async () => ({ saved_path: "file.pdf", request_path: "request.md", request_id: "id" }));
+    const modal = new DocumentImportModal({} as App,
+      [{ file: new File(["pdf"], "manual.pdf"), relativePath: "manual.pdf" }],
+      {}, "command", save, undefined, undefined, true, "convert", true, true, "wiki");
+    modal.open();
+    const content = modal.contentEl as unknown as TestElement;
+    expect(content.descendants().some((item) => ["转换方式", "转换结果检查", "选择文件"].includes(item.textContent))).toBe(false);
+    const kind = content.descendants().find((item) => item.tagName === "select"
+      && item.children.some((option) => option.value === "wiki"))!;
+    expect(kind.value).toBe("wiki");
+    content.descendants().find((item) => item.tagName === "button" && item.textContent === "生成笔记")!.click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(save).toHaveBeenCalledWith(expect.any(File), expect.objectContaining({ intent: "wiki", generate: true }));
+  });
+  it("saves originals without loading converters, and clears generation after switching modes", async () => {
+    const load = vi.fn(async () => { throw new Error("Engine offline"); });
+    const save = vi.fn(async () => ({ saved_path: "sources/originals/file.pdf", request_path: "request.md", request_id: "id" }));
+    const modal = new DocumentImportModal({} as App,
+      [{ file: new File(["pdf"], "manual.pdf"), relativePath: "manual.pdf" }],
+      { course: "chemistry" }, "learning", save, load);
+    modal.open();
+    const content = modal.contentEl as unknown as TestElement;
+    expect(load).not.toHaveBeenCalled();
+    expect(content.descendants().some((item) => item.textContent === "转换方式")).toBe(false);
+    selectMode(content, "convert");
+    const checkbox = content.descendants().find((item) => item.attributes.get("type") === "checkbox")!;
+    (checkbox as unknown as HTMLInputElement).checked = true;
+    checkbox.dispatch("change");
+    await vi.waitFor(() => expect(load).toHaveBeenCalledOnce());
+    selectMode(content, "store");
+    expect(content.descendants().some((item) => ["转换方式", "转换结果检查", "笔记类型"].includes(item.textContent))).toBe(false);
+    const submit = content.descendants().find((item) => item.textContent === "保存原件")!;
+    expect(submit.disabled).toBe(false);
+    submit.click();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(save).toHaveBeenCalledWith(expect.any(File), expect.objectContaining({ action: "store", intent: "source", generate: false, course: "chemistry" }));
+  });
   it("allows configured alternatives when the default cloud credentials are missing", async () => {
     const methods = catalogue.methods.map((entry) => ({ ...entry,
       configured: entry.id === "markitdown-service", reason: "fixture configuration hint" }));
@@ -30,8 +74,9 @@ describe("shared document import window", () => {
       { course: "course" }, "learning", importFile, async () => ({ ...catalogue, methods }));
     modal.open();
     const content = modal.contentEl as unknown as TestElement;
+    selectMode(content, "convert");
     await vi.waitFor(() => expect(content.descendants().some((item) => item.textContent.includes("fixture configuration hint"))).toBe(true));
-    const submit = content.descendants().find((item) => item.textContent === "开始导入")!;
+    const submit = content.descendants().find((item) => item.textContent === "保存并转换正文" && item.tagName === "button")!;
     expect(submit.disabled).toBe(true);
     const method = content.descendants().filter((item) => item.tagName === "select")[1]!;
     method.value = "markitdown-service";
@@ -76,13 +121,14 @@ describe("shared document import window", () => {
       { course: "course" }, "learning", importFile, async () => catalogue);
     modal.open();
     const content = modal.contentEl as unknown as TestElement;
+    selectMode(content, "convert");
     await vi.waitFor(() => expect(content.descendants().some((item) => item.textContent.includes("fixture capability limits"))).toBe(true));
     const selects = content.descendants().filter((item) => item.tagName === "select");
     selects[1]!.value = "markitdown-service";
     selects[1]!.dispatch("change");
     selects[2]!.value = "high";
     selects[2]!.dispatch("change");
-    content.descendants().find((item) => item.textContent === "开始导入")!.click();
+    content.descendants().find((item) => item.textContent === "保存并转换正文" && item.tagName === "button")!.click();
     await vi.waitFor(() => expect(importFile).toHaveBeenCalledOnce());
     expect(importFile.mock.calls[0]).toEqual([
       expect.any(File), expect.objectContaining({ method: "markitdown-service", quality: "high", parser: "auto" }),
@@ -99,11 +145,12 @@ describe("shared document import window", () => {
     ], { course: "course" }, "learning", importFile, async () => catalogue);
     modal.open();
     const content = modal.contentEl as unknown as TestElement;
+    selectMode(content, "convert");
     await vi.waitFor(() => expect(content.descendants().some((item) => item.textContent.includes("fixture capability limits"))).toBe(true));
     const method = content.descendants().filter((item) => item.tagName === "select")[1]!;
     method.value = "markitdown-service";
     method.dispatch("change");
-    const submit = content.descendants().find((item) => item.textContent === "开始导入")!;
+    const submit = content.descendants().find((item) => item.textContent === "保存并转换正文" && item.tagName === "button")!;
     expect(submit.disabled).toBe(true);
     expect(content.descendants().some((item) => item.textContent.includes("不支持 .png"))).toBe(true);
     const skip = content.descendants().find((item) => item.tagName === "label"
@@ -124,10 +171,15 @@ describe("shared document import window", () => {
       { course: "algebra" }, "learning", importFile);
     modal.open();
     const content = modal.contentEl as unknown as TestElement;
-    const intent = content.descendants().find((item) => item.tagName === "select")!;
+    selectMode(content, "convert");
+    const checkbox = content.descendants().find((item) => item.attributes.get("type") === "checkbox")!;
+    (checkbox as unknown as HTMLInputElement).checked = true;
+    checkbox.dispatch("change");
+    const intent = content.descendants().find((item) => item.tagName === "select"
+      && item.children.some((option) => option.value === "wiki"))!;
     intent.value = "wiki";
     intent.dispatch("change");
-    content.descendants().find((item) => item.textContent === "开始导入")!.click();
+    content.descendants().find((item) => item.textContent === "保存、转换并生成笔记")!.click();
     await vi.waitFor(() => expect(importFile).toHaveBeenCalledOnce());
     expect(importFile.mock.calls[0]?.[1]).toMatchObject({ intent: "wiki", generate: true, course: "algebra" });
   });
@@ -145,15 +197,15 @@ describe("shared document import window", () => {
     modal.open();
     const content = modal.contentEl as unknown as TestElement;
     const options = content.descendants().filter((item) => item.tagName === "select");
-    expect(options[0]?.value).toBe("learn");
+    expect(options[0]?.value).toBe("store");
     expect(content.descendants().some((item) => item.textContent.includes("Course：algebra"))).toBe(true);
-    const submit = content.descendants().find((item) => item.textContent === "开始导入")!;
+    const submit = content.descendants().find((item) => item.textContent === "保存原件")!;
     submit.click();
 
     await vi.waitFor(() => expect(importFile).toHaveBeenCalledTimes(2));
     expect(importFile.mock.calls.map(([file, options]) => [file.name, options.course, options.intent, options.parser])).toEqual([
-      ["one.pdf", "algebra", "learn", "auto"],
-      ["two.docx", "algebra", "learn", "auto"],
+      ["one.pdf", "algebra", "source", "auto"],
+      ["two.docx", "algebra", "source", "auto"],
     ]);
   });
 
@@ -172,7 +224,7 @@ describe("shared document import window", () => {
     );
     modal.open();
     const content = modal.contentEl as unknown as TestElement;
-    content.descendants().find((item) => item.textContent === "开始导入")!.click();
+    content.descendants().find((item) => item.textContent === "保存原件")!.click();
     await vi.waitFor(() => expect(content.descendants().some((item) => item.textContent === "重试失败项")).toBe(true));
     content.descendants().find((item) => item.textContent === "重试失败项")!.click();
     await vi.waitFor(() => expect(importFile).toHaveBeenCalledTimes(3));

@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from okf_workspace.okf.frontmatter import FrontmatterError, read_document
+from okf_workspace.okf.paths import resolve_bundle_path
 
 _ORIGINAL_RESOURCE = re.compile(r"^okf-original://sha256/([0-9a-f]{64})/([^/?#]+)$")
 
@@ -61,6 +62,20 @@ def verify_restored_data(vault: Path, originals: Path) -> RestoreVerification:
         except FrontmatterError:
             continue
         resource = document.frontmatter.get("resource")
+        if isinstance(resource, str) and resource.startswith("/sources/originals/"):
+            references += 1
+            try:
+                original = resolve_bundle_path(root, resource[1:])
+                digest = str(document.frontmatter.get("sha256", ""))
+                if not re.fullmatch(r"[0-9a-f]{64}", digest):
+                    raise ValueError("invalid Original digest")
+                if (not original.is_file()
+                        or hashlib.sha256(original.read_bytes()).hexdigest() != digest):
+                    raise ValueError("missing or corrupt Vault Original")
+                resolved += 1
+            except (OSError, ValueError) as exc:
+                errors.append(f"{exc} for {path.relative_to(root).as_posix()}")
+            continue
         if not isinstance(resource, str) or not resource.startswith("okf-original://"):
             continue
         references += 1

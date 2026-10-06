@@ -30,6 +30,8 @@ export const methodLabels: Record<ConversionMethod, string> = {
 };
 
 export interface DocumentImportOptions {
+  /** Missing only on legacy requests, whose meaning remains conversion. */
+  action?: "store" | "convert";
   intent: ImportIntent;
   quality: ImportQuality;
   parser: ImportParser;
@@ -37,6 +39,8 @@ export interface DocumentImportOptions {
   course?: string;
   project?: string;
   generate: boolean;
+  /** Device-only preference; never sent as a semantic decision. */
+  keepOffline?: boolean;
 }
 
 export interface DocumentImportResult {

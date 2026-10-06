@@ -296,7 +296,7 @@ def test_dashboard_persists_only_external_token_file_path() -> None:
     assert "foreach ($legacyId in @('claudian'))" in claudian_installer
     assert "-AllowedManifestIds @('okf-claudian')" in claudian_installer
     assert "if ($ownedLegacyClaudian) { $removedPluginIds += 'claudian' }" in uninstaller
-    assert manifest["isDesktopOnly"] is True
+    assert manifest["isDesktopOnly"] is False
 
 
 def test_windows_installers_enforce_safe_idempotent_boundaries() -> None:

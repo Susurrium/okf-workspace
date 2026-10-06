@@ -18,13 +18,14 @@ Contract；Dashboard、Templater、Codex Skills、后台服务和验证器共同
 - 未知 YAML 字段必须保留；新增状态必须先修改 Contract 和验证器，再写入笔记。
 - 临时扩展字段可以被保留，但只要 Dashboard、Skill 或程序开始读取某个字段，它就必须进入对应 Contract 并声明类型；不能让隐藏的代码约定长期游离在规范之外。
 
-## Embedded task format
+## Synced document input
 
-Task 是权威 Markdown 中的嵌入内容，不是独立 Artifact，也不新增第二份状态文件。
-
-- 正式任务使用 `- [ ] #task <text>`；普通清单只有在界面明确选择“全部清单”时才参与聚合。
-- 新建正式任务在行尾附加唯一 block ID，例如 `^task-abc123`。修改时优先按 block ID 定位；旧行只能在原行或唯一全文匹配成功时修改，歧义必须拒绝写入。
-- `[scheduled:: YYYY-MM-DD HH:MM]` 表示计划执行时间，`[due:: YYYY-MM-DD HH:MM]` 表示截止时间，`⏰ YYYY-MM-DD HH:MM` 表示提醒时间。三者是独立事实，任何一个都不能覆盖另一个。
-- YAML frontmatter、代码围栏、`Source` 和 `Digest` 正文中的清单不构成正式任务；普通清单过滤仍可显式显示其中的清单。
-- 任务完成只修改同一原文 checkbox，不自动改变 Project 状态、兴趣判断或 `studied_at`。
-- TypeScript 与 Python 消费者共同使用仓库根目录的 `tests/fixtures/tasks/task-cases.json` 验证筛选语义。
+`document-import-request.yaml` 描述用户提交的文件和处理选择；新申请位于
+`system/imports/`，`file` 指向 `sources/originals/<sha256>/<filename>` 中的完整原件。
+新申请使用 `request_version: 4`，必须明确 `action: store` 或 `convert`。
+`store` 只带资料归属，不带 `quality`、`method`、`generate`，也不创建转换任务。
+`convert` 必须带完整转换选项。缺少版本和动作的旧申请保留转换语义。
+Source 的 `text` 仅在正文存在时写入；无正文原件是正常资料，不创建空白 Source Text。
+原件、申请和回执使用同一套 Vault 同步。`transport: file-store` 和 `original_store`
+仅用于读取迁移前的历史申请，新写入禁止使用；旧 `inbox/uploads/` 申请仍可接收。
+`document-import-receipt.yaml` 是 Engine 结果投影，不是执行权威，也不触发原件删除。

@@ -1,6 +1,7 @@
+import { saveSyncedDocument } from "../imports/synced-intake.js";
+import { ensureDocumentSyncCapacity } from "../imports/sync-capacity.js";
 import { noteStatusLabel } from "../ui/display-labels.js";
-import { FileSystemAdapter, Notice, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
-import { readFileSync } from "node:fs";
+import { FileSystemAdapter, Notice, Platform, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
 
 import { LocalApi } from "../api/client.js";
 import { assertMatchingVault, currentVaultFingerprint } from "../api/vault-identity.js";
@@ -46,7 +47,6 @@ import type {
   FeedSyncResult,
 } from "../feeds/types.js";
 import { feedItemMappings } from "../feeds/mappings.js";
-import { HttpDocumentImportApi } from "../imports/service.js";
 import { importFilesFromDrop, type ImportFile } from "../imports/drop.js";
 import type {
   DocumentImportOptions,
@@ -78,7 +78,9 @@ import {
 } from "./dashboard-ribbon.js";
 import { IndexSyncCoordinator } from "./index-sync.js";
 import { feedLivePreviewExtension } from "./live-preview.js";
-import { LocalServiceManager } from "./local-service.js";
+import type { LocalServiceManager } from "./local-service.js";
+import { OriginalFiles } from "./original-files.js";
+import { SyncedImportsModal } from "./synced-imports-modal.js";
 import { ChoiceModal, FieldsPromptModal, ProjectLogModal, TextPromptModal } from "./prompts.js";
 import { QuickCaptureModal } from "./quick-capture-modal.js";
 import { DocumentConversionResultModal, DocumentImportModal, DocumentReconversionModal, type ImportOrigin } from "./document-import-modal.js";
@@ -132,6 +134,7 @@ import {
 } from "./dashboard-view.js";
 
 export default class OkfBrainPlugin extends Plugin {
+  public get isMobile(): boolean { return Platform.isMobile; }
   public settings: OkfBrainSettings = DEFAULT_SETTINGS;
   private persistedSettings: Record<string, unknown> = {};
   private apexHost: ApexHostAdapter | undefined;
@@ -157,9 +160,22 @@ export default class OkfBrainPlugin extends Plugin {
   private dashboardUiStateStore: DashboardUiStateStore | undefined;
   private readonly unregisterApexSections: Array<() => void> = [];
   private readonly embeddedDashboardSurfaces = new Set<OkfDashboardView>();
+  public originalFiles: OriginalFiles | undefined;
 
   public async onload(): Promise<void> {
     await this.loadSettings();
+    this.originalFiles = new OriginalFiles(this.app);
+    this.app.workspace.onLayoutReady(() => {
+      void ensureDocumentSyncCapacity(this.app).catch((error: unknown) =>
+        new Notice(error instanceof Error ? error.message : "请检查 LiveSync 附件同步上限"));
+      void this.originalFiles?.recover();
+    });
+    this.registerEvent(this.app.vault.on("create", (file) => {
+      if (this.originalFiles?.recoveryIssues.length && /^(sources\/originals|system\/imports)\//u.test(file.path)) {
+        void this.originalFiles.recover().then(() => this.refreshDashboardViews());
+      }
+    }));
+    this.registerOriginalAccess();
     this.vaultNotes = new VaultNoteService(this.app);
     const takeover = await takeoverApexNativeData(this.app, this.manifest.id);
     const copied = takeover.entries.filter((entry) => entry.status === "copied");
@@ -229,17 +245,20 @@ export default class OkfBrainPlugin extends Plugin {
       (error) => console.error("[okf-workspace] could not save Dashboard UI state", error),
     );
     this.registerDashboardRecentFiles();
-    this.claudianBridge = new ClaudianBridgeAdapter(this.app);
-    this.localService = new LocalServiceManager(() => ({
-      baseUrl: this.settings.baseUrl,
-      enabled: this.settings.manageLocalService,
-      pythonExecutable: this.settings.pythonExecutable,
-      deploymentConfig: this.settings.deploymentConfig,
-      logDirectory: this.settings.serviceLogDirectory,
-    }));
-    this.indexSync = new IndexSyncCoordinator(async () => {
-      await this.api().syncIndex();
-    });
+    if (!this.isMobile) {
+      this.claudianBridge = new ClaudianBridgeAdapter(this.app);
+      const { LocalServiceManager } = await import("./local-service.js");
+      this.localService = new LocalServiceManager(() => ({
+        baseUrl: this.settings.baseUrl,
+        enabled: this.settings.manageLocalService,
+        pythonExecutable: this.settings.pythonExecutable,
+        deploymentConfig: this.settings.deploymentConfig,
+        logDirectory: this.settings.serviceLogDirectory,
+      }));
+      this.indexSync = new IndexSyncCoordinator(async () => {
+        await this.api().syncIndex();
+      });
+    }
     this.addSettingTab(new DashboardSettingTab(this.app, this.apexHost, this, {
       heading: "连接与导入",
       getSettingDefinitions: () => okfServiceSettingDefinitions(this),
@@ -247,20 +266,22 @@ export default class OkfBrainPlugin extends Plugin {
     }));
     this.registerCommands();
     this.registerApexCommands();
-    this.registerReadingViewControls();
+    if (!this.isMobile) this.registerReadingViewControls();
     this.registerIndexSync();
-    this.registerEditorExtension(
-      feedLivePreviewExtension(this.app, {
-        load: (feed, itemId) => this.loadFeedDecision(feed, itemId),
-        decide: (feed, itemId, action) => this.decideFeed(feed, itemId, action),
-        openPath: (path) => this.openVaultPath(path),
-      }),
-    );
-    void this.initializeManagedEngine();
-    void this.initializeSemanticMonitor();
-    void this.initializeConversionMonitor();
-    this.registerInterval(window.setInterval(() => void this.pollSemanticOperations(), 3_000));
-    this.registerInterval(window.setInterval(() => void this.pollConversionRecords(), 5_000));
+    if (!this.isMobile) {
+      this.registerEditorExtension(
+        feedLivePreviewExtension(this.app, {
+          load: (feed, itemId) => this.loadFeedDecision(feed, itemId),
+          decide: (feed, itemId, action) => this.decideFeed(feed, itemId, action),
+          openPath: (path) => this.openVaultPath(path),
+        }),
+      );
+      void this.initializeManagedEngine();
+      void this.initializeSemanticMonitor();
+      void this.initializeConversionMonitor();
+      this.registerInterval(window.setInterval(() => void this.pollSemanticOperations(), 3_000));
+      this.registerInterval(window.setInterval(() => void this.pollConversionRecords(), 5_000));
+    }
   }
 
   public onunload(): void {
@@ -384,7 +405,9 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public async reloadLocalToken(): Promise<void> {
+    if (this.isMobile) { this.settings.token = ""; return; }
     try {
+      const { readFileSync } = require("node:fs") as typeof import("node:fs");
       this.settings.token = readFileSync(this.settings.tokenFile, "utf8").trim();
     } catch {
       this.settings.token = "";
@@ -461,7 +484,8 @@ export default class OkfBrainPlugin extends Plugin {
         { value: "course", label: "新建课程", description: "创建课程主页" },
         { value: "project", label: "新建项目", description: "创建项目主页与日志" },
         { value: "import", label: "导入资料", description: "PDF、Word 或 PowerPoint" },
-        { value: "ask", label: "问我的笔记", description: "在 Claudian 中读取相关笔记后回答" },
+        { value: "uploads", label: "已保存的资料", description: "打开原件、转换正文或查看处理结果" },
+        ...(!this.isMobile ? [{ value: "ask", label: "问我的笔记", description: "在 Claudian 中读取相关笔记后回答" } as const] : []),
       ] as const,
       "快捷操作",
       async (choice) => {
@@ -474,6 +498,7 @@ export default class OkfBrainPlugin extends Plugin {
         else if (choice === "course") this.promptCourse();
         else if (choice === "project") this.promptProject();
         else if (choice === "import") this.promptDocumentImport();
+        else if (choice === "uploads") this.openDocumentSubmissions();
         else this.promptAsk();
       },
     ).open();
@@ -1468,6 +1493,7 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public api(): LocalApi {
+    if (this.isMobile) throw new Error("这个处理操作请在电脑上执行；资料可先保存并同步提交");
     return new LocalApi(this.settings.baseUrl, this.settings.token, currentVaultFingerprint(this.app));
   }
 
@@ -1717,6 +1743,8 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   private registerCommands(): void {
+    this.addCommand({ id: "view-document-uploads", name: "查看已保存的资料",
+      callback: () => this.openDocumentSubmissions() });
     this.addCommand({
       id: DASHBOARD_COMMAND_ID,
       name: "打开工作台",
@@ -1781,17 +1809,17 @@ export default class OkfBrainPlugin extends Plugin {
       name: "记录项目决策",
       callback: () => this.promptNewDecision(),
     });
-    this.addCommand({
+    if (!this.isMobile) this.addCommand({
       id: "ask-notes",
       name: "问我的笔记",
       callback: () => this.promptAsk(),
     });
-    this.addCommand({
+    if (!this.isMobile) this.addCommand({
       id: "create-knowledge-from-sources",
       name: "在 Claudian 中生成知识笔记",
       callback: () => this.promptWikiFromSources(),
     });
-    this.addCommand({
+    if (!this.isMobile) this.addCommand({
       id: "rewrite-current-section",
       name: "在 Claudian 中修改当前章节",
       callback: () => this.promptRewriteCurrentSection(),
@@ -1801,7 +1829,7 @@ export default class OkfBrainPlugin extends Plugin {
       name: "导入 PDF/Word/PowerPoint",
       callback: () => this.promptDocumentImport(),
     });
-    this.addCommand({
+    if (!this.isMobile) this.addCommand({
       id: "rebuild-index",
       name: "重建检索索引",
       callback: () => {
@@ -1856,42 +1884,26 @@ export default class OkfBrainPlugin extends Plugin {
     this.openDocumentImport([], relation, relation.course ? "learning" : "command");
   }
 
+  public openDocumentSubmissions(): void { new SyncedImportsModal(this.app, this.originalFiles).open(); }
+
   public openDocumentImport(
     files: ImportFile[] = [],
     relation: Pick<DocumentImportOptions, "course" | "project"> = {},
     origin: ImportOrigin = "command",
   ): void {
-    const api = new HttpDocumentImportApi(
-      this.settings.baseUrl,
-      this.settings.token,
-      120_000,
-      currentVaultFingerprint(this.app),
-    );
-    let serviceReady: Promise<void> | undefined;
     new DocumentImportModal(
-      this.app, files, relation, origin,
-      async (file, options) => {
-        serviceReady ??= this.ensureLocalServiceAvailable();
-        await serviceReady;
-        const result = await api.importDocument(file, options);
-        if (result.reused_existing) new Notice("已复用已有导入；如需更换转换正文，请使用重新转换。");
-        this.watchDocumentConversion(result.conversion_id);
-        if (result.semantic_operation) this.watchSemanticOperation(result.semantic_operation.operation_id);
-        this.refreshDashboardViews();
-        return result;
-      },
-      async () => {
-        serviceReady ??= this.ensureLocalServiceAvailable();
-        await serviceReady;
-        return this.api().converters();
-      },
-      async (kind, title, slug) => {
-        const result = kind === "course"
-          ? await this.notes().createCourse(title, slug)
-          : await this.notes().createProject(title, slug);
-        this.refreshDashboardViews();
-        return result;
-      },
+        this.app, files, relation, origin,
+        async (file, options) => {
+          const saved = await saveSyncedDocument(this.app, file, options);
+          this.refreshDashboardViews();
+          return saved;
+        }, undefined,
+        async (kind, title, slug) => {
+          const result = kind === "course" ? await this.notes().createCourse(title, slug)
+            : await this.notes().createProject(title, slug);
+          this.refreshDashboardViews();
+          return result;
+        }, true,
     ).open();
   }
 
@@ -1941,6 +1953,39 @@ export default class OkfBrainPlugin extends Plugin {
     });
   }
 
+  private registerOriginalAccess(): void {
+    this.addCommand({ id: "open-original", name: "打开当前资料的原件", callback: () => {
+      const file = this.app.workspace.getActiveFile();
+      if (file) void this.originalFiles?.openNote(file.path);
+    } });
+    this.registerObsidianProtocolHandler("okf-original", (params) => {
+      if (/^[0-9a-f]{64}$/u.test(params.sha256 ?? "") && params.filename) {
+        void this.originalFiles?.open({ digest: params.sha256!, filename: params.filename });
+      }
+    });
+    this.registerEvent(this.app.workspace.on("file-menu", (menu, file) => {
+      if (!(file instanceof TFile)) return;
+      if (file.extension === "md") menu.addItem((item) => item.setTitle("打开关联原件").setIcon("file")
+        .onClick(() => void this.originalFiles?.openNote(file.path)));
+      else if (/^(pdf|docx?|pptx?|png|jpe?g|webp|bmp|gif)$/iu.test(file.extension)) {
+        menu.addItem((item) => item.setTitle("导入为资料").setIcon("file-input").onClick(() => {
+          void this.originalFiles?.importVaultFile(file, (input) =>
+            this.openDocumentImport([{ file: input, relativePath: input.name }]))
+            .catch((error: unknown) => new Notice(error instanceof Error ? error.message : "附件读取失败"));
+        }));
+      }
+    }));
+    this.registerMarkdownPostProcessor((element, context) => {
+      if (!element.querySelector("h1")) return;
+      const file = this.app.vault.getAbstractFileByPath(context.sourcePath);
+      if (!(file instanceof TFile)) return;
+      const kind = this.app.metadataCache.getFileCache(file)?.frontmatter?.type;
+      if (!["Source", "Source Text", "Study Guide", "Wiki"].includes(String(kind))) return;
+      const button = element.createEl("button", { text: "打开关联原件", cls: "okf-original-action" });
+      button.addEventListener("click", () => void this.originalFiles?.openNote(file.path));
+    });
+  }
+
   private renderFeedDecisionFlow(
     controls: HTMLElement,
     status: HTMLElement,
@@ -1966,6 +2011,7 @@ export default class OkfBrainPlugin extends Plugin {
       }, 700);
     };
     const schedule = (): void => {
+      if (this.isMobile) return;
       if (this.indexSyncTimer !== undefined) window.clearTimeout(this.indexSyncTimer);
       this.indexSyncTimer = window.setTimeout(() => {
         this.indexSyncTimer = undefined;
@@ -2156,7 +2202,7 @@ export default class OkfBrainPlugin extends Plugin {
     path: string,
   ): void {
     const normalized = path.replace(/\\/gu, "/").replace(/^\/+|\/+$/gu, "");
-    const location = this.app.vault.adapter instanceof FileSystemAdapter
+    const location = !this.isMobile && this.app.vault.adapter instanceof FileSystemAdapter
       ? this.app.vault.adapter.getFullPath(normalized)
       : normalized;
     new Notice(status === "unindexed"
@@ -2181,6 +2227,7 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public async ensureLocalServiceAvailable(): Promise<void> {
+    if (this.isMobile) throw new Error("这个处理操作请在电脑上执行；资料可先保存并同步提交");
     if (!this.localService) throw new Error("工作区本地服务尚未初始化");
     await this.localService.ensureStarted();
   }

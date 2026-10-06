@@ -20,6 +20,7 @@ export class HttpDocumentImportApi implements DocumentImportApi {
     file: File,
     options: DocumentImportOptions,
   ): Promise<DocumentImportResult> {
+    if (options.action === "store") throw new Error("仅保存原件请使用笔记库保存入口");
     if (this.expectedVaultFingerprint) {
       const identityResponse = await fetch(`${this.baseUrl.replace(/\/$/u, "")}/workspace/identity`, {
         headers: { Authorization: `Bearer ${this.token}` },

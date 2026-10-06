@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import shutil
 import time
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, cast
-from urllib.parse import quote
 
 import httpx
 
 from okf_workspace.git import GitCheckpointError, checkpointing_enabled, create_checkpoint
+from okf_workspace.sources import SourcePublisher
 
 from .clients import MarkItDownClient, MinerUClient, ParserClient, RetryableConversionError
 from .cloud_mineru import CloudMinerUClient
@@ -34,13 +36,15 @@ from .models import (
     QCReport,
     requires_semantic_generation,
 )
-from .originals import OriginalStore
-from .publish import publish_import
+from .originals import VaultOriginalStore
+from .publish import publish_import, publish_original, route_existing_import
 from .qc import inspect_export
 from .routing import choose_method
 from .ssh_transport import SSHTransportError
 from .state import ConversionStore
 from .word import OfficeComConverter
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class LegacyDocConverter(Protocol):
@@ -85,7 +89,10 @@ class DocumentImporter:
         doc_converter: LegacyDocConverter | None = None,
     ) -> None:
         self.vault = vault.resolve()
-        self.original_store = OriginalStore(originals)
+        # Keep the deployment argument readable for existing installations;
+        # external originals are migration input, never the active write target.
+        self.legacy_originals = originals.resolve()
+        self.original_store = VaultOriginalStore(self.vault, state)
         self.state_root = state.resolve()
         self.store = ConversionStore(self.state_root)
         self.settings = settings or ImportSettings.from_env()
@@ -258,6 +265,7 @@ class DocumentImporter:
             },
             warnings=(*qc.warnings, *checkpoint_warnings),
         )
+        self._discard_working_files(identifier)
         return ImportResult(
             conversion_id=identifier,
             status=ConversionStatus.IMPORTED,
@@ -270,6 +278,26 @@ class DocumentImporter:
             qc=qc,
             method=export.method,
         )
+
+    def _discard_working_files(self, identifier: str) -> None:
+        """After the durable receipt, retain the export for retries, not scratch copies."""
+        working = self.store.directory(identifier) / "working"
+        try:
+            root = self.state_root / "conversions"
+            resolved = working.resolve()
+            if (
+                resolved != root / identifier / "working"
+                or not resolved.is_relative_to(root)
+                or resolved.is_relative_to(self.vault)
+            ):
+                raise ValueError("conversion working directory escapes external State")
+            if working.exists():
+                shutil.rmtree(working)
+        except (OSError, ValueError):
+            # Cleanup failure must never turn a successfully published import into failure.
+            _LOGGER.warning(
+                "Could not clean conversion scratch files: %s", identifier, exc_info=True,
+            )
 
     def import_document(
         self, request: ImportRequest, *, replace_existing: bool = False,
@@ -383,13 +411,35 @@ class DocumentImporter:
             )
             raise
 
+    def save_original(self, request: ImportRequest) -> dict[str, object]:
+        """Save/register bytes without selecting a parser or allocating a conversion."""
+        if request.generate or request.intent not in {ImportIntent.SOURCE, ImportIntent.LATER}:
+            raise ValueError("仅保存原件不能请求转换或生成笔记")
+        original = self.original_store.ingest(request.source, filename=request.source_filename)
+        source = publish_original(self.vault, request, original)
+        outputs = {"source": str(source)}
+        publisher = SourcePublisher(self.vault)
+        document = publisher.read_record(source)
+        if "text" in document.frontmatter:
+            text, _ = publisher.resolve_text(document)
+            outputs["source_text"] = str(text)
+        return {"status": "stored", "outputs": outputs, "file_sha256": original.sha256}
+
     def enqueue(self, request: ImportRequest) -> dict[str, object]:
-        selected_method = self.resolve_method(request)
-        request = replace(request, method=selected_method)
         original = self.original_store.ingest(
             request.source,
             filename=request.source_filename,
         )
+        existing = SourcePublisher(self.vault).find_by_sha256(original.sha256)
+        if existing and "text" in existing[1].frontmatter:
+            # Generation from published text needs no available converter.
+            selected_method = request.method or (
+                ConversionMethod.from_parser(request.parser) if request.parser
+                else self.settings.default_conversion_method
+            )
+        else:
+            selected_method = self.resolve_method(request)
+        request = replace(request, method=selected_method)
         selected_parser = selected_method.parser
         queued_request = replace(request, source=original.stored_path)
         identifier = conversion_id(original.sha256, queued_request, selected_parser)
@@ -410,6 +460,39 @@ class DocumentImporter:
                 ConversionStatus.IMPORTED.value,
             }:
                 return {**existing, "reused_existing": True}
+        publisher = SourcePublisher(self.vault)
+        existing_source = publisher.find_by_sha256(original.sha256)
+        if existing_source and "text" in existing_source[1].frontmatter:
+            source, text, draft = route_existing_import(
+                self.vault, existing_source[0], intent=queued_request.intent,
+                course=queued_request.course, project=queued_request.project,
+            )
+            if text is None:
+                raise ValueError("Source Text disappeared during import")
+            outputs = {"source": str(source), "source_text": str(text)}
+            # Reuse the original publication baseline, never treat human edits
+            # as permission for a later unattended replacement.
+            for prior in self.store.list():
+                prior_outputs = prior.get("outputs")
+                if not isinstance(prior_outputs, dict):
+                    continue
+                values = cast(dict[str, object], prior_outputs)
+                baseline = values.get("source_text_sha256")
+                if values.get("source_text") == str(text) and isinstance(baseline, str):
+                    outputs["source_text_sha256"] = baseline
+                    break
+            if draft is not None:
+                outputs["routed_target"] = str(draft)
+            self.store.update(
+                identifier, status=ConversionStatus.IMPORTED, request=queued_request,
+                original=original, parser=selected_parser, outputs=outputs,
+                warnings=("沿用已有正文，未重新转换。",),
+                stages={"conversion": "reused", "quality": "reused", "routing": "completed",
+                        "semantic": "pending" if requires_semantic_generation(
+                            queued_request.intent, queued_request.generate,
+                        ) else "not-requested"},
+            )
+            return {**self.store.load(identifier), "reused_existing": True}
         self.store.update(
             identifier,
             status=ConversionStatus.QUEUED,
@@ -473,7 +556,7 @@ class DocumentImporter:
             else None
         )
         request = ImportRequest(
-            source=Path(required_string("original_path")),
+            source=self.original_store.resolve(required_string("source_sha256"), verify=True),
             intent=intent,
             source_filename=required_string("source_filename"),
             quality=quality,
@@ -497,20 +580,9 @@ class DocumentImporter:
             if qc.passed and (export.method or ConversionMethod.from_parser(export.parser)) is (
                 self.resolve_method(request)
             ):
-                original_path = Path(required_string("original_path"))
-                source_sha256 = required_string("source_sha256")
+                original_path = request.source
                 source_filename = required_string("source_filename")
-                original = OriginalRecord(
-                    sha256=source_sha256,
-                    filename=source_filename,
-                    extension=original_path.suffix.casefold(),
-                    size_bytes=original_path.stat().st_size,
-                    stored_path=original_path,
-                    resource=(
-                        f"okf-original://sha256/{source_sha256}/"
-                        f"{quote(source_filename, safe='-._~')}"
-                    ),
-                )
+                original = self.original_store.ingest(original_path, filename=source_filename)
                 return self._publish_ready(
                     identifier,
                     request,

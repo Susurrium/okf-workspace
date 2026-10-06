@@ -410,6 +410,7 @@ export class VaultDashboardReader {
     const current = localDate();
     const cache = this.cache();
     const files = this.app.vault.getMarkdownFiles().filter((file) => {
+      if (file.path.startsWith("inbox/uploads/") || file.path.startsWith("system/imports/")) return false;
       const root = file.path.split("/")[0] ?? "";
       return USER_ROOTS.has(root) && !["index.md", "log.md"].includes(file.name);
     });

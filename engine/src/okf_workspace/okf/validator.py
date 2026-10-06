@@ -60,6 +60,7 @@ def _is_skipped(path: Path, vault: Path) -> bool:
     parts = path.relative_to(vault).parts
     return (
         path.name in _CONTROL_FILES
+        or parts[:2] == ("sources", "originals")
         or any(part in _SKIPPED_DIRECTORIES for part in parts)
         or (len(parts) >= 2 and parts[0] == "system" and parts[1] in _SKIPPED_SYSTEM_SECTIONS)
         or is_workbench_backup(relative)
@@ -152,6 +153,8 @@ def _valid_temporal(value: object, *, allow_date: bool) -> bool:
 
 
 def _valid_field_type(kind: str, value: object) -> bool:
+    if kind == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
     if kind == "boolean":
         return isinstance(value, bool)
     if kind == "string":

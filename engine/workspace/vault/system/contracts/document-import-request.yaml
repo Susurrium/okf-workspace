@@ -1,0 +1,34 @@
+# New requests always include file: /sources/originals/<sha256>/<filename>.
+# transport/original_store and inbox/uploads are read-only legacy compatibility.
+contract_version: 3
+artifact: Document Import Request
+authority: markdown
+paths:
+  - inbox/uploads/<request-id>/request.md
+  - system/imports/<request-id>/request.md
+required_fields: [request_id, filename, file_sha256, size_bytes, intent]
+conditional_required_fields:
+  request_version: [action]
+  transport: [original_store]
+field_types:
+  request_id: string
+  file: string
+  transport: string
+  original_store: string
+  filename: string
+  file_sha256: string
+  size_bytes: integer
+  intent: string
+  quality: string
+  method: string
+  generate: boolean
+  action: string
+  request_version: integer
+  course: vault_path
+  project: vault_path
+states:
+  action: [store, convert]
+  transport: [file-store]
+  intent: [learn, wiki, source, later]
+  quality: [quick, high]
+  method: [auto, mineru-cloud, markitdown-service, mineru-self-hosted]

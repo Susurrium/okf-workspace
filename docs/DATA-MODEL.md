@@ -118,7 +118,7 @@ studied_at: 2026-08-20T18:30:00+08:00
 | `Wiki` | `knowledge/wiki/` | 必填 `description`；可选关联、学习、生成、核验和失效信息。 |
 | `Wiki Map` | `knowledge/maps/` | 必填 `description`；只做主题导航和 Wiki 关系组织。 |
 | `Digest` | `feeds/<feed>/YYYY/` | `feed/digest_id/issued_at/items`；原生可读 Feed 合刊。 |
-| `Source` | `sources/records/<kind>/` | 必填 `resource/kind/text/uses`；身份与用途分离。Workspace 新写入含 `ingested_via`，可选 `sha256/feed_item/digest`。 |
+| `Source` | `sources/records/<kind>/` | 必填 `resource/kind/uses`；身份与用途分离。`text` 在正文存在时才写入。Workspace 新写入含 `ingested_via`，可选 `sha256/feed_item/digest`。 |
 | `Source Text` | `sources/text/<kind>/` | `parser/sources` 和转换后的完整 Markdown。 |
 | `Profile` | `self/` | 用户明确维护的能力、偏好、方向、限制和当前状态。 |
 | `Agent Policy` | `system/policies/` | AI 工作边界。 |
@@ -129,17 +129,17 @@ studied_at: 2026-08-20T18:30:00+08:00
 ## 7. Source 流水线
 
 ```text
-Original（Vault 外原件）
-  → Source Pair
-      ├─ Source（来源身份、出处、Source Text 链接和 uses[]）
+Original（Vault 内 sources/originals/，全量同步）
+  → Source（仅保存即可成立；转换后再关联 Source Text）
+      ├─ uses[]（用户明确选择的用途与课程/项目关联）
       │   ├─ purpose: study     → Learning / Study Guide
       │   ├─ purpose: wiki      → Knowledge / Wiki
-      │   ├─ purpose: reference → 保留 Source Pair，不生成语义成果
+      │   ├─ purpose: reference → 保留资料，不自动转换或生成语义成果
       │   └─ purpose: undecided → Inbox 等待人工决定
-      └─ Source Text（MinerU、MarkItDown、网页或 Feed 的完整 Markdown）
+      └─ text（可选）→ Source Text（转换后的正文或已获取的网页/Feed 正文）
 ```
 
-Source 与 Source Text 会故意使用相同 basename，因为它们是一对稳定关联的文件，但绝不是
+仅保存原件时没有 Source Text。转换后 Source 与 Source Text 使用相同 basename，因为它们是一对稳定关联的文件，但绝不是
 重复正文：Source 是轻量身份卡和用途入口，Source Text 才保存完整内容。Dashboard/Claudian
 必须用 `type` 与 `title` 显示“来源卡 / 完整正文”等角色，不能只显示 basename 让人误解。
 

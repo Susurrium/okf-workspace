@@ -42,6 +42,8 @@ class FakeParser:
         timeout_seconds: float = 900.0,
     ) -> ParserExport:
         self.calls.append(source)
+        working_directory.mkdir(parents=True, exist_ok=True)
+        (working_directory / "ocr-scratch.png").write_bytes(b"scratch fixture")
         if self.error is not None:
             raise self.error
         assert self.export is not None
@@ -90,12 +92,10 @@ def test_wiki_import_writes_original_export_source_text_and_reserves_target(
     )
 
     assert result.original.stored_path.is_file()
-    assert not result.original.stored_path.is_relative_to(vault)
-    assert result.original.stored_path.relative_to(tmp_path / "originals").parts[:2] == (
-        "sha256",
-        result.original.sha256[:2],
-    )
-    assert (result.original.stored_path.parent / "manifest.json").is_file()
+    assert result.original.stored_path.is_relative_to(vault / "sources/originals")
+    assert result.original.stored_path.parent.name == result.original.sha256
+    assert not (tmp_path / "originals").exists()
+    assert not (result.original.stored_path.parent / "manifest.json").exists()
     assert (result.export_directory / "document.md").is_file()
     assert (result.export_directory / "manifest.json").is_file()
     assert (result.export_directory / "qc-report.json").is_file()
@@ -106,13 +106,17 @@ def test_wiki_import_writes_original_export_source_text_and_reserves_target(
     assert result.routed_target is not None
     source = read_document(result.source)
     extract = read_document(result.source_text)
-    assert source.frontmatter["resource"].startswith("okf-original://sha256/")
+    assert source.frontmatter["resource"].startswith("/sources/originals/")
     assert source.frontmatter["ingested_via"] == "file-import"
     assert "purpose" not in source.frontmatter
     assert "course" not in source.frontmatter
     assert "project" not in source.frontmatter
     assert source.frontmatter["uses"] == [{"purpose": "wiki"}]
     assert extract.frontmatter["parser"] == "mineru"
+    assert "assets" not in extract.frontmatter
+    assert extract.frontmatter["sources"] == [
+        {"resource": f"/{result.source.relative_to(vault).as_posix()}"},
+    ]
     assert "/sources/assets/" in extract.body
     assert not result.routed_target.exists()
 
@@ -122,6 +126,96 @@ def test_wiki_import_writes_original_export_source_text_and_reserves_target(
         )
     )
     assert status["status"] == "imported"
+    assert not (result.export_directory.parent / "working").exists()
+
+
+def test_only_final_body_dependencies_are_synced_but_full_export_can_be_retried(
+    tmp_path: Path,
+) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    export = useful_export()
+    export.assets["images/ocr-unused.png"] = b"temporary OCR crop"
+    parser = FakeParser(ParserName.MINERU, export)
+    importer = DocumentImporter(
+        vault=vault, originals=tmp_path / "originals", state=tmp_path / "state",
+        clients={ParserName.MINERU: parser},
+    )
+    result = importer.import_document(
+        ImportRequest(source=make_pdf(tmp_path), intent=ImportIntent.SOURCE),
+    )
+    assert result.source is not None and result.source_text is not None
+    asset_root = vault / "sources/assets" / result.source.stem
+    assert (asset_root / "images/network.png").read_bytes() == b"PNG"
+    assert not (asset_root / "images/ocr-unused.png").exists()
+    assert (result.export_directory / "assets/images/ocr-unused.png").is_file()
+    manifest = json.loads((result.export_directory / "manifest.json").read_text(encoding="utf-8"))
+    assert set(manifest["assets"]) == {"assets/images/network.png", "assets/images/ocr-unused.png"}
+    before = result.source_text.read_bytes()
+    importer.retry(result.conversion_id)
+    assert len(parser.calls) == 1
+    assert result.source_text.read_bytes() == before
+    assert not (asset_root / "images/ocr-unused.png").exists()
+
+
+def test_scratch_cleanup_failure_does_not_fail_published_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    importer = DocumentImporter(
+        vault=vault, originals=tmp_path / "originals", state=tmp_path / "state",
+        clients={ParserName.MINERU: FakeParser(ParserName.MINERU, useful_export())},
+    )
+
+    def busy(_path: Path) -> NoReturn:
+        raise PermissionError("scratch file is busy")
+
+    monkeypatch.setattr("okf_workspace.importers.pipeline.shutil.rmtree", busy)
+    result = importer.import_document(
+        ImportRequest(source=make_pdf(tmp_path), intent=ImportIntent.SOURCE),
+    )
+    assert result.source_text is not None and result.source_text.is_file()
+    assert importer.store.load(result.conversion_id)["status"] == "imported"
+    assert (result.export_directory.parent / "working/ocr-scratch.png").is_file()
+
+
+def test_scratch_cleanup_refuses_paths_outside_conversion_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    importer = DocumentImporter(
+        vault=vault, originals=tmp_path / "originals", state=tmp_path / "state",
+        clients={ParserName.MINERU: FakeParser(ParserName.MINERU, useful_export())},
+    )
+    unrelated = tmp_path / "unrelated"
+    protected = unrelated / "working" / "keep.png"
+    protected.parent.mkdir(parents=True)
+    protected.write_bytes(b"keep")
+    def unrelated_directory(_identifier: str) -> Path:
+        return unrelated
+
+    monkeypatch.setattr(importer.store, "directory", unrelated_directory)
+    importer._discard_working_files("fixture")  # pyright: ignore[reportPrivateUsage]
+    assert protected.read_bytes() == b"keep"
+
+
+def test_text_only_import_does_not_create_a_vault_asset_directory(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    export = ParserExport(
+        markdown="# Manual\n\nA complete readable text with no image dependencies.\n",
+        assets={"images/unused.png": b"scratch"},
+        parser=ParserName.MINERU, parser_version="test",
+    )
+    importer = DocumentImporter(
+        vault=vault, originals=tmp_path / "originals", state=tmp_path / "state",
+        clients={ParserName.MINERU: FakeParser(ParserName.MINERU, export)},
+    )
+    result = importer.import_document(
+        ImportRequest(source=make_pdf(tmp_path), intent=ImportIntent.SOURCE),
+    )
+    assert result.source is not None and result.source_text is not None
+    assert not (vault / "sources/assets" / result.source.stem).exists()
+    assert "assets" not in read_document(result.source_text).frontmatter
+    assert (result.export_directory / "assets/images/unused.png").is_file()
 
 
 def test_failed_qc_keeps_export_but_does_not_publish_fake_success(
@@ -154,6 +248,7 @@ def test_failed_qc_keeps_export_but_does_not_publish_fake_success(
         )
 
     assert list((tmp_path / "state/conversions").glob("*/export/document.md"))
+    assert list((tmp_path / "state/conversions").glob("*/working/ocr-scratch.png"))
     assert not list((vault / "sources/records/documents").glob("manual-*.md"))
 
 

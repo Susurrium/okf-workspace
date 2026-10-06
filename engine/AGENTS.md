@@ -33,7 +33,7 @@ created_at: 2026-08-20
 - 未知 frontmatter 字段必须保留。
 - AI 不得推断或自动写入 `studied_at`。
 - 无人值守后台只允许原子创建目标或替换命名 `ai:auto` 区域；交互式 Codex 按用户明确授权写入。
-- Original、密钥、运行状态、Feed cache 和向量索引不进入 Vault。
+- Original 保存在生产 Vault 的 sources/originals/，与笔记全量同步；密钥、运行状态、Feed cache 和向量索引不进入 Vault。
 - 兴趣与长期价值只由用户判断；AI 不得为 Feed 生成这两个结论。
 - 长期知识只使用 `type: Wiki`；不创建 Knowledge Concept 或 Reference。
 - 未学习但长期有价值的资料可以直接生成 Wiki；只有用户明确确认完成时才写 `studied_at`。

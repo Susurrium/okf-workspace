@@ -27,7 +27,7 @@ npm --workspace dashboard run build
 Dashboard 分为“读取面”和“命令面”：
 
 - Today、Inbox、Learning、Projects、Knowledge、Life 通过 Obsidian Vault API 直接读取 Markdown，不依赖 HTTP；
-- 普通日记、Capture、课程和项目可由插件直接写 Vault；AI 调用、文档导入、Feed cache、索引写入、撤销和 System 状态需要访问 Vault 外的 Runtime State、Original Store、Codex、MinerU/MarkItDown 或 Git，因此由本地 API 执行；
+- 普通日记、Capture、课程和项目可由插件直接写 Vault；AI 调用、文档导入、Feed cache、索引写入、撤销和 System 状态需要访问 Vault 外的 Runtime State、Codex、MinerU/MarkItDown 或 Git，因此由本地 API 执行；
 - Dashboard 打开普通页面不会重复探测服务。用户点击明确的写入动作时检查一次；请求失败时再恢复服务并显示可重试错误。
 
 这种边界保证“笔记能不能看”不受后台服务影响，同时把浏览器插件不应直接持有的 token、外部进程和 Vault 外文件留在受控服务中。
@@ -38,7 +38,7 @@ Dashboard 分为“读取面”和“命令面”：
 - 其他接口要求 `Authorization: Bearer <random-token>`；
 - 服务器拒绝绑定非 loopback 地址；
 - 浏览器跨域只放行 Obsidian 桌面渲染器等明确的本地来源、`GET/POST/OPTIONS` 和 `Authorization/Content-Type`；其他来源的预检会被拒绝；
-- API 返回 Vault 相对路径，不返回 Original 绝对路径、文件哈希、token 或 Runtime export 路径；
+- API 返回 Vault 相对路径，不返回 Original 绝对路径、token 或 Runtime export 路径；原件访问使用 Source 中已有的 SHA-256 标识；
 - 完整异常和转换工作目录只进入本地日志；
 - token 放在 Vault 外，不经 LiveSync。
 
@@ -61,7 +61,10 @@ Dashboard 分为“读取面”和“命令面”：
 | `POST /ai/self-test` | 根据指定笔记返回自测题，不写入 Vault |
 | `POST /ai/knowledge/create` | 从明确选择的材料创建 `status: draft` 的 Wiki；同名目标返回 409 |
 | `POST /ai/section/rewrite` | 只改写指定章节；目标在生成期间变化时返回 409 |
-| `POST /documents/import` | 上传并执行 Original → 转换 → Source 发布 |
+| `POST /documents/import` | `action=store` 仅保存原件并登记 Source；`action=convert` 转换，旧调用缺省仍转换 |
+| `GET /documents/originals/{sha256}/content?filename=...` | 认证读取本机 Vault 原件；本机缺失则等待 LiveSync |
+| `POST /documents/originals/{sha256}/open?filename=...` | 已停用（410）；Dashboard 直接调用 Obsidian 原生打开 |
+| `POST /documents/uploads/cleanup?apply=false` | 已停用（410）；全量同步原件不再自动清理 |
 | `GET /documents/converters` | 读取默认方式、支持格式、配置状态与能力限制；不探测或启动服务 |
 | `GET /documents/conversions?status=failed` | 列出转换失败任务 |
 | `POST /documents/conversions/{id}/retry` | 不指定方式恢复原任务；指定 `method` 重新转换，执行中返回 409 |

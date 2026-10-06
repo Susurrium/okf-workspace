@@ -10,6 +10,8 @@ from okf_workspace.okf.templates import initialize_vault
 from okf_workspace.retrieval.scanner import iter_markdown
 
 FINAL_ARTIFACTS = {
+    "Document Import Request",
+    "Document Import Receipt",
     "Capture",
     "Daily",
     "Reflection",
@@ -112,7 +114,6 @@ def test_profile_v3_has_one_fixed_contract_per_final_artifact(tmp_path: Path) ->
     assert catalog.artifacts["Source"].required_fields == (
         "resource",
         "kind",
-        "text",
         "uses",
     )
     assert "course" not in catalog.artifacts["Source"].field_types

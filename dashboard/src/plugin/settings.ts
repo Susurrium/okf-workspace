@@ -43,6 +43,11 @@ export const DEFAULT_SETTINGS: OkfBrainSettings = {
 };
 
 export function renderOkfServiceSettings(container: HTMLElement, plugin: OkfBrainPlugin): void {
+    renderOriginalFileSettings(container);
+    if (plugin.isMobile) {
+      container.createDiv({ text: "保持 LiveSync 开启。原件随笔记全量同步；仅保存不会自动转换，明确选择转换后才由电脑处理。" });
+      return;
+    }
     new Setting(container)
       .setName("随 Obsidian 启动本地服务")
       .setDesc("打开 Obsidian 时启动；关闭或禁用插件时停止。")
@@ -94,6 +99,11 @@ export function renderOkfServiceSettings(container: HTMLElement, plugin: OkfBrai
             await plugin.saveSettings();
           }),
       );
+}
+
+function renderOriginalFileSettings(container: HTMLElement): void {
+  new Setting(container).setName("原件全量同步")
+    .setDesc("原件保存在 sources/originals，与笔记统一通过 LiveSync 同步。PDF 和图片直接在 Obsidian 中阅读；无需配置独立文件服务或离线缓存。");
 }
 
 export function okfServiceSettingDefinitions(plugin: OkfBrainPlugin): SettingDefinitionItem[] {
