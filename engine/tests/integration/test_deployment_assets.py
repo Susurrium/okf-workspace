@@ -16,8 +16,10 @@ def _powershell_quote(value: Path | str) -> str:
 
 
 def _run_powershell(command: str) -> subprocess.CompletedProcess[str]:
+    # Match error messages independently of terminal colors and concise-view wrapping.
+    plain_command = "$PSStyle.OutputRendering='PlainText';$ErrorView='NormalView';" + command
     return subprocess.run(
-        ["pwsh", "-NoProfile", "-Command", command],
+        ["pwsh", "-NoProfile", "-Command", plain_command],
         check=False,
         capture_output=True,
         text=True,
