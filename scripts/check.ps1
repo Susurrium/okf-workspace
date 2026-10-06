@@ -6,19 +6,6 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
 & (Join-Path $root 'deploy\windows\test-dashboard-plugin-migration.ps1')
 
-Push-Location (Join-Path $root 'services\originals')
-try {
-    & uv sync --extra dev --locked
-    if ($LASTEXITCODE -ne 0) { throw 'Original file service dependency check failed' }
-    & uv run pytest
-    if ($LASTEXITCODE -ne 0) { throw 'Original file service tests failed' }
-    & uv run ruff check src tests
-    if ($LASTEXITCODE -ne 0) { throw 'Original file service Ruff check failed' }
-    & uv run pyright
-    if ($LASTEXITCODE -ne 0) { throw 'Original file service Pyright check failed' }
-}
-finally { Pop-Location }
-
 Push-Location (Join-Path $root 'engine')
 try {
     & uv run pytest

@@ -28,6 +28,7 @@ styles.generated.css
 # Deterministic document fixtures keep only their source files in Git.
 engine/tests/fixtures/documents/legacy-build/
 engine/tests/fixtures/documents/rendered-*/
+engine/tests/fixtures/documents/*.inspect.ndjson
 
 # Workspace Kit contains only structure and managed resources, never user data.
 /engine/workspace/vault/actions/**

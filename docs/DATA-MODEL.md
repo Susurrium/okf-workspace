@@ -12,7 +12,7 @@
 本节的字段和 Contract 适用于 OKF Artifact。Apex 工作台是 Dashboard 管理的文档，使用
 `dashboard: true` 和独立的 `workbench_schema`，不要求笔记 `type`、`title`、`created_at`
 或 H1。它仍可保存用户便签和真实任务，也需要备份；文件角色与各消费边界见
-[数据所有权](architecture/data-ownership.md)。
+[数据所有权](architecture/README.md#data-ownership)。
 
 ## 2. 公共字段
 
@@ -150,9 +150,9 @@ Source 的身份字段不表达课程、项目或处理结果：
 - `text`：唯一对应的 Source Text Vault 路径；
 - `ingested_via`：首次进入 Workspace 的渠道，只记录来源沿革。
 
-因此 Source 的身份/定位必填字段是 `resource/kind/text`，与处理选择无关；人工决定另放在
-同样必填的 `uses` 列表中。每一项是一个可长期复用的用途，可附带用户明确选择的 Course
-或 Project：
+Source 的身份必填字段是 `resource/kind`；`text` 仅在正文已发布时写入。
+人工决定放在同样必填的 `uses` 列表中。每一项是一个可长期复用的用途，
+可附带用户明确选择的 Course 或 Project：
 
 ```yaml
 type: Source
@@ -173,7 +173,7 @@ uses:
 
 - `study`：该上下文需要 Study Guide，成果进入 Learning；
 - `wiki`：该上下文需要长期 Wiki，成果进入 Knowledge；
-- `reference`：只保留 Source 与 Source Text，不触发语义生成；
+- `reference`：保留资料；仅保存原件时不要求 Source Text，不触发语义生成；
 - `undecided`：该上下文还没有决定，显示在 Inbox。
 
 `undecided` 只用于文件导入等 Intake 流程中用户明确要求暂存归类的 Source。Feed 条目暂时

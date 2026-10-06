@@ -10,9 +10,10 @@ created_at: 2026-08-20
 
 1. 用户当前明确要求；
 2. `workspace/vault/system/contracts/*.yaml`（数据格式与写入边界）；
-3. `../docs/DEVELOPMENT-PLAN.md`（产品流程与架构）；
+3. `../docs/architecture/`（当前模块边界与数据归属）；
 4. 当前测试与代码；
-5. 历史文档和旧项目只用于理解背景，不产生规范约束。
+5. `../docs/DEVELOPMENT-PLAN.md`（开发计划，不覆盖当前架构与实现）；
+6. 历史文档和旧项目只用于理解背景，不产生规范约束。
 
 ## 不可重新引入
 

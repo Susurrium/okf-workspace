@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>OKF Workspace · 信息流与系统架构</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f4f7fb;color:#22354a;font:15px/1.7 "Microsoft YaHei","Segoe UI",sans-serif}button,input,select{font:inherit}button,a{touch-action:manipulation}button{cursor:pointer;border:1px solid #cdd7e5;border-radius:8px;padding:7px 12px;background:#fff;color:#2d4664}button:hover{background:#edf3fa}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,.node:focus-visible{outline:3px solid #c77819;outline-offset:3px}a{color:#285f99;text-underline-offset:3px}header{padding:24px 30px 18px;background:white;border-bottom:1px solid #dce4ee}h1{font-size:28px;margin:3px 0 8px;line-height:1.4}header p{margin:0;color:#587087}.eyebrow{color:#657b93;font-size:12px;letter-spacing:1px}.meta{display:flex;gap:6px 16px;flex-wrap:wrap;font-size:12px;color:#62778e;margin:10px 0}.tabs{display:flex;gap:7px;flex-wrap:wrap;margin-top:18px}.tabs button[aria-selected=true]{color:white;background:#244e7c;border-color:#244e7c}.layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px;padding:20px 28px}.canvas,aside{min-width:0;background:white;border:1px solid #dce4ee;border-radius:12px}.toolbar{padding:12px 15px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid #e1e8f1}.toolbar select,.toolbar input{max-width:100%;min-width:0;border:1px solid #cdd7e5;border-radius:7px;padding:7px 9px;background:white;color:#314d69}.toolbar input{flex:1;min-width:170px}.stat{font-size:12px;color:#647b93;margin-left:auto}.help,.subtitle{padding:10px 16px;margin:0;color:#60778e;font-size:13px;background:#fafcff;border-bottom:1px solid #e6ecf3}.subtitle{border-top:1px solid #e6ecf3;border-bottom:0;border-radius:0 0 12px 12px}.viewport{overflow:auto;height:68vh;min-height:500px;padding:12px 16px;overscroll-behavior:contain}.diagram{padding:0;min-height:520px}.diagram svg{display:block;max-width:none}.tree,.tree ul{list-style:none;margin:0;padding:0}.tree ul{padding-left:17px;margin:3px 0 5px 11px;border-left:1px solid #dce5ef}.branch{margin:4px 0;min-width:0}.branch-row{display:flex;width:100%;gap:8px;text-align:left;align-items:flex-start;padding:7px 10px;background:#fff;border-color:#e0e7ef;border-left:3px solid #7c95b1;line-height:1.6}.branch-row .marker{flex:0 0 14px;color:#6b8197}.branch-row .text{min-width:0;overflow-wrap:anywhere}.branch-row small{display:block;color:#76889a;font-size:11px}.branch[data-kind=input]>.branch-row{background:#edf3ff;border-left-color:#4569bd;font-weight:600}.branch[data-kind=choice]>.branch-row{background:#fff9ee;border-left-color:#ad7d21}.branch[data-kind=artifact]>.branch-row{border-left-color:#b48428}.branch[data-kind=state]>.branch-row{border-left-color:#778796}.branch[data-kind=exception]>.branch-row{background:#fff5f3;border-left-color:#c87c66}.branch[data-kind=parallel]>.branch-row{background:#f1f8f5;border-left-color:#258675}.branch-row.selected{outline:2px solid #356a9f;outline-offset:-2px}.branch-row.match{background:#fff0bd}aside{height:fit-content;padding:18px;position:sticky;top:14px}aside h2{margin:0 0 10px;font-size:18px}aside p{font-size:13px;color:#536a81;margin:10px 0;overflow-wrap:anywhere}#detail-path{padding:9px 10px;background:#f3f6fa;border-radius:7px;white-space:pre-wrap}#sources a{display:block;font-size:12px;overflow-wrap:anywhere;margin:8px 0}.trail{max-height:230px;overflow:auto;line-height:1.7;font-size:12px;color:#657b92}.legend{border-top:1px solid #e4eaf2;margin-top:15px;padding-top:12px;font-size:12px;color:#647a91}.legend p{margin:4px 0}.notice{font-size:12px!important;border-top:1px solid #e4eaf2;padding-top:12px}footer{font-size:12px;color:#657c93;padding:0 28px 22px}.empty{padding:35px;text-align:center;color:#74889a}[hidden]{display:none!important}@media(max-width:950px){.layout{grid-template-columns:1fr;padding:12px}aside{position:static}header{padding:18px}.viewport{height:65vh;min-height:420px}}@media(max-width:550px){h1{font-size:23px}.tree ul{padding-left:5px;margin-left:3px}.viewport{padding:8px}.toolbar{padding:9px;gap:6px}.tabs button{padding:6px 9px;font-size:13px}.toolbar label{font-size:12px}footer{padding:0 14px 20px}}@media print{header,.toolbar,aside,footer{display:none}.layout{display:block;padding:0}.viewport{height:auto;overflow:visible}}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="eyebrow">OKF WORKSPACE · OFFLINE ARCHITECTURE VIEWER</div>
+    <h1>一条信息进入 OKF，接下来会怎样？</h1>
+    <p>默认沿分支阅读：入口 → 用户选择 → 处理 → 保存位置 → 展示与后续复用。</p>
+    <div class="meta"><span id="baseline"></span><span id="fingerprint"></span><a href="../README.md">架构规范</a><a href="../../../docs/README.md">文档索引</a><a href="../../../README.md">项目首页</a></div>
+    <nav class="tabs" id="tabs" role="tablist" aria-label="信息流与架构视图"></nav>
+  </header>
+  <main class="layout">
+    <section class="canvas" id="panel" role="tabpanel" aria-label="当前视图">
+      <div class="toolbar" id="flow-tools">
+        <label for="scenario">信息入口</label><select id="scenario"><option value="all">全部入口</option></select>
+        <input id="search" type="search" aria-label="搜索信息流" placeholder="搜索原件、学习、失败、同步…">
+        <button id="trunk">主干</button><button id="key">关键步骤</button><button id="expand">全部展开</button>
+        <button id="download-flow">下载分支文本</button><span class="stat" id="flow-stat" role="status"></span>
+      </div>
+      <div class="toolbar" id="chart-tools" hidden>
+        <button id="minus" aria-label="缩小">−</button><button id="plus" aria-label="放大">＋</button>
+        <button id="fit">适应宽度</button><button id="clear">清除选择</button><button id="export">下载 SVG</button><span class="stat" id="zoom"></span>
+      </div>
+      <p class="help" id="help">点击分支展开或收起，并在右侧查看保存位置、路径与代码证据。选择节点按条件走其中一路；并行节点可以同时走多路。</p>
+      <div class="viewport" id="viewport"><noscript>请启用 JavaScript 查看交互图；静态预览可打开同目录的 overview.svg。</noscript></div>
+      <p class="subtitle" id="subtitle"></p>
+    </section>
+    <aside aria-label="节点说明">
+      <h2 id="detail-title">选择一个节点</h2>
+      <p id="detail">展开分支查看后续处理。来源与规则可以通过下方链接核对。</p>
+      <p id="detail-path" hidden></p>
+      <div class="trail" id="trail"></div><div id="sources"></div>
+      <div class="legend"><p>▣ 信息入口　? 用户选择　⊕ 并行流向</p><p>◆ 保存的内容　▤ 运行状态　! 失败与恢复</p><p>架构图实线表示主要关系；虚线表示部署、可选路径或投影，具体含义以箭头文字为准。</p></div>
+      <p class="notice">本页是代码与文档的解释视图。Contracts 和架构规范定义规则；图不证明生产服务在线或当前验收已通过。重复展开的结果仍按 URL / 文件哈希复用身份。</p>
+    </aside>
+  </main>
+  <footer><span id="scope"></span><br>更新图形定义后运行 <code>python scripts/docs/build_architecture.py</code>，用 <code>--check</code> 检查引用与生成结果。所有查看功能离线可用。</footer>
+  <script>
+    'use strict';
+    const data = __DATA__;
+    const svgImages = __SVGS__;
+    const $ = id => document.getElementById(id);
+    const viewport = $('viewport');
+    const symbols = {root:'●',input:'▣',step:'→',choice:'?',parallel:'⊕',artifact:'◆',view:'◉',state:'▤',exception:'!'};
+    const nodeMap = new Map();
+    const rows = new Map();
+    const lists = new Map();
+    const branches = new Map();
+    let current = 'flow', scale = 1, activeChart = null;
+    const treeHost = document.createElement('ul');treeHost.className = 'tree';
+    const empty = document.createElement('p');empty.className = 'empty';empty.textContent = '没有匹配的分支，请更换搜索词。';empty.hidden = true;
+
+    function sourceLink(source){const a=document.createElement('a');a.href='../../../'+source;a.textContent=source;return a}
+    function resetDetail(){
+      $('detail-title').textContent='选择一个节点';$('detail').textContent='展开分支查看后续处理；架构视图中选择节点可突出直接关联关系。';
+      $('detail-path').hidden=true;$('trail').replaceChildren();$('sources').replaceChildren(sourceLink('docs/architecture/README.md'));
+      rows.forEach(row=>row.classList.remove('selected'));
+    }
+    function details(node){
+      rows.forEach(row=>row.classList.toggle('selected',row.dataset.node===node.id));
+      $('detail-title').textContent=node.title;
+      const meanings={choice:'按用户选择或条件进入相应分支。',parallel:'这些流向可同时发生，不是互斥选择。',state:'此节点描述运行数据或派生状态，请与长期内容区分。',exception:'此节点描述失败边界或恢复路径。',artifact:'此节点描述保存的内容及其后续用途。'};
+      $('detail').textContent=node.detail||(meanings[node.kind]||'沿子节点继续查看处理步骤、展示和复用。');
+      $('detail-path').hidden=!node.path;$('detail-path').textContent=node.path?'保存位置：'+node.path:'';
+      $('sources').replaceChildren(sourceLink(node.source));
+      const path=[];let cursor=nodeMap.get(node.id);while(cursor){path.unshift(cursor.title);cursor=nodeMap.get(cursor.parent)}
+      $('trail').textContent=path.length?'当前分支：'+path.join(' → '):'';
+    }
+    function renderNode(node){
+      nodeMap.set(node.id,node);const li=document.createElement('li');li.className='branch';li.dataset.kind=node.kind;li.dataset.node=node.id;
+      const button=document.createElement('button');button.className='branch-row';button.dataset.node=node.id;
+      const marker=document.createElement('span');marker.className='marker';marker.setAttribute('aria-hidden','true');
+      const text=document.createElement('span');text.className='text';text.textContent=(symbols[node.kind]||'→')+' '+node.title;
+      if(node.path){const small=document.createElement('small');small.textContent=node.path;text.append(small)}
+      button.append(marker,text);li.append(button);rows.set(node.id,button);branches.set(node.id,li);
+      if(node.children.length){const ul=document.createElement('ul');node.children.forEach(child=>ul.append(renderNode(child)));lists.set(node.id,ul);li.append(ul);button.setAttribute('aria-expanded','false')}
+      button.addEventListener('click',()=>{if(lists.has(node.id))setOpen(node.id,lists.get(node.id).hidden);details(node)});
+      return li;
+    }
+    function setOpen(id,open){const ul=lists.get(id);if(!ul)return;ul.hidden=!open;rows.get(id).setAttribute('aria-expanded',String(open));rows.get(id).firstChild.textContent=open?'▾':'▸'}
+    function depth(limit){lists.forEach((ul,id)=>setOpen(id,nodeMap.get(id).depth<limit))}
+    function categoryOf(node){let n=node;while(n.depth>1)n=nodeMap.get(n.parent);return n.id}
+    function filterTree(){
+      const query=$('search').value.trim().toLocaleLowerCase();const scenario=$('scenario').value;const visible=new Set();let hits=0;
+      nodeMap.forEach(node=>{
+        const inScenario=scenario==='all'||node.depth===0||categoryOf(node)===scenario;
+        const matches=(node.title+' '+node.path+' '+node.source).toLocaleLowerCase().includes(query);
+        rows.get(node.id).classList.toggle('match',Boolean(query)&&inScenario&&matches);
+        if(inScenario&&(!query||matches)){
+          if(query)hits++;let cursor=node;while(cursor){visible.add(cursor.id);cursor=nodeMap.get(cursor.parent)}
+        }
+      });
+      branches.forEach((li,id)=>{li.hidden=!visible.has(id)});
+      if(query)lists.forEach((ul,id)=>{if(visible.has(id))setOpen(id,true)});
+      empty.hidden=visible.size>0;
+      $('flow-stat').textContent=query?hits+' 个匹配 / '+nodeMap.size+' 个节点':visible.size+' / '+nodeMap.size+' 个节点';
+    }
+    function resize(){if(!activeChart)return;const svg=viewport.querySelector('svg');svg.style.width=activeChart.width*scale+'px';svg.style.height=activeChart.height*scale+'px';$('zoom').textContent=Math.round(scale*100)+'%'}
+    function clearChart(){viewport.querySelectorAll('.dim,.selected').forEach(el=>el.classList.remove('dim','selected'));resetDetail()}
+    function selectChart(id){
+      clearChart();const node=activeChart.nodes.find(n=>n.id===id);if(!node)return;
+      const adjacent=new Set([id]);activeChart.edges.forEach(e=>{if(e.a===id)adjacent.add(e.b);if(e.b===id)adjacent.add(e.a)});
+      viewport.querySelectorAll('.node').forEach(el=>{el.classList.toggle('dim',!adjacent.has(el.dataset.node));el.classList.toggle('selected',el.dataset.node===id)});
+      viewport.querySelectorAll('.edge-group').forEach(el=>el.classList.toggle('dim',el.dataset.a!==id&&el.dataset.b!==id));
+      details({...node,id:'chart:'+id});
+    }
+    function showView(id){
+      current=id==='flow'||data.charts.some(c=>c.id===id)?id:'flow';activeChart=data.charts.find(c=>c.id===current)||null;
+      const isFlow=current==='flow';$('flow-tools').hidden=!isFlow;$('chart-tools').hidden=isFlow;
+      viewport.classList.toggle('diagram',!isFlow);$('tabs').querySelectorAll('button').forEach(b=>{b.setAttribute('aria-selected',String(b.dataset.view===current));b.tabIndex=b.dataset.view===current?0:-1});
+      $('panel').setAttribute('aria-labelledby','tab-'+current);resetDetail();
+      if(isFlow){viewport.replaceChildren(treeHost,empty);filterTree();$('help').textContent='点击分支展开或收起，并查看路径与证据。选择节点按条件走其中一路；并行节点可以同时走多路。';$('subtitle').textContent='共同后续步骤在各分支下展开，以保持树形；重复显示不意味着重复创建资料。'}
+      else{
+        viewport.innerHTML=svgImages[current];$('help').textContent='点击节点突出直接关联关系；完整业务分支请切换到信息流。可缩放、滚动画布，或下载当前 SVG。';$('subtitle').textContent=activeChart.subtitle;
+        viewport.querySelectorAll('.node').forEach(el=>{el.addEventListener('click',()=>selectChart(el.dataset.node));el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();selectChart(el.dataset.node)}})});
+        scale=Math.max(.25,(viewport.clientWidth-12)/activeChart.width);resize();
+      }
+      viewport.scrollTo(0,0);
+    }
+    function download(content,type,name){const url=URL.createObjectURL(new Blob([content],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+    function outline(node,prefix='',last=true,root=false){const lines=[(root?'':prefix+(last?'└─ ':'├─ '))+(symbols[node.kind]||'→')+' '+node.title+(node.path?' ['+node.path+']':'')];node.children.forEach((c,i)=>lines.push(...outline(c,root?'':prefix+(last?'   ':'│  '),i===node.children.length-1)));return lines}
+
+    treeHost.append(renderNode(data.tree));depth(3);
+    data.tree.children.forEach(node=>{const o=document.createElement('option');o.value=node.id;o.textContent=node.title;$('scenario').append(o)});
+    [{id:'flow',title:'信息流分支树'},...data.charts].forEach(view=>{
+      const b=document.createElement('button');b.id='tab-'+view.id;b.dataset.view=view.id;b.setAttribute('role','tab');b.setAttribute('aria-controls','panel');b.textContent=view.title;
+      b.addEventListener('click',()=>{location.hash=view.id;showView(view.id)});$('tabs').append(b);
+    });
+    $('tabs').addEventListener('keydown',event=>{const items=[...$('tabs').querySelectorAll('button')];let index=items.indexOf(document.activeElement);if(event.key==='ArrowRight')index=(index+1)%items.length;else if(event.key==='ArrowLeft')index=(index-1+items.length)%items.length;else return;event.preventDefault();items[index].focus();items[index].click()});
+    $('search').addEventListener('input',()=>{$('scenario').value='all';if(!$('search').value)depth(3);filterTree()});
+    $('scenario').addEventListener('change',()=>{$('search').value='';depth(4);filterTree();resetDetail();viewport.scrollTo(0,0)});
+    $('trunk').onclick=()=>{depth(2);filterTree()};$('key').onclick=()=>{depth(4);filterTree()};$('expand').onclick=()=>depth(Infinity);
+    $('download-flow').onclick=()=>download(outline(data.tree,'',true,true).join('\n')+'\n','text/plain;charset=utf-8','okf-information-flow.txt');
+    $('plus').onclick=()=>{scale=Math.min(2.5,scale*1.2);resize()};$('minus').onclick=()=>{scale=Math.max(.25,scale/1.2);resize()};$('fit').onclick=()=>{scale=(viewport.clientWidth-12)/activeChart.width;resize()};$('clear').onclick=clearChart;
+    $('export').onclick=()=>download(svgImages[current],'image/svg+xml;charset=utf-8','okf-architecture-'+current+'.svg');
+    document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(current==='flow')resetDetail();else clearChart()}});
+    window.addEventListener('hashchange',()=>{const id=location.hash.slice(1)||'flow';if(id!==current)showView(id)});
+    $('baseline').textContent='核对：'+data.metadata.reviewed_at+' · 参考基线 '+data.metadata.baseline_commit;
+    $('fingerprint').textContent='图形及引用校验 '+data.metadata.source_fingerprint.slice(0,12);$('fingerprint').title=data.metadata.source_fingerprint;
+    $('scope').textContent=data.metadata.scope;showView(location.hash.slice(1)||'flow');
+  </script>
+</body>
+</html>

@@ -39,7 +39,7 @@ AUTHORIZED_TAILNET_IDENTITIES=REPLACE_ME
 ## 2. 服务定位与能力边界
 
 Engine 默认使用 MinerU 云端，MarkItDown 保留为可选的文本优先转换方式。
-客户端选择与配置见 [文档转换方式](../../docs/DOCUMENT-CONVERSION.md)，其能力边界如下：
+客户端选择与配置见 [文档转换方式](../../docs/DEPLOYMENT.md#conversion)，其能力边界如下：
 
 - 适合有数字文本层的普通 PDF 和结构化 PPTX；
 - 二进制旧 PPT 必须由 Windows 客户端先转换并验证为派生 PPTX；

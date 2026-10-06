@@ -1,0 +1,1797 @@
+{
+  "schema": 1,
+  "reviewed_at": "2026-10-06",
+  "baseline_commit": "8706ed2f",
+  "scope": "参考该提交，并核对当前工作区的文档整合与共享视图清理；不代表生产部署状态。",
+  "charts": [
+    {
+      "id": "overview",
+      "title": "系统总览",
+      "subtitle": "三个应用，共同围绕生产 Vault；箭头表示运行时调用或数据流。",
+      "width": 1580,
+      "height": 1100,
+      "groups": [
+        {
+          "x": 20,
+          "y": 25,
+          "w": 340,
+          "h": 990,
+          "title": "人工工作环境 · Obsidian",
+          "kind": "ui"
+        },
+        {
+          "x": 385,
+          "y": 25,
+          "w": 340,
+          "h": 990,
+          "title": "桌面执行 · Engine",
+          "kind": "engine"
+        },
+        {
+          "x": 750,
+          "y": 25,
+          "w": 390,
+          "h": 990,
+          "title": "数据与规则 · 仓库外",
+          "kind": "vault"
+        },
+        {
+          "x": 1165,
+          "y": 25,
+          "w": 390,
+          "h": 990,
+          "title": "外部系统与可选能力",
+          "kind": "external"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "human",
+          "x": 50,
+          "y": 75,
+          "title": "用户 / 原生笔记",
+          "lines": [
+            "阅读、编辑、明确选择用途",
+            "Tasks / Dataview / 模板 / 日历"
+          ],
+          "kind": "ui",
+          "detail": "Obsidian 是人类读写环境。受管 Artifact 遵循 Vault Contracts；工作台 Markdown 与 Apex 原生 JSON 各有格式和职责。兴趣、长期价值与学习完成由用户明确判断。",
+          "source": "docs/USER-GUIDE.md",
+          "w": 270,
+          "h": 105
+        },
+        {
+          "id": "dash",
+          "x": 50,
+          "y": 275,
+          "title": "Dashboard · 统一 Apex 工作台",
+          "lines": [
+            "Apex 挂载八个共享业务视图",
+            "简单编辑 / Engine 命令 / Codex 交接"
+          ],
+          "kind": "ui",
+          "detail": "一个工作台插件通过 okf-surface-sections 挂载共享 OkfDashboardView。直接读取 Vault；简单人类等价编辑使用 Vault API，转换、发布和语义状态机由 Engine 管理。",
+          "source": "dashboard/src/features/workbench/okf-surface-sections.ts",
+          "w": 270,
+          "h": 105
+        },
+        {
+          "id": "widgets",
+          "x": 50,
+          "y": 525,
+          "title": "Apex 原生生活工具",
+          "lines": [
+            "习惯 / 记账 / 阅读 / 专注",
+            "音乐、媒体与 widget state"
+          ],
+          "kind": "ui",
+          "detail": "由 ApexHostAdapter 托管原生服务，维持各自 JSON/plugin 数据模型。工作台便签和布局保存在 dashboard: true 的 Markdown，属于用户数据。",
+          "source": "dashboard/src/adapters/apex-host.ts",
+          "w": 270,
+          "h": 105
+        },
+        {
+          "id": "claudian",
+          "x": 50,
+          "y": 780,
+          "title": "Claudian · 交互式 Agent UI",
+          "lines": [
+            "会话 / 流式输出 / 工具 / 审批",
+            "恢复 / 附件 / 多 Provider"
+          ],
+          "kind": "ui",
+          "detail": "src/main.ts 是唯一 composition root；core 提供执行契约，features 通过 host/registries 使用能力，providers 保有各自运行时。OKF bridge v1 固定交给 Codex。",
+          "source": "claudian/src/main.ts",
+          "w": 270,
+          "h": 105
+        },
+        {
+          "id": "api",
+          "x": 415,
+          "y": 275,
+          "title": "Engine 本地 API / CLI",
+          "lines": [
+            "FastAPI · 127.0.0.1:8765",
+            "Bearer token + Vault fingerprint"
+          ],
+          "kind": "engine",
+          "detail": "Dashboard 桌面加载时持有本地 Engine 进程，退出关闭 stdin 后停止。CLI 与 API 复用领域工作流；移动端不启动这些本机执行能力。",
+          "source": "engine/src/okf_workspace/api/app.py",
+          "w": 270,
+          "h": 105
+        },
+        {
+          "id": "domain",
+          "x": 415,
+          "y": 465,
+          "title": "领域与工作流编排",
+          "lines": [
+            "Intake / Feeds / Sources",
+            "Learning / Knowledge / Projects / Life"
+          ],
+          "kind": "engine",
+          "detail": "Sources 是 Source/Source Text 身份、查找与统一发布的唯一所有者；Intake 和 Feeds 不相互调用实现。应用工作流协调领域模块。",
+          "source": "docs/architecture/README.md#module-boundaries",
+          "w": 270,
+          "h": 105
+        },
+        {
+          "id": "workers",
+          "x": 415,
+          "y": 665,
+          "title": "后台执行与检索",
+          "lines": [
+            "同步导入接收 / 转换 Worker",
+            "语义 Worker / Hybrid Retrieval"
+          ],
+          "kind": "engine",
+          "detail": "同步导入接收与转换是 API 生命周期管理的线程；生产语义 Worker 是独立子进程。检索有 FTS5 与可选向量，候选命中后读取真实 Markdown。",
+          "source": "engine/src/okf_workspace/api/app.py",
+          "w": 270,
+          "h": 105
+        },
+        {
+          "id": "kit",
+          "x": 415,
+          "y": 865,
+          "title": "Workspace Kit · 源码资源",
+          "lines": [
+            "Contracts / Templates / Views",
+            "Policies / AGENTS / Skills"
+          ],
+          "kind": "engine",
+          "detail": "engine/workspace 是规则与模板源，打包/安装部署到生产 Vault 的 system/、AGENTS.md 和 .agents/skills/。Claudian 不复制业务提示。",
+          "source": "engine/pyproject.toml",
+          "w": 270,
+          "h": 105
+        },
+        {
+          "id": "vault",
+          "x": 795,
+          "y": 295,
+          "title": "生产 Vault · 语义权威",
+          "lines": [
+            "Markdown / YAML / Source Text",
+            "原件 / 正文附件 / 申请 / 回执"
+          ],
+          "kind": "vault",
+          "detail": "Originals 活动位置是 sources/originals/<sha256>/<filename>。笔记及正文引用附件属于持久用户内容，LiveSync 复制完整字节。源仓库仅包含可部署资源。",
+          "source": "docs/architecture/README.md#data-ownership",
+          "w": 300,
+          "h": 130
+        },
+        {
+          "id": "state",
+          "x": 795,
+          "y": 585,
+          "title": "Runtime State · Vault 外",
+          "lines": [
+            "operations / conversions / feed-cache",
+            "brain.sqlite / vectors.sqlite / logs",
+            "配置、凭据、诊断与运行缓存"
+          ],
+          "kind": "state",
+          "detail": "队列、进度、错误和重试在 State 中；索引可重建。Import Receipt 仅是 Vault 内显示投影。Secrets 和 provider 本地会话不进入 Vault 语义层或源码。",
+          "source": "engine/src/okf_workspace/config.py",
+          "w": 300,
+          "h": 130
+        },
+        {
+          "id": "apexdata",
+          "x": 795,
+          "y": 825,
+          "title": "Apex 用户数据与工作台",
+          "lines": [
+            "原生 JSON / plugin data",
+            "工作台 Markdown / 安全副本"
+          ],
+          "kind": "state",
+          "detail": "Apex 生活工具的数据不自动成为 OKF Artifact；工作台是用户拥有的文档。默认语义检索排除工作台及安全副本，显式附件可读取当前正文。",
+          "source": "docs/architecture/README.md#data-ownership",
+          "w": 300,
+          "h": 130
+        },
+        {
+          "id": "feeds",
+          "x": 1225,
+          "y": 105,
+          "title": "外部 Feed 生产者",
+          "lines": [
+            "AI Daily / PkuHoleObserver",
+            "只读导出 + 独立订阅管理协议"
+          ],
+          "kind": "external",
+          "detail": "AI Daily 经 forced-command SSH feed-export.v1 增量拉取；source-admin.v1 管订阅；树洞使用快照。生产者属于外部系统，Engine 负责本机缓存、Digest 和用户决定。",
+          "source": "docs/INTERFACES.md#feeds",
+          "w": 280,
+          "h": 105
+        },
+        {
+          "id": "parser",
+          "x": 1225,
+          "y": 340,
+          "title": "文档转换器",
+          "lines": [
+            "默认 MinerU 官方云 API",
+            "可选 MarkItDown / 自建 MinerU"
+          ],
+          "kind": "external",
+          "detail": "转换器返回 Markdown bundle；Engine 决定方式、校验格式、QC 与发布。质量档位不决定转换器，失败不静默切换。MarkItDown 是真正独立的 API/Worker 服务。",
+          "source": "docs/DEPLOYMENT.md#conversion",
+          "w": 280,
+          "h": 105
+        },
+        {
+          "id": "codex",
+          "x": 1225,
+          "y": 580,
+          "title": "Codex 与 AI 运行时",
+          "lines": [
+            "交互：Codex App Server",
+            "后台：Codex exec / 只读生成"
+          ],
+          "kind": "external",
+          "detail": "OKF bridge 固定 Codex。Claudian 还包含 Claude、Grok、OpenCode、Pi providers。Engine 常规 AI provider 可配置 OpenAI-compatible API；后台语义流程当前使用 CodexSemanticRunner。",
+          "source": "engine/src/okf_workspace/semantic/runner.py",
+          "w": 280,
+          "h": 105
+        },
+        {
+          "id": "sync",
+          "x": 1225,
+          "y": 825,
+          "title": "同步与恢复",
+          "lines": [
+            "LiveSync ⇄ Caddy ⇄ CouchDB",
+            "可选 Restic / Git checkpoint"
+          ],
+          "kind": "external",
+          "detail": "LiveSync 同步 Vault 中的笔记、原件、申请和回执；不复制 Engine 状态与 token。备份独立于同步；Git checkpoint 和 Restic 为显式启用的恢复能力。旧 Originals 服务只用于历史恢复。",
+          "source": "docs/DEPLOYMENT.md#sync-backup",
+          "w": 280,
+          "h": 105
+        }
+      ],
+      "edges": [
+        {
+          "a": "human",
+          "b": "dash",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "dash",
+          "b": "api",
+          "label": "HTTP 命令",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "dash",
+          "b": "vault",
+          "label": "直接读取 / 简单编辑",
+          "dashed": false,
+          "side": "top"
+        },
+        {
+          "a": "dash",
+          "b": "claudian",
+          "label": "okfBridge v1",
+          "dashed": false,
+          "side": "left"
+        },
+        {
+          "a": "dash",
+          "b": "widgets",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "api",
+          "b": "domain",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "domain",
+          "b": "workers",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "domain",
+          "b": "vault",
+          "label": "统一发布 / 读取",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "workers",
+          "b": "state",
+          "label": "持久运行状态",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "kit",
+          "b": "vault",
+          "label": "安装部署",
+          "dashed": true,
+          "side": null
+        },
+        {
+          "a": "widgets",
+          "b": "apexdata",
+          "label": "原生存储",
+          "dashed": false,
+          "side": "bottom"
+        },
+        {
+          "a": "feeds",
+          "b": "domain",
+          "label": "拉取",
+          "dashed": false,
+          "side": "top"
+        },
+        {
+          "a": "workers",
+          "b": "parser",
+          "label": "显式方式",
+          "dashed": false,
+          "side": "right"
+        },
+        {
+          "a": "workers",
+          "b": "codex",
+          "label": "后台生成",
+          "dashed": false,
+          "side": "bottom"
+        },
+        {
+          "a": "claudian",
+          "b": "codex",
+          "label": "交互运行时",
+          "dashed": false,
+          "side": "bottom"
+        },
+        {
+          "a": "vault",
+          "b": "sync",
+          "label": "全量同步",
+          "dashed": false,
+          "side": "right"
+        }
+      ]
+    },
+    {
+      "id": "engine",
+      "title": "模块与依赖",
+      "subtitle": "箭头从使用方指向依赖；方框是逻辑职责，括号对应当前实际代码目录。",
+      "width": 1580,
+      "height": 1030,
+      "groups": [
+        {
+          "x": 20,
+          "y": 30,
+          "w": 1540,
+          "h": 145,
+          "title": "入口与适配",
+          "kind": "ui"
+        },
+        {
+          "x": 20,
+          "y": 200,
+          "w": 1540,
+          "h": 150,
+          "title": "应用工作流编排",
+          "kind": "engine"
+        },
+        {
+          "x": 20,
+          "y": 385,
+          "w": 1540,
+          "h": 410,
+          "title": "领域模块与基础能力",
+          "kind": "engine"
+        },
+        {
+          "x": 20,
+          "y": 850,
+          "w": 1540,
+          "h": 150,
+          "title": "Foundation 与唯一格式规范",
+          "kind": "vault"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "d",
+          "x": 80,
+          "y": 65,
+          "title": "Dashboard",
+          "lines": [
+            "Apex + 共享 OkfDashboardView",
+            "Vault read model / API / bridge"
+          ],
+          "kind": "ui",
+          "detail": "插件不能复制转换、Source 发布和后台语义状态机。Apex 是被同一个插件 host 托管的界面与工具集合。",
+          "source": "dashboard/src/features/workbench/okf-surface-sections.ts",
+          "w": 270,
+          "h": 80
+        },
+        {
+          "id": "a",
+          "x": 440,
+          "y": 65,
+          "title": "API / CLI / Worker",
+          "lines": [
+            "api/ · cli.py · worker.py"
+          ],
+          "kind": "engine",
+          "detail": "入口调用应用工作流和明确领域服务；API route 不隐匿跨模块事务。",
+          "source": "engine/src/okf_workspace/api/app.py",
+          "w": 270,
+          "h": 80
+        },
+        {
+          "id": "c",
+          "x": 1160,
+          "y": 65,
+          "title": "Claudian",
+          "lines": [
+            "UI / core contracts / providers"
+          ],
+          "kind": "ui",
+          "detail": "Core 不依赖 app/features/providers；main.ts 注册、构造和拆卸具体实现。features/provider 通过各自 Host 使用能力。",
+          "source": "claudian/AGENTS.md",
+          "w": 270,
+          "h": 80
+        },
+        {
+          "id": "wf",
+          "x": 410,
+          "y": 235,
+          "title": "Application workflows",
+          "lines": [
+            "ai/workflows.py · ingestion.py",
+            "notes/organize.py · semantic/service.py"
+          ],
+          "kind": "engine",
+          "detail": "这是逻辑编排层；当前并没有一个同名 workflows 目录。它组合资料、用户用途、领域目标和后台 operations。",
+          "source": "docs/architecture/README.md#module-boundaries",
+          "w": 640,
+          "h": 90
+        },
+        {
+          "id": "intake",
+          "x": 70,
+          "y": 435,
+          "title": "Intake",
+          "lines": [
+            "importers/ · notes/captures.py",
+            "notes/web_captures.py"
+          ],
+          "kind": "engine",
+          "detail": "捕获、Web Clip、原件验证、同步申请接收、转换和 QC 属于 Intake。它使用 Sources 和 Foundation，不能调用 Feeds 内部实现。",
+          "source": "engine/src/okf_workspace/importers/pipeline.py",
+          "w": 270,
+          "h": 105
+        },
+        {
+          "id": "feeds",
+          "x": 440,
+          "y": 435,
+          "title": "Feeds",
+          "lines": [
+            "feeds/",
+            "cache / editions / decisions / subscriptions"
+          ],
+          "kind": "engine",
+          "detail": "拉取外部生产者、Digest 渲染、订阅镜像与人工决定。已打开 Digest 的首次创建可由 Dashboard Vault API 完成，渲染与刷新仍由 Engine 管。",
+          "source": "engine/src/okf_workspace/feeds/decisions.py",
+          "w": 305,
+          "h": 105
+        },
+        {
+          "id": "workspace",
+          "x": 820,
+          "y": 435,
+          "title": "Workspace 领域",
+          "lines": [
+            "notes/ · ai/ · projections/",
+            "学习 / 知识 / 项目 / 生活 / 任务"
+          ],
+          "kind": "engine",
+          "detail": "学习、知识、项目、生活由当前 notes/create.py、ai/ 与 projections/ 协作实现；领域名称不表示存在同名模块。已清理的旧 notes 包装器不再作为实现入口。",
+          "source": "engine/src/okf_workspace/notes/create.py",
+          "w": 305,
+          "h": 105
+        },
+        {
+          "id": "retrieval",
+          "x": 1200,
+          "y": 435,
+          "title": "Retrieval",
+          "lines": [
+            "retrieval/",
+            "FTS5 + 可选 vector + 真实读取"
+          ],
+          "kind": "engine",
+          "detail": "SQLite 索引是候选查找工具，可重建；显式路径、词法、向量和一跳链接扩展后，ContextReader 从磁盘读取真实 Markdown。",
+          "source": "engine/src/okf_workspace/retrieval/search.py",
+          "w": 290,
+          "h": 105
+        },
+        {
+          "id": "sources",
+          "x": 250,
+          "y": 655,
+          "title": "Sources · 唯一发布者",
+          "lines": [
+            "sources/publisher.py",
+            "canonical identity / Source pair / uses[]"
+          ],
+          "kind": "engine",
+          "detail": "URL canonical identity 或文件哈希去重，保持首次 provenance。可只登记 Source；只有正文存在才写 text 链接和 Source Text。多个用途/context 共用一个 Source。",
+          "source": "engine/src/okf_workspace/sources/publisher.py",
+          "w": 410,
+          "h": 105
+        },
+        {
+          "id": "ops",
+          "x": 900,
+          "y": 655,
+          "title": "Operations · 执行责任",
+          "lines": [
+            "semantic/ · importers/state.py / worker.py",
+            "队列 / 阶段 / 取消 / 失败 / 重试"
+          ],
+          "kind": "engine",
+          "detail": "Operations 是逻辑运行状态责任；实际实现分别位于 semantic 与 importers，不存在独立 operations 源码目录。生产语义 Worker 子进程隔离检索与 Codex 生成。",
+          "source": "engine/src/okf_workspace/semantic/worker.py",
+          "w": 470,
+          "h": 105
+        },
+        {
+          "id": "foundation",
+          "x": 245,
+          "y": 890,
+          "title": "Foundation（okf/）",
+          "lines": [
+            "Contracts / YAML / paths / relations / atomic file IO"
+          ],
+          "kind": "vault",
+          "detail": "只承载格式、路径、关系和原子文件操作等底层能力，不依赖上层领域。严格生产、宽容读取；保留未知 YAML 字段。",
+          "source": "engine/src/okf_workspace/okf/contracts.py",
+          "w": 600,
+          "h": 80
+        },
+        {
+          "id": "rules",
+          "x": 1000,
+          "y": 890,
+          "title": "Workspace Resources",
+          "lines": [
+            "engine/workspace/ → 部署 Vault"
+          ],
+          "kind": "vault",
+          "detail": "Contracts 是 Artifact 格式权威；模板、Skills、views 和 policies 共用同一来源。",
+          "source": "engine/workspace/vault/system/contracts/README.md",
+          "w": 390,
+          "h": 80
+        }
+      ],
+      "edges": [
+        {
+          "a": "d",
+          "b": "wf",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "a",
+          "b": "wf",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "wf",
+          "b": "intake",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "wf",
+          "b": "feeds",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "wf",
+          "b": "workspace",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "wf",
+          "b": "ops",
+          "label": "",
+          "dashed": false,
+          "side": "right"
+        },
+        {
+          "a": "intake",
+          "b": "sources",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "feeds",
+          "b": "sources",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "sources",
+          "b": "foundation",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "workspace",
+          "b": "foundation",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "retrieval",
+          "b": "foundation",
+          "label": "",
+          "dashed": false,
+          "side": "right"
+        },
+        {
+          "a": "ops",
+          "b": "retrieval",
+          "label": "调用",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "rules",
+          "b": "foundation",
+          "label": "格式规则",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "c",
+          "b": "rules",
+          "label": "部署后按需读取",
+          "dashed": true,
+          "side": "right"
+        }
+      ]
+    },
+    {
+      "id": "data",
+      "title": "数据与权威",
+      "subtitle": "实线是持久关系；虚线是读取、生成、索引或显示投影。没有第二份知识正文权威。",
+      "width": 1580,
+      "height": 1080,
+      "groups": [
+        {
+          "x": 20,
+          "y": 25,
+          "w": 1540,
+          "h": 755,
+          "title": "生产 Vault · 持久语义和用户文件",
+          "kind": "vault"
+        },
+        {
+          "x": 20,
+          "y": 815,
+          "w": 1540,
+          "h": 220,
+          "title": "运行投影与独立数据模型 · 存储位置见节点",
+          "kind": "state"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "capture",
+          "x": 65,
+          "y": 85,
+          "title": "Capture / 导入申请",
+          "lines": [
+            "inbox/captures/",
+            "system/imports/<uuid>/request.md"
+          ],
+          "kind": "vault",
+          "detail": "Capture 与 Import Request 是不同入口。v4 申请明确 action: store/convert，原件先保存；移动端只写文件和申请，不维护业务执行状态。",
+          "source": "engine/workspace/vault/system/contracts/document-import-request.yaml",
+          "w": 270,
+          "h": 105
+        },
+        {
+          "id": "original",
+          "x": 65,
+          "y": 315,
+          "title": "Original · 原件",
+          "lines": [
+            "sources/originals/<sha256>/<filename>",
+            "完整字节，全设备本地保存"
+          ],
+          "kind": "vault",
+          "detail": "文件哈希与长度在 Engine 导入时验证。原件可没有解析正文；PDF 和图片直接由 Obsidian WorkspaceLeaf.openFile(TFile) 打开。",
+          "source": "docs/DEPLOYMENT.md#original-migration",
+          "w": 315,
+          "h": 105
+        },
+        {
+          "id": "source",
+          "x": 500,
+          "y": 115,
+          "title": "Source · 资料身份",
+          "lines": [
+            "sources/records/<kind>/<slug>.md",
+            "resource / kind / uses[] / optional text"
+          ],
+          "kind": "vault",
+          "detail": "资料身份与某次学习、项目用途无关。uses[] 元组按 purpose + optional course/project 幂等，允许多场景复用同一来源。",
+          "source": "engine/workspace/vault/system/contracts/source.yaml",
+          "w": 330,
+          "h": 125
+        },
+        {
+          "id": "text",
+          "x": 500,
+          "y": 360,
+          "title": "Source Text · 资料正文",
+          "lines": [
+            "sources/text/<kind>/<slug>.md",
+            "sources 指向 Source；正文链接附件"
+          ],
+          "kind": "vault",
+          "detail": "有可用正文才创建 Source Text；它可能是转换文本或采集内容，不保证等于完整原文。sources 指向 Source，正文链接实际使用的附件；完整转换 export 与 QC 保存在 State。",
+          "source": "engine/workspace/vault/system/contracts/source-text.yaml",
+          "w": 330,
+          "h": 125
+        },
+        {
+          "id": "assets",
+          "x": 65,
+          "y": 555,
+          "title": "正文附件 / Digest",
+          "lines": [
+            "sources/assets/",
+            "feeds/ai-daily|treehole/YYYY/"
+          ],
+          "kind": "vault",
+          "detail": "正文附件在发布前根据最终 Markdown 的引用过滤。Digest 是原生完整 Feed 阅读入口；不操作 Feed item 不生成 Source。",
+          "source": "docs/architecture/README.md#data-ownership",
+          "w": 315,
+          "h": 105
+        },
+        {
+          "id": "learning",
+          "x": 1050,
+          "y": 85,
+          "title": "Learning",
+          "lines": [
+            "Course / Lesson / Study Guide",
+            "learning/courses/ · learning/guides/"
+          ],
+          "kind": "vault",
+          "detail": "课程、课堂笔记与学习材料独立记录。course/project 是关系投影，一个 Study Guide 不因多场景重复复制。studied_at 只能由用户明确确认。",
+          "source": "engine/workspace/vault/system/contracts/study-guide.yaml",
+          "w": 390,
+          "h": 105
+        },
+        {
+          "id": "knowledge",
+          "x": 1050,
+          "y": 260,
+          "title": "Knowledge",
+          "lines": [
+            "Wiki / Wiki Map",
+            "knowledge/wiki/ · knowledge/maps/"
+          ],
+          "kind": "vault",
+          "detail": "Wiki 是长期知识，Wiki Map 提供地图导航。wiki 用途可直接从资料生成，无需先完成学习。reference 用途不产生语义目标。",
+          "source": "engine/workspace/vault/system/contracts/wiki.yaml",
+          "w": 390,
+          "h": 105
+        },
+        {
+          "id": "projects",
+          "x": 1050,
+          "y": 435,
+          "title": "Projects",
+          "lines": [
+            "project.md / log.md / Decision",
+            "projects/<project>/"
+          ],
+          "kind": "vault",
+          "detail": "Project 保存状态、下一步等领域信息，log 追加真实进展，Decision 保存决定。项目相关 Capture 和学习材料通过关系关联。",
+          "source": "engine/workspace/vault/system/contracts/project.yaml",
+          "w": 390,
+          "h": 105
+        },
+        {
+          "id": "life",
+          "x": 1050,
+          "y": 610,
+          "title": "Life / Self / Tasks",
+          "lines": [
+            "Daily / Reflection / Review / Profile",
+            "原笔记里的未完成 #task"
+          ],
+          "kind": "vault",
+          "detail": "日记、反思、回顾主要由人工书写。Tasks/Today 是原文投影。self 下 profile、preferences、constraints 等记录明确的用户上下文。",
+          "source": "engine/workspace/vault/system/contracts/daily.yaml",
+          "w": 390,
+          "h": 105
+        },
+        {
+          "id": "uses",
+          "x": 500,
+          "y": 615,
+          "title": "Source.uses[] · 用户用途",
+          "lines": [
+            "undecided / study / wiki / reference",
+            "optional course / project context"
+          ],
+          "kind": "vault",
+          "detail": "用途与执行状态分离。正式决定只移除同一 context 对应的 undecided，保留其他用途；Feed 未决定时留在 cache/Digest，不自动进入 Inbox。",
+          "source": "docs/architecture/README.md#data-ownership",
+          "w": 330,
+          "h": 105
+        },
+        {
+          "id": "runtime",
+          "x": 65,
+          "y": 870,
+          "title": "Runtime State",
+          "lines": [
+            "JSON operations / conversions / feed-cache",
+            "parser export / QC / receipts / logs"
+          ],
+          "kind": "state",
+          "detail": "队列是外部 State 中可恢复的 JSON manifests，不是新增数据库权威；Vault Import Receipt 只是执行结果的显示投影。",
+          "source": "engine/src/okf_workspace/semantic/store.py",
+          "w": 410,
+          "h": 105
+        },
+        {
+          "id": "index",
+          "x": 565,
+          "y": 870,
+          "title": "可重建索引",
+          "lines": [
+            "brain.sqlite · SQLite FTS5",
+            "vectors.sqlite · optional fastembed"
+          ],
+          "kind": "state",
+          "detail": "检索候选必须重新读取真实 Markdown。默认排除工作台与 .dashboard-backup/；明确附加工作台可读取当前正文，不进入默认索引。",
+          "source": "engine/src/okf_workspace/retrieval/scanner.py",
+          "w": 370,
+          "h": 105
+        },
+        {
+          "id": "apex",
+          "x": 1030,
+          "y": 870,
+          "title": "Apex 用户数据",
+          "lines": [
+            "JSON / plugin data / workbench Markdown",
+            "habit / expense / reading / focus"
+          ],
+          "kind": "state",
+          "detail": "Apex native 数据维持独立模型，workbench Markdown 属于 Vault 内用户文件，不是 OKF Artifact。这里与外部状态并列仅用于区别数据类型，并非声称都存于 Vault 外。",
+          "source": "docs/architecture/README.md#data-ownership",
+          "w": 450,
+          "h": 105
+        }
+      ],
+      "edges": [
+        {
+          "a": "capture",
+          "b": "source",
+          "label": "Intake 发布",
+          "dashed": true,
+          "side": null
+        },
+        {
+          "a": "source",
+          "b": "original",
+          "label": "resource",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "source",
+          "b": "text",
+          "label": "optional text",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "text",
+          "b": "source",
+          "label": "sources",
+          "dashed": false,
+          "side": "right"
+        },
+        {
+          "a": "text",
+          "b": "assets",
+          "label": "正文链接",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "source",
+          "b": "uses",
+          "label": "持久用途",
+          "dashed": false,
+          "side": "left"
+        },
+        {
+          "a": "uses",
+          "b": "learning",
+          "label": "study",
+          "dashed": true,
+          "side": "right"
+        },
+        {
+          "a": "uses",
+          "b": "knowledge",
+          "label": "wiki",
+          "dashed": true,
+          "side": "right"
+        },
+        {
+          "a": "projects",
+          "b": "learning",
+          "label": "project 关系",
+          "dashed": false,
+          "side": "right"
+        },
+        {
+          "a": "runtime",
+          "b": "source",
+          "label": "执行 / 发布",
+          "dashed": true,
+          "side": "left"
+        },
+        {
+          "a": "text",
+          "b": "index",
+          "label": "索引投影",
+          "dashed": true,
+          "side": null
+        },
+        {
+          "a": "life",
+          "b": "index",
+          "label": "任务与检索投影",
+          "dashed": true,
+          "side": null
+        }
+      ]
+    },
+    {
+      "id": "intake",
+      "title": "文件导入流程",
+      "subtitle": "桌面与移动端共享 local-first 写入；LiveSync 到达顺序不确定，桌面接收器验证后执行。",
+      "width": 1580,
+      "height": 970,
+      "groups": [
+        {
+          "x": 20,
+          "y": 25,
+          "w": 475,
+          "h": 870,
+          "title": "设备端 · 只用 Vault API",
+          "kind": "ui"
+        },
+        {
+          "x": 525,
+          "y": 25,
+          "w": 525,
+          "h": 870,
+          "title": "指定桌面 · Engine Intake",
+          "kind": "engine"
+        },
+        {
+          "x": 1080,
+          "y": 25,
+          "w": 480,
+          "h": 870,
+          "title": "转换与持久输出",
+          "kind": "vault"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "input",
+          "x": 75,
+          "y": 85,
+          "title": "用户选文件与动作",
+          "lines": [
+            "电脑 / 手机 / 平板",
+            "默认仅保存；明确选择转换"
+          ],
+          "kind": "ui",
+          "detail": "工作台默认 action: store，仅保存原件。转换正文与生成笔记需要分别明确选择；课程或项目关联本身不触发转换或生成。",
+          "source": "engine/workspace/vault/system/contracts/document-import-request.yaml",
+          "w": 340,
+          "h": 105
+        },
+        {
+          "id": "save",
+          "x": 75,
+          "y": 305,
+          "title": "先保存完整原件",
+          "lines": [
+            "sources/originals/<sha256>/<filename>",
+            "再写 system/imports/<uuid>/request.md"
+          ],
+          "kind": "vault",
+          "detail": "Dashboard local-first writer 使用 Vault API，同哈希已归档原件可复用，不删除其他原位置或更改已嵌入链接。",
+          "source": "dashboard/src/imports/synced-intake.ts",
+          "w": 340,
+          "h": 130
+        },
+        {
+          "id": "sync",
+          "x": 75,
+          "y": 600,
+          "title": "LiveSync 全量同步",
+          "lines": [
+            "原件 + request + receipt + 成果",
+            "移动端不需要本机 Engine"
+          ],
+          "kind": "external",
+          "detail": "每台设备和 CouchDB 保存完整附件字节；申请早于原件到达时等待同步，绝不把暂时缺失当作可以执行的输入。",
+          "source": "docs/DEPLOYMENT.md#original-migration",
+          "w": 340,
+          "h": 105
+        },
+        {
+          "id": "verify",
+          "x": 605,
+          "y": 155,
+          "title": "SyncedDocumentIntake",
+          "lines": [
+            "幂等接收 / 等待完整到达",
+            "私有 snapshot / 长度与 SHA-256 校验"
+          ],
+          "kind": "engine",
+          "detail": "接收者以外部 State 记录执行身份和结果；申请、文件可乱序到达。原件不会在成功后自动删除。",
+          "source": "engine/src/okf_workspace/importers/synced_intake.py",
+          "w": 370,
+          "h": 130
+        },
+        {
+          "id": "action",
+          "x": 605,
+          "y": 400,
+          "title": "action 分支",
+          "lines": [
+            "store → 只登记 Source",
+            "convert → 持久队列与转换 Worker"
+          ],
+          "kind": "engine",
+          "detail": "store 校验并登记 Source，不创建转换任务或空白 Source Text。convert 按选定方式转换；已有正文可复用，生成笔记仍需明确选择。",
+          "source": "engine/src/okf_workspace/importers/pipeline.py",
+          "w": 370,
+          "h": 105
+        },
+        {
+          "id": "qc",
+          "x": 605,
+          "y": 665,
+          "title": "Engine 重建与发布",
+          "lines": [
+            "OCR / 页面重建 / QC / 附件筛选",
+            "Sources 统一发布 / 更新 receipt"
+          ],
+          "kind": "engine",
+          "detail": "只发布最终正文引用的本地 assets；完整 export、manifest 和 QC 保留在 State。成功发布和 receipt 持久后清 working，失败则保留以便恢复。",
+          "source": "engine/src/okf_workspace/importers/publish.py",
+          "w": 370,
+          "h": 130
+        },
+        {
+          "id": "parser",
+          "x": 1130,
+          "y": 255,
+          "title": "用户显式指定转换方式",
+          "lines": [
+            "MinerU Cloud（默认）",
+            "MarkItDown / 自建 MinerU（可选）"
+          ],
+          "kind": "external",
+          "detail": "调用转换器前按格式与配置验证。质量档位只控制 QC，转换失败不能隐式换供应商。",
+          "source": "engine/src/okf_workspace/importers/methods.py",
+          "w": 365,
+          "h": 105
+        },
+        {
+          "id": "source",
+          "x": 1130,
+          "y": 545,
+          "title": "Source + optional Source Text",
+          "lines": [
+            "身份、用途与正文关系",
+            "原件 / 实际引用 assets"
+          ],
+          "kind": "vault",
+          "detail": "store 只产生有原件的 Source；convert 成功后补足正文与链接。同一资源以规范 URL 或哈希去重，不因 course/project 再复制一份。",
+          "source": "engine/src/okf_workspace/sources/publisher.py",
+          "w": 365,
+          "h": 130
+        },
+        {
+          "id": "gen",
+          "x": 1130,
+          "y": 755,
+          "title": "明确选择后生成",
+          "lines": [
+            "study → Study Guide",
+            "wiki → Wiki；reference 无语义目标"
+          ],
+          "kind": "engine",
+          "detail": "通过 SemanticOperationService 入队。用户用途与后台执行状态分开，失败、重试、取消在外部 State 管理。",
+          "source": "engine/src/okf_workspace/importers/worker.py",
+          "w": 365,
+          "h": 105
+        }
+      ],
+      "edges": [
+        {
+          "a": "input",
+          "b": "save",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "save",
+          "b": "sync",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "sync",
+          "b": "verify",
+          "label": "同步至桌面",
+          "dashed": false,
+          "side": "right"
+        },
+        {
+          "a": "verify",
+          "b": "action",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "action",
+          "b": "source",
+          "label": "store",
+          "dashed": false,
+          "side": "top"
+        },
+        {
+          "a": "action",
+          "b": "parser",
+          "label": "convert",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "parser",
+          "b": "qc",
+          "label": "Markdown bundle",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "qc",
+          "b": "source",
+          "label": "验证后发布",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "source",
+          "b": "gen",
+          "label": "用户用途",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "qc",
+          "b": "sync",
+          "label": "回执与成果同步",
+          "dashed": false,
+          "side": null
+        }
+      ]
+    },
+    {
+      "id": "ai",
+      "title": "两条 AI 执行链路",
+      "subtitle": "交互式写入按用户授权执行；后台 Agent 只读生成，由 Engine 校验并发布。",
+      "width": 1580,
+      "height": 1070,
+      "groups": [
+        {
+          "x": 20,
+          "y": 25,
+          "w": 735,
+          "h": 955,
+          "title": "交互路径 · 用户监督",
+          "kind": "ui"
+        },
+        {
+          "x": 785,
+          "y": 25,
+          "w": 775,
+          "h": 955,
+          "title": "后台路径 · Engine 管理",
+          "kind": "engine"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "handoff",
+          "x": 90,
+          "y": 85,
+          "title": "Dashboard / 原生笔记",
+          "lines": [
+            "任务 + context paths + read/write/plan",
+            "可选 Skill；默认预填不自动发送"
+          ],
+          "kind": "ui",
+          "detail": "okfBridge v1 校验相对路径、去重附件、明确模式，并且总是选择 Codex provider。不可用时可降级为原生笔记入口或复制提示。",
+          "source": "claudian/src/integrations/okf/OkfBridge.ts",
+          "w": 570,
+          "h": 105
+        },
+        {
+          "id": "ui",
+          "x": 90,
+          "y": 275,
+          "title": "Claudian 会话外壳",
+          "lines": [
+            "composer / tabs / stream / tools / approvals",
+            "core execution contracts + app storage"
+          ],
+          "kind": "ui",
+          "detail": "主组件树由 main.ts 构成；core 只定义契约，不引用具体实现；features 通过 FeatureHost、registries 使用能力。",
+          "source": "claudian/AGENTS.md",
+          "w": 570,
+          "h": 105
+        },
+        {
+          "id": "runtime",
+          "x": 90,
+          "y": 475,
+          "title": "Codex Provider → App Server",
+          "lines": [
+            "OKF 交接固定 Codex",
+            "另有 Claude / Grok / OpenCode / Pi providers"
+          ],
+          "kind": "external",
+          "detail": "各 Provider 独立维护 CLI/API 运行时、模型目录、会话历史、命令与工具能力。存在代码实现并不意味着部署时全已启用。",
+          "source": "claudian/src/providers/defaultProviderConfigs.ts",
+          "w": 570,
+          "h": 105
+        },
+        {
+          "id": "context",
+          "x": 90,
+          "y": 675,
+          "title": "真实上下文与写入规则",
+          "lines": [
+            "Vault AGENTS + 按需 Skill + 实际读取 Markdown",
+            "okf context：检索候选 → 读真实文件"
+          ],
+          "kind": "vault",
+          "detail": "部署资源提供 OKF 业务规则；Claudian 不复制业务提示。交互写入遵守用户授权和相应 Artifact Contract，不能推断 studied_at。",
+          "source": "docs/INTERFACES.md#bridge",
+          "w": 570,
+          "h": 105
+        },
+        {
+          "id": "interactive",
+          "x": 90,
+          "y": 865,
+          "title": "生产 Vault",
+          "lines": [
+            "用户可读的唯一成果 / 原生笔记"
+          ],
+          "kind": "vault",
+          "detail": "用户监督的交互与后台流程共享同一 Vault，不复制知识正文。",
+          "source": "docs/architecture/README.md#system-overview",
+          "w": 570,
+          "h": 80
+        },
+        {
+          "id": "operation",
+          "x": 865,
+          "y": 85,
+          "title": "SemanticOperationService",
+          "lines": [
+            "显式 study/wiki 请求 → 外部 operations JSON",
+            "按 source / purpose / course/project 去重"
+          ],
+          "kind": "engine",
+          "detail": "后台生成需启用 semantic automation。入队是确定性操作，语义内容仍由 AI 生成，不要求 Claudian 窗口在线。",
+          "source": "engine/src/okf_workspace/semantic/service.py",
+          "w": 605,
+          "h": 105
+        },
+        {
+          "id": "worker",
+          "x": 865,
+          "y": 275,
+          "title": "独立 Semantic Worker 子进程",
+          "lines": [
+            "queued → retrieving → generating",
+            "真实 stage；超时、取消、重试与恢复"
+          ],
+          "kind": "engine",
+          "detail": "API lifecycle 启动和停止生产 Worker。检索与 Codex 生成又使用可终止子进程；heartbeat 只证明进程存活。",
+          "source": "engine/src/okf_workspace/semantic/worker.py",
+          "w": 605,
+          "h": 105
+        },
+        {
+          "id": "retrieve",
+          "x": 865,
+          "y": 475,
+          "title": "Hybrid Retrieval + Codex exec",
+          "lines": [
+            "FTS5 / optional vector → 候选",
+            "read-only → content + actual_reads"
+          ],
+          "kind": "external",
+          "detail": "Engine 检索给出候选，Codex 在只读环境生成 content 并报告 actual_reads。Runner 检查必读路径是否列出；模型报告不是独立文件读取审计。",
+          "source": "engine/src/okf_workspace/semantic/runner.py",
+          "w": 605,
+          "h": 105
+        },
+        {
+          "id": "publish",
+          "x": 865,
+          "y": 675,
+          "title": "Engine 校验与发布",
+          "lines": [
+            "Contract 校验 / 锁 / hash 变化保护",
+            "原子创建 或 命名 ai:auto 区域更新"
+          ],
+          "kind": "engine",
+          "detail": "自动输出不能覆盖人类区域；目标发生并发编辑时受 expected_sha256 保护。索引刷新失败不抹去已经成功写入的权威 Markdown。",
+          "source": "engine/src/okf_workspace/semantic/worker.py",
+          "w": 605,
+          "h": 105
+        },
+        {
+          "id": "result",
+          "x": 865,
+          "y": 865,
+          "title": "生产 Vault + 可重建索引",
+          "lines": [
+            "Study Guide / Wiki → Dashboard 反馈与结果链接"
+          ],
+          "kind": "vault",
+          "detail": "发布后完成 operation，失败保留真实错误和原始参数供显式重试。Engine 普通常规 AI 接口另可配置 OpenAI-compatible provider，当前后台语义 Runner 为 Codex。",
+          "source": "engine/src/okf_workspace/ai/provider.py",
+          "w": 605,
+          "h": 80
+        }
+      ],
+      "edges": [
+        {
+          "a": "handoff",
+          "b": "ui",
+          "label": "okfBridge v1",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "ui",
+          "b": "runtime",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "runtime",
+          "b": "context",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "context",
+          "b": "interactive",
+          "label": "授权下直接读写",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "operation",
+          "b": "worker",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "worker",
+          "b": "retrieve",
+          "label": "",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "retrieve",
+          "b": "publish",
+          "label": "结构化结果",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "publish",
+          "b": "result",
+          "label": "publishing → indexing",
+          "dashed": false,
+          "side": null
+        }
+      ]
+    },
+    {
+      "id": "deploy",
+      "title": "部署、同步与工程",
+      "subtitle": "仓库描述可部署拓扑；这里不声称所有可选服务当前都已上线。",
+      "width": 1580,
+      "height": 1100,
+      "groups": [
+        {
+          "x": 20,
+          "y": 25,
+          "w": 495,
+          "h": 725,
+          "title": "主桌面 · Windows + Obsidian",
+          "kind": "ui"
+        },
+        {
+          "x": 555,
+          "y": 25,
+          "w": 470,
+          "h": 725,
+          "title": "其他设备 / 同步服务器",
+          "kind": "external"
+        },
+        {
+          "x": 1065,
+          "y": 25,
+          "w": 495,
+          "h": 725,
+          "title": "外部计算与恢复",
+          "kind": "external"
+        },
+        {
+          "x": 20,
+          "y": 805,
+          "w": 1540,
+          "h": 240,
+          "title": "源码 monorepo · 不含生产用户内容、秘密或运行状态",
+          "kind": "engine"
+        }
+      ],
+      "nodes": [
+        {
+          "id": "desktop",
+          "x": 65,
+          "y": 85,
+          "title": "Obsidian 主桌面",
+          "lines": [
+            "Dashboard + Apex / Claudian / LiveSync",
+            "本地 Vault（含原件）"
+          ],
+          "kind": "ui",
+          "detail": "Dashboard 管理本地 API 进程生命周期；Claudian 管理 Provider 运行时。原生浏览和编辑不依赖本地 HTTP API。",
+          "source": "docs/DEPLOYMENT.md",
+          "w": 395,
+          "h": 105
+        },
+        {
+          "id": "engine",
+          "x": 65,
+          "y": 290,
+          "title": "本地 Engine 进程组",
+          "lines": [
+            "API + 转换/同步接收线程",
+            "启用后启动语义 Worker / Codex 子进程"
+          ],
+          "kind": "engine",
+          "detail": "只绑定 loopback。Runtime State 是 Vault 外本机目录；token 不经 LiveSync。计划任务可在 Obsidian 未启动时调用 CLI。",
+          "source": "engine/src/okf_workspace/server.py",
+          "w": 395,
+          "h": 105
+        },
+        {
+          "id": "schedule",
+          "x": 65,
+          "y": 525,
+          "title": "Windows 计划任务",
+          "lines": [
+            "每日维护：02:30",
+            "Feed Sync：06:50"
+          ],
+          "kind": "engine",
+          "detail": "安装器注册独立任务，支持错过时间补跑、有限重试和禁止重叠。维护索引及显式启用的备份/恢复检查，不建立登录常驻 API 任务。",
+          "source": "docs/DEPLOYMENT.md",
+          "w": 395,
+          "h": 105
+        },
+        {
+          "id": "mobile",
+          "x": 595,
+          "y": 85,
+          "title": "手机 / 平板 / 其他设备",
+          "lines": [
+            "Obsidian / Dashboard / LiveSync",
+            "本地完整 Vault + 原件"
+          ],
+          "kind": "ui",
+          "detail": "读写笔记、原生附件、保存文件和申请；移动端不启动本地 Engine 和 Claudian bridge。转换需指定桌面接收器上线。",
+          "source": "dashboard/src/plugin/main.ts",
+          "w": 390,
+          "h": 105
+        },
+        {
+          "id": "server",
+          "x": 595,
+          "y": 355,
+          "title": "同步服务器",
+          "lines": [
+            "Caddy HTTPS → CouchDB",
+            "独立备份逻辑快照"
+          ],
+          "kind": "external",
+          "detail": "deploy/server/compose.yml 的当前服务只有 CouchDB 与 Caddy。它们负责同步字节，没有 Workspace 业务状态机。",
+          "source": "deploy/server/compose.yml",
+          "w": 390,
+          "h": 125
+        },
+        {
+          "id": "state",
+          "x": 595,
+          "y": 590,
+          "title": "本机 State 与 Provider 会话",
+          "lines": [
+            "不进入 LiveSync 语义同步",
+            "各设备配置、索引、token 与会话"
+          ],
+          "kind": "state",
+          "detail": "运行状态、credentials 和 sessions 属于本机 operational data；独立于生产 Vault 的长期语义内容。Apex JSON 仍按自身既有 export/sync 行为管理。",
+          "source": "docs/architecture/README.md#system-overview",
+          "w": 390,
+          "h": 105
+        },
+        {
+          "id": "external",
+          "x": 1110,
+          "y": 85,
+          "title": "外部输入与 AI",
+          "lines": [
+            "AI Daily / 树洞生产者",
+            "MinerU Cloud / Codex"
+          ],
+          "kind": "external",
+          "detail": "远端 feed producers 是外部系统；Engine 提供 clients/adapters 与可配置运行时，不接管远端内容权威。",
+          "source": "docs/INTERFACES.md#feeds",
+          "w": 400,
+          "h": 105
+        },
+        {
+          "id": "optional",
+          "x": 1110,
+          "y": 320,
+          "title": "可选独立转换服务",
+          "lines": [
+            "MarkItDown：API + 隔离 Worker",
+            "自建 MinerU：显式启用 / 可管 SSH"
+          ],
+          "kind": "external",
+          "detail": "services/markitdown 是真正独立进程；integrations/mineru 主要保存部署与运维资源。默认云转换无需这两个自建服务。",
+          "source": "deploy/markitdown/compose.yaml",
+          "w": 400,
+          "h": 125
+        },
+        {
+          "id": "backup",
+          "x": 1110,
+          "y": 555,
+          "title": "恢复与历史兼容",
+          "lines": [
+            "可选 Restic / Vault Git checkpoint",
+            "旧 Originals service：仅恢复/回退"
+          ],
+          "kind": "legacy",
+          "detail": "Git checkpoint 需用户显式启用。LiveSync 不是备份。services/originals 和旧 compose 资产仍保留，不是当前原件读取或同步主路径。",
+          "source": "services/originals/README.md",
+          "w": 400,
+          "h": 125
+        },
+        {
+          "id": "repo",
+          "x": 70,
+          "y": 865,
+          "title": "三个独立应用",
+          "lines": [
+            "engine/：Python · uv / pyproject",
+            "dashboard/、claudian/：独立 Node lockfiles"
+          ],
+          "kind": "engine",
+          "detail": "统一 Git 仓库和根级开发脚本，三个核心应用独立构建。Apex 嵌入 Dashboard 构建，不是额外必需部署进程。",
+          "source": "README.md",
+          "w": 465,
+          "h": 120
+        },
+        {
+          "id": "release",
+          "x": 585,
+          "y": 865,
+          "title": "部署资源与外部适配",
+          "lines": [
+            "engine/workspace/ · services/ · integrations/",
+            "deploy/ · scripts/"
+          ],
+          "kind": "engine",
+          "detail": "Workspace Kit 随 Engine 打包；scripts 部署插件与规则，配置/报告写入外部 State。安装不覆盖用户/第三方未受管 Skills。",
+          "source": "engine/pyproject.toml",
+          "w": 430,
+          "h": 120
+        },
+        {
+          "id": "checks",
+          "x": 1070,
+          "y": 865,
+          "title": "验证与发布证据",
+          "lines": [
+            "Python pytest / Ruff / Pyright",
+            "Dashboard Vitest / tsc / build",
+            "Claudian tests / lint / typecheck / build",
+            "fixture Vault E2E / root check"
+          ],
+          "kind": "engine",
+          "detail": "根检查包含 Engine、Dashboard、Claudian 和 fixture-Vault。历史 Originals 服务使用独立脚本与 CI；活动迁移/设备恢复仍进入默认检查。图中不宣称这些检查在当前生产环境已通过。",
+          "source": "docs/DEVELOPMENT.md",
+          "w": 435,
+          "h": 150
+        }
+      ],
+      "edges": [
+        {
+          "a": "desktop",
+          "b": "engine",
+          "label": "宿主持有",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "schedule",
+          "b": "engine",
+          "label": "CLI 批处理",
+          "dashed": false,
+          "side": "left"
+        },
+        {
+          "a": "desktop",
+          "b": "server",
+          "label": "LiveSync / HTTPS",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "mobile",
+          "b": "server",
+          "label": "LiveSync / HTTPS",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "engine",
+          "b": "state",
+          "label": "本机读写",
+          "dashed": false,
+          "side": null
+        },
+        {
+          "a": "engine",
+          "b": "external",
+          "label": "执行时调用",
+          "dashed": false,
+          "side": "top"
+        },
+        {
+          "a": "engine",
+          "b": "optional",
+          "label": "显式选择",
+          "dashed": true,
+          "side": null
+        },
+        {
+          "a": "server",
+          "b": "backup",
+          "label": "独立备份",
+          "dashed": true,
+          "side": null
+        },
+        {
+          "a": "repo",
+          "b": "desktop",
+          "label": "构建 / 安装",
+          "dashed": true,
+          "side": "left"
+        },
+        {
+          "a": "release",
+          "b": "repo",
+          "label": "统一调度",
+          "dashed": true,
+          "side": null
+        },
+        {
+          "a": "checks",
+          "b": "release",
+          "label": "检查",
+          "dashed": true,
+          "side": null
+        }
+      ]
+    }
+  ]
+}

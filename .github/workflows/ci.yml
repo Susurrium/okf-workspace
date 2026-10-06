@@ -42,18 +42,6 @@ jobs:
       - run: uv run --project services/markitdown ruff check services/markitdown/src services/markitdown/tests
       - run: uv build --project services/markitdown
 
-  legacy-originals:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          python-version: "3.12"
-      - run: uv sync --project services/originals --locked --extra dev
-      - run: uv run --project services/originals pytest services/originals/tests
-      - run: uv run --project services/originals ruff check services/originals/src services/originals/tests
-      - run: uv run --project services/originals pyright --project services/originals/pyproject.toml
-
   windows-release-assets:
     runs-on: windows-latest
     steps:

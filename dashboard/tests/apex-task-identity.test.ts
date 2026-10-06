@@ -10,7 +10,6 @@ import {
   updateTaskDateFields,
   updateTaskDatesInFile,
 } from "../apex/src/alltasks-scan.js";
-import { todayFormalTasks } from "../src/features/today/today-section.js";
 
 function file(path: string): TFile {
   return Object.assign(new (TFile as unknown as new (path: string) => TFile)(path), {
@@ -128,16 +127,6 @@ type: Source
       scheduled: "2026-09-29",
     })).resolves.toBe(true);
     expect(markdown).toContain("#task Edited elsewhere ⏰ 2026-09-28 08:00 [due:: 2026-10-01] [scheduled:: 2026-09-29] ^task-dates");
-  });
-
-  it("projects the same formal source task into Today by its calendar date", () => {
-    const tasks = scanFileTasks(file("projects/demo/project.md"), [
-      "- [ ] #task Today [scheduled:: 2026-09-29] ^task-today",
-      "- [ ] #task Later [scheduled:: 2026-09-30] ^task-later",
-      "- [ ] ordinary [scheduled:: 2026-09-29]",
-    ].join("\n"));
-
-    expect(todayFormalTasks(tasks, "2026-09-29").map((task) => task.text)).toEqual(["Today"]);
   });
 
   it("invalidates task scans when external writes change size before the cached read catches up", async () => {

@@ -7,6 +7,8 @@ the monorepo; it is not the Obsidian Community plugin `realclaudian`.
 
 Upstream provenance and the deliberate upgrade procedure are recorded in [UPSTREAM.md](UPSTREAM.md).
 OKF-specific changes are recorded in [OKF-PATCHES.md](OKF-PATCHES.md).
+Workspace workflows are documented in the [user guide](../docs/USER-GUIDE.md),
+and the public Dashboard handoff in [interfaces](../docs/INTERFACES.md#bridge).
 
 ![Preview](assets/Preview.png)
 

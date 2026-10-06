@@ -4,10 +4,7 @@ The Engine owns the Vault artifact model, deterministic workflows, Intake, Feeds
 
 Production Vault content and runtime state live outside this package.
 
-CLI commands that return JSON use an ASCII-safe JSON transport so the same output can be parsed by PowerShell 7 and Windows PowerShell 5.1 regardless of the active console code page. For example:
-
-```powershell
-$report = okf doctor --verbose | Out-String | ConvertFrom-Json
-```
-
-Unicode values are restored by the JSON parser; `\uXXXX` sequences in unparsed output are intentional.
+Use the root scripts for dependency setup and checks; see [development and verification](../docs/DEVELOPMENT.md).
+Public API and CLI behavior, including PowerShell JSON transport, live in [interfaces](../docs/INTERFACES.md#cli).
+Installation and converter credentials live in [deployment](../docs/DEPLOYMENT.md).
+Artifact formats are defined by the [Vault Contracts](workspace/vault/system/contracts/), with module ownership in [architecture](../docs/architecture/README.md).

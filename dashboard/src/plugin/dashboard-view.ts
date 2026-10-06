@@ -1,3 +1,34 @@
+import {
+  projectLifecycleStatus,
+  projectStatusLabel,
+  projectStatusActions,
+  learningWorkItemStatus,
+  learningWorkItemStatusLabel,
+  courseStatusLabel,
+  systemStatusLabel,
+  systemStatusClass,
+  semanticStageLabel,
+  conversionMethodLabel,
+  conversionStatusLabel,
+  type ProjectLifecycleStatus,
+} from "../domain/workspace-status.js";
+import {
+  resourceHost,
+  relativeMoment,
+  formatLocalTimestamp,
+} from "../ui/display-format.js";
+import {
+  aiDailyMetadata,
+  latestAiDailyEdition,
+  mergeSubscriptionEditions,
+  mergeSubscriptionSources,
+  feedDecisionLabel,
+  feedSyncFailureMessage,
+  formatFeedDate,
+  treeholeMetadata,
+  humanizeFeedQuality,
+} from "../domain/feed-presentation.js";
+
 import { noteTypeLabel, captureDestinationLabel } from "../ui/display-labels.js";
 import { ItemView, Notice, TFile, WorkspaceLeaf, type App, type ViewStateResult } from "obsidian";
 import { parse as parseYaml } from "yaml";
@@ -5106,266 +5137,4 @@ function learningContextLabel(
     }
     return "独立学习";
   }).join(" · ");
-}
-
-export type ProjectLifecycleStatus = "active" | "paused" | "completed";
-export interface ProjectStatusAction {
-  status: ProjectLifecycleStatus;
-  label: string;
-}
-type LearningWorkItemStatus = "pending" | "generating" | "failed" | "refreshing" | "ready" | "completed";
-
-function projectLifecycleStatus(project: Pick<NoteSummary, "project_status">): ProjectLifecycleStatus {
-  if (project.project_status === "paused" || project.project_status === "completed") {
-    return project.project_status;
-  }
-  return "active";
-}
-
-function projectStatusLabel(status: ProjectLifecycleStatus): string {
-  if (status === "paused") return "已暂停";
-  if (status === "completed") return "已完成";
-  return "进行中";
-}
-
-function projectStatusActionLabel(
-  current: ProjectLifecycleStatus,
-  target: ProjectLifecycleStatus,
-): string {
-  if (target === "active") return current === "completed" ? "重新开启" : "恢复推进";
-  if (target === "paused") return "暂停项目";
-  return "标记完成";
-}
-
-export function projectStatusActions(status: ProjectLifecycleStatus): ProjectStatusAction[] {
-  return (["active", "paused", "completed"] as const)
-    .filter((target) => target !== status)
-    .map((target) => ({ status: target, label: projectStatusActionLabel(status, target) }));
-}
-
-function learningWorkItemStatus(
-  note: NoteSummary,
-  operation?: SemanticOperationRecord,
-): LearningWorkItemStatus {
-  if (operation && isSemanticOperationActive(operation.status)) return "generating";
-  if (operation && isSemanticOperationRetryable(operation.status)) return "failed";
-  if (operation?.status === "completed" && !note.material_ready) return "refreshing";
-  if (note.studied_at) return "completed";
-  if (note.material_ready) return "ready";
-  return "pending";
-}
-
-function learningWorkItemStatusLabel(
-  note: NoteSummary,
-  operation?: SemanticOperationRecord,
-): string {
-  const status = learningWorkItemStatus(note, operation);
-  if (status === "generating") return "生成中";
-  if (status === "failed") return "生成失败";
-  if (status === "refreshing") return "正在刷新";
-  if (status === "ready") return "可学习";
-  if (status === "completed") return "已完成";
-  return "待生成";
-}
-
-function courseStatusLabel(status: string | null | undefined): string {
-  if (status === "paused") return "已暂停";
-  if (status === "completed") return "已完成";
-  return "进行中";
-}
-
-export function systemStatusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    configured: "已配置",
-    available: "可用",
-    current: "最新",
-    ok: "正常",
-    healthy: "正常",
-    deferred: "稍后配置",
-    warning: "需要注意",
-    failed: "失败",
-    unavailable: "不可用",
-  };
-  return labels[status.toLocaleLowerCase()] ?? status;
-}
-
-function systemStatusClass(status: string): string {
-  const normalized = status.toLocaleLowerCase();
-  if (["configured", "available", "current", "ok", "healthy"].includes(normalized)) {
-    return "is-ok";
-  }
-  if (["failed", "unavailable"].includes(normalized)) return "is-error";
-  return "is-warning";
-}
-
-function semanticStageLabel(operation: SemanticOperationRecord): string {
-  if (operation.status === "queued") return "已排队，等待生成";
-  if (operation.status === "orphaned") return "后台生成中断，等待恢复";
-  const labels: Record<string, string> = {
-    retrieving: "正在检索相关笔记",
-    generating: "正在生成内容",
-    publishing: "正在写入目标笔记",
-    indexing: "正在刷新检索索引",
-  };
-  return labels[operation.stage ?? ""] ?? "后台任务正在处理";
-}
-
-function conversionMethodLabel(conversion: ConversionRecord): string {
-  return conversion.method ? methodLabels[conversion.method] : conversion.parser;
-}
-
-function conversionStatusLabel(conversion: ConversionRecord): string {
-  if (hasPendingGeneration(conversion)) return conversion.error
-    ? "转换已完成，生成入队失败；后台会重试，也可手动重试"
-    : "转换已完成，等待生成入队";
-  if (conversion.status === "queued") return "已排队";
-  if (conversion.status === "converting") return `正在使用 ${conversionMethodLabel(conversion)} 转换`;
-  if (conversion.status === "waiting-for-mineru") return "等待 MinerU；后台会自动重试";
-  if (conversion.status === "waiting-for-parser") return "等待转换服务；后台会自动重试，也可更换方式";
-  if (conversion.status === "ready") return "转换已完成，等待保存";
-  if (conversion.stages?.quality === "failed") return "质量检查未通过，可更换方式重新转换";
-  if (conversion.stages?.conversion === "completed" && conversion.stages.quality === "passed") return "转换已完成，保存需要处理";
-  return "转换失败，需要处理";
-}
-
-function resourceHost(resource: string | null | undefined): string {
-  if (!resource) return "";
-  try {
-    const url = new URL(resource);
-    return ["http:", "https:"].includes(url.protocol) ? url.hostname : "";
-  } catch {
-    return "";
-  }
-}
-
-function relativeMoment(value: string | null | undefined, now = Date.now()): string {
-  if (!value) return "";
-  const moment = Date.parse(value);
-  if (!Number.isFinite(moment)) return "";
-  const elapsed = Math.max(0, now - moment);
-  if (elapsed < 60_000) return "刚刚";
-  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)} 分钟前`;
-  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)} 小时前`;
-  if (elapsed < 7 * 86_400_000) return `${Math.floor(elapsed / 86_400_000)} 天前`;
-  return new Date(moment).toLocaleDateString();
-}
-
-function formatLocalTimestamp(value: string): string {
-  const time = Date.parse(value);
-  if (!Number.isFinite(time)) return value;
-  return new Date(time).toLocaleString("zh-CN", { hour12: false });
-}
-
-function aiDailyMetadata(item: FeedDigestItem, suppressSource = false): string {
-  const parts = [
-    suppressSource ? "" : item.source_name || item.source,
-    item.native_section,
-    item.published_at,
-    item.media_count ? `${item.media_count} 个媒体` : "",
-  ].filter((value): value is string => Boolean(value));
-  return [...new Set(parts)].join(" · ");
-}
-
-export function latestAiDailyEdition(
-  digest: FeedDashboardDigest,
-  section: AiDailyStream,
-): FeedDigestEdition | undefined {
-  return digest.ai_daily
-    .filter((edition) => edition.section === section)
-    .reduce<FeedDigestEdition | undefined>((latest, edition) =>
-      !latest || edition.issued_at.localeCompare(latest.issued_at) > 0 ? edition : latest,
-    undefined);
-}
-
-export function mergeSubscriptionEditions(
-  current: readonly FeedDigestEdition[],
-  incoming: readonly FeedDigestEdition[],
-): FeedDigestEdition[] {
-  const merged = [...current];
-  const seen = new Set(current.map((edition) => edition.digest_id));
-  for (const edition of incoming) {
-    if (edition.section !== "learning" || seen.has(edition.digest_id)) continue;
-    seen.add(edition.digest_id);
-    merged.push(edition);
-  }
-  return merged;
-}
-
-export function mergeSubscriptionSources(
-  current: readonly FeedSubscriptionSource[],
-  incoming: readonly FeedSubscriptionSource[],
-): FeedSubscriptionSource[] {
-  const merged = [...current];
-  const seen = new Set(current.map((source) => source.source_id));
-  for (const source of incoming) {
-    if (!source.source_id || seen.has(source.source_id)) continue;
-    seen.add(source.source_id);
-    merged.push(source);
-  }
-  return merged;
-}
-
-export function feedDecisionLabel(
-  decision: FeedDigestItem["decision"],
-): string {
-  if (!decision) return "";
-  return {
-    "learn-now": "已选择学习",
-    "learn-later": "待生成学习材料",
-    "wiki-now": "已选择整理为知识笔记",
-    "source-only": "已保存来源",
-    ignore: "已忽略",
-    later: "旧版稍后处理",
-  }[decision];
-}
-
-export function feedSyncFailureMessage(results: readonly FeedSyncResult[]): string {
-  const failures = results.filter((result) => result.status === "error");
-  if (!failures.length) return "";
-  const details = failures.map((failure) => {
-    const label = failure.feed === "treehole"
-      ? "树洞热榜"
-      : failure.section === "hotspot" || failure.section === "news" || failure.section === "learning"
-        ? aiDailyPreviewStreamTitle(failure.section)
-        : failure.section || "每日资讯";
-    return `${label}：${failure.detail}`;
-  });
-  return `部分内容同步失败（其他内容已更新）：${details.join("；")}`;
-}
-
-function formatFeedDate(value: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/u.exec(value);
-  if (!match) return value;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const prefix = year === new Date().getFullYear() ? "" : `${year}年`;
-  return `${prefix}${month}月${day}日`;
-}
-
-export function treeholeMetadata(item: FeedDigestItem): string {
-  const labels: Record<string, string> = {
-    best_rank: "最高排名",
-    peak_score: "热度",
-    reply_count: "回复",
-    favorite_count: "收藏",
-    like_count: "点赞",
-  };
-  const order = ["best_rank", "peak_score", "reply_count", "favorite_count", "like_count"];
-  const metrics = order
-    .filter((key) => Object.prototype.hasOwnProperty.call(item.metrics, key))
-    .map((key) => `${labels[key]} ${item.metrics[key]}`);
-  if (item.comment_count) metrics.push(`评论 ${item.comment_count}`);
-  if (item.media_count) metrics.push(`媒体 ${item.media_count}`);
-  if (item.published_at) metrics.push(item.published_at);
-  return metrics.join(" · ");
-}
-
-function humanizeFeedQuality(value: string): string {
-  return value
-    .replace(/observation[_-]gap/giu, "本期存在观测缺口")
-    .replace(/partial/giu, "部分内容缺失")
-    .replace(/degraded/giu, "采集质量下降")
-    .replace(/[_-]+/gu, " ")
-    .trim();
 }

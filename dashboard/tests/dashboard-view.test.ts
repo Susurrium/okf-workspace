@@ -1,3 +1,16 @@
+import {
+  projectStatusActions,
+  systemStatusLabel,
+} from "../src/domain/workspace-status.js";
+import {
+  latestAiDailyEdition,
+  mergeSubscriptionEditions,
+  mergeSubscriptionSources,
+  feedDecisionLabel,
+  feedSyncFailureMessage,
+  treeholeMetadata,
+} from "../src/domain/feed-presentation.js";
+
 import { ItemView, TFile, WorkspaceLeaf, type App } from "obsidian";
 import { describe, expect, it, vi } from "vitest";
 
@@ -6,15 +19,7 @@ import {
   OkfDashboardView,
   OKF_DASHBOARD_VIEW,
   PROJECT_ACTION_PANEL_LABELS,
-  feedDecisionLabel,
-  feedSyncFailureMessage,
-  latestAiDailyEdition,
-  mergeSubscriptionEditions,
-  mergeSubscriptionSources,
-  projectStatusActions,
   resolveDashboardLearningSources,
-  systemStatusLabel,
-  treeholeMetadata,
 } from "../src/plugin/dashboard-view.js";
 import type { ConversionRecord, NoteSummary, ProjectSummary, SemanticOperationRecord } from "../src/api/types.js";
 import type {

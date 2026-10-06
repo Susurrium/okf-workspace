@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1580 1100" role="img" aria-label="系统总览">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#68788d"/></marker></defs>
+<style>text{font-family:"Microsoft YaHei","Segoe UI",sans-serif}.node{cursor:pointer}.node:hover rect{stroke-width:3}.node-title{font-size:19px;font-weight:650}.node-line{font-size:14px;fill:#46566b}.edge-label{font-size:13px;fill:#4c5f76;paint-order:stroke;stroke:#fff;stroke-width:5px;stroke-linejoin:round}.edge{fill:none;stroke:#68788d;stroke-width:1.8}.dim{opacity:.13}.selected rect{stroke-width:4}</style>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<rect x="20" y="25" width="340" height="990" rx="18" fill="#e8f0ff" fill-opacity=".3" stroke="#4569bd" stroke-opacity=".24"/>
+<text x="40" y="54" fill="#4569bd" font-size="16" font-weight="650">人工工作环境 · Obsidian</text>
+<rect x="385" y="25" width="340" height="990" rx="18" fill="#e6f6f1" fill-opacity=".3" stroke="#258675" stroke-opacity=".24"/>
+<text x="405" y="54" fill="#258675" font-size="16" font-weight="650">桌面执行 · Engine</text>
+<rect x="750" y="25" width="390" height="990" rx="18" fill="#fff3d9" fill-opacity=".3" stroke="#ac7a20" stroke-opacity=".24"/>
+<text x="770" y="54" fill="#ac7a20" font-size="16" font-weight="650">数据与规则 · 仓库外</text>
+<rect x="1165" y="25" width="390" height="990" rx="18" fill="#f0eaff" fill-opacity=".3" stroke="#825abb" stroke-opacity=".24"/>
+<text x="1185" y="54" fill="#825abb" font-size="16" font-weight="650">外部系统与可选能力</text>
+<g class="edge-group" data-a="human" data-b="dash"><path class="edge" d="M185.0,180 C185.0,227.5 185.0,227.5 185.0,275" marker-end="url(#arrow)"/><text class="edge-label" x="193.0" y="227.5" text-anchor="middle"></text></g>
+<g class="edge-group" data-a="dash" data-b="api"><path class="edge" d="M320,327.5 C367.5,327.5 367.5,327.5 415,327.5" marker-end="url(#arrow)"/><text class="edge-label" x="367.5" y="320.5" text-anchor="middle">HTTP 命令</text></g>
+<g class="edge-group" data-a="dash" data-b="vault"><path class="edge" d="M185.0,275 C185.0,243 945.0,243 945.0,295" marker-end="url(#arrow)"/><text class="edge-label" x="565.0" y="253" text-anchor="middle">直接读取 / 简单编辑</text></g>
+<g class="edge-group" data-a="dash" data-b="claudian"><path class="edge" d="M50,327.5 C22,327.5 22,832.5 50,832.5" marker-end="url(#arrow)"/><text class="edge-label" x="22" y="580.0" text-anchor="middle">okfBridge v1</text></g>
+<g class="edge-group" data-a="dash" data-b="widgets"><path class="edge" d="M185.0,380 C185.0,452.5 185.0,452.5 185.0,525" marker-end="url(#arrow)"/><text class="edge-label" x="193.0" y="452.5" text-anchor="middle"></text></g>
+<g class="edge-group" data-a="api" data-b="domain"><path class="edge" d="M550.0,380 C550.0,422.5 550.0,422.5 550.0,465" marker-end="url(#arrow)"/><text class="edge-label" x="558.0" y="422.5" text-anchor="middle"></text></g>
+<g class="edge-group" data-a="domain" data-b="workers"><path class="edge" d="M550.0,570 C550.0,617.5 550.0,617.5 550.0,665" marker-end="url(#arrow)"/><text class="edge-label" x="558.0" y="617.5" text-anchor="middle"></text></g>
+<g class="edge-group" data-a="domain" data-b="vault"><path class="edge" d="M685,517.5 C740.0,517.5 740.0,360.0 795,360.0" marker-end="url(#arrow)"/><text class="edge-label" x="740.0" y="431.75" text-anchor="middle">统一发布 / 读取</text></g>
+<g class="edge-group" data-a="workers" data-b="state"><path class="edge" d="M685,717.5 C740.0,717.5 740.0,650.0 795,650.0" marker-end="url(#arrow)"/><text class="edge-label" x="740.0" y="676.75" text-anchor="middle">持久运行状态</text></g>
+<g class="edge-group" data-a="kit" data-b="vault"><path class="edge" d="M685,917.5 C740.0,917.5 740.0,360.0 795,360.0" marker-end="url(#arrow)" stroke-dasharray="7 5"/><text class="edge-label" x="740.0" y="631.75" text-anchor="middle">安装部署</text></g>
+<g class="edge-group" data-a="widgets" data-b="apexdata"><path class="edge" d="M185.0,630 C185.0,987 945.0,987 945.0,955" marker-end="url(#arrow)"/><text class="edge-label" x="565.0" y="980" text-anchor="middle">原生存储</text></g>
+<g class="edge-group" data-a="feeds" data-b="domain"><path class="edge" d="M1365.0,105 C1365.0,73 550.0,73 550.0,465" marker-end="url(#arrow)"/><text class="edge-label" x="957.5" y="83" text-anchor="middle">拉取</text></g>
+<g class="edge-group" data-a="workers" data-b="parser"><path class="edge" d="M685,717.5 C955.0,717.5 955.0,392.5 1225,392.5" marker-end="url(#arrow)"/><text class="edge-label" x="955.0" y="548.0" text-anchor="middle">显式方式</text></g>
+<g class="edge-group" data-a="workers" data-b="codex"><path class="edge" d="M550.0,770 C550.0,802 1365.0,802 1365.0,685" marker-end="url(#arrow)"/><text class="edge-label" x="957.5" y="795" text-anchor="middle">后台生成</text></g>
+<g class="edge-group" data-a="claudian" data-b="codex"><path class="edge" d="M185.0,885 C185.0,917 1365.0,917 1365.0,685" marker-end="url(#arrow)"/><text class="edge-label" x="775.0" y="910" text-anchor="middle">交互运行时</text></g>
+<g class="edge-group" data-a="vault" data-b="sync"><path class="edge" d="M1095,360.0 C1160.0,360.0 1160.0,877.5 1225,877.5" marker-end="url(#arrow)"/><text class="edge-label" x="1160.0" y="611.75" text-anchor="middle">全量同步</text></g>
+<g class="node" data-node="human" tabindex="0" role="button" aria-label="用户 / 原生笔记"><title>Obsidian 是人类读写环境。受管 Artifact 遵循 Vault Contracts；工作台 Markdown 与 Apex 原生 JSON 各有格式和职责。兴趣、长期价值与学习完成由用户明确判断。</title><rect x="50" y="75" width="270" height="105" rx="12" fill="#e8f0ff" stroke="#4569bd" stroke-width="1.6"/><text class="node-title" style="font-size:19.0px" x="67" y="106" fill="#4569bd">用户 / 原生笔记</text>
+<text class="node-line" style="font-size:14.0px" x="67" y="132">阅读、编辑、明确选择用途</text>
+<text class="node-line" style="font-size:14.0px" x="67" y="153">Tasks / Dataview / 模板 / 日历</text>
+</g>
+<g class="node" data-node="dash" tabindex="0" role="button" aria-label="Dashboard · 统一 Apex 工作台"><title>一个工作台插件通过 okf-surface-sections 挂载共享 OkfDashboardView。直接读取 Vault；简单人类等价编辑使用 Vault API，转换、发布和语义状态机由 Engine 管理。</title><rect x="50" y="275" width="270" height="105" rx="12" fill="#e8f0ff" stroke="#4569bd" stroke-width="1.6"/><text class="node-title" style="font-size:15.6px" x="67" y="306" fill="#4569bd">Dashboard · 统一 Apex 工作台</text>
+<text class="node-line" style="font-size:14.0px" x="67" y="332">Apex 挂载八个共享业务视图</text>
+<text class="node-line" style="font-size:12.6px" x="67" y="353">简单编辑 / Engine 命令 / Codex 交接</text>
+</g>
+<g class="node" data-node="widgets" tabindex="0" role="button" aria-label="Apex 原生生活工具"><title>由 ApexHostAdapter 托管原生服务，维持各自 JSON/plugin 数据模型。工作台便签和布局保存在 dashboard: true 的 Markdown，属于用户数据。</title><rect x="50" y="525" width="270" height="105" rx="12" fill="#e8f0ff" stroke="#4569bd" stroke-width="1.6"/><text class="node-title" style="font-size:19.0px" x="67" y="556" fill="#4569bd">Apex 原生生活工具</text>
+<text class="node-line" style="font-size:14.0px" x="67" y="582">习惯 / 记账 / 阅读 / 专注</text>
+<text class="node-line" style="font-size:14.0px" x="67" y="603">音乐、媒体与 widget state</text>
+</g>
+<g class="node" data-node="claudian" tabindex="0" role="button" aria-label="Claudian · 交互式 Agent UI"><title>src/main.ts 是唯一 composition root；core 提供执行契约，features 通过 host/registries 使用能力，providers 保有各自运行时。OKF bridge v1 固定交给 Codex。</title><rect x="50" y="780" width="270" height="105" rx="12" fill="#e8f0ff" stroke="#4569bd" stroke-width="1.6"/><text class="node-title" style="font-size:16.6px" x="67" y="811" fill="#4569bd">Claudian · 交互式 Agent UI</text>
+<text class="node-line" style="font-size:14.0px" x="67" y="837">会话 / 流式输出 / 工具 / 审批</text>
+<text class="node-line" style="font-size:14.0px" x="67" y="858">恢复 / 附件 / 多 Provider</text>
+</g>
+<g class="node" data-node="api" tabindex="0" role="button" aria-label="Engine 本地 API / CLI"><title>Dashboard 桌面加载时持有本地 Engine 进程，退出关闭 stdin 后停止。CLI 与 API 复用领域工作流；移动端不启动这些本机执行能力。</title><rect x="415" y="275" width="270" height="105" rx="12" fill="#e6f6f1" stroke="#258675" stroke-width="1.6"/><text class="node-title" style="font-size:19.0px" x="432" y="306" fill="#258675">Engine 本地 API / CLI</text>
+<text class="node-line" style="font-size:14.0px" x="432" y="332">FastAPI · 127.0.0.1:8765</text>
+<text class="node-line" style="font-size:13.1px" x="432" y="353">Bearer token + Vault fingerprint</text>
+</g>
+<g class="node" data-node="domain" tabindex="0" role="button" aria-label="领域与工作流编排"><title>Sources 是 Source/Source Text 身份、查找与统一发布的唯一所有者；Intake 和 Feeds 不相互调用实现。应用工作流协调领域模块。</title><rect x="415" y="465" width="270" height="105" rx="12" fill="#e6f6f1" stroke="#258675" stroke-width="1.6"/><text class="node-title" style="font-size:19.0px" x="432" y="496" fill="#258675">领域与工作流编排</text>
+<text class="node-line" style="font-size:14.0px" x="432" y="522">Intake / Feeds / Sources</text>
+<text class="node-line" style="font-size:11.0px" x="432" y="543">Learning / Knowledge / Projects / Life</text>
+</g>
+<g class="node" data-node="workers" tabindex="0" role="button" aria-label="后台执行与检索"><title>同步导入接收与转换是 API 生命周期管理的线程；生产语义 Worker 是独立子进程。检索有 FTS5 与可选向量，候选命中后读取真实 Markdown。</title><rect x="415" y="665" width="270" height="105" rx="12" fill="#e6f6f1" stroke="#258675" stroke-width="1.6"/><text class="node-title" style="font-size:19.0px" x="432" y="696" fill="#258675">后台执行与检索</text>
+<text class="node-line" style="font-size:14.0px" x="432" y="722">同步导入接收 / 转换 Worker</text>
+<text class="node-line" style="font-size:14.0px" x="432" y="743">语义 Worker / Hybrid Retrieval</text>
+</g>
+<g class="node" data-node="kit" tabindex="0" role="button" aria-label="Workspace Kit · 源码资源"><title>engine/workspace 是规则与模板源，打包/安装部署到生产 Vault 的 system/、AGENTS.md 和 .agents/skills/。Claudian 不复制业务提示。</title><rect x="415" y="865" width="270" height="105" rx="12" fill="#e6f6f1" stroke="#258675" stroke-width="1.6"/><text class="node-title" style="font-size:18.2px" x="432" y="896" fill="#258675">Workspace Kit · 源码资源</text>
+<text class="node-line" style="font-size:14.0px" x="432" y="922">Contracts / Templates / Views</text>
+<text class="node-line" style="font-size:14.0px" x="432" y="943">Policies / AGENTS / Skills</text>
+</g>
+<g class="node" data-node="vault" tabindex="0" role="button" aria-label="生产 Vault · 语义权威"><title>Originals 活动位置是 sources/originals/&lt;sha256&gt;/&lt;filename&gt;。笔记及正文引用附件属于持久用户内容，LiveSync 复制完整字节。源仓库仅包含可部署资源。</title><rect x="795" y="295" width="300" height="130" rx="12" fill="#fff3d9" stroke="#ac7a20" stroke-width="1.6"/><text class="node-title" style="font-size:19.0px" x="812" y="326" fill="#ac7a20">生产 Vault · 语义权威</text>
+<text class="node-line" style="font-size:14.0px" x="812" y="352">Markdown / YAML / Source Text</text>
+<text class="node-line" style="font-size:14.0px" x="812" y="373">原件 / 正文附件 / 申请 / 回执</text>
+</g>
+<g class="node" data-node="state" tabindex="0" role="button" aria-label="Runtime State · Vault 外"><title>队列、进度、错误和重试在 State 中；索引可重建。Import Receipt 仅是 Vault 内显示投影。Secrets 和 provider 本地会话不进入 Vault 语义层或源码。</title><rect x="795" y="585" width="300" height="130" rx="12" fill="#eef1f5" stroke="#637184" stroke-width="1.6"/><text class="node-title" style="font-size:19.0px" x="812" y="616" fill="#637184">Runtime State · Vault 外</text>
+<text class="node-line" style="font-size:12.7px" x="812" y="642">operations / conversions / feed-cache</text>
+<text class="node-line" style="font-size:13.1px" x="812" y="663">brain.sqlite / vectors.sqlite / logs</text>
+<text class="node-line" style="font-size:14.0px" x="812" y="684">配置、凭据、诊断与运行缓存</text>
+</g>
+<g class="node" data-node="apexdata" tabindex="0" role="button" aria-label="Apex 用户数据与工作台"><title>Apex 生活工具的数据不自动成为 OKF Artifact；工作台是用户拥有的文档。默认语义检索排除工作台及安全副本，显式附件可读取当前正文。</title><rect x="795" y="825" width="300" height="130" rx="12" fill="#eef1f5" stroke="#637184" stroke-width="1.6"/><text class="node-title" style="font-size:19.0px" x="812" y="856" fill="#637184">Apex 用户数据与工作台</text>
+<text class="node-line" style="font-size:14.0px" x="812" y="882">原生 JSON / plugin data</text>
+<text class="node-line" style="font-size:14.0px" x="812" y="903">工作台 Markdown / 安全副本</text>
+</g>
+<g class="node" data-node="feeds" tabindex="0" role="button" aria-label="外部 Feed 生产者"><title>AI Daily 经 forced-command SSH feed-export.v1 增量拉取；source-admin.v1 管订阅；树洞使用快照。生产者属于外部系统，Engine 负责本机缓存、Digest 和用户决定。</title><rect x="1225" y="105" width="280" height="105" rx="12" fill="#f0eaff" stroke="#825abb" stroke-width="1.6"/><text class="node-title" style="font-size:19.0px" x="1242" y="136" fill="#825abb">外部 Feed 生产者</text>
+<text class="node-line" style="font-size:14.0px" x="1242" y="162">AI Daily / PkuHoleObserver</text>
+<text class="node-line" style="font-size:14.0px" x="1242" y="183">只读导出 + 独立订阅管理协议</text>
+</g>
+<g class="node" data-node="parser" tabindex="0" role="button" aria-label="文档转换器"><title>转换器返回 Markdown bundle；Engine 决定方式、校验格式、QC 与发布。质量档位不决定转换器，失败不静默切换。MarkItDown 是真正独立的 API/Worker 服务。</title><rect x="1225" y="340" width="280" height="105" rx="12" fill="#f0eaff" stroke="#825abb" stroke-width="1.6"/><text class="node-title" style="font-size:19.0px" x="1242" y="371" fill="#825abb">文档转换器</text>
+<text class="node-line" style="font-size:14.0px" x="1242" y="397">默认 MinerU 官方云 API</text>
+<text class="node-line" style="font-size:14.0px" x="1242" y="418">可选 MarkItDown / 自建 MinerU</text>
+</g>
+<g class="node" data-node="codex" tabindex="0" role="button" aria-label="Codex 与 AI 运行时"><title>OKF bridge 固定 Codex。Claudian 还包含 Claude、Grok、OpenCode、Pi providers。Engine 常规 AI provider 可配置 OpenAI-compatible API；后台语义流程当前使用 CodexSemanticRunner。</title><rect x="1225" y="580" width="280" height="105" rx="12" fill="#f0eaff" stroke="#825abb" stroke-width="1.6"/><text class="node-title" style="font-size:19.0px" x="1242" y="611" fill="#825abb">Codex 与 AI 运行时</text>
+<text class="node-line" style="font-size:14.0px" x="1242" y="637">交互：Codex App Server</text>
+<text class="node-line" style="font-size:14.0px" x="1242" y="658">后台：Codex exec / 只读生成</text>
+</g>
+<g class="node" data-node="sync" tabindex="0" role="button" aria-label="同步与恢复"><title>LiveSync 同步 Vault 中的笔记、原件、申请和回执；不复制 Engine 状态与 token。备份独立于同步；Git checkpoint 和 Restic 为显式启用的恢复能力。旧 Originals 服务只用于历史恢复。</title><rect x="1225" y="825" width="280" height="105" rx="12" fill="#f0eaff" stroke="#825abb" stroke-width="1.6"/><text class="node-title" style="font-size:19.0px" x="1242" y="856" fill="#825abb">同步与恢复</text>
+<text class="node-line" style="font-size:14.0px" x="1242" y="882">LiveSync ⇄ Caddy ⇄ CouchDB</text>
+<text class="node-line" style="font-size:14.0px" x="1242" y="903">可选 Restic / Git checkpoint</text>
+</g>
+</svg>

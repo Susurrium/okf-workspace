@@ -1,0 +1,162 @@
+root|OKF：信息入口 → 判断与处理 → 持久落点 → 展示、复用、同步
+  input|① 随手想法 / 一句话 / 临时记录
+    artifact|先保存 Capture，附带明确选择的课程或项目关系|inbox/captures/YYYY/MM/
+      choice|用户如何处理？
+        view|暂不处理 → 原 Capture 留在 Inbox
+        choice|明确归档 → 选择一个长期目标（确定性搬运原文，不要求 AI）
+          artifact|个人感受 → Reflection|life/reflections/
+          artifact|以后查用的知识 → Wiki|knowledge/wiki/
+          artifact|个人学习记录 → Study Guide 的人工内容|learning/guides/ 或课程 guides/
+          artifact|课堂记录 + 明确课程 → Lesson|learning/courses/<course>/lessons/
+          artifact|项目进展 + 明确项目 → 追加 log.md|projects/<project>/log.md
+          choice|选定目标后，归档是否成功？
+            step|成功 → 目标持久写入后移除 Capture，用户看到目标入口
+            exception|失败 → Capture 保留；必要时回滚目标，修复后重新处理
+        artifact|明确不保留 → 移入本地 .trash，退出 Inbox|.trash/
+  input|② 网页 / Web Clipper 剪藏
+    artifact|剪藏正文 + URL + 可选课程或项目 → Web Capture|inbox/captures/
+      choice|用户决定？
+        view|暂不处理 → Capture 留在 Inbox
+        artifact|明确不保留 → Capture 移入 .trash|.trash/
+        step|明确保留 → 走网页资料发布（不同于普通 Capture 归档）
+          step|规范 URL 去重，创建或复用 Source 与 Source Text
+            choice|发布成功？
+              step|成功 → 消费 Web Capture，按本次人工用途继续
+                choice|本次选择？
+                  generate|现在学习 → 记 uses: study → 生成 Study Guide
+                  artifact|稍后学习 → 保存 pair 与 study；Learning 待生成，不建空白 Guide|sources/records/web/ + sources/text/web/
+                  generate|直接形成 Wiki → 记 uses: wiki → 生成 Wiki
+                  artifact|仅作参考 → 保存 pair 与 reference；不生成 Guide / Wiki|sources/records/web/ + sources/text/web/
+              exception|失败 → 保留 Capture / 回滚成对写入，修复后重试
+  input|③ 文件 / PDF / Word / PowerPoint / 图片
+    artifact|桌面或移动端先存完整原件，再写 request v4；显式 action 和用途|sources/originals/<sha256>/<filename> + system/imports/<uuid>/request.md
+      choice|指定桌面是否已收到申请与完整原件？
+        exception|未到齐 / 桌面未运行 → 保留文件与申请，等待同步 / 接收器
+        step|到齐 → 幂等接收，验证私有 snapshot 的长度与 SHA-256
+          choice|原件校验通过？
+            exception|不通过 → 保留用户文件，记录异常，修复后重新接收
+            choice|通过 → 用户选择的 action？
+              step|store：仅保存原件，不创建转换或生成任务
+                artifact|按 hash 创建 / 复用 Source；新原件无正文时不创建 Source Text|sources/records/documents/
+                  choice|仅保存的用途？
+                    artifact|reference → 资料保存完成，可在关联课程/项目中查用
+                    view|undecided → Inbox 待判断
+                  view|以后需要正文学习 / 生成 → 用户再请求转换或提供可读材料
+              choice|convert：已有发布正文可以复用吗？
+                step|可以 → 复用已有 Source Text，不再调用转换器
+                  uses|更新本次明确用途，再流向学习 / 知识 / 参考 / 待判断
+                step|不能，或用户明确要求重新转换
+                  choice|选择转换方式与校验格式（质量档位不选供应商）
+                    step|MinerU Cloud（默认）→ 对应格式的解析 / OCR / 版面处理
+                    step|MarkItDown（明确选择）→ Office 文本/图片；PDF 为纯文本
+                    step|自建 MinerU（明确启用）→ PDF / PPT / PPTX 对应解析
+                    exception|格式不支持 / 未配置 → 提示修正，不静默切换方式
+                  state|验证选定方式后，持久转换队列 → 转换器 → export / assets / QC|Vault 外 State/conversions/
+                    choice|执行及 QC 结果？
+                      step|成功 → 仅发布最终正文实际引用的附件
+                        artifact|统一发布 Source + Source Text + 正文附件|sources/records/ + sources/text/ + sources/assets/
+                          uses|再按用户明确用途继续
+                          state|成功发布与回执持久后才清 working；原件继续保留
+                      exception|连接暂不可用 → waiting 状态；Worker 等待后续试
+                      exception|转换 / QC / 发布失败 → 保留原件、export、诊断，显示失败
+                        choice|用户如何恢复？
+                          step|同方式已有通过 QC 的 export → 恢复发布，无需重复解析
+                          step|明确重新转换 / 更换方式 → 重跑选定解析，不自动换供应商
+      parallel|执行结果另一路回传（不会触发原件删除）
+        artifact|Engine 写 receipt 显示投影；实际执行权威仍在 State|system/imports/<uuid>/receipt.md
+          step|LiveSync 同步回执与成果 → 各设备显示结果链接
+            choice|用户打开原件，本机完整副本是否到达？
+              view|已到达 → Obsidian 原生打开 PDF / 图片；Office 受原生支持范围限制
+              exception|尚未到达 → 提示等待同步
+  input|④ 订阅 / AI Daily / 树洞 / 论文周刊
+    state|外部生产者 → 增量拉取与验证 → 本机 Feed cache|Vault 外 State/feed-cache/ + feed-sync/ cursors
+      parallel|按 stream 展示，同一 Feed 模型的不同入口
+        view|hotspot：中国热点 → Today
+        view|news：AI 资讯 → Today
+        view|TreeHole：树洞热榜 → Today
+        view|learning：RSS / 周刊 / 教程 → Reading 来源卡与期次历史
+        view|papers：启用后 → Reading 固定论文卡，独立游标，不进入普通订阅管理
+      artifact|用户打开一期完整内容 → 原生 Digest|feeds/ai-daily/YYYY/ 或 feeds/treehole/YYYY/
+        choice|用户对条目的决定？
+          state|仅浏览 / 未决定 → 留在 cache / 已有 Digest；不创建 Source 或 undecided
+          state|不保留 ignore → 只在 State 记录界面决定；不创建 Source
+          step|现在学习 learn-now → URL 去重，发布/复用 pair，持久记 study
+            generate|生成 Study Guide
+          artifact|稍后学习 learn-later → pair + study；Learning 待生成，不建空白 Guide|sources/records/ + sources/text/
+          step|直接 Wiki wiki-now → URL 去重，发布/复用 pair，持久记 wiki
+            generate|生成 Wiki
+          artifact|仅作参考 source-only → pair + reference；不生成 Guide / Wiki|sources/records/ + sources/text/
+      exception|拉取失败 → 保留 last-good 与原游标；下次补拉，不抹去其他 stream
+    step|新增 / 启停 / 移除订阅 → 独立 source-admin.v1 管理协议
+      step|新增：预览来源 → 用户确认 → revision + 幂等键更新远端 registry
+      step|停用 / 移除：停止后续抓取；已经存在的历史继续保留
+      view|后续期次仍沿本分支的拉取 → cache → 阅读 → 人工决定流动
+  input|⑤ 已有笔记 / 用户直接写入明确领域
+    choice|记录的内容是什么？
+      artifact|日常原文 → Daily|life/daily/YYYY/MM/
+        view|直接阅读编辑 → Life / Today
+        step|用户要求整理 → organize-daily → 写整理区，保留原文
+      artifact|个人反思 / 周月年回顾 → Reflection / Review|life/reflections/ 或 life/reviews/
+        view|人工记录与明确总结 → Life
+      artifact|课程与课堂 → Course / Lesson|learning/courses/<course>/
+        view|课堂笔记与课程资料 → Learning
+        step|用户要求整理 → organized-lesson 区域，保留原始课堂记录
+        generate|用户明确要求从课程资料生成 Study Guide
+      artifact|项目计划 / 进展 / 决定 → Project / log / Decision|projects/<project>/
+        view|项目状态与下一步 → Projects
+        step|临时项目想法 → 关联项目的 Capture，继续①归档路径
+        step|用户要求总结 → 读取 project + log → 更新项目状态区
+      artifact|已有 Study Guide → 用户阅读、补充人工笔记|learning/guides/ 或课程 guides/
+        generate|需要继续完善 → 更新 Study Guide
+        artifact|用户明确确认学完 → 写 studied_at；撤销确认 → 去掉相应完成标记
+        generate|明确有长期价值（不要求学完）→ 沉淀 Wiki
+      artifact|已有 Wiki → 用户核验、修订与组织|knowledge/wiki/
+        generate|明确要求更新 Wiki
+        artifact|组织 Wiki Map，链接真实 Wiki|knowledge/maps/
+      artifact|明确个人资料 / 偏好 / 约束 → self 中长期记录|self/
+  input|⑥ 用户问题 / 对话 / 明确 AI 请求
+    choice|本轮要得到什么？
+      step|仅问答 / 比较 / 查找历史决定
+        step|确定 scope → 显式路径 / FTS5 / 可选向量检索候选
+          step|读取实际 Markdown 与关联来源 → 回答并给实际读取证据
+            view|答案留在会话；没有明确保存要求，不自动创建长期笔记
+      view|只制定方案 → 本轮按请求讨论方案；plan 不等同于只读权限
+      choice|明确要求保存 / 修改
+        artifact|Daily / Lesson / Project log 等 → 匹配 Skill + 用户授权 → 目标更新
+        generate|Study Guide 的创建或更新
+        generate|Wiki 的创建或更新
+        view|自测 → 基于来源返回题目；不改变 studied_at、不自动保存成果
+  input|⑦ Apex 工作台便签 / 任务 / 生活工具记录
+    choice|输入的是什么数据？
+      artifact|便签 / 布局 / 配置 → 工作台 Markdown（dashboard: true）|用户工作台 Markdown
+        view|留在工作台；是用户文件，不是缓存或 OKF Artifact
+        step|用户明确便签转 Capture → 保存 Capture，继续①归档路径
+        view|默认语义检索排除；明确附加给 AI 才读当前正文
+      artifact|工作台真实任务 → 原文件任务条目
+        view|符合正式任务规则 → Tasks / Today 投影；安全副本不贡献重复任务
+      artifact|习惯 / 记账 / 阅读历史 / 专注 / 媒体 → Apex 原生 JSON / plugin data
+        view|各原生 widget 展示；沿用自身 export / sync
+        view|不自动生成 Source / Daily / Wiki
+  input|⑧ 文件落地后：共同的并行后续流向
+    parallel|以下去向可以同时发生，不是互斥选择
+      parallel|展示给用户：直接读取真实文件类型和关系
+        view|Capture / undecided → Inbox；study + 无成果 → Learning 待生成
+        view|Course / Lesson / Guide → Learning；Wiki / Map → Knowledge
+        view|Project / log / Decision → Projects；Daily / Reflection / Review → Life
+        view|待办 / 最近活动 / 最新 Feed 摘要 → Today；运行异常 → System
+        view|点击结果 → 原生打开真实文件，不建立第二份正文权威
+      step|原笔记里的未完成 - [ ] #task → 任务投影
+        step|排除来源示例、代码块、安全副本等 → Today / Tasks
+          artifact|用户完成 / 改日期 → 修改原任务文件 → 投影更新
+      step|可索引 Markdown → 增量同步 / 显式重建检索索引
+        state|派生 brain.sqlite FTS5 + 可选 vectors.sqlite|Vault 外 Runtime State
+          step|未来问题 / 学习 / Wiki / 项目任务 → 找候选 → 读真实文件
+            view|新的回答或明确要求的成果 → 再进入对应内容路径
+        view|不默认索引原件、imports、工作台、安全副本、系统规范等
+      step|Vault 文件与完整原件 → LiveSync → Caddy / CouchDB
+        artifact|其他设备收到完整本地副本 → 原生阅读、编辑，继续相应内容路径
+        state|本机 State / cache / indexes / secrets 不进入此同步
+      choice|用户显式启用的恢复能力
+        state|Vault Git checkpoint → 本地恢复点 / 可用撤销
+        state|Restic 独立备份 Vault 与部署资源；服务器备份 CouchDB 快照
+        step|恢复后校验文件与重建索引；同步本身不能代替备份
