@@ -32,3 +32,18 @@ Foundation -> no upper module
   artifact authorities.
 - Claudian contains provider and UI behavior, not copies of Workspace business prompts.
 - Cross-module flows are composed in application workflows, not hidden in adapters or API routes.
+
+## Synced mobile document intake
+
+Dashboard writes original bytes directly into `sources/originals/<sha256>/<filename>` and then
+publishes a Document Import Request in `system/imports/<uuid>/request.md`, using only Vault APIs.
+LiveSync carries both files; arrival order is not assumed. The designated desktop Engine verifies
+length/hash of a private snapshot. Explicit `action: store` registers a Source without text or a
+conversion job; `action: convert` invokes the existing conversion queue, reusing published text
+for subsequent generation. Desktop workbench imports use the same local-first writer. It reuses the Vault
+original instead of making an external primary copy. Receipts and published notes sync normally.
+Execution state, credentials and indexes remain outside Vault. Mobile has no business state machine.
+Reading an original uses `WorkspaceLeaf.openFile` on its local `TFile`, without Engine or an HTTP service.
+Old device uploads have a one-way recovery reader; old `okf-original://` links resolve migrated files.
+Legacy external originals and remote service assets are retained only for rollback, not active transport.
+See [original file lifecycle](../ORIGINAL-FILES.md).

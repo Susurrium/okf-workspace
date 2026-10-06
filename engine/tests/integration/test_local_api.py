@@ -1316,6 +1316,7 @@ def test_system_can_list_and_retry_failed_conversions(vault: Path, tmp_path: Pat
     client, headers, _paths = _client(vault, tmp_path, importer=importer)
     original = tmp_path / "failed.pdf"
     original.write_bytes(b"synthetic-pdf")
+    archived = importer.original_store.ingest(original)
     record = paths.state / "conversions" / "conv-failed" / "status.json"
     record.parent.mkdir(parents=True)
     record.write_text(
@@ -1323,9 +1324,9 @@ def test_system_can_list_and_retry_failed_conversions(vault: Path, tmp_path: Pat
             {
                 "conversion_id": "conv-failed",
                 "status": "failed",
-                "source_sha256": "private-hash",
+                "source_sha256": archived.sha256,
                 "source_filename": "failed.pdf",
-                "original_path": str(original),
+                "original_path": str(archived.stored_path),
                 "intent": "wiki",
                 "quality": "high",
                 "parser": "mineru",
@@ -1350,7 +1351,7 @@ def test_system_can_list_and_retry_failed_conversions(vault: Path, tmp_path: Pat
         headers=headers,
         json={"parser": "mineru"},
     )
-    assert retried.status_code == 200
+    assert retried.status_code == 200, retried.text
     assert retried.json()["status"] == "imported"
 
 
@@ -1391,6 +1392,26 @@ def test_document_import_endpoint_accepts_upload_and_returns_vault_relative_resu
     source = read_document(vault / payload["source"])
     assert source.frontmatter["title"] == "API 导入文档"
     assert source.frontmatter["resource"].endswith("/manual.pdf")
+
+
+def test_document_store_endpoint_needs_no_parser_and_creates_no_conversion(
+    vault: Path, tmp_path: Path,
+) -> None:
+    paths = BrainPaths(vault=vault, originals=tmp_path / "originals", state=tmp_path / "state")
+    importer = DocumentImporter(vault=vault, originals=paths.originals, state=paths.state)
+    client = TestClient(create_app(paths, document_importer=importer))
+    token = LocalTokenStore(paths.state).ensure()
+    response = client.post(
+        "/documents/import", headers={"Authorization": f"Bearer {token}"},
+        data={"intent": "source", "action": "store"},
+        files={"file": ("manual.pdf", b"synthetic-pdf", "application/pdf")},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "stored"
+    assert "conversion_id" not in response.json()
+    source = read_document(vault / response.json()["outputs"]["source"])
+    assert "text" not in source.frontmatter
+    assert not importer.store.list()
 
 
 def test_document_import_rejects_oversized_upload_and_removes_spool(

@@ -8,5 +8,7 @@ field_types:
   parser: string
   parser_version: string
   fallback_from: string
+  # Optional for explicit attachment metadata; document imports use body links instead.
+  # Full parser inventories belong in external State, not in this field or sources.
   assets: vault_path_list
   sources: source_list

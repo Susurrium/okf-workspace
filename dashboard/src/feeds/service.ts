@@ -23,7 +23,7 @@ import type {
   FeedSubscriptionSourceItemsPage,
   FeedSubscriptionSourceItemsQuery,
 } from "./types.js";
-import { assertMatchingVault, VAULT_FINGERPRINT_HEADER, VAULT_MISMATCH_MESSAGE } from "../api/vault-identity.js";
+import { WorkspaceHttpClient } from "../api/http-client.js";
 
 export interface OpenedFeedDigest {
   vault_path: string;
@@ -81,11 +81,25 @@ export class FeedTransportError extends Error {
 }
 
 export class HttpFeedApi implements FeedApi {
+  private readonly http: WorkspaceHttpClient;
+
   public constructor(
-    private readonly baseUrl: string,
-    private readonly token: string,
-    private readonly expectedVaultFingerprint?: string,
-  ) {}
+    baseUrl: string,
+    token: string,
+    expectedVaultFingerprint?: string,
+  ) {
+    this.http = new WorkspaceHttpClient({
+      baseUrl,
+      token,
+      expectedVaultFingerprint,
+      defaultTimeout: 20_000,
+      onHttpError: (status, detail) => new FeedHttpError(status, detail),
+      onTransportError: (error, timedOut) => new FeedTransportError(
+        timedOut ? "本地服务响应超时" : "本地服务连接中断",
+        { cause: error instanceof Error ? error : undefined },
+      ),
+    });
+  }
 
   public listDigests(kind: FeedKind): Promise<FeedDigestSummary[]> {
     return this.request(`/feeds/${kind}/digests`);
@@ -243,39 +257,7 @@ export class HttpFeedApi implements FeedApi {
   }
 
   private async request<T>(path: string, init?: RequestInit, timeout = 20_000): Promise<T> {
-    const mutating = !["GET", "HEAD"].includes((init?.method ?? "GET").toUpperCase());
-    if (mutating && this.expectedVaultFingerprint) {
-      const identity = await this.vaultIdentity();
-      assertMatchingVault(identity.vault_fingerprint, this.expectedVaultFingerprint);
-    }
-    const headers = new Headers(init?.headers);
-    headers.set("Authorization", `Bearer ${this.token}`);
-    if (mutating && this.expectedVaultFingerprint) {
-      headers.set(VAULT_FINGERPRINT_HEADER, this.expectedVaultFingerprint);
-    }
-    let response: Response;
-    try {
-      response = await fetch(`${this.baseUrl.replace(/\/$/u, "")}${path}`, {
-        ...init,
-        headers,
-        signal: init?.signal ?? AbortSignal.timeout(timeout),
-      });
-    } catch (error) {
-      if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) {
-        throw new FeedTransportError("本地服务响应超时", { cause: error });
-      }
-      throw new FeedTransportError("本地服务连接中断", {
-        cause: error instanceof Error ? error : undefined,
-      });
-    }
-    if (!response.ok) {
-      const detail = await response.text();
-      if (response.status === 409 && detail.includes("Vault identity mismatch")) {
-        throw new Error(VAULT_MISMATCH_MESSAGE);
-      }
-      throw new FeedHttpError(response.status, detail);
-    }
-    return (await response.json()) as T;
+    return this.http.request<T>(path, init, timeout);
   }
 }
 

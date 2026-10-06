@@ -18,6 +18,11 @@ python3 "$script_dir/couchdb_snapshot.py" dump \
   --credentials "$OKF_COUCHDB_CREDENTIALS" \
   --output "$snapshot"
 
-restic backup "$snapshot" "$script_dir"
+if test -n "${OKF_FILES_DATA_DIR:-}"; then
+    test -d "$OKF_FILES_DATA_DIR" || { echo 'Original file backup directory is missing' >&2; exit 1; }
+    restic backup "$snapshot" "$script_dir" "$OKF_FILES_DATA_DIR"
+else
+    restic backup "$snapshot" "$script_dir"
+fi
 restic forget --keep-daily 7 --keep-weekly 8 --keep-monthly 12 --prune
 find "$OKF_COUCHDB_DUMP_DIR" -type f -name 'couchdb-*.json.gz' -mtime +8 -delete

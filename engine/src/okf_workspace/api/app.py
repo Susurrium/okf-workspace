@@ -83,6 +83,7 @@ from okf_workspace.importers.methods import method_catalogue
 from okf_workspace.importers.models import ConversionMethod
 from okf_workspace.importers.publish import route_existing_import
 from okf_workspace.importers.state import ConversionBusyError, ConversionStore
+from okf_workspace.importers.synced_intake import SyncedDocumentIntake
 from okf_workspace.notes import NoteService
 from okf_workspace.notes.captures import (
     batch_discard_captures,
@@ -110,6 +111,7 @@ from okf_workspace.semantic import (
 from okf_workspace.semantic.worker import SemanticWorker, SemanticWorkerProcess
 
 from .auth import LocalTokenStore
+from .originals import original_routes
 
 MAX_DOCUMENT_UPLOAD_BYTES = 64 * 1024 * 1024
 
@@ -374,10 +376,15 @@ def create_app(
     )
     document_worker_stop = threading.Event()
     document_worker_thread: threading.Thread | None = None
+    synced_intake = (
+        SyncedDocumentIntake(configured_importer, semantic_service=semantic_service)
+        if document_worker is not None else None
+    )
+    synced_intake_thread: threading.Thread | None = None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
-        nonlocal document_worker_thread, injected_worker_thread
+        nonlocal document_worker_thread, injected_worker_thread, synced_intake_thread
         if semantic_service is not None:
             semantic_service.reconcile_pending()
         if semantic_process is not None:
@@ -398,8 +405,18 @@ def create_app(
                 daemon=True,
             )
             document_worker_thread.start()
+        if synced_intake is not None:
+            synced_intake_thread = threading.Thread(
+                target=synced_intake.run_forever,
+                args=(document_worker_stop,),
+                name="okf-synced-document-intake",
+                daemon=True,
+            )
+            synced_intake_thread.start()
         yield
         document_worker_stop.set()
+        if synced_intake_thread is not None:
+            synced_intake_thread.join(timeout=2)
         if document_worker_thread is not None:
             document_worker_thread.join(timeout=2)
         if injected_worker_stop is not None:
@@ -533,6 +550,7 @@ def create_app(
             raise HTTPException(status_code=401, detail="invalid local token")
 
     protected = [Depends(authorize)]
+    app.include_router(original_routes(configured), dependencies=protected)
 
     @app.get("/health")
     async def health() -> dict[str, object]:
@@ -878,10 +896,15 @@ def create_app(
     def document_converters() -> dict[str, object]:
         return method_catalogue(configured_importer.settings)
 
+    @app.post("/documents/uploads/cleanup", dependencies=protected)
+    def cleanup_document_uploads(apply: bool = False) -> list[dict[str, str]]:
+        raise HTTPException(410, "已改为 Vault 全量同步；原件属于正式附件，不再自动清理")
+
     @app.post("/documents/import", dependencies=protected)
     async def import_document(
         file: Annotated[UploadFile, File()],
         intent: Annotated[str, Form()],
+        action: Annotated[str, Form()] = "convert",
         quality: Annotated[str, Form()] = "quick",
         parser: Annotated[str, Form()] = "auto",
         method: Annotated[str, Form()] = "auto",
@@ -908,6 +931,14 @@ def create_app(
                             detail=f"document upload exceeds {MAX_DOCUMENT_UPLOAD_BYTES} bytes",
                         )
                     target.write(chunk)
+            if action not in {"store", "convert"}:
+                raise ValueError("不支持的导入操作")
+            if action == "store":
+                saved = configured_importer.save_original(ImportRequest(
+                    source=upload, source_filename=filename, intent=ImportIntent(intent),
+                    course=course, project=project, generate=generate,
+                ))
+                return _conversion_public(saved, configured.vault)
             import_request = ImportRequest(
                 source=upload,
                 intent=ImportIntent(intent),
@@ -956,11 +987,12 @@ def create_app(
         )
         public: dict[str, object] = {
             "source": _relative(source, configured.vault),
-            "source_text": _relative(extract, configured.vault),
+            "source_text": _optional_relative(extract, configured.vault),
             "routed_target": _optional_relative(draft, configured.vault),
         }
         if (
             draft is not None
+            and extract is not None
             and request.generate
             and semantic_service is not None
             and request.intent in {"learn", "wiki"}

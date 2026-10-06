@@ -21,6 +21,8 @@ def iter_markdown(vault: Path) -> Iterator[Path]:
 
 def is_retrievable_markdown(path: Path, vault: Path) -> bool:
     relative = path.resolve().relative_to(vault.resolve())
+    if relative.parts[:2] in {("inbox", "uploads"), ("sources", "originals")}:
+        return False
     if any(part in SKIPPED_DIRECTORIES for part in relative.parts):
         return False
     if relative.parts and relative.parts[0] == "archive":
@@ -30,7 +32,7 @@ def is_retrievable_markdown(path: Path, vault: Path) -> bool:
     if (
         len(relative.parts) >= 2
         and relative.parts[0] == "system"
-        and relative.parts[1] in {"contracts", "reports", "templates", "views"}
+        and relative.parts[1] in {"contracts", "reports", "templates", "views", "imports"}
     ):
         return False
     if path.name == "index.md" or not path.is_file():

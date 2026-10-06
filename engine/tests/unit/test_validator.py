@@ -5,6 +5,7 @@ from pathlib import Path
 from okf_workspace.notes import NoteService
 from okf_workspace.okf.frontmatter import OkfDocument, write_document
 from okf_workspace.okf.validator import validate_bundle, validate_document, validate_paths
+from okf_workspace.retrieval.scanner import is_retrievable_markdown
 
 
 def test_template_bundle_is_valid(vault: Path) -> None:
@@ -12,6 +13,19 @@ def test_template_bundle_is_valid(vault: Path) -> None:
 
     assert report.valid, report.issues
     assert report.files_checked > 5
+
+
+def test_original_attachments_are_not_semantic_markdown(vault: Path) -> None:
+    attachment = vault / "sources/originals" / ("a" * 64) / "lecture.pdf.md"
+    attachment.parent.mkdir(parents=True)
+    attachment.write_text("", encoding="utf-8")
+    assert validate_bundle(vault).valid
+    assert validate_paths(vault, [attachment]).valid
+    assert not is_retrievable_markdown(attachment, vault)
+    invalid_record = vault / "sources/records/documents/invalid.md"
+    invalid_record.parent.mkdir(parents=True, exist_ok=True)
+    invalid_record.write_text("", encoding="utf-8")
+    assert not validate_bundle(vault).valid
 
 
 def test_candidate_validation_checks_content_without_creating_target(vault: Path) -> None:

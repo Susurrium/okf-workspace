@@ -17,6 +17,8 @@
 - 普通人机协作、格式整理和用户监督下的 AI 编写不写作者分类。只有无人值守后台独立生成、且用户尚未检查的长期 Wiki 写 `generated: {by: process:codex-background, at: <timestamp>}`，并保留 `sources`。
 - `tags` 服务于人类浏览和 Obsidian 搜索，不承担工作流状态。
 
+- 文件原件保存在 `sources/originals/`，与笔记通过 LiveSync 全量同步。PDF/图片使用 Obsidian 原生阅读，不维护独立文件服务或按需缓存。
+
 ## 工作流
 
 - `inbox/captures/` 中存在的 Capture 就是待处理输入，不另写状态。成功整理到一个长期目标后删除 Capture，不复制到 `archive/`，也不让目标反向引用临时 Capture；丢弃时使用 Obsidian 本地回收站。Web Capture 必须先发布成 Source + Source Text。

@@ -14,10 +14,10 @@ from okf_workspace.okf.frontmatter import OkfDocument, render_document
 from okf_workspace.okf.paths import resolve_bundle_path, slugify
 from okf_workspace.sources import SourcePublisher
 
+from .asset_links import referenced_assets, rewrite_asset_links
 from .models import ImportIntent, ImportRequest, OriginalRecord, ParserExport
 
 _HEADING = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
-_LINK = re.compile(r"(!?\[[^\]]*\]\()([^)#]+)(#[^)]*)?(\))")
 
 
 @dataclass(frozen=True)
@@ -47,11 +47,9 @@ def _copy_assets(
     export: ParserExport,
     *,
     publish: bool = True,
-) -> tuple[str, list[str]]:
+) -> str:
     mapping: dict[str, str] = {}
-    published: list[str] = []
-    for relative, data in sorted(export.assets.items()):
-        normalized = relative.replace("\\", "/").lstrip("./")
+    for normalized, data in sorted(referenced_assets(export.markdown, export.assets).items()):
         target_relative = f"sources/assets/{slug}/{normalized}"
         target = resolve_bundle_path(vault, target_relative)
         if target.exists() and target.read_bytes() != data:
@@ -64,16 +62,8 @@ def _copy_assets(
         elif target.exists() and target.read_bytes() != data:
             raise FileWriteConflict(f"Source asset changed: {target}")
         mapping[normalized] = f"/{target_relative}"
-        published.append(target_relative)
 
-    def replace(match: re.Match[str]) -> str:
-        raw = match.group(2).replace("\\", "/").lstrip("./")
-        target = mapping.get(raw)
-        if target is None:
-            return match.group(0)
-        return f"{match.group(1)}{target}{match.group(3) or ''}{match.group(4)}"
-
-    return _LINK.sub(replace, export.markdown), published
+    return rewrite_asset_links(export.markdown, mapping)
 
 
 def _source_entry(relative: str) -> list[dict[str, str]]:
@@ -128,6 +118,31 @@ def publish_import(
         )
 
 
+def publish_original(vault: Path, request: ImportRequest, original: OriginalRecord) -> Path:
+    """Register an original without fabricating text or a conversion operation."""
+    publisher = SourcePublisher(vault)
+    with publisher.transaction():
+        existing = publisher.find_by_sha256(original.sha256)
+        if existing:
+            source, document = existing
+        else:
+            title = Path(original.filename).stem
+            slug = f"{slugify(title)}-{original.sha256[:10]}"
+            source = vault / "sources" / "records" / "documents" / f"{slug}.md"
+            document = OkfDocument({
+                "type": "Source", "title": title,
+                "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "resource": original.resource, "sha256": original.sha256,
+                "kind": original.extension.lstrip("."), "ingested_via": FILE_IMPORT,
+            }, f"# {title}\n\n- 原件："
+               f"[[{original.resource.removeprefix('/')}|{original.filename}]]\n")
+        publisher.resolve_use(
+            document, purpose=_purpose(request.intent),
+            course=request.course, project=request.project,
+        )
+        return publisher.publish_record(source, document)
+
+
 def _publish_import_locked(
     vault: Path,
     request: ImportRequest,
@@ -151,11 +166,15 @@ def _publish_import_locked(
         text_document = OkfDocument({}, "")
     else:
         source, source_document = existing
-        source_text, text_document = publisher.resolve_text(source_document)
+        if "text" in source_document.frontmatter:
+            source_text, text_document = publisher.resolve_text(source_document)
+        else:
+            source_text = vault / "sources" / "text" / "documents" / source.name
+            text_document = OkfDocument({}, "")
         source_relative = source.relative_to(vault).as_posix()
         text_relative = source_text.relative_to(vault).as_posix()
         slug = source.stem
-        if not replace_existing:
+        if not replace_existing and "text" in source_document.frontmatter:
             publisher.resolve_use(
                 source_document, purpose=_purpose(request.intent),
                 course=request.course, project=request.project,
@@ -164,7 +183,8 @@ def _publish_import_locked(
             return PublishedImport(
                 source, source_text, _route_draft(vault, request, slug=slug), None, True,
             )
-    markdown, assets = _copy_assets(vault, slug, export, publish=False)
+    original_only = existing is not None and "text" not in source_document.frontmatter
+    markdown = _copy_assets(vault, slug, export, publish=False)
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     source_document.frontmatter.update(
         {
@@ -188,7 +208,11 @@ def _publish_import_locked(
         source_document.body = (
             f"# {title}\n\n"
             f"- 转换正文：[{text_relative}](/{text_relative})\n"
-            f"- 原件：{original.resource}\n"
+            f"- 原件：[[{original.resource.removeprefix('/')}|{original.filename}]]\n"
+        )
+    elif original_only:
+        source_document.body = source_document.body.rstrip() + (
+            f"\n\n- 转换正文：[{text_relative}](/{text_relative})\n"
         )
     text_fields = text_document.frontmatter
     text_fields.update(
@@ -205,10 +229,8 @@ def _publish_import_locked(
         text_fields["fallback_from"] = export.degraded_from.value
     else:
         text_fields.pop("fallback_from", None)
-    if assets:
-        text_fields["assets"] = [f"/{asset}" for asset in assets]
-    else:
-        text_fields.pop("assets", None)
+    # Body links describe durable dependencies; the complete parser inventory lives in State.
+    text_fields.pop("assets", None)
     text_title = text_fields.get("title")
     text_document.body = _ensure_h1(
         markdown,
@@ -217,7 +239,7 @@ def _publish_import_locked(
     text_sha256 = hashlib.sha256(
         render_document(text_fields, text_document.body).encode("utf-8"),
     ).hexdigest()
-    if existing is not None and file_sha256(source_text) not in {
+    if existing is not None and source_text.is_file() and file_sha256(source_text) not in {
         expected_text_sha256, text_sha256,
     }:
         # The candidate hash also permits recovery after publication succeeded
@@ -226,7 +248,7 @@ def _publish_import_locked(
             "Source Text has human changes or no publication baseline; preserved the note. "
             "The new conversion is available in the runtime export directory."
         )
-    published_markdown, _ = _copy_assets(vault, slug, export)
+    published_markdown = _copy_assets(vault, slug, export)
     if published_markdown != markdown:
         raise FileWriteConflict("Source assets changed during publication; retry the import")
     publisher.publish_pair(
@@ -253,7 +275,7 @@ def route_existing_import(
     intent: ImportIntent,
     course: str | None = None,
     project: str | None = None,
-) -> tuple[Path, Path, Path | None]:
+) -> tuple[Path, Path | None, Path | None]:
     vault = vault.resolve()
     source = source.resolve()
     request = ImportRequest(
@@ -268,6 +290,16 @@ def route_existing_import(
         slug=source.stem,
     )
     publisher = SourcePublisher(vault)
+    with publisher.transaction():
+        document = publisher.read_record(source)
+        if "text" not in document.frontmatter:
+            if intent not in {ImportIntent.SOURCE, ImportIntent.LATER}:
+                raise ValueError("这份资料仅保存了原件，请先转换正文再生成笔记")
+            publisher.resolve_use(
+                document, purpose=_purpose(intent), course=course, project=project,
+            )
+            publisher.publish_record(source, document)
+            return source, None, None
     pair = publisher.update_use(
         source,
         purpose=_purpose(intent),

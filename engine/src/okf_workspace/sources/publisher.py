@@ -24,6 +24,7 @@ from okf_workspace.okf.frontmatter import (
 )
 from okf_workspace.okf.paths import resolve_bundle_path
 from okf_workspace.okf.relations import explicit_context_fields
+from okf_workspace.okf.validator import validate_document
 
 ResourceNormalizer = Callable[[str], str]
 
@@ -85,6 +86,27 @@ class SourcePublisher:
         document = parse_document(payload.decode("utf-8"), source=str(resolved))
         self._snapshots[resolved] = payload
         return document
+
+    def publish_record(self, source: Path, document: OkfDocument) -> Path:
+        """Publish metadata independently of optional extracted text."""
+        source = source.resolve()
+        if not source.is_relative_to(self.records_root) or document.type != "Source":
+            raise ValueError("Source record must be inside sources/records")
+        report = validate_document(self.vault, source, document)
+        if not report.valid:
+            raise ValueError(f"Invalid Source: {report.issues}")
+        if "text" in document.frontmatter:
+            self.resolve_text(document)
+        with self.transaction(), document_lock(source):
+            previous = self._snapshots.get(source)
+            write_document(
+                source, document, create_only=previous is None,
+                expected_sha256=hashlib.sha256(previous).hexdigest() if previous else None,
+            )
+            self._snapshots[source] = render_document(
+                document.frontmatter, document.body,
+            ).encode("utf-8")
+        return source
 
     @contextmanager
     def transaction(self) -> Generator[None]:

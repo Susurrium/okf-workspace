@@ -141,6 +141,8 @@ def scan_notes(
     notes: list[NoteSummary] = []
     for path in sorted(root.rglob("*.md")):
         relative_path = path.relative_to(root)
+        if relative_path.parts[:2] in {("inbox", "uploads"), ("system", "imports")}:
+            continue
         if path.name in {"index.md", "log.md"}:
             continue
         if any(part in _SKIP for part in relative_path.parts):

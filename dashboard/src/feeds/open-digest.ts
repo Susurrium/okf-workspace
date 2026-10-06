@@ -1,6 +1,3 @@
-import { createHash } from "node:crypto";
-import { realpathSync } from "node:fs";
-
 import type { PreparedFeedDigest } from "./service.js";
 
 export interface DigestVaultPort<File> {
@@ -16,6 +13,10 @@ export interface DigestVaultPort<File> {
 }
 
 export function vaultFingerprint(root: string): string {
+  // Desktop-only and evaluated on demand: loading the mobile bundle must not
+  // require Node, even when no Engine operation is ever invoked.
+  const { createHash } = require("node:crypto") as typeof import("node:crypto");
+  const { realpathSync } = require("node:fs") as typeof import("node:fs");
   let canonical = realpathSync.native(root).replace(/\\/gu, "/").replace(/\/+$/u, "");
   if (process.platform === "win32") canonical = canonical.toLowerCase();
   return createHash("sha256").update(canonical, "utf8").digest("hex");

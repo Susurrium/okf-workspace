@@ -42,6 +42,35 @@ function note(overrides: Partial<NoteSummary>): NoteSummary {
   };
 }
 
+it("renders mobile Inbox, Reading and System without desktop API actions", async () => {
+  const app = { vault: { getMarkdownFiles: () => [] } } as unknown as App;
+  const view = new OkfDashboardView(
+    new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)(app),
+    { isMobile: true, getDashboardUiState: () => normalizeDashboardUiState(undefined),
+      conversionSnapshot: () => [], promptCapture: vi.fn(), openDocumentImport: vi.fn() } as never,
+  );
+  const runtime = view as unknown as {
+    vaultReader: { inbox: () => Promise<unknown> };
+    api: () => unknown;
+    renderInbox: (container: HTMLElement) => Promise<void>;
+    renderReading: (container: HTMLElement) => Promise<void>;
+    renderSystem: (container: HTMLElement) => Promise<void>;
+  };
+  runtime.vaultReader = { inbox: async () => ({
+    captures: [note({ note_type: "Capture", path: "inbox/captures/mobile.md", capture_status: "pending" })],
+    processed_captures: [], pending_imports: [],
+  }) };
+  runtime.api = vi.fn(() => { throw new Error("Mobile contacted Engine"); });
+  const inbox = new TestElement();
+  await runtime.renderInbox(inbox as unknown as HTMLElement);
+  expect(inbox.descendants().some((element) => element.textContent === "导入资料")).toBe(true);
+  expect(inbox.descendants("okf-dashboard__selection-toolbar")).toHaveLength(0);
+  expect(inbox.descendants().some((element) => element.attributes.get("type") === "checkbox")).toBe(false);
+  await runtime.renderReading(new TestElement() as unknown as HTMLElement);
+  await runtime.renderSystem(new TestElement() as unknown as HTMLElement);
+  expect(runtime.api).not.toHaveBeenCalled();
+});
+
 it("keeps a failed generation handoff actionable in the real Inbox card", async () => {
   const record: ConversionRecord = {
     conversion_id: "conv-handoff", status: "imported", parser: "markitdown",

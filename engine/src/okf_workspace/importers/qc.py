@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
+from pathlib import PurePosixPath
 
+from .archive import ASSET_SUFFIXES
+from .asset_links import asset_links, resolve_asset_path
 from .models import ParserExport, QCReport
 
-_LOCAL_IMAGE = re.compile(r"!\[[^\]]*\]\((?!https?://|data:)([^)#]+)(?:#[^)]+)?\)")
 _EMBEDDED_IMAGE = re.compile(r"!\[[^\]]*\]\((data:image/[^)]*)\)", re.IGNORECASE)
 _IMAGE_MARKDOWN = re.compile(r"!\[[^\]]*\]\([^)]+\)")
 _LINK_MARKDOWN = re.compile(r"\[([^\]]+)\]\([^)]+\)")
@@ -39,8 +41,12 @@ def inspect_export(export: ParserExport, *, strict_assets: bool = False) -> QCRe
     if markdown and not has_structure:
         warnings.append("Markdown has no heading; body remains importable")
 
-    references = {match.replace("\\", "/").lstrip("./") for match in _LOCAL_IMAGE.findall(markdown)}
-    assets = {path.replace("\\", "/").lstrip("./") for path in export.assets}
+    assets = {path.replace("\\", "/") for path in export.assets}
+    references = {
+        path for link in asset_links(markdown)
+        if (path := resolve_asset_path(link, assets)) is not None
+        and (link.image or PurePosixPath(path).suffix.casefold() in ASSET_SUFFIXES)
+    }
     missing = sorted(reference for reference in references if reference not in assets)
     checks["referenced_assets_present"] = not missing
     if missing:

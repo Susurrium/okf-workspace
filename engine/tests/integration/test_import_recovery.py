@@ -92,6 +92,21 @@ def test_reimport_only_merges_uses_and_preserves_text_and_assets(
     ]
 
 
+def test_retry_does_not_pair_old_export_with_an_edited_vault_original(
+    vault: Path, tmp_path: Path,
+) -> None:
+    importer, request, parsers = setup_import(vault, tmp_path)
+    result = importer.import_document(request)
+    assert result.source_text is not None
+    before = result.source_text.read_bytes()
+    result.original.stored_path.write_bytes(b"human annotated PDF")
+    with pytest.raises(ValueError, match="原件内容已改变"):
+        importer.retry(result.conversion_id)
+    assert parsers[ParserName.MARKITDOWN].calls == 1
+    assert result.source_text.read_bytes() == before
+    assert result.original.stored_path.read_bytes() == b"human annotated PDF"
+
+
 def test_explicit_reparse_preserves_human_edits_and_reports_conflict(
     vault: Path, tmp_path: Path,
 ) -> None:
@@ -114,6 +129,9 @@ def test_queued_parser_change_replaces_only_an_unchanged_publication(
 ) -> None:
     importer, request, parsers = setup_import(vault, tmp_path)
     first = importer.import_document(request)
+    assert first.source is not None
+    original_asset = vault / "sources/assets" / first.source.stem / "images/figure.png"
+    original_bytes = original_asset.read_bytes()
     importer.store.queue_retry(first.conversion_id, parser=ParserName.MINERU)
     assert DocumentImportWorker(importer).run_once()
     record = importer.store.load(first.conversion_id)
@@ -121,7 +139,11 @@ def test_queued_parser_change_replaces_only_an_unchanged_publication(
     assert record["parser"] == "mineru"
     assert parsers[ParserName.MINERU].calls == 1
     assert first.source_text is not None
-    assert read_document(first.source_text).frontmatter["parser"] == "mineru"
+    document = read_document(first.source_text)
+    assert document.frontmatter["parser"] == "mineru"
+    assert "assets" not in document.frontmatter
+    assert "/versions/" in document.body
+    assert original_asset.read_bytes() == original_bytes
 
 
 def test_ready_conversion_recovers_using_export_without_reconversion(

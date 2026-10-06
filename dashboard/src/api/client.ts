@@ -9,14 +9,26 @@ import type {
   WebCapturePublishResult,
 } from "./types.js";
 import type { FeedSyncResult } from "../feeds/types.js";
-import { assertMatchingVault, VAULT_FINGERPRINT_HEADER, VAULT_MISMATCH_MESSAGE } from "./vault-identity.js";
+import { WorkspaceHttpClient } from "./http-client.js";
 
 export class LocalApi {
+  private readonly http: WorkspaceHttpClient;
+
   public constructor(
     public readonly baseUrl: string,
-    private readonly token: string,
-    private readonly expectedVaultFingerprint?: string,
-  ) {}
+    token: string,
+    expectedVaultFingerprint?: string,
+  ) {
+    this.http = new WorkspaceHttpClient({
+      baseUrl,
+      token,
+      expectedVaultFingerprint,
+      defaultTimeout: 15_000,
+      setJsonContentTypeForBody: true,
+      onHttpError: (status, detail) => this.httpError(status, detail),
+      onTransportError: (error, timedOut) => this.transportError(error, timedOut),
+    });
+  }
 
   public today(date?: string): Promise<TodayView> {
     const query = date ? `?target_date=${encodeURIComponent(date)}` : "";
@@ -339,50 +351,32 @@ export class LocalApi {
   }
 
   private async request<T>(path: string, init?: RequestInit, timeout = 15_000): Promise<T> {
-    const mutating = !["GET", "HEAD"].includes((init?.method ?? "GET").toUpperCase());
-    if (mutating && this.expectedVaultFingerprint) {
-      const identity = await this.request<{ vault_fingerprint: string }>("/workspace/identity");
-      assertMatchingVault(identity.vault_fingerprint, this.expectedVaultFingerprint);
-    }
-    const headers = new Headers(init?.headers);
-    headers.set("Authorization", `Bearer ${this.token}`);
-    if (mutating && this.expectedVaultFingerprint) {
-      headers.set(VAULT_FINGERPRINT_HEADER, this.expectedVaultFingerprint);
-    }
-    if (init?.body !== undefined) headers.set("content-type", "application/json");
-    let response: Response;
-    try {
-      response = await fetch(`${this.baseUrl.replace(/\/$/u, "")}${path}`, {
-        ...init,
-        headers,
-        signal: init?.signal ?? AbortSignal.timeout(timeout),
-      });
-    } catch (error) {
-      if (error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name)) {
-        throw new Error("本地服务响应超时，请稍后重试。仍可阅读和编辑笔记，导入与生成暂不可用。", { cause: error });
-      }
-      throw new Error(
-        "无法连接本地服务，请在系统状态中检查连接。仍可阅读和编辑笔记，导入与生成暂不可用。",
-        { cause: error instanceof Error ? error : undefined },
-      );
-    }
-    if (!response.ok) {
-      const detail = await response.text();
-      if (response.status === 409 && detail.includes("Vault identity mismatch")) {
-        throw new Error(VAULT_MISMATCH_MESSAGE);
-      }
-      const messages: Record<number, string> = {
-        400: "操作未完成，请检查输入后重试。",
-        401: "本地服务认证失败，请在连接设置中检查凭据。",
-        403: "当前操作没有权限，请检查连接设置。",
-        404: "内容已不存在或服务版本不匹配，请刷新后重试。",
-        409: "内容或任务状态已变化，请刷新后重试。",
-        422: "输入内容不符合要求，请检查后重试。",
-      };
-      throw new Error(messages[response.status] ?? "本地服务处理失败，请在系统状态中检查后重试。", {
-        cause: { status: response.status, detail },
+    return this.http.request<T>(path, init, timeout);
+  }
+
+  private httpError(status: number, detail: string): Error {
+    const messages: Record<number, string> = {
+      400: "操作未完成，请检查输入后重试。",
+      401: "本地服务认证失败，请在连接设置中检查凭据。",
+      403: "当前操作没有权限，请检查连接设置。",
+      404: "内容已不存在或服务版本不匹配，请刷新后重试。",
+      409: "内容或任务状态已变化，请刷新后重试。",
+      422: "输入内容不符合要求，请检查后重试。",
+    };
+    return new Error(messages[status] ?? "本地服务处理失败，请在系统状态中检查后重试。", {
+      cause: { status, detail },
+    });
+  }
+
+  private transportError(error: unknown, timedOut: boolean): Error {
+    if (timedOut) {
+      return new Error("本地服务响应超时，请稍后重试。仍可阅读和编辑笔记，导入与生成暂不可用。", {
+        cause: error,
       });
     }
-    return (await response.json()) as T;
+    return new Error(
+      "无法连接本地服务，请在系统状态中检查连接。仍可阅读和编辑笔记，导入与生成暂不可用。",
+      { cause: error instanceof Error ? error : undefined },
+    );
   }
 }

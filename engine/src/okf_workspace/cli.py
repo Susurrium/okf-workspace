@@ -324,6 +324,10 @@ def build_parser() -> argparse.ArgumentParser:
         default="quick",
     )
     document_import.add_argument(
+        "--action", choices=("store", "convert"), default="convert",
+        help="store originals only or convert (legacy default)",
+    )
+    document_import.add_argument(
         "--parser",
         choices=("auto", "mineru", "markitdown"),
         default="auto",
@@ -737,6 +741,13 @@ def main(argv: list[str] | None = None) -> int:
                 originals=args.originals,
                 state=args.state,
             )
+            if args.action == "store":
+                saved_original = importer.save_original(ImportRequest(
+                    source=args.source, intent=_import_intent(args.intent),
+                    course=args.course, project=args.project,
+                ))
+                _print_json(saved_original, stringify_unknown=True)
+                return 0
             import_result = importer.import_document(
                 ImportRequest(
                     source=args.source,

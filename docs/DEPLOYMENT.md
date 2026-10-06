@@ -29,7 +29,8 @@ cd E:\code\okf-workspace
 | 数据 | 默认路径 |
 |---|---|
 | Vault | `E:\ObsidianData\OKF-Brain` |
-| Originals | `E:\ObsidianData\OKF-Brain-Originals` |
+| 原件（活动位置） | `<Vault>\sources\originals` |
+| 旧 Originals（安装兼容与回退） | `E:\ObsidianData\OKF-Brain-Originals` |
 | Runtime State | `E:\ObsidianData\OKF-Brain-State` |
 | 部署配置 | `E:\ObsidianData\OKF-Brain-State\config\deployment.json` |
 
@@ -62,12 +63,16 @@ $report.actionable
 这个命令不依赖当前活动代码页；无需运行 `chcp 65001`，也不要先用文本替换修补输出。
 需要保存原始 JSON 时可直接重定向，随后按 JSON 读取。
 
-安装开始前会先验证 Vault、Originals 与 Runtime State：三者必须是绝对解析后彼此独立、
+旧版安装参数仍保留独立 Originals 目录作为迁移来源，新文件实际写入 Vault 内。
+安装开始前会先验证 Vault、旧 Originals 与 Runtime State：三者必须是绝对解析后彼此独立、
 不相同也不互相嵌套的目录，且不能指向磁盘根目录或源码仓库根目录。每个受管目录都会写入
 同一安装身份的 `.okf-workspace-owner.json`；这既允许三个目录位于不同磁盘或父目录，也让
 卸载器只删除本次安装明确拥有的数据。
 
 ## 3. 备份与 LiveSync
+
+手机文件导入使用现有 LiveSync 全量同步完整原件，无需独立原件服务。
+原件保存到 Vault 的 `sources/originals/`；配置、备份与旧版迁移见 [原件全量同步](ORIGINAL-FILES.md)。
 
 当前开发阶段不把备份作为安装前置条件，也不自动为 Vault 建立每日 Git checkpoint。
 需要 Restic 时显式传入：
@@ -78,7 +83,7 @@ $report.actionable
   -BackupRepository 'F:\Backups\OKF-Workspace'
 ```
 
-LiveSync 在单机流程稳定后单独启用。它同步 Vault 内容，不同步 Runtime State、Originals、
+LiveSync 在单机流程稳定后单独启用。它同步包含完整原件的 Vault，不同步 Runtime State、旧 Originals 回退副本、
 本地服务或源码；移动端仅阅读和编辑 Markdown 时不要求主机 Obsidian 在线。
 传入 `-LiveSyncPluginSource` 时，安装器会先完整检查 `main.js`、`manifest.json`、
 `styles.css` 以及 manifest id，再通过临时目录原子替换插件文件；预检失败不会改动现有插件。

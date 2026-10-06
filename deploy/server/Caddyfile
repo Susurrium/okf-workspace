@@ -1,6 +1,8 @@
 {$OKF_SYNC_DOMAIN} {
     encode zstd gzip
-    reverse_proxy couchdb:5984
+    handle {
+        reverse_proxy couchdb:5984
+    }
 
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains"

@@ -8,7 +8,7 @@ export const DOCUMENT_EXTENSIONS = new Set([
 ]);
 export const MAX_DOCUMENT_BYTES = 64 * 1024 * 1024;
 
-export function isSupportedDocument(file: File): boolean {
+export function isSupportedDocument(file: Pick<File, "name">): boolean {
   return DOCUMENT_EXTENSIONS.has(file.name.split(".").at(-1)?.toLowerCase() ?? "");
 }
 

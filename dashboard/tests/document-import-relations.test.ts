@@ -47,6 +47,8 @@ function content(modal: DocumentImportModal): TestElement {
 }
 
 function button(modal: DocumentImportModal, label: string): TestElement {
+  if (label === "开始导入") return content(modal).descendants().find((item) => item.tagName === "button"
+    && ["保存原件", "保存并转换正文", "保存、转换并生成笔记"].includes(item.textContent))!;
   return content(modal).descendants().find((item) => item.tagName === "button" && item.textContent === label)!;
 }
 
@@ -91,9 +93,9 @@ describe("document import relation creation", () => {
     const draftFiles = files();
     const modal = new DocumentImportModal(f.app, draftFiles, {}, "command", f.importFile, undefined, f.createRelation);
     modal.open();
-    choose(modal, "用途", "learn");
+    choose(modal, "处理方式", "convert");
     choose(modal, "转换方式", "markitdown-service");
-    choose(modal, "质量检查", "high");
+    choose(modal, "转换结果检查", "high");
     const generation = content(modal).descendants().find((item) => item.tagName === "input"
       && item.attributes.get("type") === "checkbox")!;
     (generation as unknown as HTMLInputElement).checked = true;
@@ -105,9 +107,9 @@ describe("document import relation creation", () => {
     await vi.waitFor(() => expect(button(modal, "开始导入").disabled).toBe(false));
     expect(f.createRelation).toHaveBeenCalledWith(kind, "医学统计学", "statistics");
     expect(f.importFile).not.toHaveBeenCalled();
-    expect(select(modal, "用途").value).toBe("learn");
+    expect(select(modal, "处理方式").value).toBe("convert");
     expect(select(modal, "转换方式").value).toBe("markitdown-service");
-    expect(select(modal, "质量检查").value).toBe("high");
+    expect(select(modal, "转换结果检查").value).toBe("high");
     expect(content(modal).descendants().some((item) => item.textContent.includes("folder/chapter/two.docx"))).toBe(true);
     expect(content(modal).descendants().filter((item) => item.tagName === "form")).toHaveLength(0);
     const path = kind === "course" ? "learning/courses/statistics/course.md" : "projects/statistics/project.md";
@@ -131,8 +133,9 @@ describe("document import relation creation", () => {
     const modal = new DocumentImportModal(f.app, files(), { course: "original" }, "learning",
       f.importFile, undefined, f.createRelation);
     modal.open();
+    choose(modal, "处理方式", "convert");
     choose(modal, "转换方式", "markitdown-service");
-    choose(modal, "质量检查", "high");
+    choose(modal, "转换结果检查", "high");
     beginCreation(modal, kind, "不要创建", "cancelled");
     button(modal, "取消新建").click();
     expect(select(modal, "归属").value).toBe("course:original");

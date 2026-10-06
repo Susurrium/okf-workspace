@@ -9,6 +9,7 @@ import {
 } from "../../apex/src/alltasks-scan.js";
 
 import { LocalApi } from "../api/client.js";
+import { renderSyncedImports } from "./synced-imports-modal.js";
 import type {
   ConversionRecord,
   CourseSummary,
@@ -829,8 +830,8 @@ export class OkfDashboardView {
   ): void {
     const zone = parent.createDiv({
       cls: "okf-document-drop okf-dashboard__document-drop",
-      text: "拖入文件或文件夹以导入资料 · 也可点击此处选择",
-      attr: { role: "button", tabindex: "0", "aria-label": "导入文件或文件夹" },
+      text: this.plugin.isMobile ? "选择资料，保存后同步给电脑处理" : "拖入文件或文件夹以导入资料 · 也可点击此处选择",
+      attr: { role: "button", tabindex: "0", "aria-label": this.plugin.isMobile ? "选择资料" : "导入文件或文件夹" },
     });
     const open = (files: ImportFile[] = []): void => this.plugin.openDocumentImport(files, relation, origin);
     zone.addEventListener("click", () => open());
@@ -1036,6 +1037,7 @@ export class OkfDashboardView {
       actionGrid.createDiv({ cls: "okf-dashboard__empty", text: "今天没有需要继续或处理的行动。" });
     }
 
+    if (this.plugin.isMobile) return;
     this.renderDailyFeeds(readingPane);
 
     void this.api()
@@ -1255,6 +1257,10 @@ export class OkfDashboardView {
     trigger: HTMLButtonElement,
     options: AnchoredActionPanelOptions,
   ): void {
+    if (this.plugin.isMobile) {
+      options = { ...options, actions: options.actions.filter((action) =>
+        !/^(?:claudian|wiki|cancel|generate)/u.test(action.id ?? "")) };
+    }
     // The lightweight Vitest Obsidian runtime intentionally has no browser
     // document. The component itself has dedicated DOM-level tests.
     if (!trigger.ownerDocument?.defaultView) return;
@@ -1552,6 +1558,16 @@ export class OkfDashboardView {
   }
 
   private async renderReading(container: HTMLElement): Promise<void> {
+    if (this.plugin.isMobile) {
+      container.createDiv({ text: "订阅由电脑更新，这里可以打开已同步的汇总。" });
+      const files = this.app.vault.getMarkdownFiles().filter((file) => file.path.startsWith("feeds/"));
+      for (const file of files.slice(-50).reverse()) {
+        container.createEl("button", { text: file.basename, cls: "okf-dashboard__ghost-action" })
+          .addEventListener("click", () => void this.openPath(file.path));
+      }
+      if (!files.length) container.createDiv({ text: "暂时没有同步过来的订阅汇总。" });
+      return;
+    }
     const actions = container.createDiv({
       cls: "okf-dashboard__hero-actions okf-reading-actions",
     });
@@ -2955,6 +2971,11 @@ export class OkfDashboardView {
     });
     importDocument.addEventListener("click", () => this.plugin.openDocumentImport([], {}, "inbox"));
     this.renderDocumentDropZone(container, {}, "inbox");
+    const submitted = container.createEl("details");
+    submitted.createEl("summary", { text: "已保存的资料与处理结果" });
+    const submittedList = submitted.createDiv();
+    await renderSyncedImports(this.app, submittedList, this.plugin.originalFiles);
+    if (this.plugin.isMobile) submitted.open = true;
 
     const stageTabs = container.createDiv({
       cls: "okf-dashboard__segments okf-dashboard__stage-tabs",
@@ -3027,7 +3048,7 @@ export class OkfDashboardView {
         discardSelected.setText(`移到回收站 (${this.selectedCaptures.size})`);
         discardSelected.toggleClass("is-hidden", !this.selectedCaptures.size);
       };
-      if (visible.some((item) => item.note.note_type === "Capture")) {
+      if (!this.plugin.isMobile && visible.some((item) => item.note.note_type === "Capture")) {
         const toolbar = container.createDiv({ cls: "okf-dashboard__selection-toolbar" });
         discardSelected = toolbar.createEl("button", {
           text: "移到回收站 (0)",
@@ -3076,7 +3097,7 @@ export class OkfDashboardView {
     const cards = section.createDiv({ cls: "okf-dashboard__compact-list" });
     for (const item of items) {
       const card = cards.createDiv({ cls: "okf-dashboard__compact-row okf-dashboard__compact-row--stacked" });
-      if (item.note.note_type === "Capture") {
+      if (!this.plugin.isMobile && item.note.note_type === "Capture") {
         const checkbox = card.createEl("input", {
           attr: { type: "checkbox", "aria-label": `选择 ${item.note.title}` },
         });
@@ -3150,6 +3171,7 @@ export class OkfDashboardView {
   }
 
   private webCaptureActions(parent: HTMLElement, note: NoteSummary): void {
+    if (this.plugin.isMobile) return;
     const actions = parent.createDiv({ cls: "okf-dashboard__actions okf-dashboard__decision-entry" });
     const status = actions.createDiv({ cls: "okf-dashboard__muted", text: "由你判断学习意愿和长期价值。" });
     const choices = actions.createDiv({ cls: "okf-dashboard__decision-choices" });
@@ -3193,6 +3215,10 @@ export class OkfDashboardView {
   }
 
   private pendingSourceActions(parent: HTMLElement, note: NoteSummary): void {
+    if (this.plugin.isMobile) {
+      parent.createDiv({ text: "资料已同步；归类和生成可在电脑继续。" });
+      return;
+    }
     const actions = parent.createDiv({ cls: "okf-dashboard__actions" });
     const learn = actions.createEl("button", { text: "用于学习" });
     learn.addEventListener("click", () => this.plugin.promptRoutePendingSource(note.path, "learn"));
@@ -3208,6 +3234,7 @@ export class OkfDashboardView {
     operation?: SemanticOperationRecord,
     includeOperations = false,
   ): void {
+    if (this.plugin.isMobile) return;
     const actions = parent.createDiv({ cls: "okf-work-item__actions" });
     const active = operation && isSemanticOperationActive(operation.status);
     if (operation && isSemanticOperationActive(operation.status)) {
@@ -3978,6 +4005,18 @@ export class OkfDashboardView {
     note: NoteSummary,
     operation?: SemanticOperationRecord,
   ): void {
+    if (this.plugin.isMobile) {
+      const actions = parent.createDiv({ cls: "okf-dashboard__actions" });
+      actions.createEl("button", { text: "打开" })
+        .addEventListener("click", () => void this.openPath(note.path));
+      if (canCompleteDashboardStudy(note, operation)) {
+        actions.createEl("button", { text: note.studied_at ? "取消完成" : "标记完成" })
+          .addEventListener("click", () => {
+            void this.plugin.setStudyCompleted(note.path, !note.studied_at).then(() => this.render(true));
+          });
+      }
+      return;
+    }
     const active = operation && isSemanticOperationActive(operation.status);
     const cluster = parent.createDiv({ cls: "okf-work-item__actions" });
     const action = cluster.createEl("button", {
@@ -4425,6 +4464,11 @@ export class OkfDashboardView {
   }
 
   private inboxActions(parent: HTMLElement, note: NoteSummary): void {
+    if (this.plugin.isMobile) {
+      parent.createEl("button", { text: "打开记录" })
+        .addEventListener("click", () => void this.openPath(note.path));
+      return;
+    }
     const entry = parent.createDiv({ cls: "okf-dashboard__actions" });
     const organize = entry.createEl("button", {
       text: "整理…",
@@ -4495,6 +4539,13 @@ export class OkfDashboardView {
   }
 
   private async renderSystem(container: HTMLElement): Promise<void> {
+    if (this.plugin.isMobile) {
+      container.createDiv({ text: "移动端可使用本地工作台和资料提交，后台转换在电脑上线后执行。" });
+      container.createEl("button", { text: "插件设置" })
+        .addEventListener("click", () => this.plugin.openPluginSettings());
+      await renderSyncedImports(this.app, container.createDiv(), this.plugin.originalFiles);
+      return;
+    }
     const actions = container.createDiv({ cls: "okf-dashboard__page-actions" });
     const refresh = actions.createEl("button", {
       text: "刷新诊断",

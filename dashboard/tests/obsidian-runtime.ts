@@ -1,4 +1,5 @@
 import { StateField } from "@codemirror/state";
+export const Platform = { isMobile: false, isDesktop: true, isPhone: false };
 
 export const editorInfoField = StateField.define<{ file: TFile | null }>({
   create: () => ({ file: null }), update: (value) => value,

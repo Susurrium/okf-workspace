@@ -1,0 +1,22 @@
+contract_version: 3
+artifact: Document Import Receipt
+authority: markdown
+paths:
+  - inbox/uploads/<request-id>/receipt.md
+  - system/imports/<request-id>/receipt.md
+required_fields: [request_id, request, processing_status, message]
+field_types:
+  request_id: string
+  request: vault_path
+  processing_status: string
+  message: string
+  conversion_id: string
+  original_archived: boolean
+  file_sha256: string
+  outputs: mapping
+  semantic_status: string
+  semantic_error: string
+states:
+  processing_status: [stored, waiting-for-file, waiting-for-upload, queued, converting, ready, waiting-for-mineru, waiting-for-parser, imported, failed]
+regions:
+  required_ai: [document-import-result]

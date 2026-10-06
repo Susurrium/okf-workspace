@@ -1,0 +1,23 @@
+name: okf-original-files
+services:
+  originals:
+    build:
+      context: ../../services/originals
+    restart: unless-stopped
+    environment:
+      OKF_FILES_ROOT: /data
+      OKF_FILES_TOKEN_FILE: /run/secrets/original-files-token
+      OKF_FILES_STORE_ID: ${OKF_FILES_STORE_ID:?set a stable store identity}
+    volumes:
+      - ${OKF_FILES_DATA_DIR:?set an absolute data directory}:/data
+      - ./secrets/original-files.token:/run/secrets/original-files-token:ro
+    ports:
+      - "127.0.0.1:8787:8080"
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

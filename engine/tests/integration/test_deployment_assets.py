@@ -16,8 +16,10 @@ def _powershell_quote(value: Path | str) -> str:
 
 
 def _run_powershell(command: str) -> subprocess.CompletedProcess[str]:
+    # Match error messages independently of terminal colors and concise-view wrapping.
+    plain_command = "$PSStyle.OutputRendering='PlainText';$ErrorView='NormalView';" + command
     return subprocess.run(
-        ["pwsh", "-NoProfile", "-Command", command],
+        ["pwsh", "-NoProfile", "-Command", plain_command],
         check=False,
         capture_output=True,
         text=True,
@@ -296,7 +298,7 @@ def test_dashboard_persists_only_external_token_file_path() -> None:
     assert "foreach ($legacyId in @('claudian'))" in claudian_installer
     assert "-AllowedManifestIds @('okf-claudian')" in claudian_installer
     assert "if ($ownedLegacyClaudian) { $removedPluginIds += 'claudian' }" in uninstaller
-    assert manifest["isDesktopOnly"] is True
+    assert manifest["isDesktopOnly"] is False
 
 
 def test_windows_installers_enforce_safe_idempotent_boundaries() -> None:

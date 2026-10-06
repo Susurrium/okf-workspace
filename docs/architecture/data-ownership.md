@@ -3,7 +3,9 @@
 | Data | Owner | Readers |
 | --- | --- | --- |
 | Capture | Intake | Dashboard, workflows |
-| Original manifest and blob | Intake | conversion pipeline |
+| Vault original attachment | User; Intake verifies and stores it, LiveSync replicates it | Obsidian native viewer, conversion pipeline |
+| Explicit Document Import Request | User, through Dashboard Vault APIs after the attachment is saved | desktop Intake receiver, mobile Dashboard |
+| Document Import Receipt display projection | Engine Intake | Dashboard; execution authority stays in external State |
 | Source identity, durable `uses[]`, and Source Text | Sources | all Workspace modules, retrieval, Dashboard |
 | Feed cache, Digest, and action receipt | Feeds | Dashboard, Sources, Operations |
 | Course, Lesson, Study Guide | Workspace Learning | Dashboard, Claudian, retrieval |
@@ -15,9 +17,21 @@
 | Apex habits, expenses, reading history, completed focus sessions, and widget state | Apex native services and their existing JSON/plugin data | Unified Dashboard widgets and their existing export/sync adapters |
 | Workbench Markdown layout, inline memos and tasks, and workbench safety copies | Dashboard/Apex workbench format | Dashboard, explicit AI attachments; live embedded tasks may participate in task projections |
 
-`Source.resource`, `kind`, and `text` describe a context-neutral input identity. Provenance such as
+`Source.resource` and `kind` describe a context-neutral input identity. Optional `text` links a
+published Source Text; saving an original does not require or fabricate that text. Provenance such as
 `ingested_via` records how the input first entered the Workspace; neither identity nor provenance says
 what the user wants to do with it.
+
+Document imports publish only the local assets referenced by the final converted body, after OCR
+and page reconstruction. Those assets live in `sources/assets/` and sync with the text and original;
+parser scratch images and unused exports are not Vault content. `Source Text.sources` points to the
+Source record, never to an inventory of extracted images. Body links carry attachment dependencies;
+document import publication does not enumerate them again in YAML `assets`.
+
+The complete parser export, asset manifest and QC report remain in external State for retry and
+diagnostics. Scratch `working/` files are removed only after publication and the successful receipt
+are durable. Failed or interrupted conversions retain scratch files. Export recovery remains possible
+without calling the parser again. This policy does not garbage-collect existing Vault attachments.
 
 Durable human decisions belong to `Source.uses[]`. Each use contains `purpose` plus optional `course`
 and `project` Vault references. The tuple is idempotent, so one Source can support several courses,

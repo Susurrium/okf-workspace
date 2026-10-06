@@ -23,6 +23,7 @@ _FIELD_TYPES = {
     "boolean",
     "date",
     "datetime",
+    "integer",
     "list",
     "mapping",
     "source_list",
