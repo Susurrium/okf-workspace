@@ -1,6 +1,6 @@
 {
   "name": "okf-claudian",
-  "version": "2.3.6-okf.4",
+  "version": "2.3.6-okf.5",
   "description": "Claudian - Claude Code embedded in Obsidian sidebar",
   "main": "main.js",
   "engines": {
@@ -70,7 +70,7 @@
     "@modelcontextprotocol/sdk": "~1.30.0",
     "cross-spawn": "7.0.6",
     "jsonc-parser": "3.3.1",
-    "smol-toml": "1.7.1",
+    "smol-toml": "1.9.0",
     "tslib": "^2.8.1",
     "ws": "8.21.2"
   },
@@ -80,12 +80,13 @@
     "@codemirror/view": "$@codemirror/view",
     "@hono/node-server": "2.0.11",
     "@humanfs/node": "0.16.8",
-    "baseline-browser-mapping": "2.11.13",
     "body-parser": "2.3.0",
-    "browserslist": "4.28.8",
-    "fast-uri": "3.1.6",
+    "fast-uri": "3.1.8",
     "hono": "4.13.7",
-    "ip-address": "10.3.1",
+    "ip-address": "10.7.3",
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "3.15.2"
+    },
     "js-yaml": "4.3.2",
     "qs": "6.16.0"
   }
