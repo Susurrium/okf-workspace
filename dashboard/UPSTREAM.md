@@ -1,8 +1,8 @@
 # Apex upstream baseline
 
 The unified workbench imports PandoraReads/apex-dashboard as a source subtree at `dashboard/apex/`.
-The current accepted source baseline is Apex 3.6.5. Its upstream acceptance and production cutover
-status are tracked in [the 3.6.5 update record](../docs/archive/2026-09-apex/apex-sync-3.6.5-plan.md).
+The current accepted source baseline is Apex 3.6.5. Its upstream validation and the 2026-09-29 production
+cutover are recorded in the [acceptance ledger](ACCEPTANCE.md).
 
 | Field | Locked value |
 | --- | --- |
@@ -27,12 +27,12 @@ and validation scripts remain available for deliberate upgrades.
 
 The 3.6.5 subtree candidate passed Apex lint, TypeScript/esbuild production build, and all 44 Apex
 `test:*` scripts. The unified Dashboard checks and root `scripts/check.ps1` passed. P01–P08, including
-isolated Obsidian acceptance and upgrade/rollback comparison, are recorded in the update record and
-acceptance ledger. This promotes the source baseline for integration/release review. Production cutover
-completed on 2026-09-29; see the update record and acceptance ledger for installed-runtime evidence.
+isolated Obsidian acceptance and upgrade/rollback comparison, are recorded in the acceptance ledger.
+This promotes the source baseline for integration/release review. Production cutover completed on
+2026-09-29; see the acceptance ledger for that installed-runtime evidence.
 
-The original 2.5.4 import and 3.6.0 rehearsal remain historical provenance. The 3.6.0 rehearsal is
-documented in [the archived update exercise](../docs/archive/2026-09-apex/apex-update-exercise-2026-09-21.md).
+The original 2.5.4 import and 3.6.0 rehearsal remain historical provenance. Their exercise reports are
+retained in Git history; the acceptance ledger records the accepted 3.6.5 outcome.
 
 ## Update procedure
 
@@ -44,8 +44,8 @@ documented in [the archived update exercise](../docs/archive/2026-09-apex/apex-u
    scenarios in `dashboard/ACCEPTANCE.md`.
 5. Exercise the critical flows in a disposable Obsidian Vault and update this file with the accepted commit.
 6. After acceptance or production cutover, update this baseline and the acceptance ledger with the resulting
-   status. Keep dated audit and test reports as historical evidence, and add a pointer to their later outcome
-   when their original status is no longer current.
+   status. Retain completed audit and exercise reports in Git history, and keep the current outcome in
+   this baseline and the acceptance ledger.
 
 Passing a Git merge or TypeScript compilation alone is not an accepted upstream update.
 

@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 
@@ -22,9 +23,10 @@ describe('enhanced CLI discovery and subprocess PATH', () => {
     process.env.LOCALAPPDATA = path.join(directory, 'Local AppData');
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     process.env = originalEnv;
-    rmSync(directory, { recursive: true, force: true });
+    // Windows can retain a short-lived handle to the executable after it exits.
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   it.each(['default', 'home fallback', 'XDG_DATA_HOME', 'MISE_DATA_DIR', 'MISE_SHIMS_DIR', 'npm_config_prefix', ...(!isWindows ? ['.npm-global'] : [])])(

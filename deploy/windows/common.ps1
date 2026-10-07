@@ -109,6 +109,45 @@ function Read-OkfConfig {
     return Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
 }
 
+function Get-OkfRuntimeRoot {
+    param([Parameter(Mandatory)][object]$Deployment)
+    if ($Deployment.PSObject.Properties.Name -contains 'runtime_root' -and [string]$Deployment.runtime_root) {
+        return Resolve-OkfPath ([string]$Deployment.runtime_root)
+    }
+    return Resolve-OkfPath ([string]$Deployment.repository_root)
+}
+
+function Get-OkfEnginePython {
+    param([Parameter(Mandatory)][object]$Deployment)
+    if ($Deployment.PSObject.Properties.Name -contains 'engine_python' -and [string]$Deployment.engine_python) {
+        return Resolve-OkfPath ([string]$Deployment.engine_python)
+    }
+    return Join-Path (Get-OkfRuntimeRoot $Deployment) 'engine\.venv\Scripts\python.exe'
+}
+
+function Get-OkfEngineCommand {
+    param([Parameter(Mandatory)][object]$Deployment)
+    return Join-Path (Split-Path -Parent (Get-OkfEnginePython $Deployment)) 'okf.exe'
+}
+
+function Get-OkfResticCommand {
+    param([Parameter(Mandatory)][object]$Deployment)
+    if ($Deployment.PSObject.Properties.Name -contains 'restic_executable' -and [string]$Deployment.restic_executable) {
+        $executable = Resolve-OkfPath ([string]$Deployment.restic_executable)
+        if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw "Restic executable not found: $executable" }
+        return $executable
+    }
+    return Assert-OkfCommand 'restic'
+}
+
+function Get-OkfBackupTag {
+    param([Parameter(Mandatory)][object]$Deployment)
+    if ($Deployment.PSObject.Properties.Name -contains 'installation_id' -and [string]$Deployment.installation_id) {
+        return "okf-workspace:$($Deployment.installation_id)"
+    }
+    return 'okf-workspace'
+}
+
 function Set-OkfEnvironment {
     param([Parameter(Mandatory)][object]$Config)
     $env:OKF_BRAIN_VAULT = [string]$Config.vault

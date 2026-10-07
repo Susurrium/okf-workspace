@@ -10,7 +10,7 @@ if (-not (Test-Path -LiteralPath $producers -PathType Leaf)) {
     exit 0
 }
 
-$okf = Join-Path ([string]$deployment.repository_root) 'engine\.venv\Scripts\okf.exe'
+$okf = Get-OkfEngineCommand $deployment
 & $okf feed sync all --state ([string]$deployment.state)
 if ($LASTEXITCODE -ne 0) {
     throw 'Feed synchronization was incomplete; the scheduled task will retry.'

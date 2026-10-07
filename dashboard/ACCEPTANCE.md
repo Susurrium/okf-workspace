@@ -6,14 +6,15 @@
 > restored M4–M6 and the desktop runtime portion of M8. M7 has authenticated fixture-sync evidence; live
 > producer sync and source/history pagination now pass in the isolated Obsidian run. M9 rollback comparison
 > also passes against a fresh pre-swap snapshot. P08 passed its reachable-surface inventory in the isolated
-> run. See `archive/2026-09-apex/APEX-OKF-FUNCTIONAL-PARITY-IMPLEMENTATION-2026-09-21.md`.
+> run. The accepted outcomes are recorded in the staged gates and isolated-run evidence below; detailed
+> implementation reports remain available in Git history.
 
 > **Production cutover update (2026-09-29):** release v0.8.0 is installed in the production Vault. The
 > backup, installer acceptance, live plugin load, Engine health, plugin identity, and scheduled-task checks
 > are recorded below. The isolated M0–M9 and P01–P08 evidence remains separate from production runtime evidence.
 
-This ledger is the implementation authority for the staged work described in
-`archive/2026-09-apex/APEX-DASHBOARD-DEVELOPMENT-PLAN-2026-09-21.md`. A row is complete only when its named automated evidence
+This ledger records the capability inventory, staged gates and acceptance evidence for the Apex × OKF
+integration. Historical proposals remain available in Git history. A row is complete only when its named automated evidence
 passes and, where required, its disposable-Vault interaction has been recorded. Production user data is
 never a test fixture.
 
@@ -91,7 +92,7 @@ following rows record the individual scenario evidence:
 | A16 | Feed return, note update, or theme switch | Unrelated web/music/timer state survives; reading page and position survive | Passed: real theme cycle preserved exact Feed position and Pomodoro bytes; UI-state tests passed |
 | A17 | Unknown field/section/free prose/newer board version | Data is retained and compatibility limit is visible; save never silently drops it | Passed: real schema-99 warning and repeated save preservation plus format tests |
 | A18 | Re-run interrupted legacy Apex-data takeover | Original format remains, manual changes are not overwritten, no Vault notes are created, one writer remains | Passed: real disabled-legacy copy/rerun/conflict run plus takeover tests |
-| A19 | Apply an upstream update | Native Apex and integrated OKF scenarios pass after a real subtree update exercise | **Passed:** isolated 2.5.4 → 3.6.0 → 3.6.5 subtree updates; 44 Apex scripts/lint/build, root check, P01–P08 acceptance, and upgrade/rollback comparison; see `docs/archive/2026-09-apex/apex-sync-3.6.5-plan.md` |
+| A19 | Apply an upstream update | Native Apex and integrated OKF scenarios pass after a real subtree update exercise | **Passed:** isolated 2.5.4 → 3.6.0 → 3.6.5 subtree updates; 44 Apex scripts/lint/build, root check, P01–P08 acceptance, and upgrade/rollback comparison; see the Apex 3.6.5 isolated Obsidian run below and [upstream baseline](UPSTREAM.md) |
 
 ## Synthetic Vault scenarios
 

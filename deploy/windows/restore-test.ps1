@@ -7,7 +7,8 @@ param(
 
 . (Join-Path $PSScriptRoot 'common.ps1')
 $deployment = Read-OkfConfig $Config
-$restic = Assert-OkfCommand 'restic'
+$restic = Get-OkfResticCommand $deployment
+$tag = Get-OkfBackupTag $deployment
 $env:RESTIC_REPOSITORY = [string]$deployment.backup_repository
 $env:RESTIC_PASSWORD_FILE = [string]$deployment.restic_password_file
 $backupState = Join-Path ([string]$deployment.state) 'backups'
@@ -38,9 +39,9 @@ try {
     New-Item -ItemType Directory -Path $restoredVaultPath, $restoredOriginalsPath | Out-Null
     $vaultSnapshotPath = Get-ResticSnapshotPath ([string]$deployment.vault)
     $originalsSnapshotPath = Get-ResticSnapshotPath ([string]$deployment.originals)
-    & $restic restore "latest:$vaultSnapshotPath" --target $restoredVaultPath --verify
+    & $restic restore "latest:$vaultSnapshotPath" --tag $tag --target $restoredVaultPath --verify
     if ($LASTEXITCODE -ne 0) { throw 'Restic Vault restore failed' }
-    & $restic restore "latest:$originalsSnapshotPath" --target $restoredOriginalsPath --verify
+    & $restic restore "latest:$originalsSnapshotPath" --tag $tag --target $restoredOriginalsPath --verify
     if ($LASTEXITCODE -ne 0) { throw 'Restic Original Store restore failed' }
 
     $restoredVault = Get-Item -LiteralPath $restoredVaultPath
@@ -49,7 +50,7 @@ try {
         throw "Restored Vault not found below $restoredVaultPath"
     }
 
-    $okf = Join-Path ([string]$deployment.repository_root) 'engine\.venv\Scripts\okf.exe'
+    $okf = Get-OkfEngineCommand $deployment
     $reportText = & $okf backup verify-restore --vault $restoredVault.FullName --originals $restoredOriginals.FullName --json
     if ($LASTEXITCODE -ne 0) { throw "Restored data verification failed: $reportText" }
     $report = $reportText | ConvertFrom-Json

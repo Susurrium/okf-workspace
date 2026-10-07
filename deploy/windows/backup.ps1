@@ -3,7 +3,8 @@ param([Parameter(Mandatory)][string]$Config)
 
 . (Join-Path $PSScriptRoot 'common.ps1')
 $deployment = Read-OkfConfig $Config
-$restic = Assert-OkfCommand 'restic'
+$restic = Get-OkfResticCommand $deployment
+$tag = Get-OkfBackupTag $deployment
 $env:RESTIC_REPOSITORY = [string]$deployment.backup_repository
 $env:RESTIC_PASSWORD_FILE = [string]$deployment.restic_password_file
 if (-not (Test-Path -LiteralPath $env:RESTIC_PASSWORD_FILE -PathType Leaf)) {
@@ -29,9 +30,13 @@ if (-not (Test-Path -LiteralPath $initialized)) {
 $sources = @(
     [string]$deployment.vault,
     [string]$deployment.originals,
-    (Join-Path ([string]$deployment.repository_root) 'deploy')
+    (Get-OkfRuntimeRoot $deployment),
+    (Join-Path ([string]$deployment.state) 'config'),
+    (Join-Path ([string]$deployment.state) 'secrets')
 )
-$output = & $restic backup @sources --json --exclude '.git' --exclude '.trash' --exclude '.obsidian/workspace*.json' --exclude 'sources/assets/treehole-media'
+$producers = Join-Path ([string]$deployment.state) 'feed-producers.json'
+if (Test-Path -LiteralPath $producers -PathType Leaf) { $sources += $producers }
+$output = & $restic backup @sources --json --tag $tag --exclude '.git' --exclude '.venv' --exclude 'node_modules' --exclude 'restic-password' --exclude $env:RESTIC_PASSWORD_FILE --exclude '.trash' --exclude '.obsidian/workspace*.json' --exclude 'sources/assets/treehole-media'
 if ($LASTEXITCODE -ne 0) { throw 'Restic backup failed' }
 $summary = $output |
     ForEach-Object { try { $_ | ConvertFrom-Json } catch { $null } } |
@@ -39,7 +44,7 @@ $summary = $output |
     Select-Object -Last 1
 $snapshot = if ($summary -and $summary.snapshot_id) { [string]$summary.snapshot_id } else { 'created' }
 
-& $restic forget --keep-daily 7 --keep-weekly 8 --keep-monthly 12 --prune
+& $restic forget --tag $tag --keep-daily 7 --keep-weekly 8 --keep-monthly 12 --prune
 if ($LASTEXITCODE -ne 0) { throw 'Restic retention cleanup failed' }
 
 Write-OkfJson -Path (Join-Path $backupState 'last-success.json') -Value ([ordered]@{
