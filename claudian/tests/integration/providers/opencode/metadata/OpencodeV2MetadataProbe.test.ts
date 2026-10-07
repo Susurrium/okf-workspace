@@ -84,7 +84,7 @@ beforeEach(() => {
   writeCatalog();
 });
 
-afterEach(() => rmSync(root, { recursive: true, force: true }));
+afterEach(() => rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
 
 function writeCatalog(name = 'DeepSeek Chat'): void {
   writeFileSync(environment.CATALOG_FILE!, JSON.stringify([
@@ -305,6 +305,7 @@ it('cancels one reader during shared startup without stopping another reader', a
   } finally { await service.dispose(); }
 });
 
+// Two native server lifetimes can include Windows shutdown escalation and handle release.
 it('invalidates a retained server during startup and permits a fresh discovery', async () => {
   environment.READY_DELAY_MS = '1000';
   const service = new OpencodeMetadataService(createPlugin());
@@ -318,7 +319,7 @@ it('invalidates a retained server during startup and permits a fresh discovery',
     await expect(service.loadCatalog()).resolves.toBe(true);
     expect(readFileSync(environment.ENDPOINT_FILE!, 'utf8')).not.toBe(endpoint);
   } finally { await service.dispose(); }
-});
+}, 15_000);
 
 it('closes the retained server across environment transitions and reads the new environment', async () => {
   const plugin = createPlugin();
