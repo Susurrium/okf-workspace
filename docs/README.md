@@ -20,6 +20,6 @@
 - Claudian：[组件说明](../claudian/README.md)、[上游版本](../claudian/UPSTREAM.md)、[OKF 补丁与 Bridge 类型](../claudian/OKF-PATCHES.md)。
 - 可选服务：[MarkItDown](../services/markitdown/README.md)、[自建 MinerU](../integrations/mineru/README.md)。
 - 历史恢复：[Originals 恢复服务](../services/originals/README.md)。
-- [发布记录](releases/0.9.0.md)、[历史归档](archive/README.md)。
+- [当前发布记录](releases/0.9.2.md)。历史发布说明、路线图、访谈和阶段报告通过 Git 历史查阅。
 
-2026-10-06 将分散的转换、原件、移动端、同步、API、Feed 和插件说明合并到上述指南，移除旧跳转入口；旧路线图与访谈保留在归档。维护规则见[开发与验收](DEVELOPMENT.md#文档维护)。
+2026-10-06 将分散的转换、原件、移动端、同步、API、Feed 和插件说明合并到上述指南，移除旧跳转入口；2026-10-07 清理历史过程文档与旧发布说明，历史内容保留在 Git 中。维护规则见[开发与验收](DEVELOPMENT.md#文档维护)。

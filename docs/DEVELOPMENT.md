@@ -244,11 +244,13 @@ uv run --project engine python scripts/smoke-mineru-cloud.py `
 - 模块、依赖与写入归属更新 `architecture/README.md`；字段与正文模型更新 `DATA-MODEL.md`，实际 Contract 始终优先。
 - 日常操作更新 `USER-GUIDE.md`；安装、凭据、同步、迁移和恢复更新 `DEPLOYMENT.md`；协议更新 `INTERFACES.md`。
 - 组件源码、专用配置、上游版本和补丁说明留在组件旁边。不要修改 vendored 上游 README 来承担仓库级导航。
-- 当前计划只记录仍需推进或待确认的事项；完成记录写入验收台账、发布记录或 Git 历史。已结束的提案、访谈、旧路线图和升级过程放进 `docs/archive/`，注明日期与现行入口。
+- 当前计划只记录仍需推进或待确认的事项；完成记录写入验收台账、当前发布记录或 Git 历史。已结束的提案、访谈、旧路线图、升级过程和旧发布说明由 Git 历史保留，不在当前目录维护重复副本；移除文件时同步修正现行文档的引用。
 - Vault Contracts、模板、Policies 和 Skills 是可部署资源，继续独立维护，不并入 README。
 - 移动或合并文件时同时更新相对链接、章节锚点和命令；不积累重复正文和兼容跳转文件。
 
 缓存、依赖、构建输出和本地任务资料由 Git 忽略。清理 `.context/` 或工作目录前检查 Git worktree、未提交内容和仍使用的恢复资料。
+
+查阅已移除的文档时，使用 `git log --all -- <文档路径>` 定位保留该文件的提交，再用 `git show <提交>:<文档路径>` 读取。2026-10-07 清理前的文档基线为 `98a56ee2`；历史材料不替代现行架构、Contracts 或验收规范。
 
 ### 架构可视化
 
