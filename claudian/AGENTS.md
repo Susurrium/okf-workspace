@@ -12,7 +12,7 @@ npm run typecheck && npm run lint && npm run test && npm run build && npm run ch
 ```
 
 - For focused changes, `npm run test:affected -- --base origin/main` selects related tests; it does not replace typecheck, lint, build, or performance checks. Documentation-only changes need `git diff --check` (CI enforces it on every pull request) and their affected documentation tests, not a production build.
-- Builds only generate local artifacts. Follow the root development and deployment guides for explicit installation, persistent test-environment selection and profile isolation.
+- Builds only generate local artifacts. Deploy through the root test-workspace updater or an explicit installer; regular acceptance uses the persistent test Vault and its isolated profile. Source installation validates its test State before writing artifacts.
 
 ## Architectural constraints
 

@@ -239,7 +239,8 @@ describe('prepareOpencodeLaunchArtifacts', () => {
       expect(JSON.parse(title.configContent).default_agent).toBe('claudian-title');
     } finally {
       link?.mockRestore();
-      await fs.rm(root, { recursive: true, force: true });
+      // Windows can briefly retain hard-linked directory entries after handles close.
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 
