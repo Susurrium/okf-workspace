@@ -63,7 +63,7 @@ function openWorkspaceMenu(plugin: ApexHost, file: string, name: string, ev: Eve
 }
 
 /**
- * Workspace switcher: number pills + add button on the banner, at the
+ * Workspace switcher: workspace buttons + add button on the banner, at the
  * top-left corner of the stats view's center column (the CSS mirrors the
  * stats grid to find that edge). Resting semi-visible, full on hover/focus;
  * on mobile there is no hover, so the pills stay visible. Rebuilt on every

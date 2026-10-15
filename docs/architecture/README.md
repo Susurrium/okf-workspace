@@ -102,7 +102,7 @@ See [original file lifecycle](../DEPLOYMENT.md#original-migration).
 | Semantic and conversion state | Operations | Dashboard, workers |
 | Contracts, templates, views, policies, Skills | Engine Workspace resources | Engine, deployed Vault, Dashboard, Claudian |
 | Apex habits, expenses, reading history, completed focus sessions, and widget state | Apex native services and their existing JSON/plugin data | Unified Dashboard widgets and their existing export/sync adapters |
-| Workbench Markdown layout, inline memos and tasks, and workbench safety copies | Dashboard/Apex workbench format | Dashboard, explicit AI attachments; live embedded tasks may participate in task projections |
+| Workbench Markdown layout, inline memos and checklists, and workbench safety copies | Dashboard/Apex workbench format | Dashboard and explicit AI attachments; Tasks and Engine task projections exclude workbenches |
 
 `Source.resource` and `kind` describe a context-neutral input identity. Optional `text` links a
 published Source Text; saving an original does not require or fabricate that text. Provenance such as
@@ -165,8 +165,8 @@ than being interpreted as an empty Vault.
 
 Default lexical/vector retrieval excludes workbenches and root `.dashboard-backup/` safety copies;
 index sync removes prior entries. Explicitly selected workbench attachments are read from current
-Markdown without entering the default index. Live workbench tasks retain the normal embedded-task
-rules; backup copies never contribute duplicate tasks or semantic governance findings. Workbenches
+Markdown without entering the default index. Workbench checklists remain local to their cards;
+Tasks and Engine task projections exclude every workbench and its backup copies. Workbenches
 remain included in backup/restore, and moving a memo into Capture remains an explicit user action.
 
 Original transport, migration and backup procedures: [deployment](../DEPLOYMENT.md#original-migration). Converter configuration: [deployment](../DEPLOYMENT.md#conversion). Public handoffs: [interfaces](../INTERFACES.md).

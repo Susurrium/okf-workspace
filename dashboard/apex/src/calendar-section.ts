@@ -16,6 +16,8 @@ import {
 import { renderMonthGrid, renderWeekTimeGrid, mondayOf } from './calendar-grid';
 import { DayAgendaModal, readCalendarTaskFilter, writeCalendarTaskFilter } from './calendar-modal';
 import { closeDayPreview, scheduleDayPreview } from './calendar-widget';
+import { calendarScopeControls, filterCalendarScope, readCalendarScope, calendarTimeEvents } from './calendar-scope';
+import { writeCalendarScopeForApp } from './calendar-modal';
 
 /** Per-section reload functions keyed by the section's host element, so vault
  *  task changes refresh the grid in place (re-scan + re-render into the live
@@ -56,6 +58,9 @@ export function renderCalendarSection(
 	app: App,
 	settings: DashboardSettings,
 	onOpenNote?: (file: TFile, line?: number) => void,
+	initialView: 'month' | 'week' = 'month',
+	config: Record<string, unknown> = {},
+	setConfig?: (config: Record<string, unknown>) => void | Promise<void>,
 ): void {
 	const excludeFolders = settings.calendarExcludeFolders ?? [];
 
@@ -73,10 +78,19 @@ export function renderCalendarSection(
 	const now = new Date();
 	let year = now.getFullYear();
 	let month = now.getMonth();
-	let view: 'month' | 'week' = 'month';
+	let view: 'month' | 'week' = initialView;
 	let weekStart: Date = mondayOf(now);
+	if (typeof config.calendarYear === 'number') year = config.calendarYear;
+	if (typeof config.calendarMonth === 'number') month = config.calendarMonth;
+	if (typeof config.calendarWeekStart === 'string') {
+		const value = window.moment(config.calendarWeekStart, 'YYYY-MM-DD', true);
+		if (!value.isValid()) throw new Error('日历周起始日期无效');
+		weekStart = value.toDate();
+	}
 	/** Persisted task filter, shared with the full-screen modal. */
 	let filter: CalendarTaskFilter = readCalendarTaskFilter(app);
+	if (typeof config.calendarTaskFilter === 'string' && CALENDAR_TASK_FILTERS.includes(config.calendarTaskFilter as CalendarTaskFilter)) filter = config.calendarTaskFilter as CalendarTaskFilter;
+	let scope = readCalendarScope({ ...settings, ...config });
 	/** Latest unfiltered scan (the filter is applied per render, like the modal). */
 	let byDay = new Map<string, VaultTask[]>();
 
@@ -95,6 +109,7 @@ export function renderCalendarSection(
 			if (v === 'week') weekStart = mondayOf(new Date());
 			syncChrome();
 			renderGrid();
+			persistNavigation();
 		});
 		viewBtns[v] = btn;
 	}
@@ -110,6 +125,7 @@ export function renderCalendarSection(
 		month = now2.getMonth();
 		weekStart = mondayOf(now2);
 		renderGrid();
+		persistNavigation();
 	});
 
 	// Task filter: narrows WHICH tasks occupy the grid. Dropdown via Obsidian's
@@ -125,16 +141,21 @@ export function renderCalendarSection(
 	setIcon(caret, 'chevron-down');
 	filterBtn.addEventListener('click', (e) => {
 		const menu = new Menu();
-		for (const f of CALENDAR_TASK_FILTERS) {
+		for (const f of (['formal', 'all', ...(!['formal', 'all'].includes(filter) ? [filter] : [])] as CalendarTaskFilter[])) {
 			menu.addItem(item => item
 				.setTitle(t(`calendar.filter.${f}`))
 				.setChecked(f === filter)
-				.onClick(() => applyFilter(f)));
+				.onClick(() => { void applyFilter(f); }));
 		}
 		filterBtn.setAttribute('aria-expanded', 'true');
 		menu.onHide(() => filterBtn.setAttribute('aria-expanded', 'false'));
 		menu.showAtMouseEvent(e);
 	});
+	calendarScopeControls(nav, app, scope, async next => {
+		if (setConfig) await saveSectionConfig({ ...next });
+		else await writeCalendarScopeForApp(app, next);
+		scope = next; renderGrid();
+	}, Boolean(setConfig));
 
 	const body = host.createDiv({ cls: 'dashboard-calendar-section-body' });
 
@@ -152,32 +173,54 @@ export function renderCalendarSection(
 		filterLabel.textContent = t(`calendar.filter.${filter}`);
 	}
 
-	function applyFilter(next: CalendarTaskFilter): void {
+	async function saveSectionConfig(changes: Record<string, unknown> = {}): Promise<void> {
+		const updated = { ...config, ...scope, calendarTaskFilter: filter, initialView: view,
+			calendarYear: year, calendarMonth: month, calendarWeekStart: toIsoDate(weekStart), ...changes };
+		await setConfig?.(updated);
+		config = updated;
+	}
+
+	function persistNavigation(): void {
+		if (setConfig) void saveSectionConfig().catch(error => new Notice(error instanceof Error ? error.message : '日历位置保存失败'));
+	}
+
+	async function applyFilter(next: CalendarTaskFilter): Promise<void> {
 		if (next === filter) return;
+		const previous = filter;
 		filter = next;
-		writeCalendarTaskFilter(app, filter);
+		try {
+			if (setConfig) await saveSectionConfig();
+			else writeCalendarTaskFilter(app, filter);
+		} catch (error) {
+			filter = previous;
+			new Notice(error instanceof Error ? error.message : '日历内容范围保存失败');
+		}
 		syncChrome();
 		renderGrid();
 	}
 
-	const onToggle = async (task: VaultTask, nextChecked: boolean): Promise<void> => {
+	const onToggle = async (task: VaultTask, nextChecked: boolean): Promise<boolean> => {
 		try {
-			await toggleTaskInFile(app, task, nextChecked);
+			if (!await toggleTaskInFile(app, task, nextChecked)) {
+				new Notice(t('alltasks.toggleFailed'));
+				return false;
+			}
 			invalidatePath(task.path);
 		} catch {
 			new Notice(t('alltasks.toggleFailed'));
-			return;
+			return false;
 		}
 		// Optimistic flip; the vault-event debounce re-scans for the truth.
 		task.checked = nextChecked;
 		renderGrid();
+		return true;
 	};
 
 	async function rescan(): Promise<void> {
 		// Always include the dashboard file itself: its checkbox lists are the
 		// user's live todos AND the day-agenda's fallback write destination (same
 		// rationale as the sidebar widget).
-		const tasks = (await collectVaultTasks(app, excludeFolders, settings.dashboardFile)).filter(isCalendarRelevant);
+		const tasks = (await collectVaultTasks(app, excludeFolders, settings.dashboardFile)).filter(task => isCalendarRelevant(task) || task.completion || task.cancelled);
 		byDay = indexTasksByDay(tasks);
 	}
 
@@ -187,7 +230,7 @@ export function renderCalendarSection(
 		closeDayPreview();
 		// Filtered day view recomputed every render so the 'active' today-boundary
 		// and checked-drops-out behavior stay fresh (same as the modal).
-		const viewByDay = filterTasksByDay(byDay, filter, toIsoDate(new Date()));
+		const viewByDay = filterCalendarScope(filterTasksByDay(byDay, filter, toIsoDate(new Date())), scope);
 		const gridOpts = {
 			compact: false as const,
 			app,
@@ -211,7 +254,7 @@ export function renderCalendarSection(
 			},
 		};
 		const { label } = view === 'week'
-			? renderWeekTimeGrid(body, weekStart, viewByDay, gridOpts)
+			? renderWeekTimeGrid(body, weekStart, calendarTimeEvents(viewByDay, scope.calendarDateFact), gridOpts)
 			: renderMonthGrid(body, year, month, viewByDay, gridOpts);
 		labelEl.textContent = label;
 	}
@@ -231,6 +274,7 @@ export function renderCalendarSection(
 			year = y;
 		}
 		renderGrid();
+		persistNavigation();
 	}
 
 	prev.addEventListener('click', () => shift(-1));

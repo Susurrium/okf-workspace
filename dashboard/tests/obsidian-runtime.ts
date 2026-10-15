@@ -1,5 +1,17 @@
 import { StateField } from "@codemirror/state";
+import { parse as parseYamlDocument } from "yaml";
 export const Platform = { isMobile: false, isDesktop: true, isPhone: false };
+export const getLanguage = (): string => 'zh';
+export const getAllTags = (metadata: { tags?: Array<{ tag: string }>; frontmatter?: { tags?: string | string[] } }): string[] => {
+  const raw = metadata.frontmatter?.tags;
+  const frontmatter = Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(/[ ,]+/u) : [];
+  return [...(metadata.tags ?? []).map(item => item.tag), ...frontmatter.map(tag => tag.startsWith('#') ? tag : `#${tag}`)];
+};
+export const parseFrontMatterTags = (frontmatter: { tags?: string | string[] }): string[] => getAllTags({ frontmatter });
+export const parseLinktext = (link: string): { path: string; subpath: string } => {
+  const at = link.indexOf('#');
+  return at < 0 ? { path: link, subpath: '' } : { path: link.slice(0, at), subpath: link.slice(at) };
+};
 
 export const editorInfoField = StateField.define<{ file: TFile | null }>({
   create: () => ({ file: null }), update: (value) => value,
@@ -7,6 +19,7 @@ export const editorInfoField = StateField.define<{ file: TFile | null }>({
 export const editorLivePreviewField = StateField.define<boolean>({ create: () => true, update: (value) => value });
 
 export class TFile {
+  public stat = { mtime: 0, ctime: 0, size: 0 };
   public readonly name: string;
   public readonly basename: string;
 
@@ -18,6 +31,13 @@ export class TFile {
 
 export class WorkspaceLeaf {
   public constructor(public readonly app: unknown = {}) {}
+}
+
+export class MarkdownRenderer {
+  // 单元替身记录渲染输入；Markdown、链接和主题由隔离 Obsidian 实机验证。
+  public static async render(_app: unknown, markdown: string, element: HTMLElement): Promise<void> {
+    (element as unknown as TestElement).setText(markdown);
+  }
 }
 
 interface TestElementOptions {
@@ -129,11 +149,17 @@ export class TestElement {
   }
 
   public querySelectorAll(selector: string): TestElement[] {
+    const tags = selector.split(",").map(value => value.trim());
+    if (tags.every(value => /^[a-z]+$/iu.test(value))) return this.descendants().filter(child => tags.includes(child.tagName));
     const classes = [...selector.matchAll(/\.([a-z0-9_-]+)/giu)].map((match) => match[1]!);
     const data = /\[data-([a-z0-9_-]+)="([^"]*)"\]/iu.exec(selector);
     return this.descendants().filter((child) =>
       classes.every((className) => child.classes.has(className)) &&
       (!data || child.dataset[dataAttributeKey(`data-${data[1]}`)] === data[2]));
+  }
+
+  public querySelector(selector: string): TestElement | null {
+    return this.querySelectorAll(selector)[0] ?? null;
   }
 
   public closest(selector: string): TestElement | null {
@@ -185,6 +211,7 @@ export class Modal {
 }
 
 class TextAreaComponent {
+  public setValue(value: string): this { (this.inputEl as unknown as TestElement).value = value; return this; }
   public readonly inputEl = new TestElement("textarea") as unknown as HTMLTextAreaElement;
 
   public setPlaceholder(value: string): this {
@@ -198,6 +225,31 @@ class TextAreaComponent {
   }
 }
 
+class ValueComponent {
+  public constructor(public readonly inputEl: TestElement) {}
+  public get selectEl(): TestElement { return this.inputEl; }
+  public setValue(value: string): this { this.inputEl.value = value; return this; }
+  public addOptions(options: Record<string, string>): this {
+    for (const [value, text] of Object.entries(options)) this.inputEl.createEl("option", { text, attr: { value } }).value = value;
+    return this;
+  }
+  public addOption(value: string, text: string): this { return this.addOptions({ [value]: text }); }
+  public onChange(callback: (value: string) => void): this {
+    this.inputEl.addEventListener(this.inputEl.tagName === "select" ? "change" : "input", () => callback(this.inputEl.value));
+    return this;
+  }
+}
+
+class ButtonComponent {
+  public constructor(private readonly element: TestElement) {}
+  public get buttonEl(): TestElement { return this.element; }
+  public setButtonText(text: string): this { this.element.setText(text); return this; }
+  public setCta(): this { return this; }
+  public onClick(callback: () => void | Promise<void>): this {
+    this.element.addEventListener("click", () => { void callback(); }); return this;
+  }
+}
+
 export class Setting {
   public readonly settingEl: TestElement;
 
@@ -207,6 +259,15 @@ export class Setting {
 
   public setName(_value: string): this { return this; }
   public setDesc(_value: string): this { return this; }
+  public addDropdown(builder: (component: ValueComponent) => void): this {
+    builder(new ValueComponent(this.settingEl.createEl("select"))); return this;
+  }
+  public addText(builder: (component: ValueComponent) => void): this {
+    builder(new ValueComponent(this.settingEl.createEl("input"))); return this;
+  }
+  public addButton(builder: (component: ButtonComponent) => void): this {
+    builder(new ButtonComponent(this.settingEl.createEl("button"))); return this;
+  }
 
   public addTextArea(builder: (component: TextAreaComponent) => void): this {
     const component = new TextAreaComponent();
@@ -241,33 +302,5 @@ export class Menu {
 }
 
 export function parseYaml(source: string): Record<string, unknown> {
-  const parsed: Record<string, unknown> = {};
-  let uses: Record<string, string | null>[] | undefined;
-  let currentUse: Record<string, string | null> | undefined;
-  const clean = (value: string): string => value.trim().replace(/^['"]|['"]$/gu, "");
-  for (const line of source.split(/\r?\n/u)) {
-    if (/^uses:\s*$/u.test(line)) {
-      uses = [];
-      parsed.uses = uses;
-      currentUse = undefined;
-      continue;
-    }
-    const useStart = /^\s+-\s+purpose:\s*(.*?)\s*$/u.exec(line);
-    if (uses && useStart?.[1] !== undefined) {
-      currentUse = { purpose: clean(useStart[1]) };
-      uses.push(currentUse);
-      continue;
-    }
-    const useField = /^\s+(course|project):\s*(.*?)\s*$/u.exec(line);
-    if (currentUse && useField?.[1] && useField[2] !== undefined) {
-      currentUse[useField[1]] = clean(useField[2]) || null;
-      continue;
-    }
-    const match = /^([^\s:#][^:#]*):\s*(.*?)\s*$/u.exec(line);
-    if (match?.[1] && match[2] !== undefined) {
-      parsed[match[1].trim()] = clean(match[2]);
-      currentUse = undefined;
-    }
-  }
-  return parsed;
+  return parseYamlDocument(source) as Record<string, unknown>;
 }

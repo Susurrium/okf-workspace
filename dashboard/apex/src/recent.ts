@@ -7,10 +7,10 @@ export interface RecentDoc {
 	relativeTime: string;
 }
 
-export function getRecentDocs(app: App, count: number): RecentDoc[] {
+export function getRecentDocs(app: App, count: number, excludedPrefixes: readonly string[] = []): RecentDoc[] {
 	const files = app.vault.getMarkdownFiles();
 	const sorted = files
-		.filter(f => !f.path.startsWith('.'))
+		.filter(f => !f.path.startsWith('.') && !excludedPrefixes.some(prefix => f.path.startsWith(prefix)))
 		.sort((a, b) => b.stat.mtime - a.stat.mtime)
 		.slice(0, count);
 

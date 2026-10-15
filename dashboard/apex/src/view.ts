@@ -36,6 +36,7 @@ import type { HolidayInfo } from './holiday-service';
 import { WidgetTypeModal, type WidgetType } from './widget-type-modal';
 import { StickyCardTypeModal } from './sticky-card-type-modal';
 import { AddSectionModal } from './add-section-modal';
+import { isRegisteredSection } from './section-registry';
 import { WeatherConfigModal } from './weather-config-modal';
 import { LibraryConfigModal } from './library-config-modal';
 import { FolderConfigModal } from './folder-config-modal';
@@ -57,7 +58,10 @@ import { createReadingMiniTimer, type ReadingMiniTimer } from './reading-mini-ti
 import { ReadingService } from './reading-service';
 import { ReminderNoticeModal } from './reminder-notice';
 import { t } from './i18n';
-import { archiveCompleted, serializeTasksForNote } from './task-tree';
+import { archiveCompleted, serializeTasksForNote, getTaskByPath, serializeTaskItemLine } from './task-tree';
+import { collectVaultTasks, type VaultTask } from './alltasks-scan';
+import { cloneTaskLines } from '../../tasks-generated/core.js';
+import { rewriteTaskReferences } from './task-operations';
 import { getOrCreateDailyNote, ensureFolder } from './daily-notes';
 import { createMemoNote } from './memo-note';
 import type { App } from 'obsidian';
@@ -485,10 +489,23 @@ export class DashboardView extends ItemView implements HoverParent {
 		return column ? this.refreshSectionInPlace(sectionRef(column)) : false;
 	}
 
-	async addSectionType(sectionType: string, name: string): Promise<void> {
-		if (!this.hasSectionType(sectionType)) await this.addColumnWithType(name, sectionType);
+	async addSectionType(sectionType: string, name: string, config?: Record<string, unknown>): Promise<void> {
+		const serializeConfig = (value: unknown): string => JSON.stringify(value, (_key, item: unknown) => {
+			if (item && typeof item === 'object' && !Array.isArray(item)) {
+				return Object.fromEntries(Object.entries(item).sort(([left], [right]) => left.localeCompare(right)));
+			}
+			return item;
+		});
+		const existing = this.data?.columns.find(column => column.sectionType === sectionType &&
+			(config === undefined || serializeConfig(column.extensionConfig ?? {}) === serializeConfig(config)));
+		if (!existing) await this.sync.addColumn(name, sectionType, config);
 		await this.refresh();
-		this.revealSectionType(sectionType);
+		const column = existing ?? this.data?.columns.filter(item => item.sectionType === sectionType).at(-1);
+		if (column) {
+			const row = Array.from(this.containerEl.querySelectorAll<HTMLElement>('.dashboard-section-row'))
+				.find(item => item.dataset.column === sectionRef(column));
+			row?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		}
 	}
 
 	async replaceWorkspacePath(oldPath: string, newPath: string): Promise<void> {
@@ -508,10 +525,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	}
 
 	async addSection(): Promise<void> {
-		const name = await showPromptDialog(this.app, { title: t('renderer.sectionName') });
-		if (name) {
-			void this.sync.addColumn(name);
-		}
+		this.openAddSectionModal();
 	}
 
 	/** Flip the banner between poster & quotes and the stats dashboard.
@@ -1074,7 +1088,7 @@ export class DashboardView extends ItemView implements HoverParent {
 			}
 		} else {
 			content.createEl('h4', { text: t('mobile.recent'), cls: 'dashboard-mobile-drawer-title' });
-			const docs = getRecentDocs(this.app, this.plugin.settings.recentDocCount);
+			const docs = getRecentDocs(this.app, this.plugin.settings.recentDocCount, this.plugin.recentDocumentExclusions);
 			renderRecentDocs(content, docs, (path) => { void this.navigateToPath(path); });
 		}
 
@@ -1179,7 +1193,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		);
 
 		if (!isStackedLayout(this.plugin.settings)) {
-			const docs = getRecentDocs(this.app, this.plugin.settings.recentDocCount);
+			const docs = getRecentDocs(this.app, this.plugin.settings.recentDocCount, this.plugin.recentDocumentExclusions);
 			renderRecentDocs(
 				scroll,
 				docs,
@@ -1413,6 +1427,12 @@ export class DashboardView extends ItemView implements HoverParent {
 			onTaskReorder: (cardId: string, fromPath: number[], toPath: number[], before: boolean) => this.sync.reorderTask(cardId, fromPath, toPath, before),
 			onTaskMoveToCard: (srcCardId: string, fromPath: number[], destCardId: string, destPath: number[], mode: 'before' | 'after' | 'nest') => this.sync.moveTaskToCard(srcCardId, fromPath, destCardId, destPath, mode),
 			onTaskEdit: (cardId: string, taskPath: number[], text: string) => this.sync.editTask(cardId, taskPath, text),
+			onTaskDetails: !this.plugin.checklistsInWorkbenchOnly && this.plugin.editTask ? (cardId: string, path: number[]) => {
+				void this.resolveCardTask(cardId, path).then(task => this.plugin.editTask!(task)).catch(error => new Notice(String(error), 8000));
+			} : undefined,
+			onTaskDateEdit: !this.plugin.checklistsInWorkbenchOnly && this.plugin.editTaskDates ? (cardId: string, path: number[]) => {
+				void this.resolveCardTask(cardId, path).then(task => this.plugin.editTaskDates!(task)).catch(error => new Notice(String(error), 8000));
+			} : undefined,
 			onTaskNest: (cardId: string, taskPath: number[]) => this.sync.nestTask(cardId, taskPath),
 			onTaskNestInto: (cardId: string, srcPath: number[], destPath: number[]) => this.sync.nestTaskInto(cardId, srcPath, destPath),
 			onTaskUnnest: (cardId: string, taskPath: number[]) => this.sync.unnestTask(cardId, taskPath),
@@ -1420,6 +1440,7 @@ export class DashboardView extends ItemView implements HoverParent {
 			onMemoUpdate: (card: DashboardCard, updates: Pick<DashboardCard, 'body' | 'blockquote'> & Partial<Pick<DashboardCard, 'tasks' | 'docs' | 'wikiLink' | 'url' | 'type'>>) => this.sync.updateMemoCard(card.id, updates),
 			onMemoSaveAsNote: (card: DashboardCard) => this.convertMemo(card),
 			onTaskSaveToDaily: (card: DashboardCard) => this.saveTasksToDaily(card),
+			onTaskCopyToDaily: this.plugin.checklistsInWorkbenchOnly ? undefined : (card: DashboardCard) => this.saveTasksToDaily(card, true),
 			onDocAdd: (cardId: string, path: string) => this.sync.addDocToCard(cardId, path),
 			onCardNewNote: (cardId: string, pos?: { x: number; y: number }) => { void this.handleCardNewNote(cardId, pos); },
 			onDocDelete: (cardId: string, docPath: number[]) => this.sync.deleteDoc(cardId, docPath),
@@ -1459,7 +1480,7 @@ export class DashboardView extends ItemView implements HoverParent {
 				});
 			},
 			onQuickNoteCreate: (preset: QuickNotePreset) => void createNoteFromPreset(this.app, preset),
-			onQuickNoteCapture: (text: string) => void captureThought(this.app, this.plugin.settings, text),
+			onQuickNoteCapture: (text: string) => captureThought(this.app, this.plugin.settings, text),
 			onOpenPinnedNote: (note: PinnedNote) => openPinnedNote(this.app, note),
 			onQuickCommand: (cmd: QuickCommand) => {
 				const commands = (this.app as AppWithCommands).commands;
@@ -1470,7 +1491,7 @@ export class DashboardView extends ItemView implements HoverParent {
 				}
 				commands.executeCommandById(cmd.commandId);
 			},
-			onQuickNoteDaily: () => void openTodayNote(this.app),
+			onQuickNoteDaily: () => void (this.plugin.openTodayNote ? this.plugin.openTodayNote() : openTodayNote(this.app)),
 			onQuickNoteConfig: () => new QuickNoteConfigModal(this.app, this.plugin).open(),
 			onMoveCard: (cardId: string, targetCol: string, targetIdx: number) => this.handleMoveCard(cardId, targetCol, targetIdx),
 			onMemoColorChange: (card: DashboardCard, color: string) => this.sync.updateMemoColor(card.id, color),
@@ -1502,10 +1523,13 @@ export class DashboardView extends ItemView implements HoverParent {
 						this.refreshSectionInPlace(columnName);
 					});
 				},
-				onExtensionConfigChange: (columnName: string, config: Record<string, unknown>) => {
+				onExtensionConfigChange: (columnName: string, config: Record<string, unknown>, baseline?: Record<string, unknown>) => {
 					this.suppressNextRender = true;
-					void this.sync.updateExtensionConfig(columnName, config).then(() => {
+					return this.sync.updateExtensionConfig(columnName, config, baseline).then(() => {
 						this.refreshSectionInPlace(columnName);
+					}).catch((error: unknown) => {
+						this.suppressNextRender = false;
+						throw error;
 					});
 				},
 				getCollapsedSections: () => new Set(this.sectionCollapseState.forWorkspace(collapseWorkspacePath)),
@@ -1570,10 +1594,48 @@ export class DashboardView extends ItemView implements HoverParent {
 		}
 	}
 
-	private async saveTasksToDaily(card: DashboardCard): Promise<void> {
+	private async resolveCardTask(cardId: string, path: number[]): Promise<VaultTask> {
+		await this.sync.flush();
+		const card = this.data?.columns.flatMap(column => column.cards).find(candidate => candidate.id === cardId);
+		const task = card ? getTaskByPath(card.tasks, path) : undefined;
+		if (!task) throw new Error('清单条目已经变化');
+		const line = serializeTaskItemLine(task);
+		const id = /\s+\^([\w-]+)\s*$/u.exec(line)?.[1];
+		const matches = (await collectVaultTasks(this.app)).filter(candidate => candidate.path === `${this.currentWorkspacePath()}.md`
+			&& (id ? candidate.blockId === id : candidate.originalLine.replace(/\s*<!--collapsed-->/u, '').trim() === line.trim()));
+		if (matches.length !== 1) throw new Error('无法唯一定位清单条目，请检查来源中的独立标识');
+		return matches[0]!;
+	}
+
+	private async saveTasksToDaily(card: DashboardCard, copy = false): Promise<void> {
 		try {
 			if (!card.tasks || card.tasks.length === 0) {
 				new Notice(t('notice.noTasksToSave'));
+				return;
+			}
+			if (this.plugin.saveTasksToDaily) {
+				let body: string;
+				if (copy) {
+					body = cloneTaskLines(serializeTasksForNote(card.tasks).split('\n'), this.currentWorkspacePath()).join('\n');
+				} else {
+					await this.sync.ensureTaskIdentities(card.id);
+					const current = this.sync.getData()?.columns.flatMap(column => column.cards).find(item => item.id === card.id);
+					if (!current) throw new Error('任务卡片已经变化');
+					const links: string[] = [];
+					const visit = (tasks: typeof card.tasks, indent = 0) => {
+						for (const task of tasks) {
+							const id = /\s+\^([a-zA-Z0-9-]+)\s*$/u.exec(task.text)?.[1];
+							if (!id) throw new Error('任务缺少独立标识');
+							const label = task.text.replace(/\s+\^[\w-]+\s*$/u, '').replace(/\|/gu, '｜');
+							links.push(`${'    '.repeat(indent)}- [[${this.currentWorkspacePath().replace(/\.md$/u, '')}#^${id}|${label}]]`);
+							if (task.children) visit(task.children, indent + 1);
+						}
+					};
+					visit(current.tasks);
+					body = links.join('\n');
+				}
+				const result = await this.plugin.saveTasksToDaily(`### ${card.title?.trim() || t('notice.memoUntitled')}\n${body}`);
+				new Notice(t('notice.tasksSavedToDaily', { path: result.path }), 4000);
 				return;
 			}
 
@@ -1613,20 +1675,20 @@ export class DashboardView extends ItemView implements HoverParent {
 	private async archiveCompletedTasks(columnName: string): Promise<void> {
 		try {
 			if (!this.data) return;
-			const column = this.data.columns.find((c) => c.name === columnName);
+			const column = this.data.columns.find((c) => sectionRef(c) === columnName || c.name === columnName);
 			if (!column) return;
 
 			const now = new Date();
 			const pad = (n: number) => String(n).padStart(2, '0');
 			const time = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
-			const entries: Array<{ task: string; card: string }> = [];
+			const entries: Array<{ task: string; card: string; markdown: string }> = [];
 			for (const card of column.cards) {
 				const { archived } = archiveCompleted(card.tasks);
 				if (archived.length === 0) continue;
 				const cardTitle = card.title?.trim() || t('notice.memoUntitled');
 				for (const item of archived) {
-					entries.push({ task: item.text, card: cardTitle });
+					entries.push({ task: item.text, card: cardTitle, markdown: serializeTasksForNote([item]) });
 				}
 			}
 
@@ -1646,7 +1708,12 @@ export class DashboardView extends ItemView implements HoverParent {
 			// today's daily note (created from the daily-notes template when
 			// missing; a stale blank note is template-rescued) or the configured
 			// fixed file with auto-created folders.
-			const lines = entries.map((e) => t('notice.archiveLine', { time, task: e.task, card: e.card }));
+			if (this.plugin.checklistsInWorkbenchOnly) {
+				await this.sync.archiveTasks(columnName, true);
+				new Notice(`已归档 ${entries.length} 项清单，内容保存在当前工作台。`, 4000);
+				return;
+			}
+			const lines = entries.map(e => `\n### ${e.card} · ${time}\n${e.markdown}`);
 			const appendText = `${lines.join('\n')}\n`;
 
 			let destFile: TFile;
@@ -1674,6 +1741,8 @@ export class DashboardView extends ItemView implements HoverParent {
 			await this.app.vault.modify(destFile, `${raw}${sep}${appendText}`);
 
 			await this.sync.archiveTasks(columnName);
+			const ids = entries.flatMap(entry => [...entry.markdown.matchAll(/\s\^([\w-]+)\s*$/gmu)].map(match => match[1]!));
+			await rewriteTaskReferences(this.app, `${this.currentWorkspacePath()}.md`, destFile, ids);
 
 			new Notice(t('notice.archived', { count: entries.length, path: destFile.path }), 4000);
 		} catch (err) {
@@ -1722,6 +1791,10 @@ export class DashboardView extends ItemView implements HoverParent {
 			return;
 		}
 		this.openNotePopover(file, subpath, line);
+	}
+
+	public revealTaskSource(file: TFile, line: number, blockId?: string): void {
+		this.openNote(file, blockId ? `#^${blockId}` : undefined, line);
 	}
 
 	/** Tab-path open with an optional line reveal once the view is active. */
@@ -2258,9 +2331,12 @@ export class DashboardView extends ItemView implements HoverParent {
 	}
 
 	private async deleteColumn(columnName: string, columnIndex?: number): Promise<void> {
+		const column = typeof columnIndex === 'number' && columnIndex >= 0
+			? this.data?.columns[columnIndex] : this.data?.columns.find(item => matchesSection(item, columnName));
+		if (!column || !matchesSection(column, columnName)) throw new Error('Section no longer exists');
 		const confirmed = await showConfirmDialog(this.app, {
 			title: t('common.confirmDelete'),
-			message: t('renderer.confirmDeleteSection', { column: columnName }),
+			message: t(isRegisteredSection(column.sectionType ?? '') ? 'renderer.confirmRemoveSection' : 'renderer.confirmDeleteSection', { column: column.name }),
 		});
 		if (!confirmed) return;
 		await this.sync.deleteColumn(columnName, columnIndex);
@@ -2268,6 +2344,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	}
 
 	private async executeAction(action: QuickAction): Promise<void> {
+		if (await this.plugin.executeQuickAction?.(action)) return;
 		if (action.type === 'file') {
 			await this.navigateToPath(action.target);
 		} else if (action.type === 'command') {
@@ -2646,7 +2723,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		if (!parent) return;
 
 		recentSection.remove();
-		const docs = getRecentDocs(this.app, this.plugin.settings.recentDocCount);
+		const docs = getRecentDocs(this.app, this.plugin.settings.recentDocCount, this.plugin.recentDocumentExclusions);
 		renderRecentDocs(parent, docs, (path) => { void this.navigateToPath(path); });
 	}
 
@@ -2815,7 +2892,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		const now = new Date();
 
 		for (const col of this.data.columns) {
-			for (const card of col.cards) {
+			for (const card of this.plugin.handlesTaskReminders ? [] : col.cards) {
 				for (let i = 0; i < card.tasks.length; i++) {
 					const task = card.tasks[i]!;
 					if (!task.reminder || task.checked) continue;

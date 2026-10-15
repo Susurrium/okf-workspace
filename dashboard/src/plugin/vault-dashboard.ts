@@ -15,10 +15,9 @@ import {
   filterDashboardLearningScope,
 } from "../domain/dashboard-experience.js";
 import { isIngestedVia } from "../domain/inbox-work-queue.js";
-import { scanFileTasks } from "../../apex/src/alltasks-scan.js";
+import { collectVaultTasks, indexTasksByDay, type VaultTask } from "../../apex/src/alltasks-scan.js";
 
 const USER_ROOTS = new Set(["inbox", "learning", "projects", "knowledge", "life", "sources"]);
-const TASK_ROOTS = new Set(["inbox", "learning", "projects", "knowledge", "life", "self"]);
 
 interface ScannedNote {
   file: TFile;
@@ -61,6 +60,11 @@ export interface KnowledgeProjection {
 
 export interface LifeProjection {
   notes: NoteSummary[];
+}
+
+export interface SourcesProjection {
+  sources: NoteSummary[];
+  related: NoteSummary[];
 }
 
 function localDate(value = new Date()): string {
@@ -187,12 +191,15 @@ function section(body: string, title: string): string {
   return markdownExcerpt(selected.join("\n"), 500);
 }
 
-function collectTasks(notes: readonly ScannedNote[]): TaskItem[] {
-  return notes.flatMap((note) => {
-    if (!TASK_ROOTS.has(note.file.path.split("/")[0] ?? "")) return [];
-    return scanFileTasks(note.file, note.markdown)
-      .filter((task) => task.formal && !task.checked)
-      .map((task) => ({ path: task.path, line: task.line + 1, text: task.text }));
+function taskSummaries(tasks: readonly VaultTask[], notes: readonly NoteSummary[]): TaskItem[] {
+  const byPath = new Map(notes.map(note => [note.path, note]));
+  return tasks.map((task) => {
+    const note = byPath.get(task.path);
+    const courseSlug = /^learning\/courses\/([^/]+)\//u.exec(task.path)?.[1];
+    const projectSlug = /^projects\/([^/]+)\//u.exec(task.path)?.[1];
+    const course = task.course ?? note?.course ?? (courseSlug ? `/learning/courses/${courseSlug}/course.md` : undefined);
+    const project = task.project ?? note?.project ?? (projectSlug ? `/projects/${projectSlug}/project.md` : undefined);
+    return { path: task.path, line: task.line + 1, text: task.text, ...(course ? { course } : {}), ...(project ? { project } : {}) };
   });
 }
 
@@ -291,12 +298,14 @@ export class VaultDashboardReader {
     const pendingWiki = this.pendingWikiFrom(summaries);
     const daily = `life/daily/${date.slice(0, 4)}/${date.slice(5, 7)}/${date}.md`;
     const dailySummary = summaries.find((note) => note.path === daily);
+    const tasks = (await collectVaultTasks(this.app)).filter((task) => task.formal && !task.checked);
     return {
       date,
       daily: { path: daily, exists: this.app.vault.getAbstractFileByPath(daily) instanceof TFile },
       daily_excerpt: dailySummary?.excerpt ?? "",
-      tasks: collectTasks(notes),
-      active_projects: await this.projectsFrom(summaries, true, notes),
+      tasks: taskSummaries(indexTasksByDay(tasks).get(date) ?? [], summaries),
+      overdue_tasks: taskSummaries(tasks.filter((task) => task.due && task.due < date), summaries),
+      active_projects: await this.projectsFrom(summaries, true),
       active_courses: await this.coursesFrom(summaries),
       recent_study: summaries
         .filter(
@@ -311,6 +320,8 @@ export class VaultDashboardReader {
       open_inbox_count: summaries.filter(isPendingCapture).length,
       pending_study_count: pendingStudy.length,
       pending_wiki_count: pendingWiki.length,
+      pending_study: pendingStudy,
+      pending_wiki: pendingWiki,
       stale_knowledge: summaries.filter(
         (note) => ["Wiki", "Wiki Map"].includes(note.note_type) && note.stale,
       ),
@@ -345,7 +356,7 @@ export class VaultDashboardReader {
       .sort(compareNotesByRecency);
     const [courses, projects] = await Promise.all([
       this.coursesFrom(summaries, false),
-      this.projectsFrom(summaries, false, scanned),
+      this.projectsFrom(summaries, false),
     ]);
     return {
       pending_guides: pendingGuides,
@@ -364,7 +375,12 @@ export class VaultDashboardReader {
   public async projects(): Promise<ProjectsProjection> {
     const scanned = await this.scan();
     const summaries = scanned.map((note) => note.summary);
-    return { projects: await this.projectsFrom(summaries, false, scanned) };
+    return { projects: await this.projectsFrom(summaries, false) };
+  }
+
+  public async tasks(includeClosed = false, _includeChecklists = false, applyGlobalQuery = true): Promise<TaskItem[]> {
+    const notes = (await this.scan()).map(note => note.summary);
+    return taskSummaries((await collectVaultTasks(this.app, [], undefined, applyGlobalQuery)).filter(task => task.formal && (includeClosed || !task.checked)), notes);
   }
 
   public async knowledge(): Promise<KnowledgeProjection> {
@@ -382,6 +398,12 @@ export class VaultDashboardReader {
         .filter((note) => note.path.startsWith("life/"))
         .sort(compareNotesByRecency),
     };
+  }
+
+  public async sources(): Promise<SourcesProjection> {
+    const notes = (await this.scan()).map((note) => note.summary);
+    return { sources: notes.filter((note) => note.note_type === "Source").sort(compareNotesByRecency),
+      related: notes.filter((note) => ["Study Guide", "Wiki", "Wiki Map"].includes(note.note_type)) };
   }
 
   private pendingLearningFrom(summaries: readonly NoteSummary[]): NoteSummary[] {
@@ -458,6 +480,8 @@ export class VaultDashboardReader {
             ? { ingested_via: frontmatter.ingested_via }
             : {}),
           resource: textValue(frontmatter.resource),
+          text_path: textValue(frontmatter.text)?.replace(/^\//u, "") ?? null,
+          sha256: textValue(frontmatter.sha256),
           kind: textValue(frontmatter.kind),
           course: textValue(frontmatter.course),
           project: textValue(frontmatter.project),
@@ -530,10 +554,9 @@ export class VaultDashboardReader {
   private async projectsFrom(
     notes: readonly NoteSummary[],
     activeOnly = true,
-    scanned: readonly ScannedNote[] = [],
   ): Promise<ProjectSummary[]> {
     const files = this.app.vault.getFiles();
-    const formalTasks = collectTasks(scanned);
+    const formalTasks = taskSummaries((await collectVaultTasks(this.app)).filter((task) => task.formal && !task.checked), notes);
     const projects = notes.filter(
       (note) => note.note_type === "Project" && (!activeOnly || note.project_status === "active"),
     );
@@ -568,7 +591,7 @@ export class VaultDashboardReader {
         pending_captures: notes.filter(
           (note) => isPendingCapture(note) && sameVaultPath(note.project, project.path),
         ),
-        open_tasks: formalTasks.filter((task) => task.path.startsWith(`${root}/`)),
+        open_tasks: formalTasks.filter((task) => sameVaultPath(task.project, project.path)),
       };
     });
     const order: Record<string, number> = { active: 0, paused: 1, completed: 2 };

@@ -8,12 +8,15 @@ import {
 	toggleTaskInFile,
 	invalidatePath,
 	dateBucketOf,
+	filterTasksByDay,
+	toIsoDate,
 	type VaultTask,
 } from './alltasks-scan';
 import { renderMonthGrid, renderWeekGrid, mondayOf, taskDayTime, byDayTaskTime, appendDayOriginMark } from './calendar-grid';
-import { CalendarMonthModal, DayAgendaModal } from './calendar-modal';
+import { CalendarMonthModal, DayAgendaModal, readCalendarTaskFilter } from './calendar-modal';
 import { applyModalTheme } from './modal-theme';
 import { renderTextWithLinks } from './renderer';
+import { filterCalendarScope, readCalendarScope } from './calendar-scope';
 
 /** Module-level hover-preview state, so only one popup ever exists and it can be
  *  torn down across re-renders. Mirrors the single-popup discipline used elsewhere
@@ -200,12 +203,17 @@ export function renderSidebarCalendar(
 	const gridHost = content.createDiv({ cls: 'dashboard-calendar-host' });
 	let hasLoaded = false;
 
-	const onToggle = async (task: VaultTask, nextChecked: boolean): Promise<void> => {
+	const onToggle = async (task: VaultTask, nextChecked: boolean): Promise<boolean> => {
 		try {
-			await toggleTaskInFile(app, task, nextChecked);
+			if (!await toggleTaskInFile(app, task, nextChecked)) {
+				new Notice(t('alltasks.toggleFailed'));
+				return false;
+			}
 			invalidatePath(task.path);
+			return true;
 		} catch {
 			new Notice(t('alltasks.toggleFailed'));
+			return false;
 		}
 	};
 
@@ -216,8 +224,8 @@ export function renderSidebarCalendar(
 		// exclusion covering the dashboard's folder (e.g. 'assets') would
 		// otherwise hide dashboard tasks and erase calendar-added ones on the
 		// next re-scan.
-		const tasks = (await collectVaultTasks(app, excludeFolders, settings.dashboardFile)).filter(isCalendarRelevant);
-		const byDay = indexTasksByDay(tasks);
+		const tasks = (await collectVaultTasks(app, excludeFolders, settings.dashboardFile)).filter(task => isCalendarRelevant(task) || task.completion || task.cancelled);
+		const byDay = filterCalendarScope(filterTasksByDay(indexTasksByDay(tasks), readCalendarTaskFilter(app), toIsoDate(new Date())), readCalendarScope({ ...settings }));
 		const onDayClick = (iso: string): void => {
 			new DayAgendaModal(app, iso, byDay.get(iso) ?? [], { onToggle, onOpenNote }, settings.dashboardFile).open();
 		};
@@ -259,7 +267,7 @@ export function renderSidebarCalendar(
 	});
 
 	async function openFullscreen(): Promise<void> {
-		const tasks = (await collectVaultTasks(app, excludeFolders, settings.dashboardFile)).filter(isCalendarRelevant);
+		const tasks = (await collectVaultTasks(app, excludeFolders, settings.dashboardFile)).filter(task => isCalendarRelevant(task) || task.completion || task.cancelled);
 		const byDay = indexTasksByDay(tasks);
 		new CalendarMonthModal(app, byDay, { onToggle, onOpenNote }, view, view === 'week' ? weekStart : undefined, settings.dashboardFile).open();
 	}

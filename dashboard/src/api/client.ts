@@ -283,7 +283,7 @@ export class LocalApi {
     },
   ): Promise<{
     source: string;
-    source_text: string;
+    source_text: string | null;
     routed_target?: string;
     semantic_operation?: SemanticOperationRecord;
   }> {

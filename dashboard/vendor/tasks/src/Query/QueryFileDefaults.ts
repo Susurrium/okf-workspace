@@ -1,0 +1,267 @@
+import type { OptionalTasksFile, TasksFile } from '../Scripting/TasksFile';
+import { Query } from './Query';
+
+// Enum for handler types
+enum Handler {
+    Instruction = 'instruction',
+    ShowAndHide = 'showAndHide',
+    AddValue = 'addValue',
+}
+
+interface BaseQueryProperty {
+    name: string;
+    type: string;
+}
+
+interface InstructionQueryProperty extends BaseQueryProperty {
+    handler: Handler.Instruction;
+    trueValue: string;
+    falseValue: string;
+}
+
+interface ShowAndHideQueryProperty extends BaseQueryProperty {
+    handler: Handler.ShowAndHide;
+    display: string;
+}
+
+interface AddValueQueryProperty extends BaseQueryProperty {
+    handler: Handler.AddValue;
+}
+
+type QueryProperty = InstructionQueryProperty | ShowAndHideQueryProperty | AddValueQueryProperty;
+
+// Steps for adding a new property to Query File Defaults:
+// 1. Add the new value to queryProperties below.
+// 2. Add it to metaBindPluginWidgets() below
+// 3. Build the plugin and add it to the test vault: resources/sample_vaults/Tasks-Demo/
+// 4. Open the test vault in Obsidian
+// 5. Open each of these files, and run the 'Tasks: Add all Query File Defaults properties' command,
+//    and set its value to be consistent with the existing properties:
+//      - Test Data/query_file_defaults_all_options_false.md
+//      - Test Data/query_file_defaults_all_options_null.md
+//      - Test Data/query_file_defaults_all_options_true.md
+// 6. Sort the properties in each file in alphabetical order
+// 7. Run the 'Tasks: Add all Query File Defaults properties' command, to update query_file_defaults_all_options_*.json
+// 8. Run the tests, to update all inline snapshots and approved files.
+// 9. Run mdsnippets to update the docs and sample vault - or let the GitHub Action do it after merging to main
+
+// Note: This file is excluded from SonarCloud duplication-checks,
+//       as the duplication here provides clarity.
+// Instructions are listed in the order that items are displayed in Tasks search results
+const queryProperties: QueryProperty[] = [
+    {
+        name: 'TQ_show_toolbar',
+        type: 'checkbox',
+        display: 'toolbar',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_explain',
+        type: 'checkbox',
+        handler: Handler.Instruction,
+        trueValue: 'explain',
+        falseValue: '',
+    },
+    {
+        name: 'TQ_short_mode',
+        type: 'checkbox',
+        handler: Handler.Instruction,
+        trueValue: 'short mode',
+        falseValue: 'full mode',
+    },
+    {
+        name: 'TQ_show_tree',
+        type: 'checkbox',
+        display: 'tree',
+        handler: Handler.ShowAndHide,
+    },
+
+    // Fields that appear before date values:
+    {
+        name: 'TQ_show_tags',
+        type: 'checkbox',
+        display: 'tags',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_show_id',
+        type: 'checkbox',
+        display: 'id',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_show_depends_on',
+        type: 'checkbox',
+        display: 'depends on',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_show_priority',
+        type: 'checkbox',
+        display: 'priority',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_show_recurrence_rule',
+        type: 'checkbox',
+        display: 'recurrence rule',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_show_on_completion',
+        type: 'checkbox',
+        display: 'on completion',
+        handler: Handler.ShowAndHide,
+    },
+
+    // Date fields:
+    {
+        name: 'TQ_show_created_date',
+        type: 'checkbox',
+        display: 'created date',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_show_start_date',
+        type: 'checkbox',
+        display: 'start date',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_show_scheduled_date',
+        type: 'checkbox',
+        display: 'scheduled date',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_show_due_date',
+        type: 'checkbox',
+        display: 'due date',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_show_cancelled_date',
+        type: 'checkbox',
+        display: 'cancelled date',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_show_done_date',
+        type: 'checkbox',
+        display: 'done date',
+        handler: Handler.ShowAndHide,
+    },
+
+    // Elements of query results:
+    {
+        name: 'TQ_show_urgency',
+        type: 'checkbox',
+        display: 'urgency',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_show_backlink',
+        type: 'checkbox',
+        display: 'backlink',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_show_edit_button',
+        type: 'checkbox',
+        display: 'edit button',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_show_postpone_button',
+        type: 'checkbox',
+        display: 'postpone button',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_show_task_count',
+        type: 'checkbox',
+        display: 'task count',
+        handler: Handler.ShowAndHide,
+    },
+    {
+        name: 'TQ_extra_instructions',
+        type: 'text',
+        handler: Handler.AddValue,
+    },
+];
+
+/**
+ * Construct query instructions from Obsidian properties in the query file
+ */
+export class QueryFileDefaults {
+    public source(queryFile: OptionalTasksFile) {
+        if (!queryFile) {
+            return '';
+        }
+
+        const instructions = queryProperties.map((prop) => this.generateInstruction(queryFile, prop));
+        return instructions.filter((i) => i !== '').join('\n');
+    }
+
+    private generateInstruction(queryFile: TasksFile, prop: QueryProperty): string {
+        const hasProperty = queryFile.hasProperty(prop.name);
+        const value: unknown = queryFile.property(prop.name);
+        switch (prop.handler) {
+            case Handler.Instruction:
+                return (hasProperty && (value ? prop.trueValue : prop.falseValue)) || '';
+            case Handler.ShowAndHide:
+                return (hasProperty && (value ? 'show ' + prop.display : 'hide ' + prop.display)) || '';
+            case Handler.AddValue:
+                return hasProperty && typeof value === 'string' ? value : '';
+        }
+    }
+
+    public query(queryFile: OptionalTasksFile) {
+        return new Query(this.source(queryFile), queryFile);
+    }
+
+    public allPropertyNames(): string[] {
+        return queryProperties.map((prop) => prop.name);
+    }
+
+    public allPropertyNamesSorted(): string[] {
+        return this.allPropertyNames().sort((a, b) => a.localeCompare(b));
+    }
+
+    /**
+     * Return the type of the property with the specified name.
+     *
+     * @param {string} propertyName - The name of the property to retrieve the type for.
+     * @return {string | undefined} The type of the property if found, or undefined if the property is not found.
+     */
+    public propertyType(propertyName: string): string | undefined {
+        return queryProperties.find((prop) => prop.name === propertyName)?.type ?? undefined;
+    }
+
+    /**
+     * Return text that creates MetaBind widgets for users to edit query file defaults.
+     *
+     * This is used to generate content in the user documentation.
+     */
+    public metaBindPluginWidgets() {
+        // This is initially hard-coded, though I intend to machine-generate it eventually.
+        // Its text is embedded in the test vault and in the user guide.
+        return `
+toolbar: \`INPUT[toggle:TQ_show_toolbar]\`
+short mode: \`INPUT[toggle:TQ_short_mode]\`
+tree: \`INPUT[toggle:TQ_show_tree]\`
+tags: \`INPUT[toggle:TQ_show_tags]\`
+id: \`INPUT[toggle:TQ_show_id]\` depends on: \`INPUT[toggle:TQ_show_depends_on]\`
+priority: \`INPUT[toggle:TQ_show_priority]\`
+recurrence rule: \`INPUT[toggle:TQ_show_recurrence_rule]\` on completion: \`INPUT[toggle:TQ_show_on_completion]\`
+start date: \`INPUT[toggle:TQ_show_start_date]\` scheduled date: \`INPUT[toggle:TQ_show_scheduled_date]\` due date: \`INPUT[toggle:TQ_show_due_date]\`
+created date: \`INPUT[toggle:TQ_show_created_date]\` cancelled date: \`INPUT[toggle:TQ_show_cancelled_date]\` done date: \`INPUT[toggle:TQ_show_done_date]\`
+urgency: \`INPUT[toggle:TQ_show_urgency]\`
+backlink: \`INPUT[toggle:TQ_show_backlink]\`
+edit button: \`INPUT[toggle:TQ_show_edit_button]\` postpone button: \`INPUT[toggle:TQ_show_postpone_button]\`
+task count: \`INPUT[toggle:TQ_show_task_count]\`
+extra instructions: \`INPUT[textArea:TQ_extra_instructions]\`
+explain: \`INPUT[toggle:TQ_explain]\`
+`;
+    }
+}

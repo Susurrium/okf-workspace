@@ -2287,6 +2287,20 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 
 	const customDefinition = getSectionDefinition(sectionType);
 	if (customDefinition) {
+		titleEl.title = column.name;
+		if (customDefinition.configure) {
+			const configure = headerActions.createEl('button', {
+				cls: 'dashboard-section-add-btn', attr: { 'aria-label': t('library.configure') },
+			});
+			setIcon(configure, 'settings');
+			configure.addEventListener('click', () => {
+				const baseline = structuredClone(column.extensionConfig ?? {});
+				customDefinition.configure?.({
+					container: el, column, app, callbacks,
+					setConfig: config => callbacks.onExtensionConfigChange(reference, config, baseline),
+				});
+			});
+		}
 		const deleteSectionBtn = headerActions.createEl('button', {
 			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
 			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
@@ -2300,6 +2314,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		const body = el.createDiv({ cls: 'dashboard-custom-section' });
 		void Promise.resolve(customDefinition.render({
 			container: body,
+			headerActions,
 			column,
 			app,
 			callbacks,
@@ -2447,7 +2462,9 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		});
 
 		if (settings) {
-			renderCalendarSection(el, app, settings, callbacks.onOpenNoteAtLine);
+			renderCalendarSection(el, app, settings, callbacks.onOpenNoteAtLine,
+				column.extensionConfig?.initialView === 'week' ? 'week' : 'month', column.extensionConfig ?? {},
+				config => callbacks.onExtensionConfigChange(reference, config));
 		} else {
 			el.createDiv({ cls: 'dashboard-library-empty', text: t('calendar.noEvents') });
 		}
@@ -2901,6 +2918,11 @@ function renderCard(card: DashboardCard, columnName: string, sectionType: string
 			e.stopPropagation();
 			callbacks.onTaskSaveToDaily(card);
 		});
+		if (callbacks.onTaskCopyToDaily) {
+			const copy = actions.createEl('button', { cls: 'dashboard-card-btn', attr: { 'aria-label': '复制为独立日记清单', title: '复制为独立日记清单' } });
+			setIcon(copy, 'copy');
+			copy.addEventListener('click', event => { event.stopPropagation(); callbacks.onTaskCopyToDaily?.(card); });
+		}
 	}
 
 	const deleteBtn = actions.createEl('button', {
@@ -3281,7 +3303,8 @@ function renderTaskItem(
 	const label = item.createSpan({
 		cls: task.checked ? 'dashboard-task-text dashboard-task-text--done' : 'dashboard-task-text',
 	});
-	renderTextWithLinks(label, task.text, app);
+	const displayText = task.text.replace(/\s+\^[\w-]+\s*$/u, '');
+	renderTextWithLinks(label, displayText, app);
 	label.addEventListener('dblclick', (e) => {
 		e.stopPropagation();
 		const currentText = label.getText();
@@ -4051,7 +4074,8 @@ function createReminderButton(
 	btn.addEventListener('click', (e) => {
 		e.stopPropagation();
 		e.preventDefault();
-		showReminderPopup(btn, cardId, taskPath, task, callbacks);
+		if (callbacks.onTaskDateEdit) callbacks.onTaskDateEdit(cardId, taskPath);
+		else showReminderPopup(btn, cardId, taskPath, task, callbacks);
 	});
 
 	return btn;

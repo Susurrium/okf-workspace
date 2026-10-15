@@ -130,10 +130,7 @@ describe("VaultDashboardReader", () => {
     expect(today.pending_study_count).toBe(1);
     expect(today.pending_wiki_count).toBe(1);
     expect(today.recent_study[0]?.title).toBe("递归学习材料");
-    expect(today.tasks).toEqual([
-      expect.objectContaining({ path: "learning/courses/cs61a/lessons/01.md", text: "复习递归" }),
-      expect.objectContaining({ path: "projects/okf/project.md", text: "发布工作台" }),
-    ]);
+    expect(today.tasks).toEqual([]);
     expect(today.active_courses[0]).toEqual(
       expect.objectContaining({
         current_progress: "完成递归，下一步学习树。",

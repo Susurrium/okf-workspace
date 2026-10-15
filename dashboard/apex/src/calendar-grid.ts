@@ -53,6 +53,10 @@ export function taskDayTime(task: VaultTask, iso: string): string | undefined {
 	const kind = taskDayKind(task, iso);
 	if (kind === 'scheduled') return task.scheduledTime;
 	if (kind === 'completion') return task.completionTime;
+	if (kind === 'cancelled') return undefined;
+	if (kind === 'due' && task.calendarEventKind) return task.dueTime ?? (!task.start && !task.reminder ? task.time : undefined);
+	if (kind === 'reminder' && task.calendarEventKind) return task.reminder?.slice(11) || undefined;
+	if (task.calendarEventKind === 'span') return iso === task.start ? task.startTime ?? task.time : iso === task.end ? task.endTime : undefined;
 	return taskTime(task);
 }
 
@@ -63,6 +67,7 @@ export function taskDayTime(task: VaultTask, iso: string): string | undefined {
 export function taskDayTimeRange(task: VaultTask, iso: string): string | undefined {
 	const tm = taskDayTime(task, iso);
 	if (!tm) return undefined;
+	if (task.calendarEventKind && (task.calendarEventKind !== 'span' || task.end !== iso)) return tm;
 	return task.endTime && task.endTime > tm ? `${tm}-${task.endTime}` : tm;
 }
 
@@ -78,24 +83,20 @@ export function byDayTaskTime(iso: string): (a: VaultTask, b: VaultTask) => numb
 	};
 }
 
-/** Append the small origin marker (scheduled ⏳ / completed ✅) to a task row
- * when that day's anchor is one of those kinds. Shared by the month grid, week
- * grid, day agenda and hover preview so all four read identically. */
+/** 当日列表显示全部日期原因；时间事件只显示其对应的日期事实。 */
 export function appendDayOriginMark(row: HTMLElement, task: VaultTask, iso: string): void {
-	const kind = taskDayKind(task, iso);
-	if (kind === 'scheduled') {
-		const mark = row.createDiv({
-			cls: 'dashboard-calendar-mark dashboard-calendar-mark--scheduled',
-			attr: { 'aria-label': t('calendar.markerScheduled'), title: t('calendar.markerScheduled') },
-		});
-		setIcon(mark, 'hourglass');
-	} else if (kind === 'completion') {
-		const mark = row.createDiv({
-			cls: 'dashboard-calendar-mark dashboard-calendar-mark--done',
-			attr: { 'aria-label': t('calendar.markerDone'), title: t('calendar.markerDone') },
-		});
-		setIcon(mark, 'check-circle');
-	}
+	const facts = [
+		{ kind: 'scheduled', visible: task.scheduled === iso, label: '计划' },
+		{ kind: 'due', visible: task.due === iso, label: '截止' },
+		{ kind: 'reminder', visible: task.reminder?.slice(0, 10) === iso, label: '提醒' },
+		{ kind: 'completion', visible: task.completion === iso, label: '完成' },
+		{ kind: 'cancelled', visible: task.cancelled === iso, label: '取消' },
+		{ kind: 'span', visible: Boolean(task.start && task.end && task.start <= iso && task.end >= iso) || task.start === iso || task.end === iso, label: '安排' },
+	];
+	for (const fact of facts.filter(fact => fact.visible && (!task.calendarEventKind || task.calendarEventKind === fact.kind))) row.createDiv({
+		cls: `dashboard-calendar-mark dashboard-calendar-mark--${fact.kind}`, text: fact.label,
+		attr: { 'aria-label': fact.label, title: fact.label },
+	});
 }
 
 function weekdayLabels(): string[] {

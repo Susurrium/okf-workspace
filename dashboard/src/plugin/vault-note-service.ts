@@ -1,4 +1,6 @@
 import { TFile, type App } from "obsidian";
+import { prepareTaskLine } from '../../tasks-generated/core.js';
+import { readTaskSourceKind } from '../../apex/src/task-source.js';
 
 import {
   normalizeCaptureRelation,
@@ -232,6 +234,36 @@ export class VaultNoteService {
     return { path };
   }
 
+  public async appendDailyTaskBlock(block: string): Promise<{ path: string }> {
+    if (!block.trim()) throw new Error("任务内容不能为空");
+    const { path } = await this.createDaily();
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) throw new Error(`日记尚未到达：${path}`);
+    await this.app.vault.process(file, current => {
+      if (readTaskSourceKind(file.path, current) !== 'tasks') throw new Error('日记目标不能保存 Tasks 任务');
+      const lines = current.split(/\r?\n/u);
+      const heading = lines.findIndex(line => /^## 任务\s*$/u.test(line));
+      if (heading < 0) throw new Error(`日记缺少“任务”区域：${path}`);
+      const next = lines.findIndex((line, index) => index > heading && /^##\s+/u.test(line));
+      lines.splice(next < 0 ? lines.length : next, 0, block.trim(), "");
+      return lines.join("\n");
+    });
+    return { path };
+  }
+
+  public async appendTaskToNote(file: TFile, block: string): Promise<void> {
+    if (!block.trim()) throw new Error("待办内容不能为空");
+    await this.app.vault.process(file, current => {
+      if (readTaskSourceKind(file.path, current) !== 'tasks') throw new Error('目标笔记不能保存 Tasks 任务');
+      return `${current.trimEnd()}\n\n${block.trim()}\n`;
+    });
+  }
+
+  public async createTaskContainer(path: string, block: string): Promise<void> {
+    if (!path.endsWith('.md') || path.replace(/\\/gu, '/').split('/').some(part => ['.', '..'].includes(part) || part.includes(':'))) throw new Error('任务目标笔记路径无效');
+    await this.create(path, `${block.trim()}\n`);
+  }
+
   public async appendDailyTask(
     date: string,
     taskLine: string,
@@ -242,9 +274,7 @@ export class VaultNoteService {
     if (!/^- \[[ xX]\]\s+/u.test(oneLine) || oneLine.includes("\n")) {
       throw new Error("任务必须是单行 Markdown 清单");
     }
-    const formal = /(?:^|\s)#task(?:\s|$)/iu.test(oneLine)
-      ? oneLine
-      : oneLine.replace(/^(- \[[ xX]\]\s*)/u, "$1#task ");
+    const formal = prepareTaskLine(oneLine);
     const writtenLine = /\s\^[a-zA-Z0-9-]+\s*$/u.test(formal)
       ? formal
       : `${formal} ^task-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
@@ -256,6 +286,7 @@ export class VaultNoteService {
 
     let insertedLine = -1;
     await this.app.vault.process(file, (current) => {
+      if (readTaskSourceKind(file.path, current) !== 'tasks') throw new Error('日记目标不能保存 Tasks 任务');
       const lines = current.split(/\r?\n/u);
       const existing = lines.indexOf(writtenLine);
       if (existing >= 0) {

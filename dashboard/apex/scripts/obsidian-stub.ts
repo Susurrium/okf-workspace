@@ -2,6 +2,27 @@
 // `requestUrl` at runtime. Only what the scripts under test need; network
 // paths are never exercised by these checks.
 import { El } from './mini-dom';
+import realMoment from 'moment';
+
+// 任务格式与日期仍由真实 Tasks 模型和 Moment 处理；这里只隔离 Obsidian 宿主。
+Object.assign(globalThis, { window: Object.assign(globalThis, { moment: realMoment }) });
+export const getLanguage = (): string => 'zh';
+export const parseFrontMatterTags = (metadata: { tags?: string | string[] }): string[] => {
+	const value = metadata?.tags;
+	const values = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[ ,]+/) : [];
+	return values.map(tag => tag.startsWith('#') ? tag : `#${tag}`);
+};
+export const getAllTags = (cache: { tags?: Array<{ tag: string }>; frontmatter?: { tags?: string | string[] } }): string[] =>
+	[...(cache.tags ?? []).map(tag => tag.tag), ...parseFrontMatterTags(cache.frontmatter ?? {})];
+export const prepareSimpleSearch = (query: string) => (text: string) => {
+	const at = text.toLowerCase().indexOf(query.toLowerCase());
+	return at < 0 ? null : { score: 0, matches: [[at, at + query.length]] };
+};
+export function debounce<T extends (...args: never[]) => unknown>(callback: T, timeout: number): T & { cancel(): void } {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const invoke = (...args: Parameters<T>) => { clearTimeout(timer); timer = setTimeout(() => callback(...args), timeout); };
+	return Object.assign(invoke, { cancel: () => clearTimeout(timer) }) as T & { cancel(): void };
+}
 
 export const requestUrl = async (): Promise<{ json: unknown }> => ({ json: {} });
 

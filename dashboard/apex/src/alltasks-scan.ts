@@ -1,5 +1,9 @@
-import { App, TFile } from 'obsidian';
+import { App, TFile, type CachedMetadata, type ListItemCache, type HeadingCache } from 'obsidian';
 import { normalizeExcludeFolders, isUnderExcludedFolder } from './exclude-folders';
+import { parseTaskLine, indexTaskFile, matchesTaskFilter, readTaskIndex, executeTaskQuery, getSettings, validateTaskDate, type UpstreamTask } from '../../tasks-generated/core.js';
+import { taskSourceKind, readTaskSourceKind } from './task-source';
+import { parse as parseYaml } from 'yaml';
+import MarkdownIt from 'markdown-it';
 
 /** Recognized task priority levels (parsed from `[priority:: ...]`). */
 export type Priority = 'high' | 'medium' | 'low';
@@ -11,6 +15,7 @@ export type TaskGroupBy = 'date' | 'priority' | 'none';
  * display it, bucket it, and write the toggle back to its exact source line.
  */
 export interface VaultTask {
+	calendarEventKind?: CalendarDayKind;
 	file: TFile;
 	path: string;
 	/** 0-based line index of the checkbox in the source file. */
@@ -21,7 +26,19 @@ export interface VaultTask {
 	blockId?: string;
 	/** True only for explicit user tasks outside Source/Digest artifacts. */
 	formal: boolean;
+	eligible?: boolean;
+	checklist?: boolean;
 	checked: boolean;
+	status?: string;
+	statusType?: string;
+	upstream?: UpstreamTask;
+	created?: string;
+	cancelled?: string;
+	recurrence?: string;
+	dependencyId?: string;
+	dependsOn?: string[];
+	project?: string;
+	course?: string;
 	/** Display text with all markers (collapsed/reminder/due/priority) stripped. */
 	text: string;
 	/** Raw `⏰ YYYY-MM-DD( HH:MM)` reminder value, if present (time optional). */
@@ -42,6 +59,8 @@ export interface VaultTask {
 	completionTime?: string;
 	/** Start time-of-day `HH:MM` (from ⏰ / `[due::]` / `[start::]` when a time is present). */
 	time?: string;
+	startTime?: string;
+	dueTime?: string;
 	/** End time-of-day `HH:MM` (from `[end::]` when a time is present). */
 	endTime?: string;
 	priority?: Priority;
@@ -50,12 +69,14 @@ export interface VaultTask {
 }
 
 interface CacheEntry {
+	file: TFile;
 	mtime: number;
 	size: number;
 	tasks: VaultTask[];
 }
 
 const moduleCache = new Map<string, CacheEntry>();
+const markdown = new MarkdownIt('commonmark');
 
 const COLLAPSED_REGEX = /\s*<!--collapsed-->\s*$/;
 /** Plugin's own reminder marker: `⏰ YYYY-MM-DD( HH:MM)` (time optional). */
@@ -76,16 +97,8 @@ const END_EMOJI_REGEX = /\s*🛬\s*(\d{4}-\d{2}-\d{2})/;
 const SCHEDULED_FIELD_REGEX = /\s*\[scheduled::\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)\s*\]/i;
 /** Tasks-plugin scheduled emoji. */
 const SCHEDULED_EMOJI_REGEX = /\s*⏳\s*(\d{4}-\d{2}-\d{2})/;
-/** Dataview-style completion-date inline field, anywhere in the text. */
-const COMPLETION_FIELD_REGEX = /\s*\[completion::\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)\s*\]/i;
-/** Tasks-plugin done emoji with date. */
-const COMPLETION_EMOJI_REGEX = /\s*✅\s*(\d{4}-\d{2}-\d{2})/;
-/** Dataview-style priority inline field, anywhere in the text. */
-const PRIORITY_FIELD_REGEX = /\s*\[priority::\s*([^\]]+?)\s*\]/i;
 /** Any checkbox line, allowing leading indentation so subtasks are aggregated too. */
-const TASK_LINE_REGEX = /^(\s*)- \[([ xX])\]\s*(.+?)\r?$/;
-const FORMAL_TASK_REGEX = /(?:^|\s)#task(?=\s|$)/i;
-const BLOCK_ID_REGEX = /\s+\^([a-zA-Z0-9-]+)\s*$/;
+const TASK_LINE_REGEX = /^(\s*)[-*+][\t ]+\[(.)\][\t ]*(.+?)\r?$/;
 
 function frontmatterEnd(lines: string[]): number {
 	if (lines[0]?.trim() !== '---') return -1;
@@ -95,14 +108,6 @@ function frontmatterEnd(lines: string[]): number {
 	return -1;
 }
 
-/** Normalize a raw `[priority:: ...]` value to a known level. */
-function normalizePriority(raw: string): Priority | undefined {
-	const v = raw.trim().toLowerCase();
-	if (['high', 'hi', 'h', 'urgent', 'u', '1', '!!!', 'p1'].includes(v)) return 'high';
-	if (['medium', 'mid', 'm', 'normal', 'n', '2', '!!', 'p2'].includes(v)) return 'medium';
-	if (['low', 'l', 'low-priority', '3', '!', 'p3'].includes(v)) return 'low';
-	return undefined;
-}
 
 /** `HH:MM` from a `YYYY-MM-DD HH:MM`-shaped value (undefined if no time part). */
 function hhmm(s: string | undefined): string | undefined {
@@ -110,138 +115,126 @@ function hhmm(s: string | undefined): string | undefined {
 }
 
 /**
- * Scan one markdown file's content for checkbox tasks. Returns an empty array
- * (never throws) so one bad file can't break the whole section.
+ * Scan authoritative Markdown task lines. Invalid source data is reported.
  */
-export function scanFileTasks(file: TFile, content: string): VaultTask[] {
+export function scanFileTasks(file: TFile, content: string, cache: CachedMetadata = {}): VaultTask[] {
 	const lines = content.split('\n');
+	if (!lines.some(line => TASK_LINE_REGEX.test(line))) return [];
 	const yamlEnd = frontmatterEnd(lines);
+	if (lines[0]?.trim() === '---' && yamlEnd < 0) throw new Error(`任务来源 YAML 缺少结束标记：${file.path}`);
 	const yaml = yamlEnd > 0 ? lines.slice(1, yamlEnd).join('\n') : '';
-	const artifactType = /^type:\s*["']?([^\n"']+)/imu.exec(yaml)?.[1]?.trim().toLocaleLowerCase();
-	const excludesFormalTasks = artifactType === 'source' || artifactType === 'digest';
+	const metadata = yaml ? (parseYaml(yaml) ?? {}) as Record<string, unknown> : {};
+	if (metadata !== null && (typeof metadata !== 'object' || Array.isArray(metadata))) throw new Error(`待办来源 YAML 必须为对象：${file.path}`);
+	if (metadata.type !== undefined && typeof metadata.type !== 'string') throw new Error(`待办来源 type 必须为字符串：${file.path}`);
+	const kind = taskSourceKind(file.path, metadata);
+	const excludesFormalTasks = kind !== 'tasks';
 	const out: VaultTask[] = [];
-	let fence: '`' | '~' | undefined;
+	const ignored = new Set<number>();
+	const tokens = markdown.parse(lines.slice(yamlEnd + 1).join('\n'), {});
+	for (const token of tokens) {
+		if (['fence', 'code_block'].includes(token.type) && token.map) {
+			for (let line = token.map[0]; line < token.map[1]; line++) ignored.add(line + yamlEnd + 1);
+		}
+	}
+	const items: ListItemCache[] = [];
+	const stack: number[] = [];
+	const headings: HeadingCache[] = [];
+	const offsets: number[] = [];
+	let offset = 0;
+	for (const line of lines) { offsets.push(offset); offset += line.length + 1; }
+	const position = (line: number) => ({ line, col: 0, offset: offsets[line] ?? content.length });
+	for (const [index, token] of tokens.entries()) {
+		if (token.type === 'heading_open' && token.map) headings.push({ heading: tokens[index + 1]?.content ?? '',
+			level: Number(token.tag.slice(1)), position: { start: position(token.map[0] + yamlEnd + 1), end: position(token.map[1] + yamlEnd) } });
+		if (token.type === 'list_item_close') stack.pop();
+		if (token.type !== 'list_item_open' || !token.map) continue;
+		const line = token.map[0] + yamlEnd + 1;
+		const mark = TASK_LINE_REGEX.exec(lines[line] ?? '')?.[2];
+		items.push({ parent: stack.at(-1) ?? -1, ...(mark !== undefined ? { task: mark } : {}),
+			position: { start: position(line), end: position(token.map[1] + yamlEnd) } });
+		stack.push(line);
+	}
+	const snapshot: CachedMetadata = { ...cache, frontmatter: metadata, headings,
+		sections: cache.sections?.length ? cache.sections : [{ type: 'list', position: { start: position(yamlEnd + 1), end: position(lines.length - 1) } }] };
+	const indexed = new Map(indexTaskFile(file, content, snapshot, items).map(task => [task.lineNumber, task]));
 	for (let i = 0; i < lines.length; i++) {
 		const raw = lines[i]!;
 		if (i <= yamlEnd) continue;
-		const fenceMatch = /^\s*(`{3,}|~{3,})/u.exec(raw);
-		if (fenceMatch?.[1]) {
-			const marker = fenceMatch[1][0] as '`' | '~';
-			if (!fence) fence = marker;
-			else if (fence === marker) fence = undefined;
-			continue;
-		}
-		if (fence) continue;
+		if (ignored.has(i)) continue;
 		const m = raw.match(TASK_LINE_REGEX);
 		if (!m) continue;
-		const [, , mark, rest] = m;
-		let text = rest ?? '';
-		text = text.replace(COLLAPSED_REGEX, '');
-		const blockMatch = text.match(BLOCK_ID_REGEX);
-		const blockId = blockMatch?.[1];
-		if (blockMatch) text = text.replace(BLOCK_ID_REGEX, '');
-		const formal = !excludesFormalTasks && FORMAL_TASK_REGEX.test(text);
-		text = text.replace(FORMAL_TASK_REGEX, ' ');
+		const upstream = indexed.get(i) ?? parseTaskLine(raw, file.path, i, metadata);
+		if (!upstream) continue;
+		const formal = !excludesFormalTasks && matchesTaskFilter(raw) && upstream.status.type !== 'NON_TASK';
+		out.push(projectTask(file, raw, upstream, metadata, formal, kind === 'checklists'));
+	}
+	return out;
+}
 
-		let reminder: string | undefined;
-		const rm = text.match(REMINDER_REGEX);
-		if (rm) {
-			// Time part optional: date-only ⏰ anchors the day without a time label.
-			reminder = rm[2] ? `${rm[1]} ${rm[2]}` : rm[1];
-			text = text.replace(REMINDER_REGEX, '');
-		}
-
-		let due: string | undefined;
-		const df = text.match(DUE_FIELD_REGEX);
-		if (df) {
-			due = (df[1] ?? '').slice(0, 10);
-			text = text.replace(DUE_FIELD_REGEX, '');
-		}
-		if (!due) {
-			const cal = text.match(CALENDAR_REGEX);
-			if (cal) {
-				due = cal[1];
-				text = text.replace(CALENDAR_REGEX, '');
-			}
-		}
-		let priority: Priority | undefined;
-		const pf = text.match(PRIORITY_FIELD_REGEX);
-		if (pf) {
-			priority = normalizePriority(pf[1] ?? '');
-			text = text.replace(PRIORITY_FIELD_REGEX, '');
-		}
-
-		// Multi-day event window ([start::] / [end::] or 🛫 / 🛬).
-		let start: string | undefined;
-		const sf = text.match(START_FIELD_REGEX) ?? text.match(START_EMOJI_REGEX);
-		if (sf) {
-			start = (sf[1] ?? '').slice(0, 10);
-			text = text.replace(START_FIELD_REGEX, '').replace(START_EMOJI_REGEX, '');
-		}
-		let end: string | undefined;
-		const ef = text.match(END_FIELD_REGEX) ?? text.match(END_EMOJI_REGEX);
-		if (ef) {
-			end = (ef[1] ?? '').slice(0, 10);
-			text = text.replace(END_FIELD_REGEX, '').replace(END_EMOJI_REGEX, '');
-		}
-
-		// Scheduled date (⏳ / `[scheduled::]`): the day the task is planned for.
-		// A distinct calendar fact from the due date, so both anchor their own day.
-		let scheduled: string | undefined;
-		let scheduledTime: string | undefined;
-		const schf = text.match(SCHEDULED_FIELD_REGEX) ?? text.match(SCHEDULED_EMOJI_REGEX);
-		if (schf) {
-			scheduled = (schf[1] ?? '').slice(0, 10);
-			scheduledTime = hhmm(schf[1]);
-			text = text.replace(SCHEDULED_FIELD_REGEX, '').replace(SCHEDULED_EMOJI_REGEX, '');
-		}
-
-		// Completion date (✅ / `[completion::]`): the day the task was done.
-		let completion: string | undefined;
-		let completionTime: string | undefined;
-		const cmpf = text.match(COMPLETION_FIELD_REGEX) ?? text.match(COMPLETION_EMOJI_REGEX);
-		if (cmpf) {
-			completion = (cmpf[1] ?? '').slice(0, 10);
-			completionTime = hhmm(cmpf[1]);
-			text = text.replace(COMPLETION_FIELD_REGEX, '').replace(COMPLETION_EMOJI_REGEX, '');
-		}
-
-		// Time-of-day (for the calendar week time-grid): a START time wins when
-		// present (the block sits at the task's start, not its deadline), then
-		// ⏰, then a due field's time.
-		const time = hhmm(sf?.[1]) ?? hhmm(reminder) ?? hhmm(df?.[1]);
-		// End time from [end::]; a due/⏰ time landing on the START's own day
-		// also closes the block there (a 10:00→18:00 same-day window).
-		const dueCarriedTime = hhmm(reminder) ?? hhmm(df?.[1]);
-		const reminderDate = reminder?.slice(0, 10);
-		const endTime = hhmm(ef?.[1])
-			?? (start && (due ?? reminderDate) === start ? dueCarriedTime : undefined);
-
-		out.push({
+function projectTask(file: TFile, raw: string, upstream: UpstreamTask, metadata: Record<string, unknown>, formal: boolean, checklist = false): VaultTask {
+		const blockId = upstream.blockLink.trim().replace(/^\^/u, '') || undefined;
+		const rm = raw.match(REMINDER_REGEX);
+		const reminder = rm ? (rm[2] ? `${rm[1]} ${rm[2]}` : rm[1]) : undefined;
+		const endValue = (raw.match(END_FIELD_REGEX) ?? raw.match(END_EMOJI_REGEX))?.[1];
+		const end = endValue?.slice(0, 10);
+		const iso = (date: UpstreamTask['dueDate']): string | undefined => date?.isValid() ? date.format('YYYY-MM-DD') : undefined;
+		const extensionTime = (name: string): string | undefined =>
+			new RegExp(`\\[okf-${name}-time::\\s*(\\d{2}:\\d{2})\\s*\\]`, 'u').exec(raw)?.[1]
+			?? hhmm(new RegExp(`\\[${name}::\\s*([^\\]]+)\\]`, 'iu').exec(raw)?.[1]);
+		const start = iso(upstream.startDate);
+		const due = iso(upstream.dueDate);
+		const time = extensionTime('start') ?? hhmm(reminder) ?? extensionTime('due');
+		const endTime = hhmm(endValue) ?? (start && (due ?? reminder?.slice(0, 10)) === start ? hhmm(reminder) ?? extensionTime('due') : undefined);
+		const text = upstream.description
+			.replace(REMINDER_REGEX, '').replace(END_FIELD_REGEX, '').replace(END_EMOJI_REGEX, '')
+			.replace(/\s*\[okf-(?:start|due|scheduled|completion)-time::[^\]]+\]/gu, '')
+			.replace(/\s*\[(?:project|course)::[^\]]+\]/gu, '')
+			.replace(COLLAPSED_REGEX, '').trim();
+		return {
 			file,
 			path: file.path,
-			line: i,
+			line: upstream.lineNumber,
 			originalLine: raw,
 			blockId,
 			formal,
-			checked: (mark ?? ' ') !== ' ',
-			text: text.trim(),
+			eligible: formal,
+			checklist,
+			checked: checklist ? /^\s*[-*+]\s+\[[xX]\]/u.test(raw) : upstream.isDone,
+			status: upstream.status.symbol,
+			statusType: upstream.status.type,
+			upstream,
+			created: iso(upstream.createdDate), cancelled: iso(upstream.cancelledDate),
+			project: /\[project::\s*([^\]]+)\]/u.exec(raw)?.[1]?.trim() ?? (typeof metadata.project === 'string' ? metadata.project : /^projects\/[^/]+\//u.test(file.path) ? `/projects/${file.path.split('/')[1]}/project.md` : undefined),
+			course: /\[course::\s*([^\]]+)\]/u.exec(raw)?.[1]?.trim() ?? (typeof metadata.course === 'string' ? metadata.course : /^learning\/courses\/[^/]+\//u.test(file.path) ? `/learning/courses/${file.path.split('/')[2]}/course.md` : undefined),
+			recurrence: upstream.recurrence?.toText(), dependencyId: upstream.id, dependsOn: upstream.dependsOn,
+			text: taskDisplayText(text),
 			reminder,
 			due,
 			start,
 			end,
-			scheduled,
-			scheduledTime,
-			completion,
-			completionTime,
+			scheduled: iso(upstream.scheduledDate),
+			scheduledTime: extensionTime('scheduled'),
+			completion: iso(upstream.doneDate),
+			completionTime: extensionTime('completion'),
 			time,
+			startTime: extensionTime('start'),
+			dueTime: extensionTime('due'),
 			endTime,
-			priority,
+			priority: ({ '0': 'high', '1': 'high', '2': 'medium', '4': 'low', '5': 'low' } as Record<string, Priority>)[upstream.priority],
 			mtime: file.stat?.mtime ?? 0,
 			ctime: file.stat?.ctime ?? 0,
-		});
-	}
-	return out;
+		};
+}
+
+function taskDisplayText(text: string): string {
+  const filter = String(getSettings().globalFilter ?? '');
+  return (filter ? text.replace(filter, '') : text).trim();
+}
+
+export function isTaskSourcePath(path: string): boolean {
+	const parts = path.replace(/\\/gu, '/').split('/');
+	return !parts.some(part => part.startsWith('.')) && path !== 'index.md' && path !== 'AGENTS.md'
+		&& !(parts[0] === 'system' && ['contracts', 'reports', 'templates', 'views'].includes(parts[1] ?? ''));
 }
 
 /**
@@ -259,7 +252,19 @@ export async function collectVaultTasks(
 	app: App,
 	excludeFolders: string[] = [],
 	alwaysIncludePath?: string,
+	applyGlobalQuery = true,
 ): Promise<VaultTask[]> {
+	const indexed = readTaskIndex();
+	if (indexed) {
+		const tasks = indexed.flatMap(task => {
+			const file = app.vault.getAbstractFileByPath(task.path);
+			if (!(file instanceof TFile) || isUnderExcludedFolder(task.path, normalizeExcludeFolders(excludeFolders))) return [];
+			const metadata = app.metadataCache.getFileCache(file)?.frontmatter ?? {};
+			if (taskSourceKind(task.path, metadata) !== 'tasks' || task.status.type === 'NON_TASK') return [];
+			return [projectTask(file, task.originalMarkdown, task, metadata, true)];
+		});
+		return applyGlobalQuery ? applyTaskGlobalQuery(tasks) : tasks;
+	}
 	const normalized = normalizeExcludeFolders(excludeFolders);
 	const rawAlways = (alwaysIncludePath ?? '').trim().toLowerCase();
 	const alwaysFile = rawAlways ? (rawAlways.endsWith('.md') ? rawAlways : `${rawAlways}.md`) : '';
@@ -275,14 +280,14 @@ export async function collectVaultTasks(
 		// every file.
 		if (i > 0 && i % 50 === 0) await new Promise<void>(r => window.setTimeout(r, 0));
 
-		if (file.path.startsWith('.')) { stale.delete(file.path); continue; }
+		if (!isTaskSourcePath(file.path)) { stale.delete(file.path); continue; }
 		const exempt = alwaysFile !== '' && file.path.toLowerCase() === alwaysFile;
 		if (!exempt && isUnderExcludedFolder(file.path, normalized)) { stale.delete(file.path); continue; }
 		stale.delete(file.path);
 
 		const cached = moduleCache.get(file.path);
-		if (cached && cached.mtime === file.stat.mtime && cached.size === file.stat.size) {
-			all.push(...cached.tasks);
+		if (cached && cached.file === file && cached.mtime === file.stat.mtime && cached.size === file.stat.size) {
+			all.push(...cached.tasks.filter(task => task.formal));
 			continue;
 		}
 
@@ -291,7 +296,7 @@ export async function collectVaultTasks(
 		// have none). This avoids reading + regex-parsing the vast majority of notes.
 		// (Don't cache the empty result: re-checking the metadata cache each scan is
 		// cheap and self-heals if the cache was briefly stale after a write.)
-		const fc = app.metadataCache.getFileCache(file);
+		const fc = app.metadataCache?.getFileCache(file);
 		if (fc && !fc.listItems?.some(li => li.task !== undefined)) {
 			continue;
 		}
@@ -305,20 +310,74 @@ export async function collectVaultTasks(
 			content = cached && typeof directRead === 'function'
 				? await directRead.call(app.vault, file)
 				: await app.vault.cachedRead(file);
-		} catch {
-			continue;
+		} catch (error) {
+			throw new Error(`无法读取待办来源：${file.path}`, { cause: error });
 		}
-		const tasks = scanFileTasks(file, content);
-		moduleCache.set(file.path, { mtime: file.stat.mtime, size: file.stat.size, tasks });
-		all.push(...tasks);
+		const tasks = scanFileTasks(file, content, fc ?? {});
+		moduleCache.set(file.path, { file, mtime: file.stat.mtime, size: file.stat.size, tasks });
+		all.push(...tasks.filter(task => task.formal));
 	}
 	for (const path of stale) moduleCache.delete(path);
-	return all;
+	return applyGlobalQuery ? applyTaskGlobalQuery(all) : all;
+}
+
+function applyTaskGlobalQuery(tasks: VaultTask[]): VaultTask[] {
+	if (!getSettings().globalQuery) return tasks;
+	const results = executeTaskQuery('', tasks.flatMap(task => task.upstream ? [task.upstream] : []));
+	const visible = new Set(results.groups.flatMap(group => group.tasks).map(task => `${task.path}:${task.lineNumber}`));
+	return tasks.filter(task => visible.has(`${task.path}:${task.line}`));
 }
 
 /** Drop cache entries for a path (e.g. after a failed toggle) so the next scan re-reads. */
 export function invalidatePath(path: string): void {
 	moduleCache.delete(path);
+}
+
+export function invalidateAllTasks(): void { moduleCache.clear(); }
+
+function replaceTaskAndPreserveChildren(lines: string[], index: number, replacements: string[]): string {
+	const tokens = markdown.parse(lines.join('\n'), {});
+	const item = tokens.find(token => token.type === 'list_item_open' && token.map?.[0] === index);
+	if (!item?.map) throw new Error('无法确定任务与子项的范围');
+	const end = item.map[1];
+	const children = lines.slice(index + 1, end);
+	if (!replacements.length) {
+		const parentIndent = /^[\t ]*/u.exec(lines[index]!)![0].replace(/\t/gu, '    ').length;
+		const childIndents = tokens.filter(token => token.type === 'list_item_open' && token.map && token.map[0] > index && token.map[0] < end)
+			.map(token => /^[\t ]*/u.exec(lines[token.map![0]]!)![0].replace(/\t/gu, '    ').length - parentIndent).filter(indent => indent > 0);
+		const delta = childIndents.length ? Math.min(...childIndents) : 0;
+		const promoted = children.map(line => {
+			const prefix = /^[\t ]*/u.exec(line)![0];
+			return `${' '.repeat(Math.max(0, prefix.replace(/\t/gu, '    ').length - delta))}${line.slice(prefix.length)}`;
+		});
+		lines.splice(index, end - index, ...promoted);
+	} else if (replacements.length > 1 && parseTaskLine(replacements[0]!)?.isDone && !parseTaskLine(replacements[1]!)?.isDone) {
+		// 后续项排在完成项之后时，原子项继续属于原执行记录。
+		lines.splice(index, end - index, replacements[0]!, ...children, ...replacements.slice(1));
+	} else lines.splice(index, 1, ...replacements);
+	return lines.join('\n');
+}
+
+/** 所有完整任务编辑共用定位与原子写入，避免用过期编辑覆盖外部修改。 */
+export async function replaceTaskInFile(app: App, task: Pick<VaultTask, 'file' | 'line' | 'originalLine' | 'path'>, replacements: string[]): Promise<boolean> {
+	let wrote = false;
+	await app.vault.process(task.file, data => {
+		if (readTaskSourceKind(task.path, data) !== 'tasks') throw new Error('任务来源已经变化，不能写入工作台或排除范围');
+		const lines = data.split('\n');
+		let index = lines[task.line] === task.originalLine ? task.line : -1;
+		if (index < 0) {
+			const matches = lines.flatMap((line, number) => line === task.originalLine ? [number] : []);
+			if (matches.length === 1) index = matches[0]!;
+		}
+		if (index < 0) return data;
+		if (replacements.some(line => !TASK_LINE_REGEX.test(line))) throw new Error('替换内容必须为完整的 Markdown 任务行');
+		const identified = replacements.map(line => matchesTaskFilter(line) && !/\s+\^[\w-]+\s*$/u.test(line)
+			? `${line.trimEnd()} ^task-${crypto.randomUUID()}` : line);
+		wrote = true;
+		return replaceTaskAndPreserveChildren(lines, index, identified);
+	});
+	if (wrote) invalidatePath(task.path);
+	return wrote;
 }
 
 /**
@@ -331,6 +390,8 @@ export async function toggleTaskInFile(app: App, task: VaultTask, nextChecked: b
 	let wrote = false;
 	try {
 		await app.vault.process(task.file, (data: string) => {
+			const kind = readTaskSourceKind(task.path, data);
+			if (task.formal ? kind !== 'tasks' : !task.checklist || kind !== 'checklists') throw new Error('任务来源已经变化，请刷新后重试');
 			const lines = data.split('\n');
 			const target = task.originalLine;
 			let idx = lines[task.line] === target ? task.line : -1;
@@ -352,14 +413,20 @@ export async function toggleTaskInFile(app: App, task: VaultTask, nextChecked: b
 				return data;
 			}
 			const current = lines[idx]!;
-			const replacement = current.replace(/- \[[ xX]\]/u, nextChecked ? '- [x]' : '- [ ]');
-			if (replacement === current) {
+			if (task.formal && !matchesTaskFilter(current)) throw new Error('任务过滤条件已经变化，请刷新后重试');
+			if (task.formal && task.status !== undefined && parseTaskLine(current, task.path)?.status.symbol !== task.status) return data;
+			const replacements = task.formal
+				? parseTaskLine(current, task.path)!.toggleWithRecurrenceInUsersOrder().map(next => {
+					const line = next.toFileLineString();
+					return task.blockId && !next.blockLink ? `${line.trimEnd()} ^task-${crypto.randomUUID()}` : line;
+				})
+				: [current.replace(/([-*+][\t ]+)\[.\]/u, `$1[${nextChecked ? 'x' : ' '}]`)];
+			if (replacements.length === 1 && replacements[0] === current) {
 				wrote = false;
 				return data;
 			}
-			lines[idx] = replacement;
 			wrote = true;
-			return lines.join('\n');
+			return replaceTaskAndPreserveChildren(lines, idx, replacements);
 		});
 	} catch (err) {
 		console.error('[Dashboard] alltasks toggle failed:', err);
@@ -372,35 +439,33 @@ export interface TaskDateFields {
 	reminder?: string;
 	due?: string;
 	scheduled?: string;
+	start?: string;
+	end?: string;
 }
 
-const DATE_VALUE_REGEX = /^\d{4}-\d{2}-\d{2}$/u;
-const REMINDER_VALUE_REGEX = /^\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?$/u;
 
 /** Replace only the three independently editable date markers on a task line. */
 export function updateTaskDateFields(line: string, fields: TaskDateFields): string {
-	const reminder = fields.reminder?.trim() ?? '';
-	const due = fields.due?.trim() ?? '';
-	const scheduled = fields.scheduled?.trim() ?? '';
-	if (reminder && !REMINDER_VALUE_REGEX.test(reminder)) throw new Error('提醒必须为 YYYY-MM-DD 或 YYYY-MM-DD HH:MM');
-	if (due && !DATE_VALUE_REGEX.test(due)) throw new Error('截止日必须为 YYYY-MM-DD');
-	if (scheduled && !DATE_VALUE_REGEX.test(scheduled)) throw new Error('计划日必须为 YYYY-MM-DD');
-
+	const current = parseTaskLine(line);
+	const start = Object.hasOwn(fields, 'start') ? fields.start : current?.startDate?.format('YYYY-MM-DD');
+	const end = Object.hasOwn(fields, 'end') ? fields.end : (line.match(END_FIELD_REGEX) ?? line.match(END_EMOJI_REGEX))?.[1];
+	if (start && end && end.slice(0, 10) < start.slice(0, 10)) throw new Error('结束日期不能早于开始日期');
 	const suffixMatch = line.match(/(\s+\^[a-zA-Z0-9-]+)?(\s*<!--collapsed-->)?\s*$/u);
 	const suffix = suffixMatch?.[0] ?? '';
 	let body = suffix ? line.slice(0, -suffix.length) : line;
-	body = body
-		.replace(REMINDER_REGEX, '')
-		.replace(DUE_FIELD_REGEX, '')
-		.replace(CALENDAR_REGEX, '')
-		.replace(SCHEDULED_FIELD_REGEX, '')
-		.replace(SCHEDULED_EMOJI_REGEX, '')
-		.trimEnd();
-	const markers = [
-		reminder ? `⏰ ${reminder}` : '',
-		due ? `[due:: ${due}]` : '',
-		scheduled ? `[scheduled:: ${scheduled}]` : '',
-	].filter(Boolean);
+	const rules: Record<keyof TaskDateFields, RegExp[]> = {
+		reminder: [REMINDER_REGEX], due: [DUE_FIELD_REGEX, CALENDAR_REGEX], scheduled: [SCHEDULED_FIELD_REGEX, SCHEDULED_EMOJI_REGEX],
+		start: [START_FIELD_REGEX, START_EMOJI_REGEX], end: [END_FIELD_REGEX, END_EMOJI_REGEX],
+	};
+	const markers: string[] = [];
+	for (const key of Object.keys(fields) as Array<keyof TaskDateFields>) {
+		const value = fields[key]?.trim() ?? '';
+		if (value && !validateTaskDate(value)) throw new Error(`${key} 必须为有效的 YYYY-MM-DD 或 YYYY-MM-DD HH:MM`);
+		for (const rule of rules[key]) body = body.replace(rule, '');
+		body = body.replace(new RegExp(`\\s*\\[okf-${key}-time::[^\\]]+\\]`, 'gu'), '');
+		if (value) markers.push(key === 'reminder' ? `⏰ ${value}` : `[${key}:: ${value}]`);
+	}
+	body = body.trimEnd();
 	return `${body}${markers.length > 0 ? ` ${markers.join(' ')}` : ''}${suffix}`;
 }
 
@@ -412,6 +477,7 @@ export async function updateTaskDatesInFile(
 ): Promise<boolean> {
 	let wrote = false;
 	await app.vault.process(task.file, (data: string) => {
+		if (readTaskSourceKind(task.path, data) !== 'tasks') throw new Error('任务来源已经变化，请刷新后重试');
 		const lines = data.split('\n');
 		let idx = lines[task.line] === task.originalLine ? task.line : -1;
 		if (idx === -1 && task.blockId) {
@@ -425,9 +491,13 @@ export async function updateTaskDatesInFile(
 			if (hits.length === 1) idx = hits[0]!;
 		}
 		if (idx === -1) return data;
-		const replacement = updateTaskDateFields(lines[idx]!, fields);
+		const updated = updateTaskDateFields(lines[idx]!, fields);
+		const parsed = parseTaskLine(updated, task.path);
+		if (!parsed) throw new Error('任务格式已经变化，日期尚未保存');
+		const replacement = parsed.toFileLineString();
 		if (replacement === lines[idx]) return data;
-		lines[idx] = replacement;
+		lines[idx] = fields.reminder && !task.blockId && !/\s+\^[\w-]+\s*$/u.test(replacement)
+			? `${replacement} ^task-${crypto.randomUUID()}` : replacement;
 		wrote = true;
 		return lines.join('\n');
 	});
@@ -532,10 +602,12 @@ export function isCalendarRelevant(task: VaultTask): boolean {
 /** Why a task occupies a given calendar day. Renderers use this to pick the
  * time label and origin marker. Marker precedence: completion > reminder >
  * scheduled > due > span (the most specific fact for that day wins). */
-export type CalendarDayKind = 'completion' | 'reminder' | 'scheduled' | 'due' | 'span';
+export type CalendarDayKind = 'completion' | 'cancelled' | 'reminder' | 'scheduled' | 'due' | 'span';
 
 export function taskDayKind(task: VaultTask, iso: string): CalendarDayKind {
+	if (task.calendarEventKind) return task.calendarEventKind;
 	if (task.completion && task.completion === iso) return 'completion';
+	if (task.cancelled && task.cancelled === iso) return 'cancelled';
 	if (task.reminder && task.reminder.slice(0, 10) === iso) return 'reminder';
 	if (task.scheduled && task.scheduled === iso) return 'scheduled';
 	if (task.due && task.due === iso) return 'due';
@@ -593,6 +665,7 @@ export function indexTasksByDay(tasks: VaultTask[]): Map<string, VaultTask[]> {
 		if (task.due) days.add(task.due);
 		if (task.reminder) days.add(task.reminder.slice(0, 10));
 		if (task.completion) days.add(task.completion);
+		if (task.cancelled) days.add(task.cancelled);
 		for (const iso of days) {
 			const list = byDay.get(iso);
 			if (list) list.push(task);
@@ -697,6 +770,7 @@ export function buildTaskLine(
 	title: string,
 	dayIso: string,
 	times: { start?: TaskTimeInput; due?: TaskTimeInput; scheduled?: TaskTimeInput },
+	defaultDate: 'due' | 'scheduled' = 'due',
 ): string {
 	const parts: string[] = [];
 	const start = markerValue(times.start, dayIso);
@@ -705,6 +779,6 @@ export function buildTaskLine(
 	if (start) parts.push(`[start:: ${start}]`);
 	if (due) parts.push(`[due:: ${due}]`);
 	if (scheduled) parts.push(`[scheduled:: ${scheduled}]`);
-	if (parts.length === 0) parts.push(`📅 ${dayIso}`);
+	if (parts.length === 0) parts.push(`${defaultDate === 'scheduled' ? '⏳' : '📅'} ${dayIso}`);
 	return `- [ ] ${title} ${parts.join(' ')}`;
 }

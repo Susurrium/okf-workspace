@@ -88,18 +88,24 @@ export function renderQuickNoteRegion(
 			region.toggleClass('dashboard-quicknote--capture-expanded', expanded);
 		};
 		input.addEventListener('input', resize);
-		const submit = () => {
+		let submitting = false;
+		const submit = async () => {
 			const text = input.value.trim();
-			if (text) {
-				callbacks.onQuickNoteCapture(text);
+			if (!text || submitting) return;
+			submitting = true;
+			input.disabled = true;
+			try {
+				await callbacks.onQuickNoteCapture(text);
 				input.value = '';
-			}
-			resize();
+				resize();
+			} catch (error) {
+				new Notice(error instanceof Error ? error.message : String(error));
+			} finally { submitting = false; input.disabled = false; }
 		};
 		input.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
 				e.preventDefault();
-				submit();
+				void submit();
 			}
 		});
 	}

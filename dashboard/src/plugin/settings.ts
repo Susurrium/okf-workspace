@@ -27,6 +27,7 @@ export interface OkfBrainSettings {
   feedReadingPositions: Partial<Record<"ai-daily" | "treehole", FeedReadingPosition>>;
   /** Apex layout, theme, provider, and native-widget settings. */
   apex: ApexDashboardSettings;
+  tasks: Record<string, unknown>;
 }
 
 export const DEFAULT_SETTINGS: OkfBrainSettings = {
@@ -40,6 +41,7 @@ export const DEFAULT_SETTINGS: OkfBrainSettings = {
   dashboardUiState: createDefaultDashboardUiState(),
   feedReadingPositions: {},
   apex: normalizeApexSettings(undefined),
+  tasks: {},
 };
 
 export function renderOkfServiceSettings(container: HTMLElement, plugin: OkfBrainPlugin): void {

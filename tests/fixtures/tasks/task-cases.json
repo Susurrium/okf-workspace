@@ -1,5 +1,11 @@
 [
   {
+    "path": "workbenches/中文工作台.md",
+    "markdown": "---\ndashboard: true\nworkbench_schema: 3\n---\n- [ ] #task Board checklist 🔁 every week ⏳ 2026-10-13\n- [x] Completed checklist\n",
+    "formal_open": [],
+    "checkbox_count": 2
+  },
+  {
     "path": "projects/demo/project.md",
     "markdown": "---\ntype: Project\nsample: \"- [ ] #task YAML example\"\n---\n\n```markdown\n- [ ] #task fenced example [scheduled:: 2026-09-29]\n```\n\n- [ ] #task Ship release ⏰ 2026-09-28 08:00 [scheduled:: 2026-09-29 09:00] [due:: 2026-09-30] ^task-ship\n- [x] #task Already done [completion:: 2026-09-27] ^task-done\n- [ ] ordinary project checklist [scheduled:: 2026-09-29]\n",
     "formal_open": ["Ship release"],
@@ -21,6 +27,24 @@
     "path": "life/daily/2026/09/2026-09-29.md",
     "markdown": "---\ntype: Daily\n---\n\n- [ ] #task Same text [scheduled:: 2026-09-29] ^task-first\n- [ ] #task Same text [scheduled:: 2026-09-29] ^task-second\n",
     "formal_open": ["Same text", "Same text"],
+    "checkbox_count": 2
+  },
+  {
+    "path": "projects/status/project.md",
+    "markdown": "---\ntype: Project\n---\n- [/] #task Writing ⏫ 🆔 writing\n- [-] #task Cancelled ❌ 2026-10-13\n- [ ] #task Review 🔁 every week ⏳ 2026-10-13\n",
+    "formal_open": ["Writing", "Review"],
+    "checkbox_count": 3
+  },
+  {
+    "path": "sources/texts/example.md",
+    "markdown": "---\ntype: Source Text\n---\n- [ ] #task Quoted checklist\n",
+    "formal_open": [],
+    "checkbox_count": 1
+  },
+  {
+    "path": "projects/markdown/project.md",
+    "markdown": "---\ntype: Project\n---\n````markdown\n```\n- [ ] #task Inside longer fence\n````\n\n    - [ ] #task Indented code example\n\n- [ ] #task Real parent\n    - [ ] #task Real child\n",
+    "formal_open": ["Real parent", "Real child"],
     "checkbox_count": 2
   }
 ]

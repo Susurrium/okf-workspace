@@ -126,7 +126,9 @@ type: Source
       due: "2026-10-01",
       scheduled: "2026-09-29",
     })).resolves.toBe(true);
-    expect(markdown).toContain("#task Edited elsewhere ⏰ 2026-09-28 08:00 [due:: 2026-10-01] [scheduled:: 2026-09-29] ^task-dates");
+    expect(markdown).toContain('#task Edited elsewhere');
+    expect(markdown).toContain('📅 2026-10-01');
+    expect(scanFileTasks(task.file, markdown)[0]).toMatchObject({ reminder: '2026-09-28 08:00', due: '2026-10-01', scheduled: '2026-09-29', blockId: 'task-dates' });
   });
 
   it("invalidates task scans when external writes change size before the cached read catches up", async () => {

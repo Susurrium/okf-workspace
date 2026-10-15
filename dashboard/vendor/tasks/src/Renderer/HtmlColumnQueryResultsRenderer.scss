@@ -1,0 +1,57 @@
+.tasks-columns {
+    display: flex;
+    gap: 1rem;
+    overflow-x: auto;
+    align-items: flex-start;
+    padding: 0.5rem 2px;
+
+    &-column {
+        flex: 0 0 18rem;
+        // Ensure all columns have the same width:
+        min-width: 18rem;
+        max-width: 18rem;
+
+        border: 1px solid var(--background-modifier-border);
+        border-radius: 8px;
+        background: var(--background-secondary);
+        padding: 0 0.5rem;
+        transition:
+            border-color 60ms ease,
+            background-color 60ms ease,
+            opacity 60ms ease,
+            box-shadow 60ms ease;
+
+        &.tasks-columns-column-drag-active {
+            &.tasks-columns-column-can-drop {
+                border-color: var(--interactive-accent);
+                background: var(--background-secondary-alt);
+            }
+
+            &.tasks-columns-column-cannot-drop {
+                opacity: 0.45;
+            }
+        }
+
+        &.tasks-columns-column-current-drop-target {
+            border-color: var(--interactive-accent);
+            background: var(--background-modifier-hover);
+            box-shadow: 0 0 0 2px var(--interactive-accent);
+        }
+
+        &-card {
+            cursor: grab;
+            user-select: none;
+
+            // Ensure there is a bit of a vertical gap between cards in the same column
+            // (it would be nice to skip this below the last task in each column or group):
+            margin-bottom: 0.5rem;
+
+            // Put a border around the task and its checkbox:
+            border: 1px solid var(--background-modifier-border);
+            border-radius: 6px;
+
+            // Give cards a different background colour:
+            background: var(--background-primary);
+        }
+    }
+}

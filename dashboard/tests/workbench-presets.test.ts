@@ -11,17 +11,13 @@ import {
 describe("OKF workbench presets", () => {
   it("provides every declared workflow and defaults to the unified daily board", () => {
     expect(WORKBENCH_PRESETS.map((preset) => preset.id)).toEqual([
-      "daily", "learning", "project", "reading", "life", "system",
+      "daily", "learning", "project", "reading", "knowledge", "life", "system",
     ]);
     expect(workbenchPresetData().columns.map((column) => column.sectionType)).toEqual([
-      "memo",
       "workspace-today",
-      "workspace-inbox",
-      "workspace-projects",
+      "memo",
+      "workspace-updates",
       "calendar",
-      "workspace-reading",
-      "workspace-life",
-      "workspace-system",
     ]);
     expect(workbenchPresetData().quickActions).toContainEqual({
       name: "全局搜索",
@@ -30,14 +26,14 @@ describe("OKF workbench presets", () => {
       target: "global-search:open",
     });
     expect(workbenchPresetData().quickActions.map((action) => action.name)).toEqual([
-      "全局搜索", "快速创建", "问我的笔记", "导入资料", "系统状态",
+      "快速记录", "新建待办", "全局搜索", "快捷操作",
     ]);
   });
 
   it("serializes stable section IDs and declarative filters without object snapshots", () => {
     const unregister = [
       "workspace-today", "workspace-inbox", "workspace-projects", "workspace-reading",
-      "workspace-life", "workspace-system",
+      "workspace-life", "workspace-system", "workspace-updates", "workspace-sources",
     ]
       .map((type) => registerSectionDefinition({
         type,
@@ -49,8 +45,10 @@ describe("OKF workbench presets", () => {
     try {
       const parsed = parse(generateWorkbenchPresetMarkdown("daily"));
       expect(new Set(parsed.columns.map((column) => column.id)).size).toBe(parsed.columns.length);
-      expect(parsed.columns.find((column) => column.id === "daily-projects")?.extensionConfig)
-        .toEqual({ statuses: ["active"] });
+      expect(parsed.columns.find((column) => column.id === "daily-today")?.extensionConfig)
+        .toEqual({ showDailyUpdates: false, pageSize: 5 });
+      expect(parsed.columns.find((column) => column.id === "daily-updates")?.extensionConfig)
+        .toEqual({ itemsPerEdition: 3, readingView: "daily-updates", feedStreams: ["hotspot", "news", "treehole"] });
       expect(generateWorkbenchPresetMarkdown("daily")).not.toContain("open_tasks:");
     } finally {
       unregister.forEach((dispose) => dispose());
@@ -61,16 +59,17 @@ describe("OKF workbench presets", () => {
     expect(workbenchPresetData("reading").columns.map((column) => column.sectionType)).toEqual([
       "workspace-reading",
       "weread",
-      "workspace-knowledge",
-      "workspace-inbox",
     ]);
   });
 
-  it("does not claim project or reading context that the preset does not bind", () => {
+  it("keeps business tools complete while binding only the chosen context", () => {
     const project = workbenchPresetData("project");
-    expect(project.columns.find((column) => column.id === "project-today")?.name).toBe("今日行动");
-    expect(project.columns.find((column) => column.id === "project-learning")?.name).toBe("学习");
-    expect(workbenchPresetData("reading").columns.find((column) => column.id === "reading-knowledge")?.name)
-      .toBe("知识库");
+    expect(project.columns.map(column => column.sectionType)).toEqual(["workspace-projects", "memo"]);
+    expect(project.columns[0]?.extensionConfig).toEqual({});
+    expect(workbenchPresetData("project", { project: "projects/a/project.md" }).columns[0]?.extensionConfig)
+      .toEqual({ project: "projects/a/project.md" });
+    for (const preset of WORKBENCH_PRESETS) {
+      expect(workbenchPresetData(preset.id as never).columns.every(column => column.extensionConfig?.mode === undefined)).toBe(true);
+    }
   });
 });

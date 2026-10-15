@@ -46,3 +46,6 @@ engine/tests/fixtures/documents/*.inspect.ndjson
 
 # Obsidian plugin runtime settings are deployed, never source-controlled.
 /dashboard/data.json
+
+# Rebuilt from the pinned Tasks source and integration entry points.
+/dashboard/tasks-generated/

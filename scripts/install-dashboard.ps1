@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Vault = 'E:\ObsidianData\OKF-Brain',
+    [Parameter(Mandatory)][string]$Vault,
     [string]$State = ''
 )
 
@@ -26,27 +26,11 @@ if (Test-Path -LiteralPath $dataPath -PathType Leaf) {
     $data = Read-OkfJsonHashtable -Path $legacyDataPath -Description 'Legacy Dashboard settings'
 }
 
-$explicitState = [bool]$State
-$existingConfig = if ($data.ContainsKey('deploymentConfig')) {
-    [string]$data['deploymentConfig']
-} else {
-    ''
-}
-$stateRoot = if ($explicitState) {
-    [System.IO.Path]::GetFullPath($State)
-} elseif ($existingConfig) {
-    [System.IO.Path]::GetDirectoryName(
-        [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($existingConfig))
-    )
-} else {
-    [System.IO.Path]::Combine((Split-Path -Parent $vaultRoot), 'OKF-Brain-State')
-}
+if (-not $State) { throw 'Source Dashboard installation requires an explicit test State.' }
+$stateRoot = [System.IO.Path]::GetFullPath($State)
 $configPath = [System.IO.Path]::Combine($stateRoot, 'config', 'deployment.json')
-$deployment = @{}
-if (Test-Path -LiteralPath $configPath -PathType Leaf) {
-    $deployment = Read-OkfJsonHashtable -Path $configPath -Description 'Deployment config'
-}
-$apiPort = if ($deployment.ContainsKey('api_port')) { [int]$deployment['api_port'] } else { 8765 }
+$deployment = Assert-OkfTestEnvironment -Config $configPath -Vault $vaultRoot
+$apiPort = [int]$deployment['api_port']
 $dashboardMigration = Get-OkfDashboardPluginMigrationPlan -Vault $vaultRoot
 
 # Read and validate every existing JSON input before replacing plugin artifacts.
@@ -55,19 +39,11 @@ Install-OkfDashboardPluginAtomic `
     -DashboardRoot (Join-Path $root 'dashboard') `
     -Target $target | Out-Null
 
-if ($explicitState -or -not $data.ContainsKey('baseUrl')) {
-    $data['baseUrl'] = "http://127.0.0.1:$apiPort"
-}
-if ($explicitState -or -not $data.ContainsKey('tokenFile')) {
-    $data['tokenFile'] = [System.IO.Path]::Combine($stateRoot, 'secrets', 'local-api-token')
-}
+$data['baseUrl'] = "http://127.0.0.1:$apiPort"
+$data['tokenFile'] = [System.IO.Path]::Combine($stateRoot, 'secrets', 'local-api-token')
 $data['pythonExecutable'] = Join-Path $root 'engine\.venv\Scripts\python.exe'
-if ($explicitState -or -not $data.ContainsKey('deploymentConfig')) {
-    $data['deploymentConfig'] = $configPath
-}
-if ($explicitState -or -not $data.ContainsKey('serviceLogDirectory')) {
-    $data['serviceLogDirectory'] = [System.IO.Path]::Combine($stateRoot, 'logs')
-}
+$data['deploymentConfig'] = $configPath
+$data['serviceLogDirectory'] = [System.IO.Path]::Combine($stateRoot, 'logs')
 if (-not $data.ContainsKey('manageLocalService')) { $data['manageLocalService'] = $true }
 $data.Remove('token')
 Write-OkfJson -Path $dataPath -Value $data

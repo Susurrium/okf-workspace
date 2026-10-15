@@ -44,7 +44,7 @@ from okf_workspace.importers import (
     ImportRequest,
     ParserName,
 )
-from okf_workspace.migration import migrate_current_layout
+from okf_workspace.migration import migrate_current_layout, sync_workspace_resources
 from okf_workspace.notes import NoteService
 from okf_workspace.notes.captures import CaptureDestination, process_capture
 from okf_workspace.okf.templates import initialize_vault
@@ -119,6 +119,12 @@ def build_parser() -> argparse.ArgumentParser:
     migrate = commands.add_parser("migrate", help="migrate superseded queue and layout metadata")
     migrate.add_argument("--vault", type=Path, default=defaults.vault)
     migrate.add_argument("--state", type=Path, default=defaults.state)
+
+    resources = commands.add_parser(
+        "resources", help="update managed resources without migrating notes"
+    )
+    resources.add_argument("action", choices=("sync",))
+    resources.add_argument("--vault", type=Path, required=True)
 
     validate = commands.add_parser("validate", help="validate an OKF Bundle")
     validate.add_argument("--vault", type=Path, default=defaults.vault)
@@ -469,6 +475,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "migrate":
             changes = migrate_current_layout(args.vault, default_template_root(), args.state)
+            _print_json({"changes": changes})
+            return 0
+        if args.command == "resources":
+            changes = sync_workspace_resources(args.vault, default_template_root())
             _print_json({"changes": changes})
             return 0
         if args.command == "validate":

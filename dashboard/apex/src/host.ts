@@ -1,10 +1,11 @@
-import type { App } from 'obsidian';
+import type { App, TFile } from 'obsidian';
 
 import type { DashboardSettings } from './types';
 import type { TaskInsertTarget } from './daily-notes';
 import type { PomodoroService } from './pomodoro-service';
 import type { ReadingService } from './reading-service';
-import type { DashboardCard } from './types';
+import type { DashboardCard, QuickAction } from './types';
+import type { VaultTask } from './alltasks-scan';
 
 export type ArtifactMutation =
 	| { kind: 'frontmatter'; path: string; artifactType: string; property: string; value: unknown }
@@ -56,6 +57,20 @@ export interface ApexHost {
 	): Promise<{ path: string; created: boolean }>;
 	createManagedArtifact?(artifactType: string): Promise<boolean>;
 	openDocumentImportFromDrop?(transfer: DataTransfer): void;
+	executeQuickAction?(action: QuickAction): Promise<boolean>;
+	openTodayNote?(): Promise<void>;
+	saveTasksToDaily?(block: string): Promise<{ path: string }>;
+	editTask?(task: VaultTask): Promise<void>;
+	handlesTaskReminders?: boolean;
+	checklistsInWorkbenchOnly?: boolean;
+	prepareTaskLine?(line: string): string;
+	calendarDefaultDate?: 'scheduled' | 'due';
+	editTaskDates?(task: VaultTask): void;
+	createTask?(date?: string): void;
+	openTaskSource?(task: VaultTask): Promise<void>;
+	canWriteTaskTarget?(file: TFile): boolean;
+	taskStatistics?(excludeFolders?: string[]): Promise<{ totalTasks: number; doneTasks: number; pendingTasks: number; taskCompletion: number }>;
+	recentDocumentExclusions?: readonly string[];
 }
 
 export interface WorkspacePresetOption {

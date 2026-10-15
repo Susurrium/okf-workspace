@@ -1,6 +1,7 @@
 import type { FeedDecisionAction, FeedDecisionResult } from "../feeds/types.js";
 import { isSemanticOperationActive } from "../domain/semantic-operation-state.js";
 import { FEED_DECISION_ACTIONS, feedDecisionFeedback } from "./ai-daily-inline-decision.js";
+import { renderMaterialDecision } from "./material-decision.js";
 
 export interface FeedDecisionFlowActions {
   load(): Promise<FeedDecisionResult | undefined>;
@@ -44,26 +45,8 @@ export function renderFeedDecisionFlow(controls: HTMLElement, status: HTMLElemen
     if (result.action === "learn-later") button("现在生成学习材料", () => void choose("learn-now"));
     if (!operation || !isSemanticOperationActive(operation.status)) button("更改判断", renderPrimary);
   };
-  const renderLearning = (): void => {
-    controls.replaceChildren();
-    status.setText("你想学习：现在生成辅助学习材料，还是先放进学习？");
-    button("现在生成辅助学习材料", () => void choose("learn-now"));
-    button("稍后学习", () => void choose("learn-later"));
-    button("返回", renderPrimary);
-  };
-  const renderNoLearning = (): void => {
-    controls.replaceChildren();
-    status.setText("你不打算学习：它仍有长期参考价值吗？");
-    button("整理为知识笔记", () => void choose("wiki-now"));
-    button("只保存资料", () => void choose("source-only"));
-    button("不保留", () => void choose("ignore"));
-    button("返回", renderPrimary);
-  };
   function renderPrimary(): void {
-    controls.replaceChildren();
-    status.setText("先判断你是否想学习这条内容；暂时不处理时直接离开即可。");
-    button("想学习", renderLearning);
-    button("不打算学习", renderNoLearning);
+    renderMaterialDecision(controls, status, { choose: action => void choose(action) });
   }
   const load = async (): Promise<void> => {
     controls.replaceChildren();

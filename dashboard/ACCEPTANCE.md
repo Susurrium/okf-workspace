@@ -1,8 +1,326 @@
 # Apex × OKF acceptance ledger
 
-Current test-environment and lifecycle procedures are maintained in the
-[development guide](../docs/DEVELOPMENT.md#正式发布后的继续开发).
-The entries below retain the environment paths and results of their recorded runs.
+## 分区真实视觉验收（2026-10-15）
+
+本轮按用户授权，在独立的 `surface-capabilities` 测试环境中获取真实 Obsidian 截图，逐张查看，
+修改问题后重新构建、安装和复查。最终 39 张截图均来自相同的安装产物，每张截图的尺寸、主题、
+安装哈希与文件哈希记录于 `work/surface-visual-final/receipt.json`；候选文件保存在该目录的 `candidate/`。
+
+| 范围 | 结果与证据 |
+| --- | --- |
+| 十个独立页面 | 明暗主题各一轮，检查文字、工具、卡片与页面边界；最终截图为 `verified-light-*-page.png` 和 `verified-dark-*-page.png` |
+| 工作台与布局 | 查看实际分栏、折叠、资料和任务分区；检查窄窗口中的操作换行。最终截图包括 `verified-board-split.png`、`verified-board-collapsed.png` |
+| 学习与课程 | 实际展开选择器、选择课程、打开课程详情，查看带内容的学习卡片；宽屏与窄窗口中列表和操作均可见。临时学习夹具未设置 `studied_at` |
+| 弹窗与任务写入 | 查看资料、项目、课程、分区配置和任务表单；430px 桌面窗口中检查完整表单滚动。空描述禁止提交，实际保存后保留新生成的任务标识；注入写入后的刷新故障，再次提交成功，任务只出现一次且字节不变。已有工作台正文保持一致。`work/surface-visual-final/run.json` |
+| 订阅卡片 | 查看正常空状态；以隔离的内存合成响应检查多条内容、就地加载和卡片滚动，实际生产渲染器保持运行。测试后恢复原读取方法，不代表远端订阅服务验收 |
+| 自动化与构建 | 最终 Dashboard 405 项测试、两组类型检查和生产构建通过。日志为 `work/surface-visual-retry-tests.log`、`work/surface-visual-retry-typecheck.log`、`work/surface-visual-retry-install.log` |
+| 文件与退出 | 清理本轮工作台、任务和学习记录后，Vault 校验通过，检查 33 个 Markdown 文件；构建与安装的三个产物哈希一致。窗口、Engine、自动启动和 LiveSync 均关闭，CDP 9367 无监听 |
+
+本轮修正空订阅卡片的多余高度、资料详情的分栏、详情操作间距、任务表单的内部标识和窄窗口日期布局，
+以及课程选择入口、选项高度和课程操作区的越界。当前交互说明见[使用指南](../docs/USER-GUIDE.md#分区与工作台)。
+
+本次没有部署正式环境。窄尺寸使用桌面 Chromium 窗口，未进行真实移动设备验证；外部 AI、文档转换、
+远端订阅及同步未验收。中间截图与诊断保留于 `work/surface-visual/diagnostics.json` 及同目录截图。
+
+## 分区完整功能与页面状态验收（2026-10-15）
+
+工作台与独立页面共用业务工具、操作和查询。目录排序、任务视图、筛选和分页在当前实例中完成；
+独立打开传递已应用的浏览状态，各页面保存自己的返回历史。分区配置通过 Obsidian 的 frontmatter
+API 局部保存，保留完整正文及未知字段。行为说明统一见[使用指南](../docs/USER-GUIDE.md#分区与工作台)。
+
+用户明确授权另建隔离测试环境，以避免与另一个聊天使用的 `OKF-Test` 冲突。本次实机环境为
+`work/fixtures/surface-capabilities/vault`，State 和 Obsidian profile 位于同一夹具的独立 State 下；
+API 8767、CDP 9367，独立安装身份与本地凭据，不连接 LiveSync。
+
+| 验证范围 | 结果与证据 |
+| --- | --- |
+| 根检查 | Engine 588、跨组件 12 passed / 1 skipped、Dashboard 当次 403、Claudian 6316 passed / 3 skipped，以及 72 项脚本测试通过；类型、lint、构建和边界检查通过。`work/surface-final-root-check.log` |
+| 最终 Dashboard 候选 | 完整 405 项测试、两组类型检查和生产构建通过，覆盖目录排序和配置窗口的并发保护。`work/surface-final-dashboard-tests.log` |
+| Apex | lint、独立构建、`test:refresh-scope`、`test:scroll-root`、`test:kanban-upgrade` 通过；配置并发冲突与未知字段合并进入 Dashboard 回归测试 |
+| 实机操作 | 35 项不同检查通过：十个业务页面、旧配置的完整工具、就地分页和切换、真实任务完成及表单写入、排序与搜索传递、实例隔离、原生冷启动状态恢复、配置保存和正文保留，以及窗口打开后的新增字段保留与同字段冲突保护。`work/surface-final-results.json` |
+| 主题与尺寸 | 原生明暗主题下，六个独立页面的 48 次尺寸测量及两个工作台标题栏的 16 次测量通过。实际 client/scroll 宽度逐项记录；工作台较宽请求受到父容器约束，未据此宣称实际达到所有请求宽度。`work/surface-runtime-geometry.json` |
+| 内容与契约 | 打开工作台前后字节一致；局部保存保留全部正文、根与列未知字段、其他分区配置；实际任务写入和浏览状态经过冷启动核对。最终隔离 Vault 验证通过，检查 33 个 Markdown 文件 |
+| 安装身份 | Dashboard `main.js`、`styles.css`、`manifest.json` 的构建与安装 SHA-256 一致；当前源码哈希和检查范围记录于隔离 State 的 `reports/surface-deployment-receipt.json`，汇总见 `work/surface-final-results.json` |
+| 退出 | 本次工作台与任务记录已清理；窗口、Engine、自动启动与 LiveSync 均关闭，8767/9367 无监听。标准 DOCX 的 store-only 导入结果作为合成排序夹具保留；环境用途与到期时间记录于 `work/fixtures/surface-capabilities/fixture.json` |
+
+原生关闭和冷启动用于核对页面历史；常规测试控制脚本在关闭前会卸载插件并移除页面，不能据此
+判定原生页面恢复行为。验收脚本诊断和失败记录保留在 `work/surface-verification-diagnostics.json`
+及 `work/surface-runtime-*-failure*.json`。
+
+本次没有部署正式环境。实机检查使用 DOM、真实文件、本地 Engine 和尺寸数据；未执行视觉检查、
+远端同步、外部 AI 或文档转换服务验收。
+
+## Tasks and workbench source boundaries (2026-10-15)
+
+The source candidate retains Tasks 8.5.0 configuration, indexing, queries and editor,
+and restricts Apex checklists to workbench Markdown. Production was not deployed
+and existing production content was not migrated. The worktree contains pre-existing
+and task-related uncommitted changes; the test receipt identifies the installed bytes.
+
+| Verification | Result and evidence |
+| --- | --- |
+| Repository checks | Engine 588 passed; cross-component 12 passed / 1 skipped; Dashboard initially 395 passed; Claudian 420 suites / 6316 tests passed, 3 skipped, and 72 script tests passed. `work/tasks-boundary-root-check.log` records the root run. |
+| Final Dashboard and Apex changes | Dashboard typecheck/build and all 403 tests passed, including 14 boundary tests. Apex lint/build and affected calendar/card scripts passed. |
+| Actual Tasks settings and editing | 16 checks passed: custom and empty filters, Dataview format, next-status order, editor field/access-key options, real Markdown save, all workbench exclusion, rename and historical inspection. `work/tasks-boundary-live-final.log`. |
+| Actual Apex checklist operations | Five checks passed: parent/child completion, literal task metadata, complete in-workbench archive, reload and Tasks exclusion. `work/tasks-boundary-checklist-live-final.log`. |
+| Actual write boundaries | Four checks passed: Tasks rejects workbench destinations; checklist writes reject a removed workbench identity; rejected operations preserve current bytes. `work/tasks-boundary-write-guards-live-final.log`. |
+| Date shortcut | The actual date dialog saved the selected task format and preserved time, unknown metadata and block identity. `work/tasks-boundary-date-live-final.log`. |
+| Restart | 67 task records, byte hashes of 17 workbenches, Tasks settings and saved views matched. Settings use deep value comparison; workbenches use exact SHA-256 comparison. `work/tasks-boundary-restart-result.log` and before/after snapshots. |
+| Engine and contracts | Actual test Vault projection excluded workbenches and returned 52 open tasks; Vault validation passed for 71 Markdown files. |
+| Installed candidate | Installed artifacts matched their build hashes at candidate capture. The Dashboard candidate, SHA-256 manifest and matching deployment receipt are frozen in `work/tasks-boundary-accepted/`; subsequent workspace builds do not replace this evidence. |
+
+All real-app checks used the fixed `OKF-Test` Vault, Engine 8766 and its isolated
+profile/CDP 9366, with LiveSync disabled. Synthetic test notes remain in that test
+Vault. Tasks settings were restored after configuration checks. Final shutdown
+confirmed `vault_open`, `api_listening`, `engine_autostart` and `livesync_enabled`
+were false, with no CDP listener. Verification used DOM, file content and local
+runtime APIs; visual inspection, remote synchronization and external AI/conversion
+services were not exercised.
+
+## Persistent test environment acceptance (2026-10-15)
+
+This run used `E:\ObsidianData\OKF-Test`, State `OKF-Test-State`, Engine port 8766
+and the State-owned `obsidian-profile` on CDP 9366. The profile registered only
+the test Vault. Current environment and lifecycle procedures are maintained in
+the [development guide](../docs/DEVELOPMENT.md#正式发布后的继续开发).
+
+Fifty fixture files and two saved task views were consolidated into this Vault;
+existing test notes and workbench bytes were preserved. Current Engine resources,
+Skills and both plugin builds are installed. The test Vault passed contract
+validation with 62 files checked. Installed artifact hashes are recorded in
+`OKF-Test-State/reports/deployment-receipt.json` and `development-build.json`.
+
+| Verification | Evidence |
+| --- | --- |
+| Vault identity, ten business pages, unified Tasks takeover, task indexing, contextual form and actual Markdown write, original-only Source semantics | 29 checks in `work/fixed-test-acceptance-result.json` |
+| Actual Engine authentication, matching Vault identity, rejected mismatched write, six read endpoints and persisted Capture | 10 checks in `work/fixed-test-live-api-result.json` |
+| Engine-offline Capture through Obsidian Vault APIs | `work/fixed-test-offline-result.json` |
+| Restart persistence of 64 tasks, exact board bytes, saved query identities/scopes, actual task Markdown and plugin state | Seven checks in `work/fixed-test-final-lifecycle.json` |
+| Temporary fixture path restrictions, metadata, Contracts and completed cleanup | `work/fixture-tool-result.json` |
+| Complete source update, contract validation and verified installed builds | `work/fixed-test-update-final.log` |
+| Repository checks and final installer/control regression | Root check passed: Engine 584, cross-component 12 passed / 1 skipped, Dashboard 350, Claudian checks/tests/build; final focused installer/control suite: 34 passed |
+
+The former Dashboard acceptance directories, task acceptance directory and
+optimization profile were archived and removed after archive/file-hash checks.
+Eleven old creation, server and CDP launch tools were retired. Archives, manifests,
+operation snapshots, failure records and copied evidence are retained under
+`E:\ObsidianData\Archives\20261015-test-consolidation`. Runtime paths in the
+historical entries below identify those archived runs.
+
+Production plugin files and deployment configuration matched their operation-start
+hashes; the production process and scheduled-task targets were retained. At
+completion the test window, Engine, autostart and LiveSync were all stopped.
+This acceptance used DOM, file content and real local APIs. Visual inspection,
+remote synchronization, external conversion and AI-provider execution were not
+performed.
+
+## Section layout and navigation acceptance (2026-10-14)
+
+Workbench sections use the native Apex container spacing and collapse rules.
+The containing section owns the primary title and frame. Its header contains
+scoped full-view access and refresh; meaningful internal group/source headings
+remain visible. Workspace switching, widgets and quick buttons use the native
+Apex interface. Scoped full-view navigation explicitly activates the originating
+workbench on return.
+
+The candidate was installed only in
+`E:\ObsidianData\OKF-Dashboard-Acceptance-20261013\vault` (CDP 9337).
+The recorded test calendar `section-mv6yaoye` was removed from `优化日常`.
+Other metadata and Markdown body content matched the preserved baseline,
+including the Project/Memo order and user-created `笔记` section. All 62 tasks
+remained indexed. Multi-instance calendar testing used a separate generated
+layout-test board, which was removed from the workspace registry after testing;
+its Markdown remains as test evidence.
+
+| Scenario | Evidence |
+| --- | --- |
+| Expanded/collapsed Project + native Memo combinations | 64 layout assertions at 1440×1000 dark/light, 2560×1392 and 1100×950; folded heights both 64px, matching tops, narrow sections use full width |
+| Primary title, source/group headings, header controls and original navigation | `work/section-refinement-layout-results.json`, inspected `section-refinement-pair-*.png` |
+| Scoped full view, unknown config, return activation, full-update heading, command access, DOM drag/drop, pointer resizing, legacy Today and multiple calendars | Nine final checks in `work/section-refinement-final-interactions.json` |
+| Existing layout/data preservation | `work/section-refinement-preservation.json`, exact metadata/body comparison against the recorded baseline |
+| Current experience board | `section-refinement-final-folded.png`, `section-refinement-final-updates.png`, `section-refinement-experience-top.png` |
+
+Dashboard: 350 Vitest tests, both TypeScript checks and production build passed.
+All 44 Apex scripts passed; standalone build and lint passed again after the
+renderer refinement. Final CSS assets were regenerated through `build-assets.mjs`
+and loaded for the final geometry/interaction run. Vault contract validation
+passed with 66 files checked. `git diff --check` passed.
+
+Installed/build SHA-256 values matched: main
+`74fed374c1478722fe5e5accbdc990ca895c4b592a33f8fb21ca411139dce52b`,
+styles `628a4c429ca2b146fa92e5e787b9bf2268801ebad4811f53e2a41093186f8421`.
+No production deployment was performed.
+
+The CDP evidence distinguishes console history from errors emitted during each
+check. Two existing invalid-PDF entries were recorded before this run in
+`section-refinement-runtime-baseline.json`; final interaction checks emitted no
+new errors. Return-state diagnosis and the initial resize-event mismatch remain
+recorded in `section-refinement-return-diagnosis.json` and
+`section-refinement-resize-failure.json`. The resize check subsequently exercised
+the actual PointerEvent handlers. Feed previews used synthetic cache served by
+the authenticated Engine for this isolated Vault; external providers were not
+invoked by these layout checks.
+
+## Dashboard interaction optimization (2026-10-14)
+
+The optimized workbench adds an independent Tasks page, shared contextual task
+forms and rows, named workbench selection, business navigation, bounded summaries,
+and Source/Project/Course details with scoped catalogue routes. Existing boards,
+native Apex data and useful contextual entry points are retained. New daily
+presets use four configurable shortcuts. Capture supports simultaneous Course
+and Project associations; import purpose remains independent of processing.
+
+Runtime acceptance used only
+`E:\ObsidianData\OKF-Dashboard-Acceptance-20261013\vault`, CDP 9337, the separate
+`work/optimization-obsidian-profile` and the isolated Engine on port 8777.
+The Engine Vault fingerprint was verified before use. The new `优化日常` board
+was created through the workbench interface; the legacy board was preserved.
+No production deployment or production content edits were performed.
+
+| Scenario | Evidence and result |
+| --- | --- |
+| Contextual task creation, visible defaults, exact Markdown, cancellation, dates/time, query intersection, saved scope, object details, catalogue returns, Capture and history | `work/optimization-flow-results.json`: 22 checks passed in actual Obsidian |
+| Recurrence, unique next occurrence, complete subtree move, reference updates, independent subtree copies and dependencies, saved-view rename/delete, independent calendar scopes | `work/optimization-boundary-results.json`: 13 checks passed |
+| Calendar content isolation, persisted navigation, quick creation with plan default, full editor date inheritance, invalid query and recovery | `work/optimization-calendar-results.json`: 8 checks passed |
+| Business pages, themes and widths | Ten pages captured in both native dark/light themes at 1440×1000; five pages at 960×850, with 580px content panes; page client and scroll widths matched, with no page error blocks |
+| Native layout and dialogs | New daily board, task form and actual vertical split captured; screenshots reviewed for card boundaries, hierarchy, wrapping, labels, readable controls and modal actions |
+| Restart persistence | `work/optimization-restart-result.json`: saved-view IDs/query/scope, exact board Markdown, task count and scoped overdue page matched before and after restart |
+
+The three final runtime suites reported no console errors or unhandled runtime
+exceptions. Large-list checks verify that details remain bounded and the full
+catalogue can still find the newly created task. UI repairs were rebuilt,
+installed in the isolated Vault and rechecked. Screenshot and geometry evidence
+is in `work/optimization-visual-final.json` and `work/optimization-final-*.png`.
+
+Restart acceptance used one active writer for the full test Vault. An older
+isolated Obsidian profile was stopped after its registered Vaults were verified
+to be test-only. The concurrent-profile attempt and its differing snapshots
+remain in `work/optimization-before-restart.json` and
+`work/optimization-after-restart.json`; the successful comparison uses the
+`optimization-single-writer-*` snapshots. Fixture-note datetime and heading
+requirements were corrected; the final Vault contract validation passed with
+65 files checked and no issues.
+
+The installed candidate matches the production build: main SHA-256
+`91bdd26bcf4e99d14e4160de780dd6dcb961cb43dd6ce65b8855347f7e8c9713`,
+styles SHA-256
+`3b927a04c68f844ec5359c042eb8b4afe5c750e01688c8553e063f3174589c35`.
+
+Final automated verification: root `scripts/check.ps1` passed under PowerShell 7
+with Node 24.16.0: Engine 575, cross-component 12 passed / 1 skipped, Dashboard
+349, Claudian 6,316 passed / 3 skipped and 72 architecture/script checks.
+Engine Ruff/Pyright, Dashboard and Tasks integration type checks, Claudian
+typecheck/lint and production builds passed. All 44 Apex test scripts,
+standalone build and lint passed. A further Dashboard production build passed
+after the final CSS refinements. `git diff --check` passed.
+
+Claudian's separate performance check passed with a 2.32 MiB bundle; its 188.5 ms
+median cold evaluation exceeded the advisory 150 ms threshold. This is a
+Claudian measurement, independent of the Dashboard visual acceptance.
+
+Feed content was synthetic cache served by the actual isolated Engine. Live
+Producer synchronization, external parsing and AI-provider generation were not
+rerun in this UI acceptance; automated workflow tests remain separate evidence.
+
+## Unified Tasks component (2026-10-13)
+
+The Tasks 8.5.0 source is embedded in the Dashboard package. Formal tasks, local
+checklists, Today, calendar, contextual catalogues and native Markdown task
+interactions share the same task semantics and authoritative source files.
+
+| Scenario | Evidence | Verification boundary |
+| --- | --- | --- |
+| Recurrence, custom states, dependency queries, tags, hierarchy and independent copies | `tests/unified-tasks.test.ts` | Real embedded Tasks model and query engine; Obsidian host isolated |
+| Reminder acknowledgement, rescheduling, child items and identity across moves | `tests/task-reminders.test.ts` | Real reminder service, controlled clock and host notifications |
+| Complete subtree move, fields, source conflict and references | `tests/task-operations.test.ts` | Real operation against synthetic Markdown; host file API isolated |
+| Frontend / Engine task eligibility and Markdown code examples | `tests/fixtures/tasks/task-cases.json` | Shared cross-language fixture |
+| Task catalogue and card recurrence, native query completion, cancel, edit, reminder and move | `work/tasks-*-result.json` | Actual isolated Obsidian, DOM interaction and source-file checks |
+| Advanced dependency query, grouping, saved view, checklist promotion and contextual creation | `work/tasks-views-result.json` | Actual task interfaces; zero measured task-row overflow |
+| Calendar creation, archive fields and resolved daily references | `work/tasks-final-verification-result.json`, `work/tasks-archive-result.json` | Actual source records and Obsidian link resolution |
+
+Runtime acceptance used only `work/tasks-acceptance/vault` and a separate profile,
+CDP port 9352. Initial loading and recurrence were checked on Obsidian 1.12.7;
+the subsequent interaction run used Obsidian 1.14.4. The independent Tasks plugin
+was absent. No production deployment or production note changes occurred.
+This task used DOM, dimensions and file inspection; it did not perform screenshot
+or visual-image acceptance. CDP failure and completion records remain in
+`work/tasks-acceptance/cdp-log.ndjson`.
+
+Dashboard verification: 338 Vitest tests, Dashboard and upstream integration
+type checks, and the production build passed. Engine full pytest: 575 passed;
+cross-component fixtures: 12 passed / 1 skipped. Required Ruff and Engine Pyright
+checks passed. The complete root `scripts/check.ps1` passed: Engine 575,
+cross-component 12 passed / 1 skipped, Dashboard 338, Claudian 6,316 passed /
+3 skipped plus 72 architecture/script checks, and all required checks and builds.
+
+## Dashboard sections and interactions (2026-10-12 source change)
+
+This source change adds a Sources catalogue and a configurable latest-Feed surface, scopes components by
+workbench/section identity, preserves existing boards, and shares note rows, task completion, material
+decisions, recovery presentation and asynchronous feedback. New presets apply only to newly created boards.
+
+| Scenario | Evidence | Verification boundary |
+| --- | --- | --- |
+| Multiple Source uses, component state, explicit scope and preset round-trip | `tests/workbench-design.test.ts` | Synthetic Vault and actual Dashboard controller; no production data |
+| Original/text access and contextual operation isolation | `tests/workbench-design.test.ts` | UI/file identity checks; original viewer and AI provider are isolated |
+| Course/Project import, creation, draft restore and stale response | `tests/document-import-relations.test.ts` | Actual modal and local note writer with isolated import submission |
+| Capture draft failure/success and keyboard behavior | `tests/quick-capture-modal.test.ts` | Actual modal using the test DOM |
+| Project, Feed, lifecycle, task identity and preservation regressions | Dashboard Vitest suite | Automated component verification |
+| Obsidian runtime and visual layout | Isolated 2026-10-13 run below | Actual Windows Obsidian, synthetic Vault, screenshots and file checks |
+
+Automated verification completed on 2026-10-13: root `scripts/check.ps1` passed (Engine 575,
+cross-component 12 passed / 1 skipped, Dashboard 316, plus the required checks and builds).
+All 44 Apex `test:*` scripts, standalone build and lint passed. The source change also verifies actual
+layout-writer failure propagation and explicit retry in `tests/apex-sync-pool.test.ts`; purpose-only
+routing for original-only Sources is covered by `engine/tests/integration/test_local_api.py`.
+
+### Isolated runtime and visual acceptance (2026-10-13)
+
+The candidate was installed only in
+`E:\ObsidianData\OKF-Dashboard-Acceptance-20261013\vault`, with separate `profile/` and `state/`
+directories, CDP port 9337 and Engine port 8777. Only `okf-workspace-dashboard` was enabled;
+Engine autostart and synchronization were disabled. The Vault was generated from current Contracts
+and synthetic content. No production Vault or default Obsidian profile was used.
+
+| Scenario | Observed result |
+| --- | --- |
+| Nine business pages, defaults and shortcuts | All opened in Obsidian; the default board keeps three daily-update streams in their own section and seven existing Apex quick buttons |
+| Wide, narrow and split panes | Screenshots reviewed at 1600×1100, 900×1000 and 560×950; split-pane learning and Sources roots measured 345px with equal client/scroll widths after repair |
+| Themes and controls | Dark/light screenshots verified readable rows, visible 16px task checkboxes, wrapping actions, Source details and Knowledge facets |
+| Scope and instances | Two Learning instances retained different project bindings and stages; a missing bound Course displayed an error without widening the scope |
+| Expansion and full catalogues | Current scope, selected stage and originating board survived each route; the full catalogue reused its existing instance identity |
+| Configuration and two-pane saves | Actual Markdown save retained unknown configuration and prose; the second pane received the same-board change |
+| Tasks and learning completion | Related Guide tasks appeared in the full Project task list; completion updated Today and the Calendar completed state. Task completion did not set `studied_at`; explicit study completion and reversal worked |
+| Source uses and files | Source catalogue deduplicated uses; one purpose decision retained other pending and dual-linked uses. Original-only routing created no placeholder text; PDF/Markdown opened in native views |
+| Capture and import drafts | Closing/reopening retained text, unsubmitted files and both relationships; saving created actual notes/originals in the test Vault |
+| Subscription history | Two seeded sources rendered; history advanced from four to all six editions without duplication; source and 245px reading position survived navigation and application restart |
+| Offline behavior | With the test Engine stopped, task completion and Capture saved locally; generation reported disabled service startup and no queued success |
+| Workbench/section creation | Project preset propagated the chosen project; command and footer used the grouped section picker. Removing a Source section preserved Source notes and original files |
+| Application restart | The isolated process was closed and relaunched; one plugin identity loaded, board bytes and stage state were retained, and the installed bundle matched the build |
+
+Runtime evidence and screenshots are retained in the ignored repository `work/` directory:
+`acceptance-final-results.json`, `acceptance-page-results.json`, `acceptance-before-restart.json`,
+`acceptance-final-*.png`, `acceptance-two-panes-fixed.png`, `acceptance-today-small.png`,
+`acceptance-sources-small.png` and `acceptance-light-*.png`. The final main-bundle SHA-256 is
+`0049a774a20d5cc160a1decb698b9bf11ef75a6ac1cd267e24392fe360c9dd86`.
+The post-interaction Vault passed contract validation and contained 80 Markdown files.
+The runtime report records 63 passed checks and no unhandled application errors before or after
+restart. The isolated Obsidian process and Engine were stopped at completion; ports 9337 and 8777
+were no longer listening, and the original default-profile Obsidian process remained running.
+
+Dashboard verification after the runtime repairs: 319 Vitest tests passed, TypeScript check and
+production build passed. All 44 Apex scripts passed; the final section-confirmation change also
+passed the related dialog/deletion scripts, standalone build and lint. The full root check passed
+Engine 575, cross-component 12 / 1 skipped and Dashboard 319, then failed in the existing Claudian
+OpenCode concurrent prompt-file test on Windows (`ENOTEMPTY`; a focused run also observed `EPERM`).
+A focused 25-test rerun passed, but the subsequent full run still reported 6315 passed / 3 skipped /
+1 failed. The root check is therefore **not passed**; its failure output remains in
+`work/root-acceptance-rerun.log`.
+
+This run used seeded Feed cache served by the real local Engine. Live Producer synchronization,
+cloud parsing and AI-provider generation/cancellation/retry were not executed. Their automated
+workflow tests do not constitute live-service evidence. The candidate was not deployed to production.
+
 
 > **2026-09-21 functional-parity correction:** the original completion statement was too broad. The
 > recorded data-safety and lifecycle scenarios remain valid, but the new Apex sections do not yet preserve

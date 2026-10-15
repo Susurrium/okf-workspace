@@ -45,4 +45,18 @@ describe("board three-way merge", () => {
     expect(result.conflicts).toContain("section.todo-a.height");
     expect(result.data.columns[0]?.height).toBe(700);
   });
+
+  it("merges independent configuration edits and preserves an external unknown field", () => {
+    const base = parse(BOARD);
+    base.columns[0]!.extensionConfig = { pageSize: 5 };
+    const local = structuredClone(base);
+    local.columns[0]!.extensionConfig!.pageSize = 10;
+    const remote = structuredClone(base);
+    remote.columns[0]!.extensionConfig!.future = { retained: true };
+    const result = mergeBoardData(base, local, remote);
+    expect(result.conflicts).toEqual([]);
+    expect(result.data.columns[0]!.extensionConfig).toEqual({ pageSize: 10, future: { retained: true } });
+    remote.columns[0]!.extensionConfig!.pageSize = 20;
+    expect(mergeBoardData(base, local, remote).conflicts).toContain("section.todo-a.config.pageSize");
+  });
 });

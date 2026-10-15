@@ -25,6 +25,7 @@ function makeVault(files: Record<string, string>): { app: App; store: Map<string
 	const fileOf = (path: string): MemFile => {
 		const f = new TFile() as unknown as MemFile;
 		f.path = path;
+		(f as MemFile & { name: string }).name = path.split('/').pop()!;
 		f.basename = path.split('/').pop()!.replace(/\.md$/, '');
 		f.stat = { mtime: mtime.get(path) ?? 1_000, ctime: 1_000, size: 0 };
 		return f;
@@ -68,6 +69,7 @@ async function main(): Promise<void> {
 		return el;
 	};
 	(globalThis as { window?: unknown }).window = {
+		moment: (globalThis as unknown as { window: { moment: unknown } }).window.moment,
 		requestAnimationFrame: () => 0,
 		setTimeout: globalThis.setTimeout.bind(globalThis),
 		clearTimeout: globalThis.clearTimeout.bind(globalThis),

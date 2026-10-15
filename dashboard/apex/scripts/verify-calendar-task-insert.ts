@@ -245,7 +245,7 @@ async function main(): Promise<void> {
 	// 18. scanFileTasks: START time wins over ⏰/due for the week-grid slot;
 	//     a due time landing on the START's own day closes the block there.
 	{
-		const f = Object.assign(new TFile(), { path: 'x.md', stat: { mtime: 1, ctime: 1 } }) as TFile;
+		const f = Object.assign(new TFile(), { path: 'x.md', name: 'x.md', stat: { mtime: 1, ctime: 1 } }) as TFile;
 		const scan = (line: string) => scanFileTasks(f, `${line}\n`)[0]!;
 		const both = scan(`- [ ] dual [start:: ${futureIso} 10:00] [due:: ${futureIso} 18:00]`);
 		assert.equal(both.time, '10:00', '18a: start time wins');
@@ -263,7 +263,7 @@ async function main(): Promise<void> {
 
 	// 19. taskDayTimeRange: "10:00-18:00" when the block closes the same day.
 	{
-		const f = Object.assign(new TFile(), { path: 'x.md', stat: { mtime: 1, ctime: 1 } }) as TFile;
+		const f = Object.assign(new TFile(), { path: 'x.md', name: 'x.md', stat: { mtime: 1, ctime: 1 } }) as TFile;
 		const task = scanFileTasks(f, `- [ ] dual [start:: ${futureIso} 10:00] [due:: ${futureIso} 18:00]\n`)[0]!;
 		assert.equal(taskDayTimeRange(task, futureIso), '10:00-18:00', '19a: range label');
 		const single = scanFileTasks(f, `- [ ] plain [due:: ${futureIso} 09:00]\n`)[0]!;

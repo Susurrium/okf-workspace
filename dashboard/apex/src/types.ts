@@ -78,6 +78,8 @@ export interface DashboardSettings {
 	/** Active task filter in the full-screen calendar modal ('all' default).
 	    Persisted memory only — the sidebar widget stays unfiltered. */
 	calendarTaskFilter: CalendarTaskFilter;
+	calendarTaskState?: 'open' | 'all' | 'done' | 'cancelled';
+	calendarDateFact?: 'all' | 'scheduled' | 'due' | 'start' | 'reminder' | 'span';
 	/** Where calendar-added tasks land in the day's daily note: right below
 	    frontmatter ('start') or at the bottom ('end'). */
 	calendarTaskInsertPosition: 'start' | 'end';
@@ -531,6 +533,7 @@ export interface TrackerDataPoint {
 export interface TaskItem {
 	text: string;
 	checked: boolean;
+	status?: string;
 	reminder?: string;
 	children?: TaskItem[];
 	collapsed?: boolean;
@@ -932,6 +935,9 @@ export interface RenderCallbacks {
 	onTaskReorder(cardId: string, fromPath: number[], toPath: number[], before: boolean): void;
 	onTaskMoveToCard(srcCardId: string, fromPath: number[], destCardId: string, destPath: number[], mode: 'before' | 'after' | 'nest'): void;
 	onTaskEdit(cardId: string, taskPath: number[], newText: string): void;
+	onTaskDetails?(this: void, cardId: string, taskPath: number[]): void;
+	onTaskDateEdit?(this: void, cardId: string, taskPath: number[]): void;
+	onTaskPromote?(this: void, cardId: string, taskPath: number[]): void;
 	onCardAdd(columnName: string): void;
 	onColumnAdd(name: string, sectionType?: string): void;
 	onRequestAddSection(): void;
@@ -949,6 +955,7 @@ export interface RenderCallbacks {
 	onMemoUpdate(card: DashboardCard, updates: Pick<DashboardCard, 'body' | 'blockquote'> & Partial<Pick<DashboardCard, 'tasks' | 'docs' | 'wikiLink' | 'url' | 'type'>>): void;
 	onMemoSaveAsNote(card: DashboardCard): void;
 	onTaskSaveToDaily(card: DashboardCard): void;
+	onTaskCopyToDaily?(card: DashboardCard): void;
 	onDocAdd(cardId: string, path: string): void;
 	/** Per-card "new note" (notes/projects sections): create a vault note and
 	 *  attach it to the card's doc list. `pos` (the toolbar click point) anchors
@@ -980,11 +987,11 @@ export interface RenderCallbacks {
 	onArchiveTasks(columnName: string): void;
 	onLibraryConfigChange(columnName: string, config: LibraryConfig): void;
 	onDataviewConfigChange(columnName: string, config: DataviewConfig): void;
-	onExtensionConfigChange(columnName: string, config: Record<string, unknown>): void;
+	onExtensionConfigChange(columnName: string, config: Record<string, unknown>, baseline?: Record<string, unknown>): void | Promise<void>;
 	getCollapsedSections?(): Set<string>;
 	onCollapsedSectionsChange?(collapsed: Set<string>): void;
 	onQuickNoteCreate(preset: QuickNotePreset): void;
-	onQuickNoteCapture(text: string): void;
+	onQuickNoteCapture(text: string): void | Promise<void>;
 	onOpenPinnedNote(note: PinnedNote): void;
 	onQuickCommand(cmd: QuickCommand): void;
 	onQuickNoteDaily(): void;

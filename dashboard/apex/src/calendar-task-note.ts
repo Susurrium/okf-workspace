@@ -3,6 +3,10 @@ import { ensureFolder, type TaskInsertTarget } from './daily-notes';
 import { mergeTemplateNoteContent } from './library-new-note';
 import { momentOf } from './datetime';
 import { readTemplateContent, sanitizeFilename, splitFrontmatter, uniquePath } from './quick-note-section';
+import { parseTaskLine, taskForEditor } from '../../tasks-generated/core.js';
+import { parse as parseYaml } from 'yaml';
+import { taskSourceKind } from './task-source';
+import { getRegisteredApexHost } from './host';
 
 export type CalendarTaskNoteResult = TaskInsertTarget & {
 	/** The configured template could not be read; the note was created bare
@@ -15,11 +19,9 @@ export type CalendarTaskNoteResult = TaskInsertTarget & {
  *  fields ([start::]/[due::]/[scheduled::]/[end::]/…) anywhere in the text and
  *  the trailing emoji markers (⏰/📅/🛫/🛬/⏳/✅ with their date). */
 function taskTitleOf(taskLine: string): string {
-	return taskLine
-		.replace(/^\s*-\s*\[[ xX]\]\s*/, '')
-		.replace(/\s*\[(?:start|end|due|scheduled|completion|priority)::[^\]]*\]/gi, '')
-		.replace(/\s+(?:⏰|📅|🛫|🛬|⏳|✅)\s+\d{4}-\d{2}-\d{2}.*$/u, '')
-		.trim();
+	const task = parseTaskLine(taskLine.split('\n')[0] ?? '');
+	if (!task) throw new Error('新建任务笔记需要有效的 Markdown 任务');
+	return taskForEditor(task).description.replace(/(?:^|\s)#task(?=\s|$)/iu, '').trim();
 }
 
 /**
@@ -90,6 +92,11 @@ export async function createTaskNote(
 
 	const body = [tplBody, input.taskLine].filter(s => s.trim().length > 0).join('\n\n');
 	const content = mergeTemplateNoteContent(tplFm, body, {});
+	if (getRegisteredApexHost()?.checklistsInWorkbenchOnly) {
+		const metadata: unknown = parseYaml(splitFrontmatter(content).fm.replace(/^---\r?\n/u, '').replace(/\r?\n---\s*$/u, '')) ?? {};
+		if (typeof metadata !== 'object' || Array.isArray(metadata)) throw new Error('任务模板 YAML 必须为对象');
+		if (taskSourceKind(path, metadata as Record<string, unknown>) !== 'tasks') throw new Error('任务模板不能创建工作台或引用性资料');
+	}
 
 	const file = await app.vault.create(path, content);
 	return {

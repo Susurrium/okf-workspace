@@ -42,6 +42,15 @@ param(
 
 $repo = Resolve-OkfPath $RepositoryRoot
 $packaged = Test-Path -LiteralPath (Join-Path $repo 'runtime-manifest.json') -PathType Leaf
+if (-not $packaged) {
+    if (-not $Vault -or -not $State -or -not $Originals -or -not $SkipScheduledTasks) {
+        throw 'Source installation requires explicit test Vault, State, Originals and -SkipScheduledTasks.'
+    }
+    $testDeployment = Assert-OkfTestEnvironment -Config (Join-Path $State 'config\deployment.json') -Vault $Vault
+    if ($PSBoundParameters.ContainsKey('ApiPort') -and $ApiPort -ne [int]$testDeployment['api_port']) {
+        throw 'Source API port must match the test environment marker.'
+    }
+}
 if ($packaged) {
     if ($ClaudianRepository) { throw 'Packaged installation must use its bundled Claudian artifacts.' }
     . (Join-Path $PSScriptRoot 'release.ps1')
@@ -329,6 +338,7 @@ if ((Test-Path -LiteralPath $templaterManifest -PathType Leaf) -and
 # Read and validate every existing JSON input before replacing Dashboard artifacts.
 & (Join-Path $repo 'scripts\install-okf-claudian.ps1') `
     -Vault $vaultPath `
+    -State $statePath `
     -ClaudianRepository $claudianRepo `
     -SkipBuild:$packaged
 if ($LASTEXITCODE -ne 0) { throw 'OKF Claudian installation failed' }

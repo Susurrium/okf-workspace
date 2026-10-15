@@ -16,8 +16,10 @@ describe("Dashboard UI state", () => {
     expect(state.activeSection).toBe("today");
     expect(Object.keys(state.pages)).toEqual([
       "today",
+      "tasks",
       "inbox",
       "reading",
+      "sources",
       "learning",
       "projects",
       "knowledge",
@@ -34,6 +36,13 @@ describe("Dashboard UI state", () => {
       treehole: { scrollTop: 0 },
     });
     expect(state.readingSources).toEqual({});
+  });
+
+  it("keeps legacy task search when adding an independent Tasks page without coupling later Today edits", () => {
+    const migrated = normalizeDashboardUiState({ pages: { today: { filters: { taskQuery: "报告" }, scrollTop: 40 } } });
+    expect(migrated.pages.tasks.filters.taskQuery).toBe("报告");
+    const changed = patchDashboardUiState(migrated, { pages: { today: { filters: { taskQuery: "新查询" } } } });
+    expect(changed.pages.tasks.filters.taskQuery).toBe("报告");
   });
 
   it("migrates old feed reading positions and tolerates malformed settings", () => {

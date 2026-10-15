@@ -8,17 +8,18 @@ Engine API、CLI、Feed 协议与插件交接集中在这里。接口实现与�
 
 ## 本地 API 生命周期
 
-Dashboard 在启用本地服务管理时随 Obsidian 加载启动 Engine，插件卸载或 Obsidian 退出时
-停止所持有的进程。固定测试环境的核验与退出遵循[开发指南](DEVELOPMENT.md#更新与启停)。
+Dashboard 插件在启用本地服务管理时随 Obsidian 加载启动 Engine，插件卸载或 Obsidian 退出时
+停止所持有的进程。常规测试环境的启动与退出见[开发指南](DEVELOPMENT.md#更新与启停)。
 需要单独诊断时先停止受管测试服务，再用已核对的测试部署配置手工启动；服务只允许绑定 loopback：
 
 ```powershell
 uv run --project engine okf-server --config '<测试 State>\config\deployment.json'
 ```
 
-目标路径与端口按开发指南及部署配置核对，手动服务在调试结束后自行退出，避免同一环境被重复启动。
-首次启动会在指定 State 的 `secrets/local-api-token` 生成随机 token。正式安装由版本包安装器
-配置插件；插件通过标准输入持有进程，服务器使用 `--exit-on-stdin-close` 感知宿主退出。
+目标路径与端口按开发指南及部署配置核对。手动服务在调试结束后自行退出，再恢复受管启动，
+避免同一环境被重复启动。首次启动会在指定 State 的 `secrets/local-api-token` 生成随机 token。
+正式安装由版本包安装器配置插件。
+插件通过标准输入持有服务进程，服务器使用 `--exit-on-stdin-close` 感知宿主退出。
 
 ## 读取与命令边界
 
@@ -210,7 +211,7 @@ Dashboard 的 Today、Reading 和原生 Digest 复用同一种条目语义与判
 以下命令从仓库根目录执行；正式安装且 `okf` 已在 PATH 时可直接调用 `okf`。
 普通 CLI 使用命令参数或 `OKF_BRAIN_VAULT`、`OKF_BRAIN_ORIGINALS`、`OKF_BRAIN_STATE`
 环境变量；只有支持 `--config` 的入口（例如 `okf-server`、`doctor`）直接读取部署文件。
-示例先为当前 PowerShell 会话设置已核对的测试路径，`ORIGINALS` 仅表示旧迁移来源。
+以下示例先为当前 PowerShell 会话设置已核对的测试路径，`ORIGINALS` 仅表示旧迁移来源。
 导入和 Feed 命令可能写入数据或调用外部服务，使用合成输入和测试配置执行。
 
 ```powershell
@@ -226,14 +227,24 @@ uv run --project engine okf doctor --verbose
 
 CLI/API 旧导入调用缺省仍为 `convert`；与工作台默认仅保存原件的交互分别定义。
 
-### 资源更新与数据迁移
+<a id="workspace-resources"></a>
 
-资源更新应限定于明确受管的 Contracts、模板、policies、views 及相应配置，保留业务笔记、
-用户交互模板和未知设置。部署 Skills 与插件遵循各自安装入口；执行前核对实际写入范围。
-`okf init --vault <路径>` 只初始化空 Vault，不建立完整的测试部署身份。
-`okf migrate --vault <路径> --state <路径>` 会迁移旧字段及布局并同步资源，
-执行前明确目标、迁移范围、恢复依据，执行后核验差异和 Contracts。
-日常资源更新不附带数据迁移，具体环境操作见[开发指南](DEVELOPMENT.md#更新与启停)。
+### 初始化、资源同步与数据迁移
+
+| 命令 | 用途与前置条件 |
+| --- | --- |
+| `okf init --vault <路径>` | 在空目录初始化 Vault；不建立完整的测试部署身份 |
+| `okf resources sync --vault <路径>` | 更新已有 Vault 的受管资源，要求目标已有根 `index.md`，`--vault` 必须显式传入 |
+| `okf migrate --vault <路径> --state <路径>` | 迁移旧字段及布局，并同步资源；会修改笔记，执行前明确迁移范围和恢复依据 |
+
+`resources sync` 更新 Contracts、canonical/core 模板、views、policies 和 Web Clipper 集成，
+并删除这些受管目录中已不在资源包内的文件。interactive 模板只补缺失文件，已有内容保留。
+它还合并 `.obsidian/app.json`、`daily-notes.json`、`templates.json` 中的受管设置，保留其他键。
+业务笔记不执行迁移；Skills、插件及 Vault 根 AGENTS.md 不由该接口安装。
+
+命令输出实际变更列表，失败返回非零退出码；不保证全部资源跨文件事务回滚。
+调用前核对目标及授权，执行后检查差异和 Contracts；日常测试更新优先通过
+[统一更新入口](DEVELOPMENT.md#更新与启停)完成身份校验及配套安装。
 
 ### Feed 调试
 
@@ -351,6 +362,18 @@ Workspace Kit 位于 `engine/workspace/`，安装时同步到 Vault 的 `AGENTS.
 | `okf-workspace-dashboard:new-lesson` | 选择已有课程后创建 Lesson |
 | `okf-workspace-dashboard:new-project` | 新建项目 |
 | `okf-workspace-dashboard:import-document` | 保存原件，或明确转换资料正文 |
+| `okf-workspace-dashboard:open-tasks` | 打开 Tasks 待办页面，提供日期视图、状态历史及查询 |
+| `okf-workspace-dashboard:inspect-task-boundary` | 读取历史工作台任务与原 Tasks 配置差异，提供来源定位 |
+| `okf-workspace-dashboard:new-task` | 打开共用待办表单，明确保存位置、关联与日期 |
+| `okf-workspace-dashboard:open-today` | 打开今天 |
+| `okf-workspace-dashboard:open-inbox` | 打开收集箱 |
+| `okf-workspace-dashboard:open-reading` | 打开订阅 |
+| `okf-workspace-dashboard:open-sources` | 打开资料 |
+| `okf-workspace-dashboard:open-learning` | 打开学习 |
+| `okf-workspace-dashboard:open-projects` | 打开项目 |
+| `okf-workspace-dashboard:open-knowledge` | 打开知识 |
+| `okf-workspace-dashboard:open-life` | 打开日记与复盘 |
+| `okf-workspace-dashboard:open-system` | 打开后台处理与系统诊断 |
 
 QuickAdd 最推荐只绑定第一个命令；具体路径、YAML 和模板仍由 Workspace Contracts 维护。这样 QuickAdd
 配置损坏或未安装时，命令面板和 Dashboard 仍能完成同样操作。

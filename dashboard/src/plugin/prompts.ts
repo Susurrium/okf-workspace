@@ -39,7 +39,7 @@ export class ChoiceModal<T extends string> extends SuggestModal<ChoiceOption<T>>
   }
 
   public onChooseSuggestion(option: ChoiceOption<T>): void {
-    void this.onSelect(option.value);
+    void this.onSelect(option.value).catch(error => new Notice(error instanceof Error ? error.message : "操作失败", 10000));
   }
 }
 

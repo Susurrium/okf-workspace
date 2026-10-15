@@ -50,6 +50,15 @@ def _install_claudian(
     vault: Path,
     source: Path,
 ) -> subprocess.CompletedProcess[str]:
+    state = vault.parent / "test-state"
+    config = state / "config/deployment.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    deployment = {"vault": str(vault), "state": str(state), "api_port": 34876,
+                  "installation_id": "claudian-test-installation"}
+    config.write_text(json.dumps(deployment), encoding="utf-8")
+    (config.parent / "test-environment.json").write_text(
+        json.dumps({**deployment, "environment": "test"}), encoding="utf-8",
+    )
     return subprocess.run(
         [
             "pwsh",
@@ -58,6 +67,8 @@ def _install_claudian(
             str(root / "scripts" / "install-okf-claudian.ps1"),
             "-Vault",
             str(vault),
+            "-State",
+            str(state),
             "-ClaudianRepository",
             str(source),
             "-SkipBuild",
@@ -278,11 +289,11 @@ def test_dashboard_persists_only_external_token_file_path() -> None:
     assert "$obsidianAppSettings['propertiesInDocument'] = 'hidden'" not in installer
     assert "Register-ScheduledTask -TaskName 'OKF Brain Local Service'" not in installer
     assert "Unregister-ScheduledTask -TaskName 'OKF Brain Local Service'" in installer
-    assert "if ($explicitState -or -not $data.ContainsKey('baseUrl'))" in quick_installer
-    assert "if ($explicitState -or -not $data.ContainsKey('tokenFile'))" in quick_installer
-    assert "if ($explicitState -or -not $data.ContainsKey('deploymentConfig'))" in quick_installer
-    assert (
-        "if ($explicitState -or -not $data.ContainsKey('serviceLogDirectory'))" in quick_installer
+    for field in ("baseUrl", "tokenFile", "deploymentConfig", "serviceLogDirectory"):
+        assert f"$data['{field}'] =" in quick_installer
+    assert "$data.Remove('token')" in quick_installer
+    assert quick_installer.index("Assert-OkfTestEnvironment") < quick_installer.index(
+        "build-dashboard.ps1"
     )
     assert quick_installer.index("Read-OkfJsonHashtable -Path $dataPath") < (
         quick_installer.index("Install-OkfDashboardPluginAtomic")

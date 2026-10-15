@@ -1,7 +1,7 @@
 {
 	"name": "apex-dashboard",
 	"version": "3.6.5",
-	"description": "Your personal command center for Obsidian \u2014 memos, todos, projects, and quick links in one stunning glassmorphism dashboard.",
+	"description": "Your personal command center for Obsidian — memos, todos, projects, and quick links in one stunning glassmorphism dashboard.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
@@ -70,6 +70,7 @@
 	"dependencies": {
 		"chart.js": "^4.5.1",
 		"lunar-typescript": "^1.8.6",
+		"markdown-it": "^15.0.2",
 		"obsidian": "^1.13.1",
 		"yaml": "^2.9.0"
 	}

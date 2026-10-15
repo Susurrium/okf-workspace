@@ -68,7 +68,11 @@ it("renders mobile Inbox, Reading and System without desktop API actions", async
   runtime.api = vi.fn(() => { throw new Error("Mobile contacted Engine"); });
   const inbox = new TestElement();
   await runtime.renderInbox(inbox as unknown as HTMLElement);
-  expect(inbox.descendants().some((element) => element.textContent === "导入资料")).toBe(true);
+  const importControl = inbox.descendants("okf-dashboard__document-drop")[0]!;
+  expect(importControl.attributes.get("role")).toBe("button");
+  importControl.click();
+  expect((view as unknown as { plugin: { openDocumentImport: ReturnType<typeof vi.fn> } }).plugin.openDocumentImport)
+    .toHaveBeenCalledWith([], {}, "inbox");
   expect(inbox.descendants("okf-dashboard__selection-toolbar")).toHaveLength(0);
   expect(inbox.descendants().some((element) => element.attributes.get("type") === "checkbox")).toBe(false);
   await runtime.renderReading(new TestElement() as unknown as HTMLElement);
@@ -427,7 +431,10 @@ describe("real Dashboard View source handoff", () => {
     expect(container.descendants().some((item) => item.textContent === "返回工作台")).toBe(true);
     expect(container.descendants("okf-dashboard__nav")).toHaveLength(0);
     container.descendants().find((item) => item.textContent === "添加到当前工作台")!.click();
-    expect(addOkfSectionToActiveWorkbench).toHaveBeenCalledWith("system", "workbenches/daily");
+    expect(addOkfSectionToActiveWorkbench).toHaveBeenCalledWith("system", "workbenches/daily", {
+      systemTab: "processing",
+      viewState: { filters: {}, scrollTop: 0, tab: "processing" },
+    });
     await view.onClose();
   });
 
@@ -446,12 +453,16 @@ describe("real Dashboard View source handoff", () => {
     const pane = new OkfDashboardItemView(leaf, {
       getDashboardUiState: () => normalizeDashboardUiState(undefined),
     } as never);
+    const container = new TestElement();
+    const header = container.createDiv({ cls: "view-header-title", text: "工作台 · 学习" });
+    Object.defineProperty(pane, "containerEl", { value: container });
 
     await pane.setState({ section: "knowledge", workbenchPath: "workbenches/daily" }, {} as never);
 
     expect(pane.getViewType()).toBe(OKF_DASHBOARD_VIEW);
-    expect(pane.getDisplayText()).toBe("工作台 · 知识库");
-    expect(pane.getState()).toEqual({ section: "knowledge", workbenchPath: "workbenches/daily" });
+    expect(pane.getDisplayText()).toBe("工作台 · 知识");
+    expect(header.textContent).toBe("工作台 · 知识");
+    expect(pane.getState()).toEqual({ section: "knowledge", workbenchPath: "workbenches/daily", config: {}, navigationHistory: [] });
   });
 
   it("renders a newly confirmed source as a waiting card without requesting missing items", () => {
@@ -1233,12 +1244,15 @@ describe("real Dashboard View source handoff", () => {
     const nav = root.descendants("okf-dashboard__nav")[0];
     expect(nav?.children.map((child) => child.textContent)).toEqual([
       "今天",
-      "待处理",
-      "订阅阅读",
+      "待办",
+      "收集箱",
+      "订阅",
+      "资料",
       "学习",
       "项目",
-      "知识库",
-      "生活",
+      "知识",
+      "日记与复盘",
+      "后台与诊断",
     ]);
     expect(loadFeedSubscriptionSources).toHaveBeenNthCalledWith(1, { limit: 8 });
     expect(root.descendants("okf-reading-source-card")).toHaveLength(1);
@@ -2155,7 +2169,7 @@ describe("real Dashboard View source handoff", () => {
       .map((item) => item.children[1]?.textContent);
     expect(labels).toEqual([
       "异常",
-      "待处理",
+      "待整理记录",
       "待生成学习笔记",
       "待生成知识笔记",
       "知识待复核",
@@ -2400,16 +2414,16 @@ describe("real Dashboard View source handoff", () => {
     expect(promptProjectProgress).toHaveBeenCalledWith("projects/workspace/project.md");
     expect(panels).toHaveLength(1);
     expect(panels[0]?.label).toBe("其他操作 · 个人知识库");
-    expect(panels[0]?.actions.map((action) => action.title)).toEqual(PROJECT_ACTION_PANEL_LABELS);
+    expect(panels[0]?.actions.map((action) => action.title)).toEqual(["新建项目待办", "查看项目待办", ...PROJECT_ACTION_PANEL_LABELS]);
     expect(row?.descendants("okf-work-item__metric").map((item) => item.textContent)).toEqual([
       "待整理 0",
       "学习笔记 0",
       "资料 0",
     ]);
 
-    await panels[0]?.actions[0]?.onSelect();
-    await panels[0]?.actions[1]?.onSelect();
-    await panels[0]?.actions[2]?.onSelect();
+    await panels[0]?.actions.find(action => action.id === "capture")?.onSelect();
+    await panels[0]?.actions.find(action => action.id === "import")?.onSelect();
+    await panels[0]?.actions.find(action => action.id === "log")?.onSelect();
     expect(promptCapture).toHaveBeenCalledWith({ project: "projects/workspace/project.md" });
     expect(openDocumentImport).toHaveBeenCalledWith([], { project: "workspace" }, "context");
     expect(openVaultPath).toHaveBeenCalledWith("projects/workspace/log.md");
@@ -2436,6 +2450,7 @@ describe("real Dashboard View source handoff", () => {
     };
     runtime.attachActionPanel = () => undefined;
     runtime.changeProjectStatus = changeProjectStatus;
+    const showDetails = vi.spyOn(view as never, "openProjectDetails").mockImplementation(() => undefined);
     const container = new TestElement();
 
     runtime.renderProjectWorkItem(container as unknown as HTMLElement, project(status));
@@ -2444,7 +2459,7 @@ describe("real Dashboard View source handoff", () => {
     const primary = row.descendants("okf-work-item__primary-action")[0]!;
     expect(primary.textContent).toBe(label);
     title.click();
-    expect(openVaultPath).toHaveBeenCalledWith("projects/workspace/project.md");
+    expect(showDetails).toHaveBeenCalledWith(expect.objectContaining({ path: "projects/workspace/project.md" }));
     primary.click();
     if (status === "active") {
       expect(promptProjectProgress).toHaveBeenCalledWith("projects/workspace/project.md");
@@ -2470,22 +2485,28 @@ describe("real Dashboard View source handoff", () => {
     ]);
   });
 
-  it("opens the exact related note from Project statistics without moving primary actions", async () => {
+  it("drills down to the related scope for any count and preserves fast native-note previews", async () => {
     const openVaultPath = vi.fn(async () => undefined);
+    const navigateToOkfSection = vi.fn(async (..._args: unknown[]) => undefined);
     const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
-    const view = new OkfDashboardView(leaf, { getDashboardUiState: () => normalizeDashboardUiState(undefined), openVaultPath } as never);
+    const view = new OkfDashboardView(leaf, { getDashboardUiState: () => normalizeDashboardUiState(undefined), openVaultPath, navigateToOkfSection } as never);
     const runtime = view as unknown as { renderProjectWorkItem: (container: HTMLElement, value: ProjectSummary) => void; attachActionPanel: () => void };
     runtime.attachActionPanel = () => undefined;
+    const preview = new TestElement();
+    vi.spyOn(view as never, "showObjectDetails").mockImplementation((...args: unknown[]) => (args[1] as (el: HTMLElement, close: () => void) => void)(preview as unknown as HTMLElement, () => undefined));
     const value = project();
     value.pending_captures = [note({ path: "inbox/captures/exact.md", title: "待整理想法" })];
     value.related_materials = [note({ path: "sources/a.md", title: "资料 A" }), note({ path: "sources/b.md", title: "资料 B" })];
     const root = new TestElement(); runtime.renderProjectWorkItem(root as unknown as HTMLElement, value);
     root.descendants("okf-work-item__metric")[0]!.click();
-    expect(openVaultPath).toHaveBeenCalledWith("inbox/captures/exact.md");
+    expect(navigateToOkfSection).toHaveBeenCalledWith("inbox", view.contentEl, undefined, expect.objectContaining({ project: value.path, catalogueKey: "pending-captures" }));
+    const navigationCall: unknown[] = navigateToOkfSection.mock.calls[0] ?? [];
+    expect(navigationCall[3]).not.toHaveProperty("notePaths");
     root.descendants("okf-work-item__metric")[2]!.click();
-    const list = root.descendants("okf-work-item__related")[0]!;
-    expect(list.children.map((entry) => entry.textContent)).toEqual(["资料 A", "资料 B"]);
-    list.children[1]!.click(); expect(openVaultPath).toHaveBeenCalledWith("sources/b.md");
+    expect(navigateToOkfSection).toHaveBeenLastCalledWith("sources", view.contentEl, undefined, expect.objectContaining({ project: value.path, catalogueKey: "sources" }));
+    root.descendants("okf-metric-preview")[0]!.click();
+    preview.descendants().find(entry => entry.textContent === "资料 B")!.click();
+    expect(openVaultPath).toHaveBeenCalledWith("sources/b.md");
     expect(root.descendants("okf-work-item__actions")[0]!.children.map((entry) => entry.textContent)).toEqual(["记录进展", "添加资料 · 可拖入文件夹", "其他操作 ▾"]);
   });
 
@@ -2502,11 +2523,11 @@ describe("real Dashboard View source handoff", () => {
     runtime.attachActionPanel = () => undefined;
     runtime.vaultReader = { learning: async () => ({ pending_guides: [], ready_guides: [], completed_guides: [], courses: [selectedCourse], projects: [] }) };
     const root = new TestElement(); await runtime.renderLearning(root as unknown as HTMLElement);
-    root.descendants().find((entry) => entry.textContent === "导入学习资料")!.click();
+    root.descendants("okf-dashboard__document-drop")[0]!.click();
     root.descendants().find((entry) => entry.textContent === "新建课堂笔记")!.click();
     expect(openDocumentImport).toHaveBeenCalledWith([], { course: "algebra" }, "learning");
     expect(promptLessonForCourse).toHaveBeenCalledWith(coursePath);
-    expect(root.descendants("okf-course-work-item")[0]?.descendants("okf-work-item__actions")[0]?.children.map((entry) => entry.textContent)).toEqual(["新建课堂笔记", "添加资料 · 可拖入文件夹", "其他操作 ▾"]);
+    expect(root.descendants("okf-course-work-item")[0]?.descendants("okf-work-item__actions")[0]?.children.map((entry) => entry.textContent)).toEqual(["新建课堂笔记", "新建课程待办", "查看课程待办", "添加资料 · 可拖入文件夹", "其他操作 ▾"]);
   });
 
   it("keeps cached Daily and Papers items visible while making a refresh failure actionable", async () => {
@@ -2593,6 +2614,7 @@ describe("real Dashboard View source handoff", () => {
         title: "待生成来源",
         note_type: "Source",
         purpose: "study",
+        text_path: "sources/text/pending.md",
       }),
       note({ title: "待生成 Guide", material_ready: false }),
       note({ path: "learning/guides/ready.md", title: "可学习 Guide", material_ready: true }),

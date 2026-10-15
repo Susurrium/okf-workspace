@@ -978,12 +978,18 @@ def create_app(
         source_path: str,
         request: DocumentRouteRequest,
     ) -> dict[str, object]:
+        if request.generate and semantic_service is None:
+            raise HTTPException(
+                status_code=503,
+                detail="后台生成未启用，请先配置生成服务或选择稍后生成",
+            )
         source, extract, draft = route_existing_import(
             configured.vault,
             resolve_bundle_path(configured.vault, source_path),
             intent=ImportIntent(request.intent),
             course=request.course,
             project=request.project,
+            require_text=request.generate,
         )
         public: dict[str, object] = {
             "source": _relative(source, configured.vault),

@@ -7,6 +7,8 @@ await esbuild.build({
     "obsidian",
     "@codemirror/state",
     "@codemirror/view",
+    "@codemirror/language",
+    "@codemirror/autocomplete",
     "node:fs",
     "node:crypto",
     "node:child_process",

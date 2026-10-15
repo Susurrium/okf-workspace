@@ -4,6 +4,7 @@ import type {
   NoteSummary,
   WebCaptureAction,
 } from "../api/types.js";
+import { dashboardNoteKey, uniqueDashboardNotes } from "./note-identity.js";
 
 export const INGESTED_VIA_ORDER = [
   "web-clip",
@@ -94,9 +95,9 @@ export function buildInboxWorkQueue(
   projection: InboxProjectionData,
   conversions: readonly ConversionRecord[],
 ): InboxWorkQueue {
-  const decision = uniqueNotes([...projection.captures, ...projection.pending_imports]).map(
+  const decision = uniqueDashboardNotes([...projection.captures, ...projection.pending_imports]).map(
     (note): DecisionWorkItem => ({
-      key: `decision:${note.path}`,
+      key: `decision:${dashboardNoteKey(note)}`,
       stage: "decision",
       ingested_via: displayIngestedVia(note.ingested_via),
       note,
@@ -143,15 +144,6 @@ export function materialContextFromNote(
     ...(course ? { course } : {}),
     ...(project ? { project } : {}),
   };
-}
-
-function uniqueNotes(notes: readonly NoteSummary[]): NoteSummary[] {
-  const seen = new Set<string>();
-  return notes.filter((note) => {
-    if (seen.has(note.path)) return false;
-    seen.add(note.path);
-    return true;
-  });
 }
 
 function relationSlug(

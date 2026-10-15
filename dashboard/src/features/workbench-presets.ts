@@ -2,14 +2,15 @@ import { serialize } from "../../apex/src/parser.js";
 import type { DashboardColumn, DashboardData } from "../../apex/src/types.js";
 import type { WorkspacePresetOption } from "../../apex/src/host.js";
 
-export type WorkbenchPresetId = "daily" | "learning" | "project" | "reading" | "life" | "system";
+export type WorkbenchPresetId = "daily" | "learning" | "project" | "reading" | "knowledge" | "life" | "system";
 
 export const WORKBENCH_PRESETS: readonly WorkspacePresetOption[] = [
-  { id: "daily", label: "日常", description: "今日行动、待处理、项目、日历与每日阅读" },
-  { id: "learning", label: "学习", description: "课程、学习材料、知识与资料入口" },
-  { id: "project", label: "项目", description: "项目、今日行动、学习与资料入口" },
-  { id: "reading", label: "阅读", description: "订阅订阅、历史、微信读书与阅读工具" },
-  { id: "life", label: "生活", description: "日记、反思、复盘与记录整理" },
+  { id: "daily", label: "日常", description: "今日行动、便签、每日更新与日历" },
+  { id: "learning", label: "学习", description: "完整学习功能、课程关系与学习便签" },
+  { id: "project", label: "项目", description: "完整项目功能、关联内容与项目便签" },
+  { id: "reading", label: "订阅阅读", description: "来源、历史、微信读书与阅读工具" },
+  { id: "knowledge", label: "知识", description: "知识目录、核验、复核与导航维护" },
+  { id: "life", label: "日记与复盘", description: "日记、反思、复盘与记录整理" },
   { id: "system", label: "系统", description: "后台任务、失败恢复、诊断与维护" },
 ] as const;
 
@@ -29,70 +30,61 @@ function column(
   return { id, name, sectionType, color, cards: [], ...options };
 }
 
-export function workbenchPresetData(preset: WorkbenchPresetId = "daily"): DashboardData {
+export function workbenchPresetData(preset: WorkbenchPresetId = "daily", context: Record<string, unknown> = {}): DashboardData {
   const columns: Record<WorkbenchPresetId, DashboardColumn[]> = {
     daily: [
-      column("daily-memo", "随手记", "memo", "#f59e0b"),
-      column("daily-today", "今日", "workspace-today", "#6366f1"),
-      column("daily-inbox", "待处理", "workspace-inbox", "#ef8b45", { half: true }),
-      column("daily-projects", "近期项目", "workspace-projects", "#10b981", {
-        half: true,
-        extensionConfig: { statuses: ["active"] },
+      column("daily-today", "今天", "workspace-today", "#6366f1", {
+        extensionConfig: { showDailyUpdates: false, pageSize: 5 },
       }),
-      column("daily-calendar", "日历", "calendar", "#3b82f6"),
-      column("daily-reading", "每日阅读", "workspace-reading", "#8b5cf6"),
-      column("daily-life", "生活记录", "workspace-life", "#ec4899", { half: true }),
-      column("daily-system", "系统与后台任务", "workspace-system", "#64748b", { half: true }),
+      column("daily-memo", "工作台便签", "memo", "#f59e0b"),
+      column("daily-updates", "每日更新", "workspace-updates", "#8b5cf6", {
+        extensionConfig: { itemsPerEdition: 3, readingView: "daily-updates", feedStreams: ["hotspot", "news", "treehole"] },
+      }),
+      column("daily-calendar", "日历", "calendar", "#3b82f6", { extensionConfig: { initialView: "week" } }),
     ],
     learning: [
       column("learning-main", "学习", "workspace-learning", "#6366f1"),
-      column("learning-inbox", "待处理资料", "workspace-inbox", "#ef8b45", { half: true }),
-      column("learning-knowledge", "知识", "workspace-knowledge", "#8b5cf6", { half: true }),
       column("learning-notes", "学习便签", "memo", "#f59e0b"),
-      column("learning-system", "学习任务状态", "workspace-system", "#64748b"),
     ],
     project: [
       column("project-main", "项目", "workspace-projects", "#10b981"),
-      column("project-today", "今日行动", "workspace-today", "#6366f1", { half: true }),
-      column("project-learning", "学习", "workspace-learning", "#8b5cf6", { half: true }),
-      column("project-notes", "项目便签", "notes", "#f59e0b"),
-      column("project-inbox", "项目资料入口", "workspace-inbox", "#ef8b45"),
+      column("project-notes", "工作台便签", "memo", "#f59e0b"),
     ],
     reading: [
-      column("reading-feed", "阅读与订阅", "workspace-reading", "#8b5cf6"),
+      column("reading-feed", "订阅", "workspace-reading", "#8b5cf6"),
       column("reading-weread", "微信读书", "weread", "#10b981"),
-      column("reading-knowledge", "知识库", "workspace-knowledge", "#3b82f6"),
-      column("reading-inbox", "阅读资料入口", "workspace-inbox", "#ef8b45"),
+    ],
+    knowledge: [
+      column("knowledge-main", "知识", "workspace-knowledge", "#8b5cf6"),
     ],
     life: [
-      column("life-main", "生活", "workspace-life", "#ec4899"),
-      column("life-today", "今天", "workspace-today", "#6366f1"),
+      column("life-main", "日记与复盘", "workspace-life", "#ec4899"),
       column("life-calendar", "日历", "calendar", "#3b82f6"),
       column("life-memo", "随手记", "memo", "#f59e0b"),
     ],
     system: [
-      column("system-main", "系统与后台任务", "workspace-system", "#64748b"),
-      column("system-inbox", "转换与待处理", "workspace-inbox", "#ef8b45"),
+      column("system-main", "后台与诊断", "workspace-system", "#64748b"),
     ],
   };
   return {
     workbenchSchema: 1,
     banner: { ...BANNER },
     quickActions: [
+      { name: "快速记录", icon: "pencil", type: "command", target: "okf-workspace-dashboard:quick-capture" },
+      { name: "新建待办", icon: "list-plus", type: "command", target: "okf-workspace-dashboard:new-task" },
       { name: "全局搜索", icon: "search", type: "command", target: "global-search:open" },
-      { name: "快速创建", icon: "plus", type: "command", target: "okf-workspace-dashboard:open-action-menu" },
-      { name: "问我的笔记", icon: "message-circle", type: "command", target: "okf-workspace-dashboard:ask-notes" },
-      { name: "导入资料", icon: "file-up", type: "command", target: "okf-workspace-dashboard:import-document" },
-      { name: "系统状态", icon: "settings-2", type: "command", target: "okf-workspace-dashboard:open-system" },
+      { name: "快捷操作", icon: "plus", type: "command", target: "okf-workspace-dashboard:open-action-menu" },
     ],
-    columns: columns[preset].map((item) => ({ ...item })),
+    hiddenPresets: ["p:daily-notes", "p:file-explorer:new-file"],
+    columns: columns[preset].map((item) => ({ ...item,
+      ...(item.sectionType?.startsWith("workspace-") ? { extensionConfig: { ...item.extensionConfig, ...context } } : {}) })),
     bodyPreamble: "这里保存工作台布局和便签；课程、项目及其他笔记保存在各自文件中。",
   };
 }
 
-export function generateWorkbenchPresetMarkdown(presetId?: string): string {
+export function generateWorkbenchPresetMarkdown(presetId?: string, context?: Record<string, unknown>): string {
   const preset = WORKBENCH_PRESETS.some((item) => item.id === presetId)
     ? presetId as WorkbenchPresetId
     : "daily";
-  return serialize(workbenchPresetData(preset));
+  return serialize(workbenchPresetData(preset, context));
 }

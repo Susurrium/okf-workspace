@@ -72,9 +72,9 @@ Windows CLI 启动器包含 Python 的绝对路径。确认新位置运行及备
 ### 固定测试环境的建立与恢复
 
 固定环境路径及日常更新命令统一维护在[开发指南](DEVELOPMENT.md#正式发布后的继续开发)。
-固定测试环境投入使用前必须完成独立初始化与登记，准备独立数据目录、部署配置、
-同一安装身份的归属标记和 `config/test-environment.json`。先验证这些身份及 profile 隔离，
-再使用源码安装或启动入口；不能仅创建空目录后直接套用已有环境的更新步骤。
+源码安装、更新和启停入口都要求部署配置与测试标识已经存在；当前没有自动创建全新固定测试
+环境的一键入口。首次建立须作为明确的初始化与登记任务，准备独立数据目录、部署配置、
+同一安装身份的归属标记和 `config/test-environment.json`，验证后再使用源码入口。
 
 恢复已有环境时先停止写入并保留现状，从经核验的备份恢复缺失配置。测试标识的
 `installation_id`、`vault`、`state`、`api_port` 必须与原登记记录、部署配置及目录归属一致，
@@ -92,9 +92,9 @@ cd E:\code\okf-workspace
   -ApiPort 8766 -SkipScheduledTasks
 ```
 
-源码安装只用于已明确登记的测试目标，执行前核对标识、部署配置与完整路径，显式提供目标和
-`-SkipScheduledTasks`。完整安装包含布局与数据迁移，执行前核对迁移范围和恢复依据；
-日常更新与退出遵循[开发指南](DEVELOPMENT.md#更新与启停)。
+源码安装仅用于已具有匹配 `config/test-environment.json` 的测试环境，入口拒绝正式身份、
+隐式数据路径和全局计划任务注册。完整安装包含布局与数据迁移，执行前核对迁移范围和恢复依据；
+日常更新使用开发指南中的 `update-test-workspace.ps1`。
 安装器保留 `OKF-Brain` 系列路径作为兼容缺省；当前正式与测试操作均应显式指定目标路径，
 不能从这些缺省值推断当前使用的环境。活动原件始终保存到目标 Vault 的 `sources/originals/`。
 
@@ -318,7 +318,7 @@ Runtime State、全文索引和向量索引不作为必须恢复对象；恢复 
 
 ```powershell
 .\scripts\install-dashboard.ps1 -Vault E:\ObsidianData\OKF-Test -State E:\ObsidianData\OKF-Test-State
-.\scripts\install-okf-claudian.ps1 -Vault E:\ObsidianData\OKF-Test
+.\scripts\install-okf-claudian.ps1 -Vault E:\ObsidianData\OKF-Test -State E:\ObsidianData\OKF-Test-State
 ```
 
 安装完成后按开发指南从测试专用 profile 启动并验收。

@@ -76,6 +76,39 @@ function beginCreation(modal: DocumentImportModal, kind: ImportRelationKind, tit
 afterEach(() => vi.restoreAllMocks());
 
 describe("document import relation creation", () => {
+  it("displays and submits both Course and Project relations", async () => {
+    const f = fixture();
+    await f.notes.createCourse("统计学", "statistics");
+    await f.notes.createProject("课程实践", "practice");
+    const modal = new DocumentImportModal(f.app, files(), { course: "statistics", project: "practice" }, "context", f.importFile);
+    modal.open();
+    await vi.waitFor(() => expect(select(modal, "同时关联").value).toBe("project:practice"));
+    expect(select(modal, "归属").value).toBe("course:statistics");
+    button(modal, "开始导入").click();
+    await vi.waitFor(() => expect(f.importFile).toHaveBeenCalledTimes(2));
+    expect(f.importFile.mock.calls[0]![1]).toMatchObject({ course: "statistics", project: "practice" });
+  });
+
+  it("restores files and processing choices when a document draft is reopened", async () => {
+    const f = fixture();
+    let draft: import("../src/plugin/document-import-modal.js").DocumentImportDraft | undefined;
+    const modal = new DocumentImportModal(f.app, files(), {}, "command", f.importFile, undefined, undefined,
+      false, "store", false, false, "learn", undefined, value => { draft = value; });
+    modal.open();
+    choose(modal, "处理方式", "convert");
+    choose(modal, "转换方式", "markitdown-service");
+    choose(modal, "转换结果检查", "high");
+    modal.close();
+    expect(draft?.files).toHaveLength(2);
+    const reopened = new DocumentImportModal(f.app, [], {}, "command", f.importFile, undefined, undefined,
+      false, "store", false, false, "learn", draft);
+    reopened.open();
+    expect(select(reopened, "处理方式").value).toBe("convert");
+    expect(select(reopened, "转换方式").value).toBe("markitdown-service");
+    expect(select(reopened, "转换结果检查").value).toBe("high");
+    expect(content(reopened).descendants().filter(item => item.tagName === "li")).toHaveLength(2);
+    expect(f.importFile).not.toHaveBeenCalled();
+  });
   it("offers course and project creation in an empty Vault", async () => {
     const f = fixture();
     const modal = new DocumentImportModal(f.app, files(), {}, "command", f.importFile, undefined, f.createRelation);
@@ -192,7 +225,7 @@ describe("document import relation creation", () => {
     modal.open();
     await vi.waitFor(() => expect(select(modal, "归属").children.some((item) => item.value === "project:workspace")).toBe(true));
     expect(select(modal, "归属").value).toBe("course:statistics");
-    expect(select(modal, "归属").children.map((item) => item.textContent)).toContain("Course：统计学");
+    expect(select(modal, "归属").children.map((item) => item.textContent)).toContain("课程：统计学");
     choose(modal, "归属", value);
     button(modal, "开始导入").click();
     await vi.waitFor(() => expect(f.importFile).toHaveBeenCalledTimes(2));
@@ -204,9 +237,9 @@ describe("document import relation creation", () => {
 
   it("keeps a newly selected relation when an older list request finishes late", async () => {
     const f = fixture();
-    const empty = await new VaultDashboardReader(f.app).learning();
+    const empty = await new VaultNoteService(f.app).captureContexts();
     let finish!: (value: typeof empty) => void;
-    vi.spyOn(VaultDashboardReader.prototype, "learning").mockImplementationOnce(() =>
+    vi.spyOn(VaultNoteService.prototype, "captureContexts").mockImplementationOnce(() =>
       new Promise((resolve) => { finish = resolve; }));
     const modal = new DocumentImportModal(f.app, files(), {}, "command", f.importFile, undefined, f.createRelation);
     modal.open();

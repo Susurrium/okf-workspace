@@ -12,6 +12,8 @@ import {
   type InboxProjectionData,
 } from "./inbox-work-queue.js";
 import { isSemanticOperationActive } from "./semantic-operation-state.js";
+import { uniqueDashboardNotes } from "./note-identity.js";
+import { conversionIsRunning, conversionHasFailure } from "./operation-presentation.js";
 
 export type TodayAttentionKind =
   | "inbox-decisions"
@@ -44,13 +46,6 @@ export interface TodayAttentionInput {
   conversions?: readonly ConversionRecord[];
 }
 
-const ACTIVE_CONVERSION_STATUSES = new Set<ConversionRecord["status"]>([
-  "queued",
-  "converting",
-  "waiting-for-mineru",
-  "waiting-for-parser",
-]);
-
 /** Counts actionable Today work without assigning storage ownership to the UI. */
 export function countTodayAttention(input: TodayAttentionInput): TodayAttentionCounts {
   const operations = input.operations ?? [];
@@ -62,10 +57,10 @@ export function countTodayAttention(input: TodayAttentionInput): TodayAttentionC
     pending_wiki: input.pendingWikiCount ?? 0,
     background_running:
       operations.filter((item) => isSemanticOperationActive(item.status)).length +
-      conversions.filter((item) => ACTIVE_CONVERSION_STATUSES.has(item.status)).length,
+      conversions.filter(conversionIsRunning).length,
     background_failed:
       operations.filter((item) => ["failed", "orphaned"].includes(item.status)).length +
-      conversions.filter((item) => item.status === "failed").length,
+      conversions.filter(conversionHasFailure).length,
     today_tasks: input.tasks.length,
   };
 }
@@ -120,7 +115,7 @@ export type DashboardObjectMetricKey =
 /** A stable, display-ready count. Zeroes are intentionally retained for comparable rows. */
 export interface DashboardObjectMetric {
   key: DashboardObjectMetricKey;
-  label: "待整理" | "学习笔记" | "资料" | "课堂笔记" | "待学习";
+  label: "待整理" | "学习笔记" | "资料" | "课堂笔记" | "学习条目";
   count: number;
 }
 
@@ -174,7 +169,7 @@ export function filterDashboardLearningScope(
   scope: DashboardLearningScope,
   relationPath?: string,
 ): NoteSummary[] {
-  const unique = uniqueNoteSummaries(notes);
+  const unique = uniqueDashboardNotes(notes);
   if (scope === "all") return unique;
   if (scope === "independent") {
     return unique.filter((note) => dashboardLearningContexts(note).includes("independent"));
@@ -241,7 +236,7 @@ export function dashboardLearningScopeMetric(
 ): DashboardObjectMetric {
   return metric(
     "learning-entries",
-    "待学习",
+    "学习条目",
     countDashboardLearningScopeEntries(notes, scope, relationPath),
   );
 }
@@ -367,10 +362,7 @@ export function buildDashboardOwnedSections(
     if (!owner) continue;
     const key = ownershipKey(owner);
     const bucket = buckets.get(key) ?? [];
-    if (!bucket.some((item) => normalizePath(item.path) === normalizePath(note.path))) {
-      bucket.push(note);
-      buckets.set(key, bucket);
-    }
+    buckets.set(key, uniqueDashboardNotes([...bucket, note]));
   }
   return order.flatMap((owner): DashboardOwnedSection[] => {
     const owned = buckets.get(ownershipKey(owner));
@@ -407,20 +399,6 @@ function uniqueNotes(items: readonly DashboardContinueItem[]): DashboardContinue
     const path = normalizePath(item.note.path);
     if (seen.has(path)) return false;
     seen.add(path);
-    return true;
-  });
-}
-
-function uniqueNoteSummaries(notes: readonly NoteSummary[]): NoteSummary[] {
-  const seen = new Set<string>();
-  return notes.filter((note) => {
-    const key = note.note_type === "Source"
-      ? [note.path, note.purpose, note.course, note.project]
-        .map((value) => normalizeRelationPath(value ?? ""))
-        .join("|")
-      : normalizeRelationPath(note.path);
-    if (seen.has(key)) return false;
-    seen.add(key);
     return true;
   });
 }

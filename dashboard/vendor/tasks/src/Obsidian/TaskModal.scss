@@ -1,0 +1,56 @@
+.tasks-edit-modal-container {
+    // Minimise the vertical space below the Apply and Cancel buttons
+    padding-bottom: 0;
+
+    .modal-content {
+        padding-bottom: 0;
+    }
+}
+
+// On mobile, when a text box has focus, the software keyboard can obscure the
+// bottom of Obsidian modals. The Apply and Cancel buttons are sticky, but the
+// modal content still needs enough extra scrollable space below them for the
+// browser/WebView to scroll the buttons above the keyboard.
+//
+// Apply this only while a field that actually summons the keyboard has focus.
+// That is the Description box and the text inputs - the dates, the recurrence
+// rule and the two dependency searches.
+//
+// Matching on ':focus-within' instead would also fire for the controls that take
+// focus without opening a keyboard: the status dropdown, the date pickers, the
+// priority radio buttons and the "Only future dates" checkbox. The buttons would
+// then jump up to make room for a keyboard that never appears.
+//
+// If ':has()' is unavailable the rule simply never matches, leaving the pre-existing
+// behaviour where the keyboard can obscure the bottom of the modal.
+//
+// The extra space compensates for viewport UI, not for text size. Experiments
+// with rem-based values were fragile because changing font-size settings also
+// changed the amount of keyboard compensation. Use px for the bounds so the
+// workaround remains independent of Obsidian and OS font-size settings.
+//
+// The values are a bounded heuristic:
+// - 220px is the minimum extra scroll space. It keeps the range from becoming
+//   too small on shorter mobile screens.
+// - 35vh scales with the viewport height, so taller mobile screens get more
+//   scroll space than shorter mobile screens.
+// - 360px is the maximum extra scroll space, preventing very tall screens from
+//   getting an unnecessarily large blank area.
+//
+// This has been validated on an iPhone 17 Pro with Obsidian font sizes 10, 16
+// and 24, including iOS text size set to 135%. It is expected to be safe on
+// Android as well, because it only adds temporary scrollable space while editing.
+
+// Declared as a custom property because two things need to agree on it: the padding below, and
+// EditTask.svelte, which waits for the Description field to rise clear of the keyboard before
+// focusing it. Override this one property in a CSS snippet and both stay in step - overriding the
+// padding on its own leaves the plugin working from a number your layout no longer uses.
+.is-mobile .tasks-edit-modal-container {
+    --tasks-keyboard-space-allowance: clamp(220px, 35vh, 360px);
+}
+
+.is-mobile .tasks-edit-modal-container:has(textarea:focus, input[type='text']:focus) {
+    .modal-content {
+        padding-bottom: var(--tasks-keyboard-space-allowance);
+    }
+}

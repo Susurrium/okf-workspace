@@ -9,6 +9,8 @@ export interface SectionTypeOption {
 	labelKey?: string;
 	label?: string;
 	defaultName?: string;
+	group?: string;
+	description?: string;
 }
 
 /**
@@ -95,18 +97,31 @@ export class AddSectionModal extends Modal {
 
 	private renderTypeGrid(grid: HTMLElement): void {
 		grid.empty();
-		for (const opt of this.options()) {
-			const card = grid.createDiv({
+		const groups = new Map<string, SectionTypeOption[]>();
+		for (const option of this.options()) {
+			const group = option.group ?? (['weread', 'ticktick', 'web'].includes(option.value)
+				? t('section.groupExternal') : option.value === 'calendar' ? t('section.groupCalendar') : t('section.groupBrowse'));
+			groups.set(group, [...(groups.get(group) ?? []), option]);
+		}
+		for (const [group, options] of groups) {
+			const host = grid.createDiv({ cls: 'dashboard-section-type-group' });
+			host.createEl('h4', { text: group });
+			const items = host.createDiv({ cls: 'dashboard-add-section-grid' });
+			for (const opt of options) {
+			const card = items.createDiv({
 				cls: 'dashboard-add-section-card' + (opt.value === this.selectedType ? ' active' : ''),
 				attr: { 'data-type': opt.value, role: 'button' },
 			});
 			const iconEl = card.createDiv({ cls: 'dashboard-add-section-card-icon' });
 			setIcon(iconEl, opt.icon);
 			card.createDiv({ cls: 'dashboard-add-section-card-name', text: this.optionLabel(opt) });
+			if (opt.description) card.createDiv({ cls: 'dashboard-add-section-card-description', text: opt.description });
+			if (opt.group) card.setAttribute('title', opt.group);
 			card.addEventListener('click', () => {
 				this.selectedType = opt.value;
 				this.renderTypeGrid(grid);
 			});
+			}
 		}
 	}
 
@@ -119,11 +134,13 @@ export class AddSectionModal extends Modal {
 	private options(): SectionTypeOption[] {
 		return [
 			...SECTION_TYPE_OPTIONS,
-			...registeredSectionDefinitions().map((definition) => ({
+			...registeredSectionDefinitions().filter(definition => !definition.hidden).map((definition) => ({
 				value: definition.type,
 				icon: definition.icon,
 				label: definition.label,
 				defaultName: definition.defaultName,
+				group: definition.group,
+				description: definition.description,
 			})),
 		];
 	}

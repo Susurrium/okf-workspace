@@ -9,8 +9,10 @@ import type { DashboardSection } from "../src/plugin/dashboard-view.js";
 
 const SECTIONS: DashboardSection[] = [
   "today",
+  "tasks",
   "inbox",
   "reading",
+  "sources",
   "learning",
   "projects",
   "knowledge",
@@ -28,11 +30,11 @@ describe("registered OKF workbench surface parity", () => {
       mountOkfDashboardSurface: mount,
     });
 
-    expect(definitions.map((definition) => definition.type)).toEqual(
-      SECTIONS.map((section) => OKF_SECTION_TYPES[section]),
-    );
+    expect(definitions.map((definition) => definition.type)).toEqual([
+      ...SECTIONS.map((section) => OKF_SECTION_TYPES[section]), "workspace-updates", "alltasks",
+    ]);
 
-    for (const [index, definition] of definitions.entries()) {
+    for (const [index, definition] of definitions.slice(0, SECTIONS.length).entries()) {
       const container = { addClass: vi.fn() } as unknown as HTMLElement;
       const cleanup = await definition.render({ container } as never);
       expect(mount).toHaveBeenNthCalledWith(index + 1, container, SECTIONS[index]);

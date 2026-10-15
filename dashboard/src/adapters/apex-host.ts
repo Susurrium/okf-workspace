@@ -45,7 +45,8 @@ export interface ApexHostAdapterOptions {
     position: "start" | "end",
   ) => Promise<TaskInsertTarget | null>;
   workspacePresets?: ApexHost["workspacePresets"];
-  createWorkspaceMarkdown?: (presetId?: string) => string;
+  createWorkspaceMarkdown?: (presetId?: string, context?: Record<string, unknown>) => string;
+  chooseWorkspaceContext?: (presetId?: string) => Promise<Record<string, unknown> | undefined>;
   mutateManagedArtifact?: (mutation: ArtifactMutation) => Promise<ArtifactMutationResult>;
   convertMemoToCapture?: (
     workspacePath: string,
@@ -53,6 +54,20 @@ export interface ApexHostAdapterOptions {
   ) => Promise<{ path: string; created: boolean }>;
   createManagedArtifact?: (artifactType: string) => Promise<boolean>;
   openDocumentImportFromDrop?: (transfer: DataTransfer) => void;
+  executeQuickAction?: ApexHost["executeQuickAction"];
+  openTodayNote?: ApexHost["openTodayNote"];
+  saveTasksToDaily?: ApexHost["saveTasksToDaily"];
+  editTask?: ApexHost["editTask"];
+  handlesTaskReminders?: boolean;
+  checklistsInWorkbenchOnly?: boolean;
+  prepareTaskLine?: ApexHost['prepareTaskLine'];
+  calendarDefaultDate?: ApexHost['calendarDefaultDate'];
+  editTaskDates?: ApexHost['editTaskDates'];
+  createTask?: ApexHost['createTask'];
+  openTaskSource?: ApexHost['openTaskSource'];
+  canWriteTaskTarget?: ApexHost['canWriteTaskTarget'];
+  taskStatistics?: ApexHost['taskStatistics'];
+  recentDocumentExclusions?: ApexHost["recentDocumentExclusions"];
 }
 
 /**
@@ -69,10 +84,25 @@ export class ApexHostAdapter implements ApexHost {
   private readonly calendarTaskWriter: ApexHostAdapterOptions["insertCalendarTask"];
   public readonly workspacePresets: ApexHost["workspacePresets"];
   private readonly workspaceMarkdownFactory: ApexHostAdapterOptions["createWorkspaceMarkdown"];
+  private readonly workspaceContextChooser: ApexHostAdapterOptions["chooseWorkspaceContext"];
   private readonly artifactMutation: ApexHostAdapterOptions["mutateManagedArtifact"];
   private readonly memoConversion: ApexHostAdapterOptions["convertMemoToCapture"];
   private readonly managedArtifactCreation: ApexHostAdapterOptions["createManagedArtifact"];
   public readonly openDocumentImportFromDrop: ApexHostAdapterOptions["openDocumentImportFromDrop"];
+  public readonly executeQuickAction: ApexHost["executeQuickAction"];
+  public readonly openTodayNote: ApexHost["openTodayNote"];
+  public readonly saveTasksToDaily: ApexHost["saveTasksToDaily"];
+  public readonly editTask: ApexHost["editTask"];
+  public handlesTaskReminders: boolean;
+  public readonly checklistsInWorkbenchOnly: boolean;
+  public readonly prepareTaskLine: ApexHost['prepareTaskLine'];
+  public readonly calendarDefaultDate: ApexHost['calendarDefaultDate'];
+  public readonly editTaskDates: ApexHost['editTaskDates'];
+  public readonly createTask: ApexHost['createTask'];
+  public readonly openTaskSource: ApexHost['openTaskSource'];
+  public readonly canWriteTaskTarget: ApexHost['canWriteTaskTarget'];
+  public readonly taskStatistics: ApexHost['taskStatistics'];
+  public readonly recentDocumentExclusions: ApexHost["recentDocumentExclusions"];
   public readonly backupService: BackupService;
   private readonly mediaTagService: MediaTagService;
   private readonly habitService: HabitService;
@@ -94,10 +124,25 @@ export class ApexHostAdapter implements ApexHost {
     this.calendarTaskWriter = options.insertCalendarTask;
     this.workspacePresets = options.workspacePresets;
     this.workspaceMarkdownFactory = options.createWorkspaceMarkdown;
+    this.workspaceContextChooser = options.chooseWorkspaceContext;
     this.artifactMutation = options.mutateManagedArtifact;
     this.memoConversion = options.convertMemoToCapture;
     this.managedArtifactCreation = options.createManagedArtifact;
     this.openDocumentImportFromDrop = options.openDocumentImportFromDrop;
+    this.executeQuickAction = options.executeQuickAction;
+    this.openTodayNote = options.openTodayNote;
+    this.saveTasksToDaily = options.saveTasksToDaily;
+    this.editTask = options.editTask;
+    this.handlesTaskReminders = options.handlesTaskReminders ?? false;
+    this.checklistsInWorkbenchOnly = options.checklistsInWorkbenchOnly ?? false;
+    this.prepareTaskLine = options.prepareTaskLine;
+    this.calendarDefaultDate = options.calendarDefaultDate;
+    this.editTaskDates = options.editTaskDates;
+    this.createTask = options.createTask;
+    this.openTaskSource = options.openTaskSource;
+    this.canWriteTaskTarget = options.canWriteTaskTarget;
+    this.taskStatistics = options.taskStatistics;
+    this.recentDocumentExclusions = options.recentDocumentExclusions;
     this.backupService = new BackupService(this);
     this.mediaTagService = new MediaTagService(this);
     this.habitService = new HabitService(this);
@@ -207,12 +252,13 @@ export class ApexHostAdapter implements ApexHost {
   }
 
   public async addSection(): Promise<void> {
-    const leaf = this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE)[0];
-    if (!(leaf?.view instanceof DashboardView)) {
+    const view = this.app.workspace.getActiveViewOfType(DashboardView)
+      ?? this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE)[0]?.view;
+    if (!(view instanceof DashboardView)) {
       new Notice(t("main.openDashboard"));
       return;
     }
-    await leaf.view.addSection();
+    await view.addSection();
   }
 
   public async toggleBannerMode(): Promise<void> {
@@ -274,7 +320,9 @@ export class ApexHostAdapter implements ApexHost {
             : `无法核查工作台文件是否存在；请稍后重试：${path}.md`);
           return undefined;
         }
-        const markdown = this.workspaceMarkdownFactory?.(presetId) ?? generateDefaultMarkdown();
+        const context = this.workspaceContextChooser ? await this.workspaceContextChooser(presetId) : {};
+        if (context === undefined) return undefined;
+        const markdown = this.workspaceMarkdownFactory?.(presetId, context) ?? generateDefaultMarkdown();
         await this.app.vault.create(path.endsWith(".md") ? path : `${path}.md`, markdown);
       } catch (error) {
         console.error("Workspace file creation failed:", error);
