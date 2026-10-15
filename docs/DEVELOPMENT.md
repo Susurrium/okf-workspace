@@ -4,7 +4,7 @@
 
 本文件维护开发命令、修改要求和验收方法。测试矩阵是要求，不代表本次或生产环境已经通过；已执行的验收证据保存在组件验收台账和发布记录。
 
-按需阅读：[环境](#开发环境) · [检查与构建](#检查与构建) · [合成 Vault 验收](#合成-vault-完整流程) · [实机验收](#实机与外部服务验收) · [文案](#界面命名与文案) · [文档维护](#文档维护)。
+按需阅读：[固定测试环境](#正式发布后的继续开发) · [检查与构建](#检查与构建) · [证据与退出](#验收证据与退出) · [合成 Vault 验收](#合成-vault-完整流程) · [实机验收](#实机与外部服务验收) · [文档维护](#文档维护)。
 
 ## 开发环境
 
@@ -23,18 +23,25 @@ Dashboard 与 Claudian 有各自的 lockfile；Engine 与 MarkItDown 也有各�
 
 ## 正式发布后的继续开发
 
-源码、正式程序和测试数据分别维护。正式程序通过版本包部署，例如 `D:\OKF-Workspace`；
-开发仍在本仓库进行。修改源码不会改变已安装的正式 Engine，构建插件时只部署到测试 Vault。
+源码、正式程序和测试数据分别维护。开发仍在本仓库进行；正式程序通过
+[版本包](DEPLOYMENT.md#install)部署到仓库外。开发构建只生成本地产物，安装时核对测试目标。
+
+### 固定测试环境
 
 保留一个按当前 Contracts 初始化的 `E:\ObsidianData\OKF-Test`，配套独立
 `OKF-Test-State`、本地端口 `8766`、本地 token 和远端 `okf-test` 数据库及专用账户。
-旧 `OKF-Brain`、`OKF-Workspace` 和 `okf-workspace` 数据库继续作为历史档案，
-不整体复制到新的测试或正式环境。测试内容使用合成资料；自动化测试仍自行建立临时 fixture Vault。
+测试内容使用合成资料，保留已有测试笔记和人工检查记录。常规实机验收复用此环境，
+不按功能或日期另建长期 Vault。测试 Obsidian 应使用 State 内独立的 profile，且只登记
+对应测试 Vault；正式 Vault 由正式 profile 打开，同一 Vault 不得由多个 profile 同时写入。
 
-源码安装测试环境时显式指定这些路径、`-ApiPort 8766 -SkipScheduledTasks`；
-测试不持有正式环境的全局计划任务。安装后在测试 State 的 `config/test-environment.json`
-记录 `environment: test`、对应安装身份、Vault、State 和端口，供控制脚本校验。
-默认关闭 Engine 自动启动和 LiveSync。已有测试环境可使用：
+源码安装显式指定测试路径、`-ApiPort 8766 -SkipScheduledTasks`，不持有正式环境的全局计划任务。
+投入使用前核对 State 的 `config/test-environment.json`：`environment: test`、安装身份、
+Vault、State 和端口必须与部署配置及目录归属匹配。首次建立与恢复见
+[部署指南](DEPLOYMENT.md#test-environment)，不把已有环境的更新步骤用于空目录初始化。
+
+### 更新与启停
+
+默认关闭 Engine 自动启动和 LiveSync。现有环境控制入口为：
 
 ```powershell
 .\scripts\test-workspace.ps1 -Action Start
@@ -44,24 +51,24 @@ Dashboard 与 Claudian 有各自的 lockfile；Engine 与 MarkItDown 也有各�
 .\scripts\test-workspace.ps1 -Action Start -EnableSync
 ```
 
-Start 打开测试 Vault 并启动其 Engine；Stop 关闭测试窗口、关闭 Engine 自动启动和 LiveSync，
-不影响正式 Vault。脚本要求有效的测试环境标识，拒绝正式端口和不匹配的 Dashboard 配置。
+Start 启动测试环境，Stop 关闭测试窗口并关闭 Engine 自动启动和 LiveSync；Status 查询状态。
+执行前核对脚本实际打开的 profile、Vault 路径、部署配置与运行程序。入口必须满足固定环境的
+profile 隔离和身份要求；尚不能证明这些条件时先停止使用相应启动路径，不能以脚本返回成功代替核验。
+启动后通过受认证接口核对 Engine 的 Vault 指纹，测试操作不影响正式 Vault。
 CouchDB 可以同时保留正式和测试库；平时停用测试客户端即可，不能停止正式库共用的容器。
 测试 CouchDB 版本或服务器配置时使用独立容器。
 
-更新插件时显式指定测试环境：
+更新前停止测试窗口及后台写入者，按[安装入口](DEPLOYMENT.md#plugin-deployment)显式指定目标。
+构建与安装分别执行，构建脚本和本地配置不得隐式向 Vault 复制产物。资源更新保留业务笔记与
+用户交互模板；数据格式升级另行明确迁移范围、备份及验证。更新中断后检查实际文件和日志，
+修正失败并完成验证，不把部分复制成功记录为更新完成。
 
-```powershell
-.\scripts\install-dashboard.ps1 -Vault E:\ObsidianData\OKF-Test -State E:\ObsidianData\OKF-Test-State
-.\scripts\install-okf-claudian.ps1 -Vault E:\ObsidianData\OKF-Test
-```
+### 变更流程
 
-Claudian 的本地 `.env.local` 若启用自动复制，只能指向测试 Vault。
-测试结束执行 Stop，避免自动同步和后台 AI 写入继续运行。
-
-后续流程为：提交当前发布基线 → 新分支开发 → 相关自动化检查 → 测试 Vault 验证 →
-更新版本并打包 → 安装正式环境。保留上一个版本包以便回退；涉及数据 schema 的回退先恢复匹配数据。
-已经完成且与本次改动无关的 LiveSync／平板验收可以沿用。
+在本仓库完成修改与相关自动化检查，停止并更新固定测试环境，核对实际构建与 Engine 身份后
+执行受影响的实机场景，最后记录证据并退出测试。发布候选完成根检查和必要附加检查，
+正式版本固定提交并打包；正式安装按[部署指南](DEPLOYMENT.md#production-cutover)及用户授权执行。
+开发期间保留与本次任务无关的未提交修改，不把它们自动纳入提交或发布。
 
 ## 检查与构建
 
@@ -73,9 +80,14 @@ Claudian 的本地 `.env.local` 若启用自动复制，只能指向测试 Vault
 | --- | --- |
 | Engine Python | `uv run pytest <相关测试>`、`uv run ruff check src tests`、`uv run pyright` |
 | Dashboard | `npm run check`、`npm test -- <相关测试>`、`npm run build` |
+| Apex 源码或集成接缝 | Dashboard 检查，以及 `dashboard/apex/` 中受影响的 `test:*`、lint、build；上游升级执行全部 `test:*` |
 | Claudian | 先读最近的 `AGENTS.md`；代码修改运行 typecheck、lint、相关测试、build 及该指南要求的其他检查 |
+| Windows 安装或环境控制 | 脚本解析、相关安装与控制测试；核对身份拒绝、配置保留、进程及端口退出 |
 | 跨组件 | 根目录 `uv run --project engine pytest tests/e2e`，再运行根检查脚本 |
 | 文档 | `git diff --check`、本地链接与命令核对；组件文档有专用测试时运行该测试 |
+
+根检查当前不执行 Apex 专用检查和 Claudian `npm run check:performance`，也不覆盖真实 Obsidian、
+远端服务或多设备验收。按修改范围补齐，不能用根脚本成功代替其未执行的验证。
 
 历史 Originals 服务使用 `scripts/check-legacy-originals.ps1` 和独立 CI。当前 Vault 原件迁移、旧设备上传恢复仍进入默认 Engine／跨组件检查。
 
@@ -85,7 +97,19 @@ Dashboard 产物是 `dist/main.js`、`dist/styles.css` 和根目录 `manifest.js
 
 ## 测试原则
 
-测试使用隐私安全的合成 Vault，按当前 Contracts 生成。历史生产笔记、旧 Runtime State 和废弃开发样例不作为新写入器的兼容门槛。生产内容、索引、秘密和运行状态留在仓库外。模拟测试验证协议与工作流；真实外部服务是否可用需单独 smoke test。
+测试使用隐私安全的合成 Vault，按当前 Contracts 生成。历史生产笔记、旧 Runtime State 和废弃开发样例不作为新写入器的兼容门槛。生产内容、索引、秘密和运行状态留在仓库外；合成夹具及临时状态仅放在忽略的测试工作目录中。模拟测试验证协议与工作流；真实外部服务是否可用需单独 smoke test。
+
+## 验收证据与退出
+
+验收记录实际源码提交及未提交状态、组件版本、构建和安装文件哈希、环境身份、执行场景与结果。
+同一版本号不代表同一构建；源码、依赖、资源或产物变化后重新验证受影响部分。
+自动化、Obsidian 实机、真实外部服务、视觉和多设备验证分别表述；视觉检查遵循用户授权。
+失败日志与最终结果分别保留，合成缓存或 mock 成功不作为在线服务证明。
+
+结束后关闭测试窗口、Engine、手动服务、测试同步与自动启动，核对实际进程、API/CDP 端口
+和 profile 登记。停止失败时记录仍运行的进程或端口，不终止正式实例或共享服务。
+结果保存在本次 work/ 验收记录或组件台账，长期保留证据按
+[归档步骤](DEPLOYMENT.md#environment-retirement)处理。
 
 ## Engine 验收矩阵
 
@@ -94,7 +118,7 @@ Dashboard 产物是 `dist/main.js`、`dist/styles.css` 和根目录 `manifest.js
   旧版与未来版本不要求 Artifact 字段，身份冲突、非布尔标记及异常 YAML 明确报错。
   笔记迁移逐字节保留工作台；检索清理旧布局索引，显式附件读取最新正文；真实任务保留，
   工作台备份不重复参与检索、任务或笔记治理，备份恢复仍保留工作台。
-- Sources：Source/Source Text 成对原子发布；Web/Feed 双向 URL 去重；文件哈希去重。
+- Sources：存在正文时原子发布 Source/Source Text；仅保存原件时不创建占位正文；Web/Feed 双向 URL 去重；文件哈希去重。
 - Intake：默认仅保存原件不调用解析器；明确转换且未指定方式时使用 MinerU 云 API；本地 token 文件不进入仓库或 Vault；失败不隐式降级到旧服务。
 - Retry：切换 parser 不残留永远 queued 的旧 conversion。
 - Identity：原始文件名、resource、首个 `ingested_via` 不在 worker 中丢失。
@@ -140,9 +164,18 @@ Dashboard 产物是 `dist/main.js`、`dist/styles.css` 和根目录 `manifest.js
 
 ## 合成 Vault 完整流程
 
-每次发布使用临时目录重新生成，不复用旧状态：
+常规实机验收更新已有 OKF-Test 的资源并准备有效合成资料，保留已有测试笔记。
+干净初始化、迁移、恢复或特殊插件组合确实需要独立初始状态时，才创建临时夹具。
 
-1. 初始化 Vault 和 Contracts；
+临时夹具放在仓库忽略的 work/ 范围内，不在 E:\ObsidianData 下新建验收 Vault。
+在本次任务记录中写明用途、来源提交及未提交状态、构建哈希、创建时间、期限和清理范围。
+到期时间不代表自动停止或删除；创建任务负责关闭写入者、记录清理结果或延期理由与新期限。
+需要归档时遵循[环境退役](DEPLOYMENT.md#environment-retirement)，失败资料保留到调查完成。
+自动化测试由测试框架分配独立夹具，本地临时根使用忽略的工作目录或组件既有约定。
+
+完整业务流程：
+
+1. 常规验收更新已有测试环境并核对 Contracts；干净初始化场景才创建临时 Vault；
 2. 快速记录一个无归属 Capture、一个 Course 想法和一个 Project 想法；
 3. 先仅保存测试原件，确认不产生转换任务；再明确转换 PDF/DOCX/PPTX，确认默认云解析路径及图片完整性；
 4. 发布 Web Clip 和 Feed 中相同 URL，确认只产生一个 Source pair；
@@ -155,7 +188,8 @@ Dashboard 产物是 `dist/main.js`、`dist/styles.css` 和根目录 `manifest.js
 
 ## 实机与外部服务验收
 
-自动化全部通过后，只做一次短实机验收：
+相关自动化检查通过后，按本次改动选择必要的真实场景；完整发布候选覆盖以下适用项目。
+修正实现或更换产物后重新验证受影响场景，已有且未受影响的外部服务和多设备证据可注明依据沿用：
 
 - MinerU 云 API 真实转换带图 DOCX，并验证结果 ZIP/图片完整性；
 - 本机 Codex 完成一次可见会话和一次后台生成；
@@ -170,7 +204,7 @@ LiveSync 属于以后启用多设备时的独立验收，不阻塞当前单机�
 
 ```powershell
 uv run --project engine python scripts/smoke-mineru-cloud.py `
-  --token-file E:\ObsidianData\OKF-Brain-State\secrets\mineru-client.token
+  --token-file E:\ObsidianData\OKF-Test-State\secrets\mineru-client.token
 ```
 
 此命令会实际提交云端任务并消耗服务额度。它只打印解析器、正文长度、图片数量与 QC 结果。

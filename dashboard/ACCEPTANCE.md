@@ -1,5 +1,9 @@
 # Apex × OKF acceptance ledger
 
+Current test-environment and lifecycle procedures are maintained in the
+[development guide](../docs/DEVELOPMENT.md#正式发布后的继续开发).
+The entries below retain the environment paths and results of their recorded runs.
+
 > **2026-09-21 functional-parity correction:** the original completion statement was too broad. The
 > recorded data-safety and lifecycle scenarios remain valid, but the new Apex sections do not yet preserve
 > the full reachable behavior of the former OKF Dashboard. The subsequent shared-Surface implementation

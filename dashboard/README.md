@@ -6,7 +6,9 @@ Obsidian 工作台插件。入口为 `src/plugin/main.ts`；Apex 提供工作台
 
 在此目录执行 `npm ci`、`npm run check`、`npm test`、`npm run build`。根脚本可统一安装与检查；完整环境和验收规则见[开发指南](../docs/DEVELOPMENT.md)。
 
-构建生成 `dist/main.js` 与合并后的 `dist/styles.css`，插件 manifest 位于本目录。安装使用根 `scripts/install-dashboard.ps1` 或完整 Windows 安装器，见[部署运维](../docs/DEPLOYMENT.md#plugin-deployment)。
+构建生成 `dist/main.js` 与合并后的 `dist/styles.css`，插件 manifest 位于本目录。
+实机环境、更新和退出遵循[开发指南](../docs/DEVELOPMENT.md#正式发布后的继续开发)；
+单独安装插件和正式版本包升级见[部署运维](../docs/DEPLOYMENT.md#plugin-deployment)。
 
 ## 边界与来源
 

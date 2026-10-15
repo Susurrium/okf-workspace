@@ -16,7 +16,7 @@ Recommended update procedure:
 2. Compare the selected commit with the previous imported commit.
 3. Update the vendored Claudian source and tests as one dedicated change.
 4. Reapply or adapt the items in `OKF-PATCHES.md` through the narrowest available extension point.
-5. Run Claudian checks, Dashboard checks, fixture-Vault integration checks, the root check script, and isolated Obsidian acceptance.
+5. Run Claudian checks, Dashboard checks, fixture-Vault integration checks and the root check script. Follow the [development acceptance rules](../docs/DEVELOPMENT.md#合成-vault-完整流程) for Obsidian verification and any temporary fixtures.
 6. Update this file, `OKF-PATCHES.md`, plugin identity/version metadata, and the root release manifest.
 
 Upstream updates are manual and value-driven; they are not pulled automatically.

@@ -42,7 +42,7 @@ retained in Git history; the acceptance ledger records the accepted 3.6.5 outcom
    database edits, plugin data paths, settings, and service lifetimes.
 4. Run the upstream build/scripts, the unified Dashboard checks, shared fixture tests, and the acceptance
    scenarios in `dashboard/ACCEPTANCE.md`.
-5. Exercise the critical flows in a disposable Obsidian Vault and update this file with the accepted commit.
+5. Exercise critical flows in the persistent test Vault using the [development acceptance rules](../docs/DEVELOPMENT.md#合成-vault-完整流程). Use a temporary fixture only when the upgrade scenario requires independent initial state; complete its cleanup and record the accepted commit here.
 6. After acceptance or production cutover, update this baseline and the acceptance ledger with the resulting
    status. Retain completed audit and exercise reports in Git history, and keep the current outcome in
    this baseline and the acceptance ledger.

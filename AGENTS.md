@@ -1,33 +1,48 @@
-# OKF Workspace development policy
+# OKF Workspace 开发规则
 
-## Authority
+## 适用范围与资料
 
-1. The user's current request.
-2. `engine/workspace/vault/system/contracts/*.yaml` for Vault artifacts.
-3. `docs/architecture/` for active module and ownership boundaries.
-4. Current tests and implementation.
+- 遵循用户当前要求和个人通用 AGENTS.md；修改组件前读取适用的子目录规则。
+- 按任务读取相关文档，无需为局部修改通读全部资料：
+  - 模块边界与数据归属：[架构](docs/architecture/README.md)。
+  - Artifact 字段、路径与写入区域：[Contracts](engine/workspace/vault/system/contracts/README.md)。
+  - 开发环境、测试命令与验收：[开发指南](docs/DEVELOPMENT.md)。
+  - 安装、发布、同步、迁移与恢复：[部署指南](docs/DEPLOYMENT.md)。
+  - API、CLI 和插件协议：[接口文档](docs/INTERFACES.md)。
+- 当前实现与测试用于核对实际行为；发现与规范冲突时明确指出。
+- 计划和历史资料仅作参考；已部署状态依据实际配置、文件、回执和运行证据确认。
 
-Historical repositories and archived documents are reference material only.
+## 架构与数据
 
-## Product boundaries
+- Engine 拥有领域逻辑、确定性操作、后台任务和可部署 Vault 资源。
+- Dashboard 拥有工作台和简单人工等价编辑，不复制 Engine 状态机。
+- Claudian 拥有助手界面与 Provider runtime，OKF 业务规则来自部署的 Vault。
+- services/ 与 integrations/ 的职责遵循架构文档，不另建 Workspace 权威。
+- Markdown/YAML 是长期语义权威；写入遵循当前 Contracts，保留未知字段与用户内容。
+- 真实用户内容、原件、秘密和运行数据不得进入源码仓库。
+- 兴趣、长期价值由用户判断；AI 不得推断 studied_at。
 
-- `engine/` owns the Workspace domain, deterministic operations, API, worker, CLI, retrieval, and deployable Vault resources.
-- `dashboard/` is the Obsidian workbench. It may read the Vault directly and perform simple human-equivalent edits, but it must not duplicate Engine state machines.
-- `claudian/` owns the embedded agent UI and provider runtimes. OKF business rules come from the deployed Vault resources.
-- `services/` contains genuinely independent processes such as the MarkItDown service.
-- `integrations/` contains external-system clients and deployment assets, not Workspace authority.
+## 环境与操作边界
 
-## Data rules
+- 长期环境保持一个正式环境 OKF 和一个固定测试环境 OKF-Test；
+  常规实机验收统一使用 OKF-Test，不按功能或日期另建长期测试 Vault。
+- 临时夹具仅用于明确需要独立初始状态的测试，放在忽略的 work/ 中，
+  按开发指南记录用途并完成退出、清理或归档。
+- 正式与测试环境隔离 State、凭据、端口、profile 和同步数据库；
+  同一 Vault 不得由多个 Obsidian profile 同时写入。
+- 启动或写入前核对实际路径、环境身份和运行目标；不匹配时停止，不绕过检查。
+- 开发操作不得影响正式数据、程序、同步、共享服务或全局计划任务；
+  正式操作必须有覆盖其影响范围的用户授权。
 
-- Markdown/YAML in the production Vault is the semantic authority.
-- Runtime state, indexes, Originals, secrets, and user content never enter this repository.
-- New Workspace artifacts must satisfy the current contract; obsolete development fixtures do not define compatibility requirements.
-- Interest and long-term value remain explicit user judgments.
-- AI must not infer `studied_at`.
+## 实施与交付
 
-## Verification
-
-- Python changes: targeted pytest, Ruff, and Pyright.
-- Dashboard changes: Vitest, TypeScript check, and production build.
-- Claudian changes: nearest scoped `AGENTS.md`, typecheck, lint, relevant tests, and build.
-- Cross-boundary changes: fixture-Vault integration tests and the root check script.
+- 基于当前文件修改，保护已有及期间新增的用户修改，限制无关变更。
+- 使用现有构建、生成和部署入口；构建不隐式部署，资源更新不附带数据迁移。
+- 按开发指南及组件规则完成相关检查；跨组件变更和发布候选执行根检查，
+  并完成脚本未覆盖的必要验证。
+- 验收对应实际用户流程，核对候选产物与安装文件哈希；
+  分别记录自动化、实机、外部服务和视觉验证的实际范围。
+- 测试结束按开发指南关闭写入进程与同步，核验退出状态并处理临时资源。
+- 正式发布按部署指南使用已验收版本包，核对实际安装文件及部署回执。
+- 一个事实只维护一个正文位置；行为改变时同步相关文档。
+  完成说明准确报告结果、验证和限制。

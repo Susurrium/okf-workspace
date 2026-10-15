@@ -8,16 +8,17 @@ Engine API、CLI、Feed 协议与插件交接集中在这里。接口实现与�
 
 ## 本地 API 生命周期
 
-正式使用时不需要手工启动服务：Dashboard 插件随 Obsidian 加载时启动服务，插件卸载或 Obsidian 退出时停止。开发调试时可以手工启动；服务仍只允许绑定 loopback：
+Dashboard 在启用本地服务管理时随 Obsidian 加载启动 Engine，插件卸载或 Obsidian 退出时
+停止所持有的进程。固定测试环境的核验与退出遵循[开发指南](DEVELOPMENT.md#更新与启停)。
+需要单独诊断时先停止受管测试服务，再用已核对的测试部署配置手工启动；服务只允许绑定 loopback：
 
 ```powershell
-$env:OKF_BRAIN_VAULT = 'E:\ObsidianData\OKF-Brain'
-$env:OKF_BRAIN_ORIGINALS = 'E:\ObsidianData\OKF-Brain-Originals'
-$env:OKF_BRAIN_STATE = 'E:\ObsidianData\OKF-Brain-State'
-uv run --project engine okf-server
+uv run --project engine okf-server --config '<测试 State>\config\deployment.json'
 ```
 
-首次启动会在 `OKF_BRAIN_STATE/secrets/local-api-token` 生成随机 token。开发阶段把服务地址 `http://127.0.0.1:8765` 和 token 文件路径填入 Obsidian 插件设置；正式安装由 Windows 安装脚本完成。插件通过标准输入持有服务进程，服务器使用 `--exit-on-stdin-close` 感知宿主退出，不依赖反复轮询父进程。
+目标路径与端口按开发指南及部署配置核对，手动服务在调试结束后自行退出，避免同一环境被重复启动。
+首次启动会在指定 State 的 `secrets/local-api-token` 生成随机 token。正式安装由版本包安装器
+配置插件；插件通过标准输入持有进程，服务器使用 `--exit-on-stdin-close` 感知宿主退出。
 
 ## 读取与命令边界
 
@@ -206,9 +207,16 @@ Dashboard 的 Today、Reading 和原生 Digest 复用同一种条目语义与判
 
 ## CLI
 
-以下命令从仓库根目录执行；正式安装且 `okf` 已在 PATH 时可直接调用 `okf`。配置使用部署文件或 `OKF_BRAIN_VAULT`、`OKF_BRAIN_ORIGINALS`、`OKF_BRAIN_STATE` 环境变量，其中 `ORIGINALS` 仅表示旧迁移来源。
+以下命令从仓库根目录执行；正式安装且 `okf` 已在 PATH 时可直接调用 `okf`。
+普通 CLI 使用命令参数或 `OKF_BRAIN_VAULT`、`OKF_BRAIN_ORIGINALS`、`OKF_BRAIN_STATE`
+环境变量；只有支持 `--config` 的入口（例如 `okf-server`、`doctor`）直接读取部署文件。
+示例先为当前 PowerShell 会话设置已核对的测试路径，`ORIGINALS` 仅表示旧迁移来源。
+导入和 Feed 命令可能写入数据或调用外部服务，使用合成输入和测试配置执行。
 
 ```powershell
+$env:OKF_BRAIN_VAULT = '<测试 Vault>'
+$env:OKF_BRAIN_STATE = '<测试 State>'
+$env:OKF_BRAIN_ORIGINALS = '<测试兼容 Originals>'
 uv run --project engine okf --help
 uv run --project engine okf import paper.pdf --action store --intent source
 uv run --project engine okf import paper.pdf --action convert --intent source --method mineru-cloud
@@ -217,6 +225,15 @@ uv run --project engine okf doctor --verbose
 ```
 
 CLI/API 旧导入调用缺省仍为 `convert`；与工作台默认仅保存原件的交互分别定义。
+
+### 资源更新与数据迁移
+
+资源更新应限定于明确受管的 Contracts、模板、policies、views 及相应配置，保留业务笔记、
+用户交互模板和未知设置。部署 Skills 与插件遵循各自安装入口；执行前核对实际写入范围。
+`okf init --vault <路径>` 只初始化空 Vault，不建立完整的测试部署身份。
+`okf migrate --vault <路径> --state <路径>` 会迁移旧字段及布局并同步资源，
+执行前明确目标、迁移范围、恢复依据，执行后核验差异和 Contracts。
+日常资源更新不附带数据迁移，具体环境操作见[开发指南](DEVELOPMENT.md#更新与启停)。
 
 ### Feed 调试
 

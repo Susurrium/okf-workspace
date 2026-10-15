@@ -2,20 +2,35 @@
 
 [文档索引](README.md) · [开发准备](DEVELOPMENT.md) · [日常使用](USER-GUIDE.md)
 
-按需阅读：[正式启用](#production-cutover) · [安装](#install) · [转换服务](#conversion) · [同步与备份](#sync-backup) · [原件迁移](#original-migration) · [服务器迁移](#server-migration) · [插件更新](#plugin-deployment) · [卸载](#uninstall)。
+按需阅读：[正式启用与升级](#production-cutover) · [安装](#install) · [测试环境恢复](#test-environment) · [转换服务](#conversion) · [同步与备份](#sync-backup) · [插件更新](#plugin-deployment) · [环境退役](#environment-retirement) · [卸载](#uninstall)。
 
 <a id="production-cutover"></a>
 
-## 从测试环境启用正式 Vault
+## 正式启用与升级
 
-功能开发完成后，先固定发布版本、核对实际运行文件，再初始化正式数据环境。安装器默认路径、历史验收中的“生产”措辞和已同步的测试数据库，都不能代替用户对正式 Vault 的指定。
+正式操作需要用户对目标环境及操作范围的授权，开发验收通过不自动授权部署。
+先完成[开发验收](DEVELOPMENT.md)，固定发布提交与产物，核对实际运行文件。
+安装器默认路径、历史验收措辞和旧同步数据库不能代替用户对正式目标的指定。
+
+### 首次启用
 
 1. **固定发布版本。** 完成根检查、构建与一次当前版本的短实机验收，核对 `release-manifest.yaml` 和组件版本。保留同一提交的 Engine 包、两套插件成品及发布记录；后续修复重新生成版本与验收证据。
 2. **准备独立运行程序。** 使用下文的正式版本包安装；Engine、插件、Skills、计划任务与部署回执来自同一版本包。源码安装仅用于开发，运行副本不混入未提交改动。
 3. **初始化正式数据。** 使用新 Vault 和新 State，部署当前 Contracts、模板、Policies、Skills 与插件。配置新的本地 API token，并按需配置外部转换/AI 凭据和 Feed 来源。只迁入用户明确选择的笔记、原件和插件数据，不整体复制测试 State、会话或旧同步设置。
 4. **启用独立同步。** 多设备使用时为正式 Vault 创建独立 CouchDB 数据库与专用账户，从一台设备开始接入，再逐台接入其他设备。现有服务器可复用，测试数据库保持隔离。服务器已有 Tailscale Serve 时先核对现有路由；`deploy/server/compose.yml` 是 CouchDB + Caddy 部署方案，不能直接套用为现有 Tailscale 部署的现场配置。
 5. **完成上线验收。** 验证 Obsidian 重启、Engine 生命周期、原件保存与打开、明确转换、AI 生成和检索。多设备验收覆盖离线保存、乱序同步、重复申请、回执及目标移动设备的实际原件查看。用户已确认完成的 LiveSync/CouchDB 与平板验收可以沿用，无需逐项重复；新建立的本地加密备份仍需验证恢复。需要 CouchDB 恢复证据时，归档哈希或压缩包可读性检查不能替代数据库恢复。之后记录新部署回执。
-6. **退役测试环境。** 核对计划任务指向正式 State，停用旧 Vault 的自动写入与同步，再归档测试 Vault、配套 State、旧 Originals 和需要保留的测试数据库快照。记录用途、日期与版本，确认归档可读取后再决定删除；保留一个与正式数据隔离的测试环境用于后续升级。
+6. **处理历史环境。** 核对计划任务指向正式 State，按[环境退役](#environment-retirement)处理不再使用的环境，保留固定测试环境供后续开发。
+
+### 已有环境升级与回退
+
+使用已验收版本包的完整安装器，显式指定原 Vault、State 和兼容 Originals 路径；
+保留用户设置及 token，切换程序与插件并生成新回执。升级前停止目标环境的写入者，
+核对数据 schema、受影响文件和所需恢复依据；升级不重新初始化已有 Vault。
+构建或打包改变产物哈希时，先核验差异并补做受影响的验收，不能沿用不同产物的通过记录。
+
+回退时重新执行保留的旧版本包安装器并复用数据路径。跨 Workspace schema 的回退先根据
+相应版本说明恢复匹配数据；程序回退不能代替数据恢复。安装器会逐文件核验已安装 Engine
+与 wheel，发现运行文件被修改时停止，不覆盖修改。
 
 当前 Windows 安装器与卸载器使用同一组全局 Workspace 计划任务名称，不提供多安装实例的独立任务命名。切换时只能让指定环境持有这组后台任务；对旧 Vault 执行卸载也可能注销新环境使用的同名任务。历史数据清理应先核对所有活动路径，不能直接套用旧配置的 `-RemoveData`。
 
@@ -50,26 +65,38 @@
 安装器重建新目录的 Python 环境并更新插件、任务和回执。不要直接移动 `.venv`：
 Windows CLI 启动器包含 Python 的绝对路径。确认新位置运行及备份正常后，再处理旧程序副本。
 
-已有部署的升级使用同一 Vault、State 和兼容 Originals 路径，保留用户设置及 token；程序与插件切换到新包并生成回执。回退时重新执行保留的旧版本包安装器，复用上述数据路径；跨 Workspace schema 的回退应先依据该版本说明恢复匹配的数据，不能假定程序回退等于数据回退。运行目录的已安装 Engine 会逐文件与 wheel 校验，发现差异时安装失败，不覆盖已修改的运行程序。
+已有部署的切换与恢复要求见[升级与回退](#已有环境升级与回退)。
+
+<a id="test-environment"></a>
+
+### 固定测试环境的建立与恢复
+
+固定环境路径及日常更新命令统一维护在[开发指南](DEVELOPMENT.md#正式发布后的继续开发)。
+固定测试环境投入使用前必须完成独立初始化与登记，准备独立数据目录、部署配置、
+同一安装身份的归属标记和 `config/test-environment.json`。先验证这些身份及 profile 隔离，
+再使用源码安装或启动入口；不能仅创建空目录后直接套用已有环境的更新步骤。
+
+恢复已有环境时先停止写入并保留现状，从经核验的备份恢复缺失配置。测试标识的
+`installation_id`、`vault`、`state`、`api_port` 必须与原登记记录、部署配置及目录归属一致，
+`environment` 为 `test`，端口与正式环境隔离。仅标识文件丢失时也依据这些原始证据恢复；
+身份无法确认就停止恢复，不临时生成新身份或复制正式配置使检查通过。
 
 ### 开发源码安装
 
 ```powershell
 cd E:\code\okf-workspace
 .\deploy\windows\install.ps1 `
-  -MarkItDownUrl 'https://your-markitdown.example' `
-  -MarkItDownTokenFile 'E:\ObsidianData\OKF-Brain-State\secrets\markitdown-client.token'
+  -Vault 'E:\ObsidianData\OKF-Test' `
+  -State 'E:\ObsidianData\OKF-Test-State' `
+  -Originals 'E:\ObsidianData\OKF-Test-Legacy-Originals' `
+  -ApiPort 8766 -SkipScheduledTasks
 ```
 
-默认数据路径仍与当前 Vault 兼容：
-
-| 数据 | 默认路径 |
-|---|---|
-| Vault | `E:\ObsidianData\OKF-Brain` |
-| 原件（活动位置） | `<Vault>\sources\originals` |
-| 旧 Originals（安装兼容与回退） | `E:\ObsidianData\OKF-Brain-Originals` |
-| Runtime State | `E:\ObsidianData\OKF-Brain-State` |
-| 部署配置 | `E:\ObsidianData\OKF-Brain-State\config\deployment.json` |
+源码安装只用于已明确登记的测试目标，执行前核对标识、部署配置与完整路径，显式提供目标和
+`-SkipScheduledTasks`。完整安装包含布局与数据迁移，执行前核对迁移范围和恢复依据；
+日常更新与退出遵循[开发指南](DEVELOPMENT.md#更新与启停)。
+安装器保留 `OKF-Brain` 系列路径作为兼容缺省；当前正式与测试操作均应显式指定目标路径，
+不能从这些缺省值推断当前使用的环境。活动原件始终保存到目标 Vault 的 `sources/originals/`。
 
 安装器会：
 
@@ -79,7 +106,7 @@ cd E:\code\okf-workspace
 4. 在 Vault 外创建本地 API token；
 5. 写入 Engine、MinerU、MarkItDown 与 Codex 配置；
 6. 构建全文及可选向量索引；
-7. 注册两个相互独立的计划任务：02:30 的每日维护负责索引、可选备份与恢复检查；06:50 的 Feed Sync 在远端发布窗口后执行增量同步，支持错过启动后补跑和 10 分钟间隔的三次临时故障重试。
+7. 正式安装注册两个相互独立的计划任务：02:30 的每日维护负责索引、可选备份与恢复检查；06:50 的 Feed Sync 在远端发布窗口后执行增量同步，支持错过启动后补跑和 10 分钟间隔的三次临时故障重试。测试安装传入 `-SkipScheduledTasks`，跳过注册。
 
 每日维护同样支持错过时间后补跑、10 分钟间隔三次重试，并禁止同任务重叠运行。启用备份后先备份和检查恢复，再更新可重建的索引，避免索引故障阻止当天备份。
 
@@ -133,10 +160,10 @@ MarkItDown PDF 的严格检查不会证明图片完整，应显示“PDF 图片�
 ```json
 {
   "default_conversion_method": "mineru-cloud",
-  "mineru_token_file": "E:/ObsidianData/OKF-Brain-State/secrets/mineru-client.token",
+  "mineru_token_file": "E:/ObsidianData/OKF-Test-State/secrets/mineru-client.token",
   "mineru_model": "vlm",
   "markitdown_url": "http://127.0.0.1:18010",
-  "markitdown_token_file": "E:/ObsidianData/OKF-Brain-State/secrets/markitdown-client.token",
+  "markitdown_token_file": "E:/ObsidianData/OKF-Test-State/secrets/markitdown-client.token",
   "mineru_self_hosted_enabled": false,
   "mineru_url": "http://127.0.0.1:18000",
   "mineru_ssh_managed": true,
@@ -166,7 +193,7 @@ Token 内容始终仅存储于外部凭据文件。旧 Dashboard `documentParser
 
 ```json
 {
-  "mineru_token_file": "E:\\ObsidianData\\OKF-Brain-State\\secrets\\mineru-client.token",
+  "mineru_token_file": "E:\\ObsidianData\\OKF-Test-State\\secrets\\mineru-client.token",
   "mineru_model": "vlm"
 }
 ```
@@ -183,10 +210,15 @@ token 不进入仓库、Vault、Dashboard 插件设置或日志。更换 token �
 原件保存到 Vault 的 `sources/originals/`；旧版迁移见[原件迁移](#original-migration)。
 
 当前开发阶段不把备份作为安装前置条件，也不自动为 Vault 建立每日 Git checkpoint。
-需要 Restic 时显式传入：
+为已有正式环境启用 Restic 时，先核对本节的备份范围与恢复条件，在已验收版本包目录执行
+完整安装命令并增加备份参数；以下使用前文的正式目标：
 
 ```powershell
 .\deploy\windows\install.ps1 `
+  -ProgramRoot 'D:\OKF-Workspace' `
+  -Vault 'E:\ObsidianData\OKF' `
+  -State 'E:\ObsidianData\OKF-State' `
+  -Originals 'E:\ObsidianData\OKF-Legacy-Originals' `
   -EnableBackupSetup `
   -BackupRepository 'F:\Backups\OKF-Workspace'
 ```
@@ -281,14 +313,16 @@ Runtime State、全文索引和向量索引不作为必须恢复对象；恢复 
 
 ## 插件部署与升级回执
 
-只更新插件而不重新写完整部署配置时：
+完整测试环境更新与启停流程见[开发指南](DEVELOPMENT.md#更新与启停)。仅更新测试插件时，
+先停止测试窗口，显式指定配套目标：
 
 ```powershell
-.\scripts\install-dashboard.ps1
-.\scripts\install-okf-claudian.ps1
+.\scripts\install-dashboard.ps1 -Vault E:\ObsidianData\OKF-Test -State E:\ObsidianData\OKF-Test-State
+.\scripts\install-okf-claudian.ps1 -Vault E:\ObsidianData\OKF-Test
 ```
 
-完成后在 Obsidian 中重新加载应用。生产切换应使用完整安装器，以保证 Python 路径、token
+安装完成后按开发指南从测试专用 profile 启动并验收。
+生产切换使用正式版本包的完整安装器，以保证 Python 路径、token
 文件和 plugin settings 一致。
 
 正式包安装完成后自动生成 State 的 `reports/deployment-receipt.json`，校验已安装 Engine
@@ -310,13 +344,35 @@ Engine Skills 部署到 `.agents/skills/`，并由 `.okf-managed-skills.json` �
 
 执行[开发与验收](DEVELOPMENT.md)中的自动检查、合成 Vault 流程与实际启用服务的 smoke test，然后记录部署回执。Dashboard 的实机验收和生产切换证据见[组件验收台账](../dashboard/ACCEPTANCE.md)。这些要求不表示已执行当前生产部署。会导致校验失败、坏链或悬空任务的验收残留需删除、修复或重新转换。
 
+<a id="environment-retirement"></a>
+
+## 环境退役与归档
+
+普通临时夹具结束测试时按[开发指南](DEVELOPMENT.md#验收证据与退出)退出，核对本次创建的
+完整路径和活动引用后清理；固定测试环境继续保留。长期环境的重建或删除须有相应用户授权。
+归档和删除均不使用会注销全局计划任务的卸载器代替目录处理。
+
+需要归档时依次执行：
+
+1. 停止目标窗口、Engine、同步和其他写入者，核对实际进程及端口已退出。
+2. 清点 Vault、配套 State、profile、兼容 Originals 及必要数据库快照，记录用途、日期、
+   安装身份和版本。核对路径及重解析点，保留用户修改和恢复资料。
+3. 将归档保存到与活动目录、中间文件分开的明确位置；核验文件清单、逐文件哈希和归档
+   可读取性。涉及数据库或应用恢复时，另做相应恢复验证。
+4. 清理不再使用的 profile 登记和启动配置，检查现行工具已无活动引用；历史验收中的路径
+   保留其原始含义。确认归档和授权范围后，再删除精确的退役目录。
+5. 在本次验收记录中保存归档位置、清单、核验和清理结果。含用户内容或凭据的归档遵循
+   原有访问保护，不进入源码仓库或公开日志；未解决故障的证据继续保留。
+
 <a id="uninstall"></a>
 
 ## 卸载
 
+以下示例仅在明确授权卸载指定环境后执行；填写该环境的实际部署配置路径。
+
 ```powershell
 .\deploy\windows\uninstall.ps1 `
-  -Config 'E:\ObsidianData\OKF-Brain-State\config\deployment.json'
+  -Config '<要卸载环境的 State>\config\deployment.json'
 ```
 
 默认只移除 Workspace 计划任务、OKF Dashboard、OKF Claudian 和历史误复制的 `claudian`
