@@ -131,7 +131,7 @@ describe("workbench interaction contracts", () => {
       for (const column of data.columns.filter(item => item.sectionType?.startsWith("workspace-"))) {
         expect(column.extensionConfig?.project).toBe(project);
       }
-      expect(data.quickActions.map(item => item.name)).toEqual(["快速记录", "新建待办", "全局搜索", "快捷操作"]);
+      expect(data.quickActions.map(item => item.name)).toEqual(["快速记录", "新建任务", "全局搜索", "快捷操作"]);
       expect(data.hiddenPresets).toEqual(["p:daily-notes", "p:file-explorer:new-file"]);
     } finally { unregister.forEach(remove => remove()); }
   });
@@ -196,15 +196,15 @@ describe("workbench interaction contracts", () => {
     vi.spyOn(view as never, "attachActionPanel").mockImplementation(() => undefined);
     await view.onOpen();
     expect(root.descendants("okf-project-row")).toHaveLength(1);
-    expect(root.descendants("okf-surface-controls")).toHaveLength(0);
-    expect(header.descendants("okf-section-controls")).toHaveLength(1);
+    expect(root.descendants("okf-surface-controls")).toHaveLength(1);
+    expect(header.descendants()).toHaveLength(0);
     expect(root.descendants().some(item => item.attributes.get("aria-label") === "搜索项目")).toBe(true);
-    header.descendants().find(item => item.textContent === "独立打开")!.click();
+    root.descendants().find(item => item.textContent === "在新标签页打开")!.click();
     expect(navigate).toHaveBeenCalledWith("projects", root, "我的项目", expect.objectContaining({ project, mode: "summary", limit: 1,
       viewState: { filters: { query: "", sort: "modified" }, tab: "active", scrollTop: 0 } }), "project-instance:expanded");
     expect(root.descendants().some(item => item.textContent === "完整项目目录")).toBe(false);
     await (view as unknown as { render(preserveScroll: boolean): Promise<void> }).render(true);
-    expect(header.descendants("okf-section-controls")).toHaveLength(1);
+    expect(root.descendants("okf-surface-controls")).toHaveLength(1);
     await view.onClose();
     expect(header.children).toHaveLength(0);
   });
@@ -260,8 +260,8 @@ describe("workbench interaction contracts", () => {
     vi.spyOn(view as never, "attachActionPanel").mockImplementation(() => undefined);
     await (view as unknown as { renderProjects(parent: HTMLElement): Promise<void> }).renderProjects(root as unknown as HTMLElement);
     expect(root.descendants("okf-formal-task-row")).toHaveLength(3);
-    expect(root.descendants().some(item => item.textContent === "待办 · 4")).toBe(true);
-    root.descendants().find(item => item.textContent === "查看全部项目待办")!.click();
+    expect(root.descendants().some(item => item.textContent === "未完成任务 · 4")).toBe(true);
+    root.descendants().find(item => item.textContent === "查看全部项目任务")!.click();
     expect(navigate).toHaveBeenCalledWith("tasks", root, "我的项目", { course: undefined, project, taskView: "all" });
   });
 });

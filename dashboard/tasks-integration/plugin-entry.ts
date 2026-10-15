@@ -34,7 +34,7 @@ export async function installTasks(owner: Plugin, options: {
       return this.ready;
     }
   }
-  const runtime = new IntegratedTasks(owner.app, { ...owner.manifest, name: '待办' });
+  const runtime = new IntegratedTasks(owner.app, { ...owner.manifest, name: '任务' });
   owner.register(() => runtime.unload());
   runtime.load();
   await runtime.ready;

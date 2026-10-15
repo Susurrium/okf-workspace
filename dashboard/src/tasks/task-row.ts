@@ -25,7 +25,7 @@ export function renderTaskRow(parent: HTMLElement, options: TaskRowOptions): HTM
   row.dataset.taskIdentity = `${task.path}:${task.blockId ?? task.line}`;
   renderTaskCheckbox(row, { text: task.text, checked: task.checked, toggle: options.toggle, notify: options.notify });
   const main = row.createDiv({ cls: "okf-formal-task-row__main" });
-  const title = main.createDiv({ cls: "okf-formal-task-row__title", attr: { role: "button", tabindex: "0", "aria-label": `查看待办：${task.text}` } });
+  const title = main.createDiv({ cls: "okf-formal-task-row__title", attr: { role: "button", tabindex: "0", "aria-label": `查看任务：${task.text}` } });
   void MarkdownRenderer.render(options.app, task.text, title, task.path, options.component).catch(error => {
     title.createSpan({ text: `内容无法显示：${error instanceof Error ? error.message : "渲染失败"}` });
   });
@@ -59,7 +59,7 @@ export function renderTaskRow(parent: HTMLElement, options: TaskRowOptions): HTM
     attr: { type: "button", "aria-label": "编辑任务日期" } });
   dates.addEventListener("click", task.checked ? options.details : options.dates);
   const actions = row.createDiv({ cls: "okf-formal-task-row__actions" });
-  const more = actions.createEl("button", { text: "···", cls: "okf-task-more", attr: { type: "button", "aria-label": "待办的更多操作" } });
+  const more = actions.createEl("button", { text: "···", cls: "okf-task-more", attr: { type: "button", "aria-label": "任务的更多操作" } });
   options.menu(more);
   return row;
 }

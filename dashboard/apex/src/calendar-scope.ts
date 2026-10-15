@@ -50,7 +50,7 @@ export function calendarScopeControls(parent: HTMLElement, app: App, initial: Ca
     });
   };
   select('状态', 'calendarTaskState', { open: '未完成', all: '全部状态', done: '已完成', cancelled: '已取消' });
-  select('日期事实', 'calendarDateFact', { all: '全部日期', scheduled: '计划', due: '截止', reminder: '提醒', start: '开始', span: '跨日安排' });
+  select('按日期类型显示', 'calendarDateFact', { all: '全部日期', scheduled: '计划日期', due: '截止日期', reminder: '提醒日期', start: '开始日期', span: '跨日安排' });
   if (contexts) {
     const choices = app.vault.getMarkdownFiles().map(file => ({ path: file.path, title: String(app.metadataCache.getFileCache(file)?.frontmatter?.title ?? file.basename) }));
     select('课程', 'course', { '': '全部课程范围', ...Object.fromEntries(choices.filter(item => /^learning\/courses\/[^/]+\/course\.md$/u.test(item.path)).map(item => [item.path, item.title])) });

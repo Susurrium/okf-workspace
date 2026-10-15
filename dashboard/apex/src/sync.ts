@@ -524,8 +524,12 @@ export class SyncEngine {
 		await this.writeToDisk();
 	}
 
-	async addColumn(name: string, sectionType?: string, extensionConfig?: Record<string, unknown>): Promise<void> {
+	async addColumn(name: string, sectionType?: string, extensionConfig?: Record<string, unknown>, creationId?: string): Promise<void> {
 		if (!this.data) throw new Error('工作台尚未读取，无法添加分区');
+		if (creationId && this.data.columns.some(column => column.id === creationId)) {
+			await this.writeToDisk();
+			return;
+		}
 		const uniqueName = this.uniqueColumnName(name);
 
 		// New library sections start unfiltered. An earlier default pinned a
@@ -543,7 +547,7 @@ export class SyncEngine {
 
 		this.data = {
 			...this.data,
-			columns: [...this.data.columns, { id: `section-${Date.now().toString(36)}`, name: uniqueName, color: '#6366f1', sectionType, cards: [], libraryConfig, ...(extensionConfig ? { extensionConfig } : {}) }],
+			columns: [...this.data.columns, { id: creationId ?? `section-${Date.now().toString(36)}`, name: uniqueName, color: '#6366f1', sectionType, cards: [], libraryConfig, ...(extensionConfig ? { extensionConfig } : {}) }],
 		};
 		await this.writeToDisk();
 	}
@@ -1167,8 +1171,16 @@ export class SyncEngine {
 
 	private async load(): Promise<void> {
 		if (!this.file) return;
-
-		const content = await this.app.vault.read(this.file);
+		const file = this.file;
+		const dataAtRead = this.data;
+		const baseAtRead = this.baseData;
+		const content = await this.app.vault.read(file);
+		if (file !== this.file) return;
+		// 文件读取期间可能已经添加分区或完成写入；旧回声必须重新读取。
+		if (dataAtRead !== this.data || baseAtRead !== this.baseData || this.writeQueuePending > 0 || this.deferredWriteTimer !== null) {
+			this.onFileModify();
+			return;
+		}
 		const newData = parse(content);
 		this.assertWorkbenchSource(this.file, newData);
 

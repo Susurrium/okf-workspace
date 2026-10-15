@@ -5,7 +5,7 @@ export class TaskTargetModal extends Modal {
     private readonly move: (path: string) => Promise<void>) { super(app); }
   onOpen(): void {
     this.modalEl.addClass("okf-workflow-modal");
-    this.titleEl.setText("移动待办与子项");
+    this.titleEl.setText("移动任务与子项");
     this.contentEl.createDiv({ text: `来源：${this.source}` });
     this.contentEl.createDiv({ text: "移动完整 Markdown 子树，保留身份、关联和任务链接。", cls: "okf-dashboard__muted" });
     const input = this.contentEl.createEl("input", { attr: { type: "text", list: "okf-move-targets", "aria-label": "目标笔记", placeholder: "搜索已有笔记，或输入路径…" } });

@@ -135,9 +135,7 @@ async function run(): Promise<void> {
 	assert.equal(calls.length, 2, 'two URL fetches (initial + one retry)');
 	assert.equal(calls[0]?.headers?.Cookie, 'MUSIC_U=member', 'member cookie sent');
 
-	// Persistent -110: the retries exhaust, the skip names the track (the fee
-	// guard never fires when signed in — this notice is the only per-track
-	// explanation), and playback advances to the next track.
+	// 重试耗尽后继续下一曲，逐曲失败不弹出通知。
 	seen = messages().length;
 	resetNetwork([
 		{ data: [{ code: -110, url: null }] },
@@ -149,14 +147,12 @@ async function run(): Promise<void> {
 	await sleep(1900);
 	assert.equal(calls.length, 4, 'three attempts on the denied track + one on the next');
 	const skipMsgs = messages().slice(seen);
-	assert.equal(skipMsgs.length, 1, 'exactly one per-track notice');
-	assert.ok(skipMsgs[0]!.includes('flake'), `notice names the skipped track: ${skipMsgs[0]}`);
+	assert.equal(skipMsgs.length, 0, 'per-track denial stays quiet');
 	assert.equal(svc.getState().status, 'playing', 'advanced to the next track');
 	assert.equal(svc.getState().current?.name, 'next', 'next track is current');
 
 	// A deterministic non--110 null keeps the single immediate retry; when the
-	// whole playlist fails that way the circuit breaker stops playback after
-	// naming every track.
+	// whole playlist fails that way the circuit breaker stops playback.
 	seen = messages().length;
 	resetNetwork([
 		{ data: [{ code: 404, url: null }] }, { data: [{ code: 404, url: null }] },
@@ -168,7 +164,7 @@ async function run(): Promise<void> {
 	await sleep(150);
 	assert.equal(calls.length, 4, 'two tracks x two attempts (immediate retry, no spacing)');
 	const stopMsgs = messages().slice(seen);
-	assert.equal(stopMsgs.filter(m => m.includes('dead1') || m.includes('dead2')).length, 2, 'both dead tracks named');
+	assert.equal(stopMsgs.filter(m => m.includes('dead1') || m.includes('dead2')).length, 0, 'no per-track popups');
 	assert.ok(stopMsgs.some(m => /已停止|Stopped/.test(m)), `circuit-breaker notice shown: ${stopMsgs.join(' | ')}`);
 	assert.equal(svc.getState().status, 'idle', 'stopped after the whole playlist failed');
 	assert.equal(audio.src, null, 'audio src cleared on stop');
@@ -180,7 +176,7 @@ async function run(): Promise<void> {
 	seen = messages().length;
 	resetNetwork([]);
 	svc.play(0);
-	assert.ok(messages().slice(seen).some(m => m.includes('dead1')), 'anonymous fee-1 click keeps the vipSkipped notice');
+	assert.equal(messages().length - seen, 0, 'anonymous pre-flight denial stays quiet');
 	assert.equal(calls.length, 0, 'no network for a pre-flight skip');
 
 	process.stdout.write('verify-music-account: login, cancellation, cleanup, account-isolated playback and -110 retry/skip notices OK\n');

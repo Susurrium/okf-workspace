@@ -100,7 +100,17 @@ function main(): void {
 		assert.equal(firstFontName('  楷体  '), '楷体', '7: single bare name trimmed');
 	}
 
-	console.log('verify-banner-quote-font: all 7 checks passed');
+	// 无图横幅跟随主题前景，有图横幅保留图片前景及用户指定颜色。
+	{
+		const plainHost = new El('div');
+		renderBanner(plainHost as unknown as HTMLElement, banner({ image: '', images: [] }), () => {}, makeApp());
+		assert.equal(findByClass(plainHost, 'dashboard-banner--plain').length, 1);
+		const imageHost = new El('div');
+		renderBanner(imageHost as unknown as HTMLElement, banner({ image: 'https://example.invalid/banner.png', images: [], quoteColor: '#345678' }), () => {}, makeApp());
+		assert.equal(findByClass(imageHost, 'dashboard-banner--plain').length, 0);
+		assert.equal(findByClass(imageHost, 'dashboard-banner-quote')[0]!.style.color, '#345678');
+	}
+	console.log('verify-banner-quote-font: all 8 checks passed');
 }
 
 function valuesHas(values: Set<string>, pred: (v: string) => boolean): boolean {

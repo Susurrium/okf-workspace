@@ -1,3 +1,4 @@
+import { TASK_VIEW_LABELS } from "../tasks/task-presentation.js";
 import {
   projectLifecycleStatus,
   projectStatusLabel,
@@ -156,6 +157,7 @@ export interface EmbeddedDashboardSurfaceOptions {
   /** Apex already owns the outer section navigation and chrome. */
   embedded?: boolean;
   headerActions?: HTMLElement;
+  sectionActions?: import("../../apex/src/section-actions.js").SectionActions;
   /** A separate page for sections absent from the current Apex workbench. */
   focused?: boolean;
   /** Apex board to return to when a focused page was opened from a card. */
@@ -213,26 +215,26 @@ class ReadingSourceItemsUnavailableError extends Error {
 
 const NAVIGATION: readonly { id: Section; label: string }[] = [
   { id: "today", label: "今天" },
-  { id: "tasks", label: "待办" },
+  { id: "tasks", label: "任务" },
   { id: "inbox", label: "收集箱" },
-  { id: "reading", label: "订阅" },
+  { id: "reading", label: "订阅阅读" },
   { id: "sources", label: "资料" },
   { id: "learning", label: "学习" },
   { id: "projects", label: "项目" },
-  { id: "knowledge", label: "知识" },
+  { id: "knowledge", label: "知识笔记" },
   { id: "life", label: "日记与复盘" },
   { id: "system", label: "后台与诊断" },
 ];
 
 const PAGE_COPY: Readonly<Record<Section, { title: string; description: string }>> = {
   today: { title: "今天", description: "现在值得处理、继续和阅读的内容。" },
-  tasks: { title: "待办", description: "安排笔记中的行动，查看状态、循环、依赖与历史。" },
+  tasks: { title: "任务", description: "安排笔记中的任务，查看状态、循环、依赖与历史。" },
   inbox: { title: "收集箱", description: "整理尚未确定去向的记录与资料用途。" },
-  reading: { title: "订阅", description: "浏览来源、最新一期与历史，明确选择资料用途。" },
+  reading: { title: "订阅阅读", description: "浏览来源、最新一期与历史，明确选择资料用途。" },
   sources: { title: "资料", description: "查找已保存资料、原件、正文、用途与关联成果。" },
   learning: { title: "学习", description: "继续学习，或准备下一份学习笔记。" },
   projects: { title: "项目", description: "聚焦进行中项目的状态和下一步行动。" },
-  knowledge: { title: "知识", description: "搜索、阅读和维护知识笔记与知识导航。" },
+  knowledge: { title: "知识笔记", description: "搜索、阅读和维护知识笔记与知识导航。" },
   life: { title: "日记与复盘", description: "书写今天，回看日记、反思与周期复盘。" },
   system: { title: "后台与诊断", description: "查看执行进度、恢复失败并检查运行环境。" },
 };
@@ -328,7 +330,7 @@ export class OkfDashboardView {
   public readonly app: App;
   public readonly contentEl: HTMLElement;
   private readonly embedded: boolean;
-  private readonly headerActions?: HTMLElement;
+  private readonly sectionActions?: import("../../apex/src/section-actions.js").SectionActions;
   private surfaceControls?: HTMLElement;
   private readonly focused: boolean;
   private readonly workbenchPath: string | undefined;
@@ -450,7 +452,7 @@ export class OkfDashboardView {
       ?? (leaf as unknown as { app: App }).app;
     this.contentEl = options.container ?? fallbackView!.contentEl;
     this.embedded = options.embedded ?? false;
-    this.headerActions = options.headerActions;
+    this.sectionActions = options.sectionActions;
     this.focused = options.focused ?? false;
     this.workbenchPath = options.workbenchPath;
     this.instanceKey = options.instanceKey;
@@ -878,18 +880,15 @@ export class OkfDashboardView {
   }
 
   private renderSurfaceControls(parent: HTMLElement): void {
-    const host = this.embedded ? this.headerActions ?? parent : parent;
-    const inHeader = this.embedded && Boolean(this.headerActions);
-    const controls = host.createDiv({ cls: inHeader ? "okf-section-controls" : "okf-surface-controls" });
+    const controls = parent.createDiv({ cls: "okf-surface-controls" });
     this.surfaceControls = controls;
-    if (inHeader) host.parentElement?.addClass("dashboard-section-header--surface");
     const restrictions = [this.config.statuses ? `项目状态：${this.config.statuses.map(value => projectStatusLabel(value as ProjectLifecycleStatus)).join("、") || "未选择"}` : "",
       Array.isArray(this.rawConfig.folders) ? `文件夹：${this.rawConfig.folders.join("、")}` : "",
       Array.isArray(this.rawConfig.excludeFolders) ? `排除：${this.rawConfig.excludeFolders.join("、")}` : "",
       Array.isArray(this.rawConfig.notePaths) ? `指定对象：${this.rawConfig.notePaths.length} 项` : ""].filter(Boolean);
     if (this.config.course || this.config.project || restrictions.length) {
       const label = [this.config.course || this.config.project ? sectionScopeLabel(this.config, this.relationTitlesForNote(this.config)) : "", ...restrictions].filter(Boolean).join(" · ");
-      controls.createSpan({ cls: inHeader ? "okf-section-controls__scope" : "okf-dashboard__muted", text: label,
+      controls.createSpan({ cls: "okf-dashboard__muted", text: label,
         attr: { title: label } });
       if (!this.embedded) for (const key of ["course", "project", "statuses", "folders", "excludeFolders", "notePaths"] as const) {
         if (this.rawConfig[key] === undefined) continue;
@@ -921,11 +920,14 @@ export class OkfDashboardView {
         void this.render(true);
       });
     }
-    if (this.embedded) {
-      const expand = controls.createEl("button", { text: "独立打开", attr: { type: "button" } });
+    if (this.embedded && this.sectionActions) {
+      this.sectionActions.set({ id: "open", label: "在新标签页打开当前视图", icon: "external-link", run: () => this.expandCurrentSection() });
+      if (this.section !== "system") this.sectionActions.set({ id: "refresh", label: "刷新视图", icon: "refresh-cw", run: () => this.render(true) });
+    } else if (this.embedded) {
+      const expand = controls.createEl("button", { text: "在新标签页打开", attr: { type: "button" } });
       expand.addEventListener("click", () => this.expandCurrentSection());
     }
-    {
+    if (!this.sectionActions && this.section !== "system") {
       const refresh = controls.createEl("button", { text: "刷新", attr: { type: "button" } });
       refresh.addEventListener("click", () => void this.render(true));
     }
@@ -1211,7 +1213,7 @@ export class OkfDashboardView {
     daily.addEventListener("click", () => void this.openDaily(data));
     const jot = actions.createEl("button", { text: "快速记录", cls: "okf-dashboard__secondary-action" });
     jot.addEventListener("click", () => this.plugin.promptCapture(this.config));
-    actions.createEl("button", { text: "新建今日待办", cls: "okf-dashboard__secondary-action", attr: { type: "button" } })
+    actions.createEl("button", { text: "新建今日任务", cls: "okf-dashboard__secondary-action", attr: { type: "button" } })
       .addEventListener("click", () => this.plugin.promptNewTask({ ...this.rawConfig, taskView: "today" }));
     this.renderDocumentDropZone(actions, this.importContext(), "today");
 
@@ -1361,12 +1363,12 @@ export class OkfDashboardView {
       const previewCount = this.rawConfig.limit === undefined && this.rawConfig.pageSize === undefined ? 5 : this.config.limit;
       const tasks = this.dashboardSection(
         actionGrid,
-        "今日待办",
-        `${data.tasks.length} 项今日待办${data.tasks.length > previewCount ? `；这里显示前 ${previewCount} 项` : ""}。`,
+        "今日任务",
+        `${data.tasks.length} 项今日任务${data.tasks.length > previewCount ? `；这里显示前 ${previewCount} 项` : ""}。`,
         "okf-today-tasks",
       );
       const list = tasks.createDiv({ cls: "okf-dashboard__compact-list okf-formal-task-list" });
-      if (!data.tasks.length) list.createDiv({ text: "今天还没有已安排的待办。", cls: "okf-dashboard__empty" });
+      if (!data.tasks.length) list.createDiv({ text: "目前没有日期与今天有关的未完成任务。", cls: "okf-dashboard__empty" });
       const taskIndex = new Map(vaultTasks.map((task) => [`${task.path}:${task.line + 1}`, task]));
       for (const item of data.tasks.slice(0, previewCount)) {
         const task = taskIndex.get(`${item.path}:${item.line}`);
@@ -1382,7 +1384,7 @@ export class OkfDashboardView {
         }
       }
       {
-        const more = tasks.createEl("button", { text: "查看全部待办", cls: "okf-dashboard__ghost-action" });
+        const more = tasks.createEl("button", { text: "查看全部今日任务", cls: "okf-dashboard__ghost-action" });
         more.addEventListener("click", () => void this.plugin.navigateToOkfSection("tasks", this.contentEl,
           this.workbenchPath, { course: this.config.course, project: this.config.project, taskView: "today" }));
       }
@@ -1392,7 +1394,7 @@ export class OkfDashboardView {
           const task = taskIndex.get(`${item.path}:${item.line}`);
           if (task) this.renderFormalTaskRow(tasks, task);
         }
-        tasks.createEl("button", { text: "查看逾期待办", attr: { type: "button" } }).addEventListener("click", () =>
+        tasks.createEl("button", { text: "查看逾期任务", attr: { type: "button" } }).addEventListener("click", () =>
           void this.plugin.navigateToOkfSection("tasks", this.contentEl, this.workbenchPath, { course: this.config.course, project: this.config.project, taskView: "overdue" }));
       }
     }
@@ -1441,7 +1443,7 @@ export class OkfDashboardView {
     const folderPaths = (key: string): string[] => {
       const value = this.rawConfig[key];
       if (value === undefined) return [];
-      if (!Array.isArray(value) || value.some(path => typeof path !== 'string')) throw new Error('待办文件夹筛选格式无效');
+      if (!Array.isArray(value) || value.some(path => typeof path !== 'string')) throw new Error('任务文件夹筛选格式无效');
       return value.map(path => String(path).replace(/\\/gu, '/').replace(/^\/+|\/+$/gu, ''));
     };
     const included = folderPaths('folders');
@@ -1562,11 +1564,11 @@ export class OkfDashboardView {
       if (wrote) { invalidatePath(task.path); row.remove(); this.plugin.refreshDashboardViews(); }
       return wrote;
       }, details: task.formal ? edit : source, source, dates: () => this.plugin.promptTaskDates(task),
-      menu: trigger => this.attachActionPanel(trigger as HTMLButtonElement, { label: "待办操作", actions: [
+      menu: trigger => this.attachActionPanel(trigger as HTMLButtonElement, { label: "任务操作", actions: [
         ...(task.formal ? [{ id: "edit-task", title: "编辑详情", description: "状态、循环、依赖与关联", onSelect: edit }] : []),
         { id: "source", title: "定位来源", description: task.path, onSelect: source },
         { id: "dates", title: "安排日期", description: "分别编辑计划、截止、提醒和跨日安排", onSelect: () => this.plugin.promptTaskDates(task) },
-        { id: "move", title: "移动待办与子项", description: "保留身份、关联及引用", onSelect: () => this.plugin.promptMoveTask(task) },
+        { id: "move", title: "移动任务与子项", description: "保留身份、关联及引用", onSelect: () => this.plugin.promptMoveTask(task) },
         { id: "daily-reference", title: "加入当日日记（引用）", description: "链接原任务，继续操作同一项", onSelect: () => this.plugin.addTaskToDaily(task) },
         { id: "daily-copy", title: "复制为独立日记任务", description: "创建独立身份，保留完整子树", onSelect: () => this.plugin.addTaskToDaily(task, true) },
       ] }), notify: message => new Notice(message, 5000) });
@@ -4174,9 +4176,9 @@ export class OkfDashboardView {
       attr: { type: "button" },
     });
     primary.addEventListener("click", () => this.plugin.promptLessonForCourse(course.path));
-    actions.createEl("button", { text: "新建课程待办", attr: { type: "button" } }).addEventListener("click", () =>
+    actions.createEl("button", { text: "新建课程任务", attr: { type: "button" } }).addEventListener("click", () =>
       this.plugin.promptNewTask({ ...this.rawConfig, course: course.path }));
-    actions.createEl("button", { text: "查看课程待办", attr: { type: "button" } }).addEventListener("click", () =>
+    actions.createEl("button", { text: "查看课程任务", attr: { type: "button" } }).addEventListener("click", () =>
       void this.plugin.navigateToOkfSection("tasks", this.contentEl, this.workbenchPath, { course: course.path, project: this.config.project, taskView: "all" }));
     const courseSlug = course.path.split("/")[2];
     if (courseSlug) this.renderDocumentContextButton(actions, { course: courseSlug });
@@ -4257,7 +4259,7 @@ export class OkfDashboardView {
     main.createDiv({
       cls: "okf-work-item__summary",
       text: [
-        linkedTask ? "下一步待办" : project.next_action ? `下一步：${compactText(project.next_action, 120)}` : "尚未设置下一步",
+        linkedTask ? "下一步任务" : project.next_action ? `下一步：${compactText(project.next_action, 120)}` : "尚未设置下一步",
         relativeMoment(project.modified_at),
       ].filter(Boolean).join(" · "),
     });
@@ -4269,10 +4271,10 @@ export class OkfDashboardView {
     }, { ...this.config, project: project.path });
     if (tasks.length) {
       const taskList = main.createDiv({ cls: "okf-project-row__tasks" });
-      taskList.createDiv({ cls: "okf-dashboard__muted", text: `待办 · ${tasks.length}` });
+      taskList.createDiv({ cls: "okf-dashboard__muted", text: `未完成任务 · ${tasks.length}` });
       for (const task of tasks.filter(task => task !== linkedTask).slice(0, 3)) this.renderFormalTaskRow(taskList, task);
       if (tasks.length > 3) {
-        taskList.createEl("button", { text: "查看全部项目待办", cls: "okf-dashboard__ghost-action", attr: { type: "button" } })
+        taskList.createEl("button", { text: "查看全部项目任务", cls: "okf-dashboard__ghost-action", attr: { type: "button" } })
           .addEventListener("click", () => void this.plugin.navigateToOkfSection("tasks", this.contentEl,
             this.workbenchPath, { course: this.config.course, project: project.path, taskView: "all" }));
       }
@@ -4316,8 +4318,8 @@ export class OkfDashboardView {
     const projectDirectory = project.path.split("/").slice(0, -1).join("/");
     const logPath = project.log_path || `${projectDirectory}/log.md`;
     const actions: AnchoredActionPanelAction[] = [
-      { id: "new-task", title: "新建项目待办", description: "保存具体行动，继承当前关联", onSelect: () => this.plugin.promptNewTask({ ...this.rawConfig, project: project.path }) },
-      { id: "tasks", title: "查看项目待办", description: "安排日期，查看全部状态和历史", onSelect: () => this.plugin.navigateToOkfSection("tasks", this.contentEl, this.workbenchPath, { course: this.config.course, project: project.path, taskView: "all" }) },
+      { id: "new-task", title: "新建项目任务", description: "保存具体行动，继承当前关联", onSelect: () => this.plugin.promptNewTask({ ...this.rawConfig, project: project.path }) },
+      { id: "tasks", title: "查看项目任务", description: "安排日期，切换状态与历史视图", onSelect: () => this.plugin.navigateToOkfSection("tasks", this.contentEl, this.workbenchPath, { course: this.config.course, project: project.path, taskView: "all" }) },
       {
         id: "capture",
         title: PROJECT_ACTION_PANEL_LABELS[0],
@@ -4788,14 +4790,14 @@ export class OkfDashboardView {
       const actions = container.createDiv({ cls: "okf-dashboard__actions" });
       actions.createEl("button", { text: "记录进展", cls: "mod-cta", attr: { type: "button" } }).addEventListener("click", () => this.plugin.promptProjectProgress(project.path));
       actions.createEl("button", { text: "打开项目主页", attr: { type: "button" } }).addEventListener("click", () => { close(); void this.openPath(project.path); });
-      const taskSection = this.dashboardSection(container, "项目待办", "与这个项目关联的真实任务。");
+      const taskSection = this.dashboardSection(container, "项目任务", "与这个项目关联的未完成任务。");
       const taskActions = taskSection.createDiv({ cls: "okf-dashboard__actions" });
-      taskActions.createEl("button", { text: "新建项目待办", attr: { type: "button" } }).addEventListener("click", () => this.plugin.promptNewTask({ ...this.rawConfig, project: project.path }));
-      taskActions.createEl("button", { text: "查看全部项目待办", attr: { type: "button" } }).addEventListener("click", () => { close(); void this.plugin.navigateToOkfSection("tasks", this.contentEl, this.workbenchPath, { course: this.config.course, project: project.path, taskView: "all" }); });
+      taskActions.createEl("button", { text: "新建项目任务", attr: { type: "button" } }).addEventListener("click", () => this.plugin.promptNewTask({ ...this.rawConfig, project: project.path }));
+      taskActions.createEl("button", { text: "查看全部项目任务", attr: { type: "button" } }).addEventListener("click", () => { close(); void this.plugin.navigateToOkfSection("tasks", this.contentEl, this.workbenchPath, { course: this.config.course, project: project.path, taskView: "all" }); });
       const [tasks, summaries] = await Promise.all([this.collectFormalTasks(), this.vaultReader.tasks(true)]);
       const references = new Set(summaries.filter(task => normalizedVaultPath(task.project) === normalizedVaultPath(project.path)).map(task => `${task.path}:${task.line - 1}`));
       const relatedTasks = tasks.filter(task => task.formal && !task.checked && references.has(`${task.path}:${task.line}`));
-      if (!relatedTasks.length) taskSection.createDiv({ text: "目前没有未完成的项目待办。", cls: "okf-dashboard__empty" });
+      if (!relatedTasks.length) taskSection.createDiv({ text: "目前没有未完成的项目任务。", cls: "okf-dashboard__empty" });
       for (const task of relatedTasks.slice(0, 8)) this.renderFormalTaskRow(taskSection, task);
       this.renderMetrics(container, dashboardProjectMetrics(project), { "pending-captures": project.pending_captures, "study-guides": project.related_learning, sources: project.related_materials }, { project: project.path });
       this.renderProjectDetails(container, project);
@@ -4816,13 +4818,13 @@ export class OkfDashboardView {
       actions.createEl("button", { text: "打开课程主页", attr: { type: "button" } }).addEventListener("click", () => void this.openPath(course.path).then(close));
       this.renderDocumentContextButton(actions, { course: course.path.split("/")[2] });
       this.renderMetrics(container, dashboardCourseMetrics(course), { "pending-captures": course.pending_captures, "study-guides": course.related_learning ?? [], sources: course.related_sources, lessons: course.lessons ?? [] }, { ...this.config, course: course.path });
-      const section = this.dashboardSection(container, "课程待办", "与课程关联的行动，保留原始来源。");
+      const section = this.dashboardSection(container, "课程任务", "与课程关联的未完成任务，保留原始来源。");
       const taskActions = section.createDiv({ cls: "okf-dashboard__actions" });
-      taskActions.createEl("button", { text: "新建课程待办", attr: { type: "button" } }).addEventListener("click", () => this.plugin.promptNewTask({ ...this.rawConfig, course: course.path }));
-      taskActions.createEl("button", { text: "查看全部课程待办", attr: { type: "button" } }).addEventListener("click", () => { close(); void this.plugin.navigateToOkfSection("tasks", this.contentEl, this.workbenchPath, { course: course.path, project: this.config.project, taskView: "all" }); });
+      taskActions.createEl("button", { text: "新建课程任务", attr: { type: "button" } }).addEventListener("click", () => this.plugin.promptNewTask({ ...this.rawConfig, course: course.path }));
+      taskActions.createEl("button", { text: "查看全部课程任务", attr: { type: "button" } }).addEventListener("click", () => { close(); void this.plugin.navigateToOkfSection("tasks", this.contentEl, this.workbenchPath, { course: course.path, project: this.config.project, taskView: "all" }); });
       const tasks = (await this.collectFormalTasks()).filter(task => task.formal && !task.checked && normalizedVaultPath(task.course) === normalizedVaultPath(course.path)
         && (!this.config.project || normalizedVaultPath(task.project) === normalizedVaultPath(this.config.project)));
-      if (!tasks.length) section.createDiv({ text: "当前没有未完成的课程待办。", cls: "okf-dashboard__empty" });
+      if (!tasks.length) section.createDiv({ text: "当前没有未完成的课程任务。", cls: "okf-dashboard__empty" });
       tasks.slice(0, 8).forEach(task => this.renderFormalTaskRow(section, task));
       container.createEl("h4", { text: "课堂笔记" });
       for (const note of (course.lessons ?? []).slice(0, 10)) this.compactRow(container, note.title, "课堂笔记", "打开", () => void this.openPath(note.path).then(close));
@@ -5686,7 +5688,7 @@ export class OkfDashboardItemView extends ItemView {
   public getDisplayText(): string {
     const taskView = this.config?.taskView;
     return `工作台 · ${this.section === "tasks" || this.section === "today" && typeof taskView === "string" && taskView !== "overview"
-      ? `待办 · ${taskViewTitle(String(taskView ?? "all"))}` : this.section === "reading" && this.config?.readingView === "daily-updates" ? "每日更新" : PAGE_COPY[this.section].title}`;
+      ? `任务 · ${taskViewTitle(String(taskView ?? "all"))}` : this.section === "reading" && this.config?.readingView === "daily-updates" ? "每日更新" : PAGE_COPY[this.section].title}`;
   }
   public getIcon(): string { return "brain-circuit"; }
   public rememberNavigation(): void {
@@ -5765,8 +5767,7 @@ export class OkfDashboardItemView extends ItemView {
 }
 
 function taskViewTitle(view: string): string {
-  return ({ all: "全部未完成", today: "今日", overdue: "逾期", upcoming: "未来", unscheduled: "未安排", done: "已完成",
-    cancelled: "已取消", checklists: "工作台清单", custom: "自定义查询" } as Record<string, string>)[view] ?? "全部未完成";
+  return TASK_VIEW_LABELS[view as keyof typeof TASK_VIEW_LABELS] ?? TASK_VIEW_LABELS.all;
 }
 
 function stripMarkdown(value: string): string {

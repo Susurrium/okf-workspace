@@ -3,7 +3,7 @@ import { indexTasksByDay, toIsoDate } from "../../apex/src/alltasks-scan.js";
 
 export type TaskView = "all" | "today" | "overdue" | "upcoming" | "unscheduled" | "done" | "cancelled" | "checklists" | "custom";
 export const TASK_VIEW_LABELS: Readonly<Record<TaskView, string>> = {
-  all: "全部未完成", today: "今日", overdue: "逾期", upcoming: "未来", unscheduled: "未安排", done: "已完成",
+  all: "未完成任务", today: "今日任务", overdue: "逾期任务", upcoming: "后续安排", unscheduled: "无日期", done: "已完成",
   cancelled: "已取消", checklists: "工作台清单", custom: "自定义查询",
 };
 export const TASK_PRIORITY_LABELS: Readonly<Record<string, string>> = {

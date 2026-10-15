@@ -56,7 +56,7 @@ import type {
 import { methodLabels } from "../imports/types.js";
 import { renderFeedDecisionFlow } from "../ui/feed-decision-flow.js";
 import { DashboardSettingTab } from "../../apex/src/settings.js";
-import { DashboardView, DASHBOARD_VIEW_TYPE } from "../../apex/src/view.js";
+import { DashboardView, DASHBOARD_VIEW_TYPE, DASHBOARD_SECTION_VIEW_TYPE } from "../../apex/src/view.js";
 import { collectVaultTasks, scanFileTasks, updateTaskDatesInFile, replaceTaskInFile, toggleTaskInFile, invalidateAllTasks, invalidatePath, isTaskSourcePath, type VaultTask } from "../../apex/src/alltasks-scan.js";
 import { TaskReminderService, type ReminderStore } from '../tasks/reminders.js';
 import type { SavedTaskView } from "../tasks/task-catalog.js";
@@ -283,6 +283,7 @@ export default class OkfBrainPlugin extends Plugin {
       ...createOkfSurfaceSectionDefinitions(this).map(registerSectionDefinition),
     );
     this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new DashboardView(leaf, this.apexHost!));
+    this.registerView(DASHBOARD_SECTION_VIEW_TYPE, (leaf) => new DashboardView(leaf, this.apexHost!, true));
     this.registerView(OKF_DASHBOARD_VIEW, (leaf) => new OkfDashboardItemView(leaf, this));
     registerDashboardRibbon(this, () => void this.openDashboard());
     this.dashboardUiStateStore = new DashboardUiStateStore(
@@ -342,6 +343,7 @@ export default class OkfBrainPlugin extends Plugin {
     if (this.dashboardRefreshTimer !== undefined) window.clearTimeout(this.dashboardRefreshTimer);
     this.watchedConversionIds.clear();
     this.app.workspace.detachLeavesOfType(DASHBOARD_VIEW_TYPE);
+    this.app.workspace.detachLeavesOfType(DASHBOARD_SECTION_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(OKF_DASHBOARD_VIEW);
     for (const surface of [...this.embeddedDashboardSurfaces]) void surface.onClose();
     this.embeddedDashboardSurfaces.clear();
@@ -542,8 +544,8 @@ export default class OkfBrainPlugin extends Plugin {
         { value: "project", label: "新建项目", description: "创建项目主页与日志" },
         { value: "import", label: "导入资料", description: "PDF、Word 或 PowerPoint" },
         { value: "uploads", label: "已保存的资料", description: "打开原件、转换正文或查看处理结果" },
-        { value: "new-task", label: "新建待办", description: "安排一个行动，可关联课程或项目" },
-        { value: "tasks", label: "查看全部待办", description: "安排日期，查看循环、依赖与历史" },
+        { value: "new-task", label: "新建任务", description: "安排一个行动，可关联课程或项目" },
+        { value: "tasks", label: "打开任务", description: "查看未完成任务，切换日期视图或完成与取消历史" },
         ...(["inbox", "reading", "sources", "learning", "projects", "knowledge", "life", "system"] as const)
           .map((section) => ({ value: `view:${section}` as const, label: `打开${okfSectionDefaultName(section)}`, description: "浏览完整功能，可添加到工作台" })),
         ...(!this.isMobile ? [{ value: "ask", label: "问我的笔记", description: "在 Claudian 中读取相关笔记后回答" } as const] : []),
@@ -893,7 +895,7 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public promptTaskDates(task: VaultTask): void {
-    if (!this.taskRuntime) { new Notice('统一待办尚未启用，请先完成 Tasks 接管'); return; }
+    if (!this.taskRuntime) { new Notice('任务功能尚未启用，请先完成 Tasks 接管'); return; }
     const dates = (item: VaultTask): Record<string, string> => ({ reminder: item.reminder ?? '',
       scheduled: [item.scheduled, item.scheduledTime].filter(Boolean).join(' '), due: [item.due, item.dueTime].filter(Boolean).join(' '),
       start: [item.start, item.startTime].filter(Boolean).join(' '), end: [item.end, item.endTime].filter(Boolean).join(' ') });
@@ -908,7 +910,7 @@ export default class OkfBrainPlugin extends Plugin {
       const currentDates = dates(current);
       if (Object.keys(changed).some(key => currentDates[key] !== initial[key])) throw new Error('这些日期在编辑期间已被修改，请检查来源后再保存');
       if (!await updateTaskDatesInFile(this.app, current, changed)) throw new Error('任务已经变化，请重试');
-      new Notice('待办日期已更新');
+      new Notice('任务日期已更新');
       this.refreshDashboardViews();
     });
   }
@@ -1706,7 +1708,7 @@ export default class OkfBrainPlugin extends Plugin {
       container,
       initialSection: section,
       embedded: true,
-      ...(context ? { config: context.config, headerActions: context.headerActions,
+      ...(context ? { config: context.config, headerActions: context.headerActions, sectionActions: context.sectionActions,
         instanceKey: workbenchInstanceKey(target!.view.currentWorkspacePath(), context.columnId),
         workbenchPath: target!.view.currentWorkspacePath() } : {}),
     });
@@ -1897,8 +1899,9 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   private registerCommands(): void {
-    this.addCommand({ id: "new-task", name: "新建待办", callback: () => this.promptNewTask() });
-    this.addCommand({ id: "open-tasks", name: "查看全部待办", callback: () =>
+    this.addCommand({ id: "open-appearance-studio", name: "打开外观工作室", callback: () => this.apexHost?.openAppearanceStudio() });
+    this.addCommand({ id: "new-task", name: "新建任务", callback: () => this.promptNewTask() });
+    this.addCommand({ id: "open-tasks", name: "打开任务", callback: () =>
       void this.navigateToOkfSection("tasks", undefined, undefined, { taskView: "all" }) });
     for (const section of ["today", "inbox", "reading", "sources", "learning", "projects", "knowledge", "life"] as const) {
       this.addCommand({ id: `open-${section}`, name: `打开${okfSectionDefaultName(section)}`,
@@ -2480,8 +2483,8 @@ export default class OkfBrainPlugin extends Plugin {
     const installed = (this.app as AppWithTaskPlugins).plugins?.plugins?.['obsidian-tasks-plugin'];
     if (installed) {
       const notice = new Notice('', 0);
-      notice.noticeEl.createDiv({ text: '独立 Tasks 插件正在运行。切换后由统一待办接管笔记操作，原任务和设置均保留。' });
-      const button = notice.noticeEl.createEl('button', { text: '切换为统一待办' });
+      notice.noticeEl.createDiv({ text: '独立 Tasks 插件正在运行。切换后由工作台内置的 Tasks 接管笔记操作，原任务和设置均保留。' });
+      const button = notice.noticeEl.createEl('button', { text: '使用内置 Tasks' });
       button.addEventListener('click', () => {
         button.disabled = true;
         void (async () => {
@@ -2490,7 +2493,7 @@ export default class OkfBrainPlugin extends Plugin {
           if (this.apexHost) this.apexHost.handlesTaskReminders = false;
           notice.hide();
           this.refreshDashboardViews();
-        })().catch(error => { button.disabled = false; new Notice(error instanceof Error ? error.message : '切换待办失败', 8000); });
+        })().catch(error => { button.disabled = false; new Notice(error instanceof Error ? error.message : '切换 Tasks 失败', 8000); });
       });
       return;
     }
@@ -2505,7 +2508,7 @@ export default class OkfBrainPlugin extends Plugin {
       },
       onError: error => {
         console.error('[okf-workspace] task index refresh failed', error);
-        new Notice(error instanceof Error ? error.message : '待办索引刷新失败', 8000);
+        new Notice(error instanceof Error ? error.message : '任务索引刷新失败', 8000);
       },
       invalidate: path => {
         if (path) invalidatePath(path); else invalidateAllTasks();
@@ -2529,7 +2532,7 @@ export default class OkfBrainPlugin extends Plugin {
     });
     const check = () => void this.taskReminders!.tick().catch(error => {
       console.error('[okf-workspace] task reminders failed', error);
-      new Notice(error instanceof Error ? error.message : '待办提醒检查失败', 8000);
+      new Notice(error instanceof Error ? error.message : '任务提醒检查失败', 8000);
     });
     this.registerInterval(window.setInterval(check, 30_000));
     check();
@@ -2539,7 +2542,7 @@ export default class OkfBrainPlugin extends Plugin {
     const notice = new Notice('', 0);
     notice.noticeEl.createEl('strong', { text: task.text });
     notice.noticeEl.createDiv({ text: `${task.reminder} · ${task.path}` });
-    notice.noticeEl.createEl('button', { text: '打开待办', attr: { type: 'button' } }).addEventListener('click', () =>
+    notice.noticeEl.createEl('button', { text: '打开任务', attr: { type: 'button' } }).addEventListener('click', () =>
       void (task.formal ? this.promptTaskDetails(task) : this.openTaskSource(task)).catch(error => new Notice(String(error))));
     const action = (label: string, execute: () => Promise<void>) => {
       const button = notice.noticeEl.createEl('button', { text: label });
@@ -2577,12 +2580,12 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public async promptTaskDetails(task: VaultTask): Promise<void> {
-    if (!this.taskRuntime) throw new Error('统一待办尚未启用，请停用独立 Tasks 插件并重新载入 Dashboard');
+    if (!this.taskRuntime) throw new Error('任务功能尚未启用，请停用独立 Tasks 插件并重新载入 Dashboard');
     const contexts = await this.notes().captureContexts();
     let published: string | undefined;
     this.taskRuntime.editTask(task.originalLine, task.path, async lines => {
       const payload = lines.join('\n');
-      if (published !== undefined && published !== payload) throw new Error('待办已保存，但刷新尚未完成；请先完成刷新，再重新打开编辑');
+      if (published !== undefined && published !== payload) throw new Error('任务已保存，但刷新尚未完成；请先完成刷新，再重新打开编辑');
       if (published === undefined) {
         if (!await replaceTaskInFile(this.app, task, lines)) throw new Error('任务已发生变化，无法唯一定位');
         published = payload;
@@ -2612,7 +2615,7 @@ export default class OkfBrainPlugin extends Plugin {
 
   public promptNewTask(context: Record<string, unknown> = {}): void {
     void (async () => {
-      if (!this.taskRuntime) throw new Error('统一待办尚未启用');
+      if (!this.taskRuntime) throw new Error('任务功能尚未启用');
       const day = new Date();
       const iso = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
       const contexts = await this.notes().captureContexts();
@@ -2629,13 +2632,13 @@ export default class OkfBrainPlugin extends Plugin {
         const input = JSON.stringify(lines);
         if (prepared?.input !== input) prepared = { input, payload: lines.map(line => this.prepareFormalTaskLine(line)).join('\n') };
         const taskLine = prepared.payload;
-        if (!taskLine) throw new Error('新建待办必须保留至少一个执行项');
-        if (published && published.payload !== taskLine) throw new Error(`待办已经保存到 ${published.path}，刷新尚未完成；请先刷新后再编辑`);
+        if (!taskLine) throw new Error('新建任务必须保留至少一个执行项');
+        if (published && published.payload !== taskLine) throw new Error(`任务已经保存到 ${published.path}，刷新尚未完成；请先刷新后再编辑`);
         if (!published) {
           const path = destination?.trim().replace(/^\//u, '') ?? '';
           if (path) {
             const file = this.app.vault.getAbstractFileByPath(path);
-            if (!(file instanceof TFile) || !this.taskTargetAllowed(file)) throw new Error('请选择已有的可编辑笔记；来源资料、模板和派生视图不作为待办保存位置');
+            if (!(file instanceof TFile) || !this.taskTargetAllowed(file)) throw new Error('请选择已有的可编辑笔记；来源资料、模板和派生视图不作为任务保存位置');
             await this.notes().appendTaskToNote(file, taskLine);
             published = { path, payload: taskLine };
           } else if (calendarTarget?.path) {
@@ -2643,13 +2646,13 @@ export default class OkfBrainPlugin extends Plugin {
             if (!isTaskSourcePath(destination) || destination.split('/').some(part => ['.', '..'].includes(part) || part.includes(':'))) throw new Error('日历保存位置无效');
             if (calendarTarget.kind === 'note') {
               const result = await createTaskNote(this.app, { iso: scheduled || iso, taskLine, folder: destination,
-                templatePath: calendarTarget.templatePath, untitled: '待办' });
+                templatePath: calendarTarget.templatePath, untitled: '任务' });
               published = { path: result.file.path, payload: taskLine };
               if (result.templateMissing) new Notice('任务已保存；指定模板尚未读取，当前笔记仅包含任务。');
             } else {
               const path = calendarTarget.kind === 'folder' ? `${destination}/${scheduled || iso}.md` : destination.endsWith('.md') ? destination : `${destination}.md`;
               const file = this.app.vault.getAbstractFileByPath(path);
-              if (file instanceof TFile) { if (!this.taskTargetAllowed(file)) throw new Error('此日历目标不能保存人工待办'); await this.notes().appendTaskToNote(file, taskLine); }
+              if (file instanceof TFile) { if (!this.taskTargetAllowed(file)) throw new Error('此日历目标不能保存任务'); await this.notes().appendTaskToNote(file, taskLine); }
               else await this.notes().createTaskContainer(path, taskLine);
               published = { path, payload: taskLine };
             }
@@ -2660,7 +2663,7 @@ export default class OkfBrainPlugin extends Plugin {
         }
         await this.taskRuntime!.refresh();
         this.refreshDashboardViews();
-        const notice = new Notice(`待办已保存：${published.path}`, 7000);
+        const notice = new Notice(`任务已保存：${published.path}`, 7000);
         notice.noticeEl.createEl('button', { text: '查看来源', attr: { type: 'button' } }).addEventListener('click', () => void this.openVaultPath(published!.path));
       }, { isNew: true, target: initialTarget, targetHint, courses: contexts.courses, projects: contexts.projects,
         beforeApply: async target => {
@@ -2674,7 +2677,7 @@ export default class OkfBrainPlugin extends Plugin {
         },
         targets: this.app.vault.getMarkdownFiles().filter(file => this.taskTargetAllowed(file)).map(file => ({ path: file.path,
           title: String(this.app.metadataCache.getFileCache(file)?.frontmatter?.title ?? file.basename) })) });
-    })().catch(error => new Notice(error instanceof Error ? error.message : '新建待办失败', 8000));
+    })().catch(error => new Notice(error instanceof Error ? error.message : '新建任务失败', 8000));
   }
 
   private taskTargetAllowed(file: TFile): boolean {
@@ -2733,7 +2736,7 @@ export default class OkfBrainPlugin extends Plugin {
 
   public prepareFormalTaskLine(line: string): string {
     let prepared = line.trimEnd();
-    if (prepared.includes('\n')) throw new Error('待办必须为单行 Markdown 清单');
+    if (prepared.includes('\n')) throw new Error('任务必须为单行 Markdown 清单');
     prepared = prepareTaskLine(prepared);
     if (!/\s+\^[\w-]+\s*$/u.test(prepared)) prepared += ` ^task-${crypto.randomUUID()}`;
     return prepared;
@@ -2771,7 +2774,7 @@ export default class OkfBrainPlugin extends Plugin {
       new Notice("保存视图已更新");
       return;
     }
-    new FieldsPromptModal(this.app, '保存待办视图', [
+    new FieldsPromptModal(this.app, '保存任务视图', [
       { key: 'name', label: '视图名称', placeholder: '例如：本周课程任务' },
     ], '保存视图', async values => {
       const name = values.name!;

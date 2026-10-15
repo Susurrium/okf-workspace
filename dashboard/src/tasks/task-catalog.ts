@@ -31,7 +31,7 @@ export interface TaskCatalogOptions {
 export function renderTaskCatalog(container: HTMLElement, options: TaskCatalogOptions): void {
   const view = (options.config.taskView === "overview" ? "all" : options.config.taskView ?? "all") as TaskView;
   const toolbar = container.createDiv({ cls: "okf-task-toolbar" });
-  toolbar.createEl("button", { text: "新建待办", cls: "mod-cta", attr: { type: "button" } }).addEventListener("click", options.create);
+  toolbar.createEl("button", { text: "新建任务", cls: "mod-cta", attr: { type: "button" } }).addEventListener("click", options.create);
   let query = String(options.config.taskQuery ?? "");
   let search = String(options.config.taskSearch ?? options.search);
   let status = String(options.config.taskStatus ?? "all");
@@ -51,14 +51,14 @@ export function renderTaskCatalog(container: HTMLElement, options: TaskCatalogOp
     return input;
   };
   {
-    select(toolbar, "视图", { all: "全部未完成", today: "今日", overdue: "逾期", upcoming: "未来", unscheduled: "未安排", done: "已完成", cancelled: "已取消", custom: "自定义查询" }, view, value => navigate(value as TaskView));
+    select(toolbar, "视图", Object.fromEntries(Object.entries(TASK_VIEW_LABELS).filter(([key]) => key !== 'checklists')), view, value => navigate(value as TaskView));
     const saved = Object.fromEntries([["", "选择保存视图…"], ...options.saved.map(item => [item.id, item.name])]);
     select(toolbar, "保存视图", saved, String(options.config.savedViewId ?? ""), id => {
       const item = options.saved.find(item => item.id === id);
       if (item) options.navigate({ ...item.context, savedViewId: item.id, savedViewName: item.name });
     });
     toolbar.createEl("button", { text: "管理视图", attr: { type: "button" } }).addEventListener("click", options.manage);
-    const searchInput = toolbar.createEl("input", { cls: "okf-task-search", attr: { type: "search", "aria-label": "搜索待办", placeholder: "搜索内容、来源和关联…" } });
+    const searchInput = toolbar.createEl("input", { cls: "okf-task-search", attr: { type: "search", "aria-label": "搜索任务", placeholder: "搜索内容、来源和关联…" } });
     searchInput.value = search;
     searchInput.addEventListener("input", () => { search = searchInput.value; shown = options.limit; options.rememberSettings({ taskShown: String(shown) }); options.remember(search); render(); });
   }
@@ -67,7 +67,10 @@ export function renderTaskCatalog(container: HTMLElement, options: TaskCatalogOp
     for (const board of options.workbenches ?? []) container.createEl('button', { text: board.path, attr: { type: 'button' } }).addEventListener('click', board.open);
     return;
   }
-  if (view === "unscheduled") container.createDiv({ cls: "okf-dashboard__muted", text: "没有计划、开始／结束、截止或提醒日期的待办。" });
+  if (view === "unscheduled") container.createDiv({ cls: "okf-dashboard__muted", text: "尚未设置计划、开始、结束、截止或提醒日期的任务。" });
+  if (view === "today") container.createDiv({ cls: "okf-dashboard__muted", text: "日期与今天有关的未完成任务；各项显示计划、截止、提醒或跨日安排等原因。" });
+  if (view === "upcoming") container.createDiv({ cls: "okf-dashboard__muted", text: "包含未来日期的未完成任务；同一任务也可能与今天有关。" });
+  if (view === "overdue") container.createDiv({ cls: "okf-dashboard__muted", text: "已过截止日期或截止时间的未完成任务。" });
   let queryInput: HTMLTextAreaElement | undefined;
   let error: HTMLElement;
   {
@@ -130,8 +133,8 @@ export function renderTaskCatalog(container: HTMLElement, options: TaskCatalogOp
         return;
       }
     }
-    list.createDiv({ cls: "okf-task-count", text: `${tasks.length} 项${TASK_VIEW_LABELS[view]}${tasks.length > shown ? ` · 显示前 ${shown} 项` : ""}` });
-    if (!tasks.length) { list.createDiv({ cls: "okf-dashboard__empty", text: "当前范围没有符合条件的条目。可以新建待办，或调整筛选。" }); return; }
+    list.createDiv({ cls: "okf-task-count", text: `当前筛选共 ${tasks.length} 项 · 已显示 ${Math.min(tasks.length, shown)} 项` });
+    if (!tasks.length) { list.createDiv({ cls: "okf-dashboard__empty", text: "当前范围没有符合条件的任务。可以新建任务，或调整筛选。" }); return; }
     const visible = new Set(tasks.slice(0, shown).map(taskIdentity));
     if (!groups.some(group => group.heading)) {
       const labels: Record<string, string> = { Overdue: "逾期", Today: "今日截止", ThisWeek: "本周截止", Later: "后续截止", NoDue: "没有截止日期" };

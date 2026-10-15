@@ -512,6 +512,7 @@ export function renderLibrarySection(
 	onConfigChange: (config: LibraryConfig) => void,
 	hoverParent: HoverParent | null = null,
 	onOpenNote: ((file: TFile) => void) | null = null,
+	showConfigButton = true,
 ): void {
 	libHoverParent = hoverParent;
 	libOpener = onOpenNote;
@@ -976,6 +977,7 @@ export function renderLibrarySection(
 	const configBtn = toolbar.createDiv({ cls: 'dashboard-library-config-btn' });
 	setIcon(configBtn, 'settings');
 	configBtn.title = t('library.configure');
+	if (!showConfigButton) configBtn.remove();
 
 	// Content area
 	const contentArea = sectionContent.createDiv({ cls: 'dashboard-library-files' });

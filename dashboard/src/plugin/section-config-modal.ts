@@ -2,6 +2,7 @@ import { Modal, Notice, Setting, type App } from "obsidian";
 import { readWorkbenchSectionConfig, sectionSupportsSort } from "../features/workbench/section-config.js";
 import { VaultNoteService } from "./vault-note-service.js";
 import type { DashboardSection } from "./dashboard-ui-state.js";
+import { TASK_VIEW_LABELS } from "../tasks/task-presentation.js";
 
 export class SectionConfigModal extends Modal {
   private isClosed = false;
@@ -56,8 +57,7 @@ export class SectionConfigModal extends Modal {
     if (this.section === "today") new Setting(this.contentEl).setName("今天包含每日更新").addToggle((input) =>
       input.setValue(config.showDailyUpdates).onChange((value) => { draft.showDailyUpdates = value; }));
     if (this.section === "tasks") {
-      select("默认待办视图", "taskView", { all: "全部未完成", today: "今日", overdue: "逾期", upcoming: "未来",
-        unscheduled: "未安排（无日期）", done: "已完成", cancelled: "已取消" },
+      select("默认任务视图", "taskView", Object.fromEntries(Object.entries(TASK_VIEW_LABELS).filter(([key]) => !['custom', 'checklists'].includes(key))),
         config.taskView === "overview" ? "all" : config.taskView);
       select("分组", "taskGroupBy", { none: "不分组", date: "截止日期", priority: "优先级", path: "来源笔记", status: "状态" }, String(this.raw.taskGroupBy ?? "none"));
       select("排序", "taskSort", { due: "截止日期", scheduled: "计划日期", priority: "优先级", title: "内容", completion: "完成日期" }, String(this.raw.taskSort ?? "due"));

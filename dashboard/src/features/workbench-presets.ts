@@ -40,7 +40,7 @@ export function workbenchPresetData(preset: WorkbenchPresetId = "daily", context
       column("daily-updates", "每日更新", "workspace-updates", "#8b5cf6", {
         extensionConfig: { itemsPerEdition: 3, readingView: "daily-updates", feedStreams: ["hotspot", "news", "treehole"] },
       }),
-      column("daily-calendar", "日历", "calendar", "#3b82f6", { extensionConfig: { initialView: "week" } }),
+      column("daily-calendar", "任务日历", "calendar", "#3b82f6", { extensionConfig: { initialView: "week" } }),
     ],
     learning: [
       column("learning-main", "学习", "workspace-learning", "#6366f1"),
@@ -51,15 +51,15 @@ export function workbenchPresetData(preset: WorkbenchPresetId = "daily", context
       column("project-notes", "工作台便签", "memo", "#f59e0b"),
     ],
     reading: [
-      column("reading-feed", "订阅", "workspace-reading", "#8b5cf6"),
+      column("reading-feed", "订阅阅读", "workspace-reading", "#8b5cf6"),
       column("reading-weread", "微信读书", "weread", "#10b981"),
     ],
     knowledge: [
-      column("knowledge-main", "知识", "workspace-knowledge", "#8b5cf6"),
+      column("knowledge-main", "知识笔记", "workspace-knowledge", "#8b5cf6"),
     ],
     life: [
       column("life-main", "日记与复盘", "workspace-life", "#ec4899"),
-      column("life-calendar", "日历", "calendar", "#3b82f6"),
+      column("life-calendar", "任务日历", "calendar", "#3b82f6"),
       column("life-memo", "随手记", "memo", "#f59e0b"),
     ],
     system: [
@@ -71,7 +71,7 @@ export function workbenchPresetData(preset: WorkbenchPresetId = "daily", context
     banner: { ...BANNER },
     quickActions: [
       { name: "快速记录", icon: "pencil", type: "command", target: "okf-workspace-dashboard:quick-capture" },
-      { name: "新建待办", icon: "list-plus", type: "command", target: "okf-workspace-dashboard:new-task" },
+      { name: "新建任务", icon: "list-plus", type: "command", target: "okf-workspace-dashboard:new-task" },
       { name: "全局搜索", icon: "search", type: "command", target: "global-search:open" },
       { name: "快捷操作", icon: "plus", type: "command", target: "okf-workspace-dashboard:open-action-menu" },
     ],

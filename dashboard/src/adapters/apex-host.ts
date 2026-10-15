@@ -15,6 +15,7 @@ import { MediaTagService, registerMediaTagService } from "../../apex/src/media-t
 import { MusicService, registerMusicService } from "../../apex/src/music-service.js";
 import { PomodoroService } from "../../apex/src/pomodoro-service.js";
 import { ReadingService } from "../../apex/src/reading-service.js";
+import { ThemeStudioModal } from "../../apex/src/theme-studio-modal.js";
 import {
   createPomodoroMiniPanel,
   type PomodoroMiniPanel,
@@ -27,7 +28,7 @@ import { generateDefaultMarkdown } from "../../apex/src/parser.js";
 import { teardownBasenameIndex } from "../../apex/src/renderer.js";
 import { type DashboardSettings } from "../../apex/src/types.js";
 import type { TaskInsertTarget } from "../../apex/src/daily-notes.js";
-import { DashboardView, DASHBOARD_VIEW_TYPE } from "../../apex/src/view.js";
+import { DashboardView, DASHBOARD_VIEW_TYPE, DASHBOARD_SECTION_VIEW_TYPE } from "../../apex/src/view.js";
 import {
   alignWorkspaceNames,
   nextWorkspacePath,
@@ -240,13 +241,13 @@ export class ApexHostAdapter implements ApexHost {
   }
 
   public refreshAllDashboards(): void {
-    for (const leaf of this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE)) {
+    for (const leaf of [DASHBOARD_VIEW_TYPE, DASHBOARD_SECTION_VIEW_TYPE].flatMap(type => this.app.workspace.getLeavesOfType(type))) {
       if (leaf.view instanceof DashboardView) void leaf.view.refresh();
     }
   }
 
   public async reloadAllDashboards(): Promise<void> {
-    for (const leaf of this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE)) {
+    for (const leaf of [DASHBOARD_VIEW_TYPE, DASHBOARD_SECTION_VIEW_TYPE].flatMap(type => this.app.workspace.getLeavesOfType(type))) {
       if (leaf.view instanceof DashboardView) await leaf.view.reloadFromDisk();
     }
   }
@@ -272,11 +273,11 @@ export class ApexHostAdapter implements ApexHost {
 
   public async cycleTheme(): Promise<void> {
     const themes = [
-      "earth", "nordic", "aurora", "blossom", "lilac", "island", "tundra",
+      "earth", "nordic", "aurora", "blossom", "lilac", "aqua", "island", "tundra",
       "matcha", "mono", "neon", "volt", "magma", "onyx",
     ];
     const index = themes.indexOf(this.settings.stylePreset);
-    this.settings = { ...this.settings, stylePreset: themes[(index + 1) % themes.length] ?? "earth" };
+    this.settings = { ...this.settings, stylePreset: themes[(index + 1) % themes.length] ?? "earth", activeCustomThemeId: "" };
     await this.saveSettings();
     this.refreshAllDashboards();
   }
@@ -288,6 +289,10 @@ export class ApexHostAdapter implements ApexHost {
     const index = Math.max(0, files.indexOf(active));
     const next = files[(index + delta + files.length) % files.length];
     if (next) void this.switchWorkspace(next);
+  }
+
+  public openAppearanceStudio(): void {
+    new ThemeStudioModal(this.app, this).open();
   }
 
   public async switchWorkspace(path: string): Promise<void> {

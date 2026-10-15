@@ -7,16 +7,12 @@
   font-size: var(--font-ui-medium);
 }
 .apex-dashboard-root .okf-dashboard { --okf-surface: var(--db-bg-card); --okf-surface-muted: var(--db-bg-input); --okf-border: var(--db-border-card); --text-normal: var(--db-text); --text-muted: var(--db-text-muted); --text-accent: var(--db-accent); --interactive-accent: var(--db-accent); --text-on-accent: var(--db-text-inverse); }
-.dashboard-section-header--surface { gap: 8px; }
-.dashboard-section-header--surface .dashboard-section-title-wrap { min-width: 0; max-width: 45%; flex-shrink: 0; }
-.dashboard-section-header--surface .dashboard-section-header-actions { min-width: 0; flex: 1 1 0; justify-content: flex-end; }
-.dashboard-section-header--surface .dashboard-section-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.okf-section-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.dashboard-section-header { gap: 8px; }
+.dashboard-section-title-wrap { min-width: 0; }
+.dashboard-section-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.okf-surface-controls:empty { display: none; }
 .okf-section-controls__sort { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .okf-section-controls__sort select { width: auto; max-width: 110px; height: 30px; margin: 0; font-size: 12px; }
-.okf-section-controls button { font-size: 12px; height: 30px; padding: 0 8px; white-space: nowrap; }
-.okf-section-controls__scope { max-width: 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--db-text-muted); }
-.dashboard-section-row--collapsed .okf-section-controls { display: none; }
 .okf-dashboard .okf-dashboard__topbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; min-height: 44px; }
 .okf-dashboard .okf-dashboard__topbar > button { flex: 0 0 auto; width: auto; }
 .okf-dashboard .okf-dashboard__utilities { margin-left: auto; }

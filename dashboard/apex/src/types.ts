@@ -37,6 +37,8 @@ export interface DashboardSettings {
 	recentDocCount: number;
 	language: Language;
 	stylePreset: string;
+	customThemes?: CustomTheme[];
+	activeCustomThemeId?: string;
 	/** Board arrangement: widgets in a left rail ('side', default) or a
 	    horizontal strip under the banner ('stacked'). Desktop/tablet only;
 	    phones keep their own layout regardless of this value. */
@@ -62,6 +64,8 @@ export interface DashboardSettings {
 	pomodoroShortBreakMinutes: number;
 	pomodoroLongBreakMinutes: number;
 	pomodoroLongBreakInterval: number;
+	pomodoroMode: 'timer' | 'stopwatch';
+	pomodoroStopwatchReminderMinutes: number;
 	/** Daily pomodoro completion goal (count), shown as "1/8" in KPIs/gauge. */
 	pomodoroDailyGoal: number;
 	pomodoroAutoStartBreak: boolean;
@@ -267,6 +271,21 @@ export interface CustomColors {
 /** How a dashboard background image fills the background layer. */
 export type BgSize = 'cover' | 'contain';
 
+export interface CustomTheme {
+	id: string;
+	name: string;
+	base: string;
+	colors: CustomColors;
+	bgImage: string;
+	bgDim: number;
+	bgBlur: number;
+	bgSize: BgSize;
+	surfaceOpacity: number | null;
+	glassBlur: number | null;
+	radiusScale: number | null;
+	fontScale: DashboardSettings['fontScale'];
+}
+
 /** One "quick-create" button in the Quick Notes region: creates a note from a
  *  template file into a folder, with `{{date}}`/`{{time}}`/`{{title}}` resolved. */
 export interface QuickNotePreset {
@@ -327,6 +346,8 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
 	pomodoroShortBreakMinutes: 5,
 	pomodoroLongBreakMinutes: 15,
 	pomodoroLongBreakInterval: 4,
+	pomodoroMode: 'timer',
+	pomodoroStopwatchReminderMinutes: 0,
 	pomodoroDailyGoal: 8,
 	pomodoroAutoStartBreak: true,
 	pomodoroSoundEnabled: true,
@@ -921,6 +942,7 @@ export function sectionRef(column: DashboardColumn): string {
 }
 
 export interface RenderCallbacks {
+	sectionPage?: boolean;
 	/** Register resources owned by a custom section for the current render. */
 	onCustomSectionCleanup?(sectionReference: string, cleanup: () => void): void;
 	onCardEdit(card: DashboardCard): void;
@@ -978,6 +1000,7 @@ export interface RenderCallbacks {
 	 *  duplicate names it disambiguates which same-named column is meant. */
 	onColumnRename(oldName: string, newName: string, columnIndex?: number): void;
 	onColumnDelete(columnName: string, columnIndex?: number): void;
+	onSectionOpen?(reference: string, kind: 'tab' | 'enlarge'): void | Promise<void>;
 	onTaskReminderEdit(cardId: string, taskPath: number[], reminder: string | undefined): void;
 	onTaskNest(cardId: string, taskPath: number[]): void;
 	onTaskNestInto(cardId: string, srcPath: number[], destPath: number[]): void;

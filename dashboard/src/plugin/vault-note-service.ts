@@ -252,7 +252,7 @@ export class VaultNoteService {
   }
 
   public async appendTaskToNote(file: TFile, block: string): Promise<void> {
-    if (!block.trim()) throw new Error("待办内容不能为空");
+    if (!block.trim()) throw new Error("任务或清单内容不能为空");
     await this.app.vault.process(file, current => {
       if (readTaskSourceKind(file.path, current) !== 'tasks') throw new Error('目标笔记不能保存 Tasks 任务');
       return `${current.trimEnd()}\n\n${block.trim()}\n`;

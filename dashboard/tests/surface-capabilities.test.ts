@@ -61,13 +61,14 @@ describe("complete business surfaces", () => {
   const controls: Array<[DashboardSection, string]> = [
     ["tasks", "管理视图"], ["inbox", "快速记录到待处理"], ["sources", "资料用途"],
     ["learning", "新建课程"], ["projects", "搜索项目"], ["knowledge", "新建知识导航"],
-    ["life", "起始日期"], ["system", "系统诊断"], ["reading", "来源与历史"], ["today", "新建今日待办"],
+    ["life", "起始日期"], ["system", "系统诊断"], ["reading", "来源与历史"], ["today", "新建今日任务"],
   ];
   for (const mode of ["summary", "embedded", "full"]) it.each(controls)(`${mode}: %s retains its business tools`, async (section, control) => {
     const { root, header } = await mount(section, { mode, showDailyUpdates: false });
     expect(root.descendants("okf-dashboard__error").map(item => item.textContent)).toEqual([]);
     expect(root.descendants().some(item => item.textContent === control || item.attributes.get("aria-label") === control)).toBe(true);
-    expect(header.descendants().some(item => item.textContent === "独立打开")).toBe(true);
+    expect(root.descendants().some(item => item.textContent === "在新标签页打开")).toBe(true);
+    expect(header.descendants()).toHaveLength(0);
   });
 
   it("changes task views in place, retains the scope, and exposes advanced queries on old boards", async () => {
@@ -160,7 +161,7 @@ describe("complete business surfaces", () => {
       'sources/z.md': source('Z'), 'sources/a.md': source('A'),
     }, true, { 'sources/z.md': 2, 'sources/a.md': 1 });
     expect(board.root.descendants('okf-dashboard__row-title')[0]?.textContent).toBe('Z');
-    const sort = board.header.descendants().find(item => item.attributes.get('aria-label') === '目录排序')!;
+    const sort = board.root.descendants().find(item => item.attributes.get('aria-label') === '目录排序')!;
     sort.value = 'title'; sort.dispatch('change');
     await vi.waitFor(() => expect(board.root.descendants('okf-dashboard__row-title')[0]?.textContent).toBe('A'));
     expect(board.navigate).not.toHaveBeenCalled();

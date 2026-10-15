@@ -11,6 +11,6 @@ export async function replaceTaskWithTasks({ originalTask, newTasks }: {
   originalTask: ListItem;
   newTasks: ListItem | ListItem[];
 }): Promise<void> {
-  if (!writer) throw new Error('统一待办的写入服务尚未启用');
+  if (!writer) throw new Error('任务写入服务尚未启用');
   await writer(originalTask, (Array.isArray(newTasks) ? newTasks : [newTasks]).map(task => task.toFileLineString()));
 }

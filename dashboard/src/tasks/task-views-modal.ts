@@ -7,8 +7,8 @@ export class TaskViewsModal extends Modal {
 
   public onOpen(): void {
     this.modalEl.addClass("okf-workflow-modal");
-    this.titleEl.setText("管理待办视图");
-    if (!this.views.length) this.contentEl.createDiv({ text: "还没有保存视图。在待办页面设置筛选和查询后保存。" });
+    this.titleEl.setText("管理任务视图");
+    if (!this.views.length) this.contentEl.createDiv({ text: "还没有保存视图。在任务页面设置筛选和查询后保存。" });
     for (const view of this.views) {
       const row = this.contentEl.createDiv({ cls: "okf-saved-view" });
       const input = row.createEl("input", { attr: { type: "text", "aria-label": "视图名称" } });

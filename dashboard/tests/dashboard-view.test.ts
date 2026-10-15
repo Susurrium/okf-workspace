@@ -460,8 +460,8 @@ describe("real Dashboard View source handoff", () => {
     await pane.setState({ section: "knowledge", workbenchPath: "workbenches/daily" }, {} as never);
 
     expect(pane.getViewType()).toBe(OKF_DASHBOARD_VIEW);
-    expect(pane.getDisplayText()).toBe("工作台 · 知识");
-    expect(header.textContent).toBe("工作台 · 知识");
+    expect(pane.getDisplayText()).toBe("工作台 · 知识笔记");
+    expect(header.textContent).toBe("工作台 · 知识笔记");
     expect(pane.getState()).toEqual({ section: "knowledge", workbenchPath: "workbenches/daily", config: {}, navigationHistory: [] });
   });
 
@@ -1244,13 +1244,13 @@ describe("real Dashboard View source handoff", () => {
     const nav = root.descendants("okf-dashboard__nav")[0];
     expect(nav?.children.map((child) => child.textContent)).toEqual([
       "今天",
-      "待办",
+      "任务",
       "收集箱",
-      "订阅",
+      "订阅阅读",
       "资料",
       "学习",
       "项目",
-      "知识",
+      "知识笔记",
       "日记与复盘",
       "后台与诊断",
     ]);
@@ -2414,7 +2414,7 @@ describe("real Dashboard View source handoff", () => {
     expect(promptProjectProgress).toHaveBeenCalledWith("projects/workspace/project.md");
     expect(panels).toHaveLength(1);
     expect(panels[0]?.label).toBe("其他操作 · 个人知识库");
-    expect(panels[0]?.actions.map((action) => action.title)).toEqual(["新建项目待办", "查看项目待办", ...PROJECT_ACTION_PANEL_LABELS]);
+    expect(panels[0]?.actions.map((action) => action.title)).toEqual(["新建项目任务", "查看项目任务", ...PROJECT_ACTION_PANEL_LABELS]);
     expect(row?.descendants("okf-work-item__metric").map((item) => item.textContent)).toEqual([
       "待整理 0",
       "学习笔记 0",
@@ -2527,7 +2527,7 @@ describe("real Dashboard View source handoff", () => {
     root.descendants().find((entry) => entry.textContent === "新建课堂笔记")!.click();
     expect(openDocumentImport).toHaveBeenCalledWith([], { course: "algebra" }, "learning");
     expect(promptLessonForCourse).toHaveBeenCalledWith(coursePath);
-    expect(root.descendants("okf-course-work-item")[0]?.descendants("okf-work-item__actions")[0]?.children.map((entry) => entry.textContent)).toEqual(["新建课堂笔记", "新建课程待办", "查看课程待办", "添加资料 · 可拖入文件夹", "其他操作 ▾"]);
+    expect(root.descendants("okf-course-work-item")[0]?.descendants("okf-work-item__actions")[0]?.children.map((entry) => entry.textContent)).toEqual(["新建课堂笔记", "新建课程任务", "查看课程任务", "添加资料 · 可拖入文件夹", "其他操作 ▾"]);
   });
 
   it("keeps cached Daily and Papers items visible while making a refresh failure actionable", async () => {

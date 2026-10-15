@@ -6,6 +6,49 @@ import { DEFAULT_SETTINGS } from "../apex/src/types.js";
 import { parse, serialize } from "../apex/src/parser.js";
 
 describe("Apex board sync pool", () => {
+  it("retries a failed section creation without duplicating its identity", async () => {
+    const file = new (TFile as unknown as new (path: string) => TFile)("board.md");
+    let disk = serialize({ banner: { quote: "", author: "", image: "" }, quickActions: [], columns: [] });
+    let fail = true;
+    const app = { vault: { getFileByPath: () => file, read: async () => disk,
+      modify: async (_file: TFile, content: string) => { if (fail) { fail = false; throw new Error('模拟磁盘拒绝写入'); } disk = content; },
+      on: () => ({}), offref: () => undefined,
+      adapter: { exists: async () => true, write: async () => undefined, list: async () => ({ files: [], folders: [] }) },
+    } } as unknown as App;
+    const engine = new SyncEngine(app, { ...DEFAULT_SETTINGS, dashboardFile: "board" });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await engine.init();
+      await expect(engine.addColumn('我的便利贴','sticky',undefined,'section-request')).rejects.toThrow('拒绝写入');
+      await engine.addColumn('我的便利贴','sticky',undefined,'section-request');
+      expect(parse(disk).columns.map(column => ({ id: column.id, name: column.name }))).toEqual([{ id:'section-request', name:'我的便利贴' }]);
+    } finally { engine.destroy(); errors.mockRestore(); }
+  });
+  it("does not replace newly added sections with a delayed file-read echo", async () => {
+    const file = new (TFile as unknown as new (path: string) => TFile)("board.md");
+    let disk = serialize({ banner: { quote: "", author: "", image: "" }, quickActions: [], columns: [] });
+    let delayed: ((content: string) => void) | undefined;
+    let delayNext = false;
+    const app = { vault: { getFileByPath: () => file,
+      read: async () => delayNext ? (delayNext = false, new Promise<string>(resolve => { delayed = resolve; })) : disk,
+      modify: async (_file: TFile, content: string) => { disk = content; },
+      on: () => ({}), offref: () => undefined,
+      adapter: { exists: async () => true, write: async () => undefined, list: async () => ({ files: [], folders: [] }) },
+    } } as unknown as App;
+    const engine = new SyncEngine(app, { ...DEFAULT_SETTINGS, dashboardFile: "board" });
+    try {
+      await engine.init();
+      const old = disk;
+      delayNext = true;
+      const refresh = engine.refresh();
+      await engine.addColumn("任务", "workspace-tasks");
+      delayed!(old);
+      await refresh;
+      await vi.waitFor(() => expect(engine.getData()?.columns.map(column => column.sectionType)).toEqual(["workspace-tasks"]));
+      await engine.addColumn("清单", "todo");
+      expect(parse(disk).columns.map(column => column.sectionType)).toEqual(["workspace-tasks", "todo"]);
+    } finally { engine.destroy(); }
+  });
   it("reports a real write failure, preserves configuration and permits an explicit retry", async () => {
     const file = new (TFile as unknown as new (path: string) => TFile)("board.md");
     const original = { mode: "embedded", future: { retained: true } };

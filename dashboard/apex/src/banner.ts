@@ -115,6 +115,7 @@ export function renderBanner(
 		applyBannerFocal(el, banner, activeImage);
 	}
 
+	el.toggleClass('dashboard-banner--plain', !el.style.backgroundImage);
 	const overlay = el.createDiv({ cls: 'dashboard-banner-overlay' });
 	const content = overlay.createDiv({ cls: 'dashboard-banner-content' });
 

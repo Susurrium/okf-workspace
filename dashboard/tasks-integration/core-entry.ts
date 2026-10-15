@@ -154,7 +154,7 @@ export function taskStatusTypes(): Record<string, string> {
 export function applyTaskStatusTypes(types: Record<string, string>): void {
   const allowed = new Set(['TODO', 'DONE', 'CANCELLED', 'IN_PROGRESS', 'ON_HOLD', 'NON_TASK']);
   for (const [symbol, type] of Object.entries(types)) {
-    if (symbol.length !== 1 || !allowed.has(type)) throw new Error(`待办状态配置无效：${symbol}`);
+    if (symbol.length !== 1 || !allowed.has(type)) throw new Error(`任务状态配置无效：${symbol}`);
   }
   if (types[' '] && types[' '] !== 'TODO' || types.x && types.x !== 'DONE') throw new Error('标准复选框必须使用 TODO 和 DONE 状态');
   const settings = getSettings();

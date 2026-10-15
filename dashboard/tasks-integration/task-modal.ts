@@ -44,7 +44,7 @@ export class TaskModal extends UpstreamModal {
     applyModalTheme(this.modalEl);
     this.modalEl.createEl('button', { text: '编辑选项', attr: { type: 'button' } }).addEventListener('click', () =>
       new OptionsModal({ app: this.app, onSave: this.parameters.onSaveSettings }).open());
-    this.titleEl.setText(this.parameters.editorContext?.isNew || !taskDisplayDescription(this.original.description) ? '新建待办' : '待办详情');
+    this.titleEl.setText(this.parameters.editorContext?.isNew || !taskDisplayDescription(this.original.description) ? '新建任务' : '任务详情');
     const context = this.parameters.editorContext ?? this.defaultContext();
     this.component = mount(TaskEditor, { target: this.contentEl, props: {
       task: taskForEditor(this.original), allTasks: this.allTasks, extensions: this.draft, context,
@@ -83,7 +83,7 @@ export class TaskModal extends UpstreamModal {
     try {
       if (this.parameters.editorContext?.beforeApply) await this.parameters.editorContext.beforeApply(this.parameters.editorContext.target);
       const restored = updated.map(task => {
-        if (!taskDisplayDescription(task.description)) throw new Error('请填写待办内容');
+        if (!taskDisplayDescription(task.description)) throw new Error('请填写任务内容');
         const value = restoreEditorExtensions(task, this.original);
         let description = value.description;
         for (const [key, input] of Object.entries(this.draft)) {

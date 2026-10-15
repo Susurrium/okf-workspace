@@ -3,13 +3,18 @@ import type { ApexHost } from './host';
 import type { DashboardSettings } from './types';
 import { t } from './i18n';
 import { playDing, unlockChime } from './chime';
+import { showStopwatchReminderDialog } from './pomodoro-reminder-dialog';
 
 export type PomodoroPhase = 'work' | 'short-break' | 'long-break';
 export type PomodoroStatus = 'idle' | 'running' | 'paused';
+/** Timer flavor: classic countdown phases, or the open-ended stopwatch. */
+export type PomodoroMode = 'timer' | 'stopwatch';
 
 export interface PomodoroState {
+	mode: PomodoroMode;
 	phase: PomodoroPhase;
 	status: PomodoroStatus;
+	/** Countdown: seconds left. Stopwatch: seconds ELAPSED (counts up). */
 	remainingSeconds: number;
 	totalSeconds: number;
 	completedWorkSessions: number;
@@ -118,6 +123,20 @@ export class PomodoroService {
 	private currentActivity = '';
 	private pausedRemaining = 0;
 	private durationMs = 0;
+	/** Stopwatch mode's run flavor, captured at start so flipping the
+	 *  settings mid-run cannot morph a live run into the other machine. */
+	private runMode: PomodoroMode = 'timer';
+	/** Focused ms accumulated across stopwatch pauses. */
+	private stopwatchAccumMs = 0;
+	/** Epoch-ms start of the stopwatch's current running stretch (0 = paused). */
+	private stopwatchStartedAt = 0;
+	/** Reminder cadence snapshot (ms); a diff against the live setting re-arms
+	 *  the next reminder one full (new) interval out. */
+	private reminderMsSnapshot = 0;
+	/** Focused-ms threshold of the next reminder (Infinity = disarmed). */
+	private nextReminderAtMs = Number.POSITIVE_INFINITY;
+	private reminderDialogOpen = false;
+	private reminderController: AbortController | null = null;
 	/** Wall-clock ms accumulated across pauses for the current work phase. */
 	private focusedMs = 0;
 	private workPhaseResumedAt = 0;
@@ -171,12 +190,8 @@ export class PomodoroService {
 				this.lastWritten = raw;
 			}
 		} catch (error) {
-			// Parse error = unusable file (start fresh); an adapter/IO error
-			// (mobile file lock, iCloud file not yet downloaded) leaves the
-			// on-disk file intact — flag it so the next save cannot overwrite
-			// real history with the empty state (expense/habit pattern).
-			this.data = emptyData();
-			this.loadFailed = !(error instanceof SyntaxError);
+			this.loadFailed = true;
+			throw error;
 		}
 		this.currentActivity = this.data.currentActivity;
 		this.pruneOldSessions();
@@ -186,67 +201,37 @@ export class PomodoroService {
 	 *  per-call awaits could interleave read/compare/write cycles between
 	 *  tag edits and session completions). */
 	private saveQueue: Promise<void> = Promise.resolve();
+	private saveError: Error | undefined;
 
 	private save(): void {
-		this.saveQueue = this.saveQueue.then(() => this.persist());
+		this.saveQueue = this.saveQueue.then(() => this.persist()).then(() => { this.saveError = undefined; }).catch((error: unknown) => {
+			this.saveError = error instanceof Error ? error : new Error(String(error));
+			console.error('专注记录保存失败', error);
+			new Notice(`专注记录尚未保存：${String(error)}`);
+		});
+	}
+
+	async flush(): Promise<void> {
+		await this.saveQueue;
+		if (this.saveError) throw this.saveError;
 	}
 
 	private async persist(): Promise<void> {
-		// A non-parse load failure must not brick persistence for the whole
-		// session; re-attempt the read and merge before deciding to skip.
-		if (this.loadFailed && !(await this.retryFailedLoad())) return;
-		try {
-			const adapter = this.plugin.app.vault.adapter;
-			const dir = `${this.plugin.app.vault.configDir}/plugins/${this.plugin.manifest.id}`;
-			const path = `${dir}/${DATA_FILE}`;
-			if (!(await adapter.exists(dir))) {
-				await adapter.mkdir(dir);
-			}
-			this.data = { ...this.data, currentActivity: this.currentActivity };
-			// Merge the disk state first when someone else wrote since our
-			// last write — blind full-file saves are what made records
-			// "not sync" (last writer silently reverted the other device).
-			try {
-				if (await adapter.exists(path)) {
-					const raw = await adapter.read(path);
-					if (raw !== this.lastWritten) {
-						this.data = mergeData(normalizeData(JSON.parse(raw)), this.data);
-					}
-				}
-			} catch {
-				// Disk unreadable at save time: write our state as before.
-			}
-			const json = JSON.stringify(this.data);
-			await adapter.write(path, json);
-			this.lastWritten = json;
-		} catch {
-			// silent fail: an unwriteable pomodoro.json must not break sessions in-session
+		if (this.loadFailed) throw new Error('专注记录未成功读取，已停止保存');
+		const adapter = this.plugin.app.vault.adapter;
+		const dir = `${this.plugin.app.vault.configDir}/plugins/${this.plugin.manifest.id}`;
+		const path = `${dir}/${DATA_FILE}`;
+		this.data = { ...this.data, currentActivity: this.currentActivity };
+		if (await adapter.exists(path)) {
+			const raw = await adapter.read(path);
+			if (raw !== this.lastWritten) this.data = mergeData(normalizeData(JSON.parse(raw)), this.data);
 		}
+		if (!(await adapter.exists(dir))) await adapter.mkdir(dir);
+		const json = JSON.stringify(this.data);
+		await adapter.write(path, json);
+		this.lastWritten = json;
 	}
 
-	/** Re-attempt the initial read after a non-parse load failure. On success
-	 *  the disk state merges with the in-session state; while the file is
-	 *  still unreadable saving stays skipped rather than clobbering a file we
-	 *  cannot see. */
-	private async retryFailedLoad(): Promise<boolean> {
-		try {
-			const adapter = this.plugin.app.vault.adapter;
-			const path = `${this.plugin.app.vault.configDir}/plugins/${this.plugin.manifest.id}/${DATA_FILE}`;
-			let disk = emptyData();
-			if (await adapter.exists(path)) {
-				const raw = await adapter.read(path);
-				disk = normalizeData(JSON.parse(raw));
-				this.lastWritten = raw;
-			}
-			this.data = mergeData(disk, this.data);
-			this.loadFailed = false;
-			this.notify();
-			return true;
-		} catch (error) {
-			this.loadFailed = !(error instanceof SyntaxError);
-			return !this.loadFailed;
-		}
-	}
 
 	/** Re-read the file and union external changes into memory (another
 	 *  device's records arriving via sync, or another view's writes in the
@@ -314,9 +299,41 @@ export class PomodoroService {
 		return Math.max(0, Math.ceil((this.durationMs - elapsed) / 1000));
 	}
 
+	/** The run's flavor: while idle it follows the live setting; once a run
+	 *  starts it is pinned (runMode) so a mid-run settings flip is inert. */
+	private get activeMode(): PomodoroMode {
+		if (this.status !== 'idle') return this.runMode;
+		return this.getSettings().pomodoroMode === 'stopwatch' ? 'stopwatch' : 'timer';
+	}
+
+	/** Stopwatch: focused ms so far, the running stretch included. */
+	private stopwatchElapsedMs(): number {
+		let total = this.stopwatchAccumMs;
+		if (this.status === 'running' && this.stopwatchStartedAt) {
+			total += Date.now() - this.stopwatchStartedAt;
+		}
+		return total;
+	}
+
 	getState(): PomodoroState {
+		if (this.activeMode === 'stopwatch') {
+			const reminderSec = Math.max(0, this.getSettings().pomodoroStopwatchReminderMinutes) * 60;
+			// Ring fill reference: the reminder cadence when set, else the
+			// configured work length (fills over a "standard" pomodoro, then
+			// stays full — the UI clamps).
+			const total = reminderSec > 0 ? reminderSec : Math.round(this.getPhaseDurationMs('work') / 1000);
+			return {
+				mode: 'stopwatch',
+				phase: 'work',
+				status: this.status,
+				remainingSeconds: Math.floor(this.stopwatchElapsedMs() / 1000),
+				totalSeconds: total,
+				completedWorkSessions: 0,
+			};
+		}
 		const totalSeconds = Math.round(this.durationMs / 1000) || Math.round(this.getPhaseDurationMs(this.phase) / 1000);
 		return {
+			mode: 'timer',
 			phase: this.phase,
 			status: this.status,
 			remainingSeconds: this.getRemainingSeconds(),
@@ -327,6 +344,24 @@ export class PomodoroService {
 
 	start(): void {
 		if (this.status === 'running') return;
+		if (this.status === 'idle') this.runMode = this.getSettings().pomodoroMode === 'stopwatch' ? 'stopwatch' : 'timer';
+
+		if (this.runMode === 'stopwatch') {
+			if (this.status === 'paused') {
+				this.stopwatchStartedAt = Date.now();
+			} else {
+				this.stopwatchAccumMs = 0;
+				this.stopwatchStartedAt = Date.now();
+				this.interruptions = 0;
+				this.reminderMsSnapshot = Math.max(0, this.getSettings().pomodoroStopwatchReminderMinutes) * 60_000;
+				this.nextReminderAtMs = this.reminderMsSnapshot > 0 ? this.reminderMsSnapshot : Number.POSITIVE_INFINITY;
+			}
+			this.phase = 'work';
+			this.status = 'running';
+			this.ensureTickInterval();
+			this.notifyTick();
+			return;
+		}
 
 		if (this.status === 'paused') {
 			this.durationMs = this.pausedRemaining;
@@ -348,6 +383,15 @@ export class PomodoroService {
 
 	pause(): void {
 		if (this.status !== 'running') return;
+		if (this.activeMode === 'stopwatch') {
+			this.stopwatchAccumMs = this.stopwatchElapsedMs();
+			this.stopwatchStartedAt = 0;
+			this.interruptions++;
+			this.status = 'paused';
+			this.clearTickInterval();
+			this.notifyTick();
+			return;
+		}
 		this.pausedRemaining = Math.max(0, this.durationMs - (Date.now() - this.startedAt));
 		if (this.phase === 'work') {
 			if (this.workPhaseResumedAt) {
@@ -362,6 +406,20 @@ export class PomodoroService {
 	}
 
 	reset(): void {
+		this.reminderController?.abort();
+		if (this.activeMode === 'stopwatch' && this.status !== 'idle') {
+			// Abort without recording — the mirror of aborting a countdown
+			// phase. (Ending WITH a record is stopStopwatch.)
+			this.stopwatchAccumMs = 0;
+			this.stopwatchStartedAt = 0;
+			this.nextReminderAtMs = Number.POSITIVE_INFINITY;
+			this.reminderMsSnapshot = 0;
+			this.interruptions = 0;
+			this.status = 'idle';
+			this.clearTickInterval();
+			this.notifyTick();
+			return;
+		}
 		this.status = 'idle';
 		this.phase = 'work';
 		this.durationMs = this.getPhaseDurationMs('work');
@@ -382,7 +440,80 @@ export class PomodoroService {
 	}
 
 	skip(): void {
+		if (this.activeMode === 'stopwatch') {
+			// The mini panel's skip key: end the stopwatch run and record it.
+			if (this.status !== 'idle') this.finishStopwatch();
+			return;
+		}
 		this.transitionToNextPhase();
+	}
+
+	/** End the stopwatch run and record it as one pomodoro of its ACTUAL
+	 *  focused minutes. Runs under a minute are discarded (fat-finger
+	 *  protection). Public: the widget's stop button calls this directly. */
+	stopStopwatch(): void {
+		if (this.activeMode !== 'stopwatch' || this.status === 'idle') return;
+		this.finishStopwatch();
+	}
+
+	private finishStopwatch(): void {
+		this.reminderController?.abort();
+		const elapsedMs = this.stopwatchElapsedMs();
+		// Completed minutes only (floor), and runs under a minute discard —
+		// fat-finger protection.
+		const focusedMin = elapsedMs >= 60_000 ? Math.max(1, Math.floor(elapsedMs / 60_000)) : 0;
+		this.stopwatchAccumMs = 0;
+		this.stopwatchStartedAt = 0;
+		this.nextReminderAtMs = Number.POSITIVE_INFINITY;
+		this.reminderMsSnapshot = 0;
+		this.status = 'idle';
+		this.clearTickInterval();
+		if (focusedMin >= 1) {
+			void this.recordSession(focusedMin, { stopwatch: true }).then(() => {
+				new Notice(t('pomodoro.stopwatchRecorded', { minutes: String(focusedMin) }));
+			}).catch(error => console.error('专注记录未完成保存', error));
+			this.playSound();
+		} else {
+			new Notice(t('pomodoro.stopwatchDiscarded'));
+		}
+		this.notifyTick();
+	}
+
+	/** Reminder cadence check (stopwatch, running ticks only): re-arms when
+	 *  the live setting changed since the last arm, then fires the dialog
+	 *  when the focused total crosses the armed threshold. */
+	private checkStopwatchReminder(): void {
+		const reminderMs = Math.max(0, this.getSettings().pomodoroStopwatchReminderMinutes) * 60_000;
+		if (reminderMs !== this.reminderMsSnapshot) {
+			this.reminderMsSnapshot = reminderMs;
+			this.nextReminderAtMs = reminderMs > 0
+				? this.stopwatchElapsedMs() + reminderMs
+				: Number.POSITIVE_INFINITY;
+		}
+		if (reminderMs <= 0 || this.reminderDialogOpen) return;
+		if (this.stopwatchElapsedMs() >= this.nextReminderAtMs) {
+			this.nextReminderAtMs += reminderMs;
+			this.playSound();
+			void this.showStopwatchReminder();
+		}
+	}
+
+	private async showStopwatchReminder(): Promise<void> {
+		this.reminderDialogOpen = true;
+		const controller = new AbortController();
+		this.reminderController = controller;
+		try {
+			const minutes = Math.floor(this.stopwatchElapsedMs() / 60_000);
+			const end = await showStopwatchReminderDialog(minutes, controller.signal);
+			// Passive answers keep counting; the run may also have been ended
+			// from the widget while the dialog sat open — never double-finish.
+			if (end && this.status !== 'idle' && this.runMode === 'stopwatch') {
+				this.finishStopwatch();
+			}
+		} finally {
+			this.reminderDialogOpen = false;
+			if (this.reminderController === controller) this.reminderController = null;
+		}
 	}
 
 	setOnTick(cb: (() => void) | null): void {
@@ -404,6 +535,7 @@ export class PomodoroService {
 	}
 
 	destroy(): void {
+		this.reminderController?.abort();
 		this.clearTickInterval();
 		this.onTickCallback = null;
 		this.onCompleteCallback = null;
@@ -428,6 +560,11 @@ export class PomodoroService {
 
 	private tick(): void {
 		if (this.status !== 'running') return;
+		if (this.activeMode === 'stopwatch') {
+			this.checkStopwatchReminder();
+			this.notifyTick();
+			return;
+		}
 		const remaining = this.getRemainingSeconds();
 		if (remaining <= 0) {
 			this.onPhaseComplete();
@@ -458,7 +595,7 @@ export class PomodoroService {
 			// Actual focused minutes: the timer ran the full phase, but pauses
 			// extended the wall clock — record what was really spent focusing.
 			const focusedMin = Math.max(1, Math.round(this.currentFocusedMs() / 60000));
-			void this.recordSession(focusedMin);
+			void this.recordSession(focusedMin).catch(error => console.error('专注记录未完成保存', error));
 			this.playSound();
 			new Notice(t('pomodoro.workComplete'));
 		} else {
@@ -521,7 +658,7 @@ export class PomodoroService {
 		this.notifyTick();
 	}
 
-	private async recordSession(focusedMin: number): Promise<void> {
+	private async recordSession(focusedMin: number, opts?: { stopwatch?: boolean }): Promise<void> {
 		const today = formatDate(new Date());
 		const record: PomodoroRecord = {
 			timestamp: new Date().toISOString(),
@@ -531,9 +668,14 @@ export class PomodoroService {
 		};
 		this.appendRecord(today, record);
 		// Hold the record until the following break resolves (completed / skipped)
-		// so breakMinutes/breakCompleted land in the same write.
-		this.pendingBreak = { record, breakPhaseStartedAt: Date.now() };
+		// so breakMinutes/breakCompleted land in the same write. Stopwatch runs
+		// have no break at all — leaving the fields undefined keeps them out of
+		// the break-adherence stat (unknown, not "skipped").
+		if (!opts?.stopwatch) {
+			this.pendingBreak = { record, breakPhaseStartedAt: Date.now() };
+		}
 		this.save();
+		await this.flush();
 	}
 
 	/** Rewrite the pending work record (now carrying break adherence) in place. */

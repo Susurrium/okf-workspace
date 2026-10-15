@@ -26,7 +26,7 @@ describe("OKF workbench presets", () => {
       target: "global-search:open",
     });
     expect(workbenchPresetData().quickActions.map((action) => action.name)).toEqual([
-      "快速记录", "新建待办", "全局搜索", "快捷操作",
+      "快速记录", "新建任务", "全局搜索", "快捷操作",
     ]);
   });
 

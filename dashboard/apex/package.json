@@ -7,6 +7,9 @@
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"test:pomodoro-stopwatch": "esbuild scripts/verify-pomodoro-stopwatch.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-pomodoro-stopwatch.cjs --alias:obsidian=./scripts/obsidian-stub.ts --log-level=warning && node node_modules/.tmp/verify-pomodoro-stopwatch.cjs",
+		"test:pomodoro-settings": "esbuild scripts/verify-pomodoro-settings.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-pomodoro-settings.cjs --alias:obsidian=./scripts/obsidian-stub.ts --log-level=warning && node node_modules/.tmp/verify-pomodoro-settings.cjs",
+		"test:icon-picker": "esbuild scripts/verify-icon-picker.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-icon-picker.cjs --alias:obsidian=./scripts/obsidian-stub.ts --log-level=warning && node node_modules/.tmp/verify-icon-picker.cjs",
 		"test:mobile-stability": "esbuild scripts/verify-mobile-stability.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-mobile-stability.cjs --log-level=warning && node node_modules/.tmp/verify-mobile-stability.cjs",
 		"test:weather-mapping": "esbuild scripts/verify-weather-mapping.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-weather-mapping.cjs --alias:obsidian=./scripts/obsidian-stub.ts --log-level=warning && node node_modules/.tmp/verify-weather-mapping.cjs",
 		"test:folder-tag-search": "esbuild scripts/verify-folder-tag-search.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-folder-tag-search.cjs --alias:obsidian=./scripts/obsidian-stub.ts --log-level=warning && node node_modules/.tmp/verify-folder-tag-search.cjs",

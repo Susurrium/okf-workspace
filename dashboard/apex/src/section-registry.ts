@@ -1,10 +1,12 @@
 import type { App } from 'obsidian';
 
 import type { DashboardColumn, RenderCallbacks } from './types';
+import type { SectionActions } from './section-actions';
 
 export interface CustomSectionRenderContext {
 	container: HTMLElement;
 	headerActions?: HTMLElement;
+	sectionActions?: SectionActions;
 	column: DashboardColumn;
 	app: App;
 	callbacks: RenderCallbacks;

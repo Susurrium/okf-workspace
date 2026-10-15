@@ -4,6 +4,7 @@ import { applyModalTheme } from './modal-theme';
 import { PathPickerModal } from './path-picker-modal';
 import { resolveVaultImage } from './banner';
 import { DEFAULT_WIDGET_BACKGROUND, type DashboardSettings, type WidgetBackground } from './types';
+import { getRegisteredApexHost } from './host';
 
 /** Runtime bridge to the plugin instance (the service-locator idiom the
  *  countdown settings button already uses): lets widget cards persist edits
@@ -15,6 +16,8 @@ export interface WidgetPluginHandle {
 }
 
 export function getWidgetPlugin(app: App): WidgetPluginHandle | null {
+	const host = getRegisteredApexHost();
+	if (host?.app === app) return host;
 	const plugin = (app as unknown as {
 		plugins?: { plugins?: Record<string, unknown> };
 	}).plugins?.plugins?.['apex-dashboard'] as Partial<WidgetPluginHandle> | undefined;
@@ -70,6 +73,13 @@ export function appendInlineBackgroundButton(
 		e.stopPropagation();
 		new WidgetBackgroundModal(app, bg, onBgChange).open();
 	});
+	return btn;
+}
+
+export function appendInlineConfigButton(parent: HTMLElement, label: string, onOpen: () => void): HTMLElement {
+	const btn = parent.createEl('button', { cls: 'dashboard-widget-inline-cfg-btn', attr: { 'aria-label': label } });
+	setIcon(btn, 'settings');
+	btn.addEventListener('click', event => { event.stopPropagation(); onOpen(); });
 	return btn;
 }
 

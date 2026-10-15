@@ -151,14 +151,20 @@ export function wireCategorySelect(
  */
 export function showCategoryManager(doc: Document, service: ExpenseService): void {
 	const overlay = doc.body.createDiv({ cls: 'dashboard-confirm-overlay' });
-	const card = overlay.createDiv({ cls: 'dashboard-confirm-card dashboard-expense-catmgr' });
+	const card = overlay.createDiv({ cls: 'dashboard-confirm-card dashboard-expense-catmgr', attr: { role: 'dialog', 'aria-modal': 'true', 'aria-label': t('expense.cat.manageTitle') } });
 	applyModalTheme(card);
-	card.createEl('h3', { text: t('expense.cat.manageTitle'), cls: 'dashboard-confirm-title' });
+	const previousFocus = doc.activeElement as HTMLElement | null;
+	const header = card.createDiv({ cls: 'dashboard-expense-catmgr-header' });
+	header.createEl('h3', { text: t('expense.cat.manageTitle'), cls: 'dashboard-confirm-title' });
+	const closeButton = header.createEl('button', { cls: 'dashboard-expense-catmgr-close', attr: { type: 'button', 'aria-label': t('common.close') } });
+	setIcon(closeButton, 'x');
+	closeButton.addEventListener('click', close);
 	const body = card.createDiv({ cls: 'dashboard-expense-catmgr-body' });
 
 	function close(): void {
 		doc.removeEventListener('keydown', onKey);
 		overlay.remove();
+		previousFocus?.focus();
 	}
 	function onKey(e: KeyboardEvent): void {
 		// A native modal beneath us handles its own Escape — don't take it.
@@ -292,7 +298,6 @@ export function showCategoryManager(doc: Document, service: ExpenseService): voi
 			wireSortHandles(catRows, commitCatOrder);
 			cats.forEach((key, i) => {
 				const row = catRows[i]!;
-				const isCustom = !categoriesFor(type).includes(key);
 				row.createSpan({ cls: 'dashboard-expense-catmgr-name', text: categoryLabel(key) });
 
 				const primarySelect = row.createEl('select', {
@@ -328,7 +333,7 @@ export function showCategoryManager(doc: Document, service: ExpenseService): voi
 					text: t('expense.cat.usage', { n: service.countCategoryUsage(type, key) }),
 				});
 				addMoveButtons(row, i, cats.length, commitCatOrder);
-				if (isCustom) {
+				{
 					const del = row.createDiv({
 						cls: 'dashboard-expense-catmgr-delete',
 						attr: { role: 'button', tabindex: '0', 'aria-label': t('common.delete') },
@@ -339,9 +344,15 @@ export function showCategoryManager(doc: Document, service: ExpenseService): voi
 							title: t('expense.cat.removeConfirmTitle'),
 							message: t('expense.cat.removeConfirmMessage', { name: categoryLabel(key) }),
 						});
-						if (yes && service.removeCustomCategory(type, key)) render();
+						if (!yes) return;
+						if (!service.removeCategory(type, key)) { new Notice(t('expense.cat.removeLastDenied')); return; }
+						await service.flush();
+						render();
 					};
-					del.addEventListener('click', () => { void confirmRemove(); });
+					del.addEventListener('click', () => { void confirmRemove().catch(error => {
+						console.error('分类删除尚未保存', error);
+						new Notice(`分类删除尚未保存：${String(error)}`);
+					}); });
 				}
 			});
 			addRow(section, t('expense.cat.namePlaceholder'), (name) =>

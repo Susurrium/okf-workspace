@@ -7,6 +7,7 @@ import realMoment from 'moment';
 // 任务格式与日期仍由真实 Tasks 模型和 Moment 处理；这里只隔离 Obsidian 宿主。
 Object.assign(globalThis, { window: Object.assign(globalThis, { moment: realMoment }) });
 export const getLanguage = (): string => 'zh';
+export const getIconIds = (): string[] => ['lucide-calendar-clock', 'lucide-file-text', 'lucide-search', 'lucide-square-check-big', 'custom-brand'];
 export const parseFrontMatterTags = (metadata: { tags?: string | string[] }): string[] => {
 	const value = metadata?.tags;
 	const values = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[ ,]+/) : [];
@@ -125,6 +126,7 @@ export const MarkdownRenderer = {
 export class FuzzySuggestModal<T> {
 	app: unknown;
 	constructor(app: unknown) { this.app = app; }
+	setPlaceholder(_text: string): void {}
 	open(): void {}
 	close(): void {}
 	// Narrow the unused-generic warning; the stand-in never items items.

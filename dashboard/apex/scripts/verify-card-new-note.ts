@@ -1,5 +1,6 @@
 import { strict as assert } from 'node:assert';
 import type { App } from 'obsidian';
+import { Menu } from 'obsidian';
 import { El, findByClass, findTag } from './mini-dom';
 import { renderSection } from '../src/renderer';
 import { sectionNewNoteFolder } from '../src/library-new-note';
@@ -10,7 +11,7 @@ import type { DashboardCard, DashboardColumn, LibraryConfig, RenderCallbacks } f
 // lives on as projects + showCover:false): the button renders first in each
 // card's actions row (left of edit + delete), fires onCardNewNote with the
 // card id, and is absent on memo/sticky sections and task cards. Both cover
-// and coverless notes sections also get a header settings gear that dispatches
+// and coverless notes sections also get a settings menu item that dispatches
 // the config event (show covers + template + save folder, see view.ts), and
 // sectionNewNoteFolder maps the saved config to the creation folder
 // (vault root when unset).
@@ -90,6 +91,14 @@ const actionButtons = (section: El): El[] => {
 
 const hasNewNote = (btns: El[]): boolean => btns.some(b => b.hasClass('dashboard-card-btn--newnote'));
 
+// 通过当前公共分区菜单验证配置入口及实际事件分发。
+function sectionMenu(section: El): { title: string; click(): void }[] {
+	const more = findTag(section, 'button').find(b => b.getAttribute('aria-label') === '分区更多操作');
+	assert.ok(more, 'section menu trigger exists');
+	more.click();
+	return (Menu as unknown as { last: { items: { title: string; click(): void }[] } }).last.items;
+}
+
 function main(): void {
 	const called: string[] = [];
 	const callbacks = {
@@ -140,9 +149,7 @@ function main(): void {
 		assert.ok(!hasNewNote(actionButtons(section)), '4: task card has no new-note button');
 	}
 
-	// 5. Header settings gear: rendered on notes sections (covered or not),
-	//    dispatches the config event with the column name (view.ts opens the
-	//    settings modal); memo sections keep their original header buttons.
+	// 5. 笔记分区菜单中的设置项分发配置事件；便签分区不提供笔记配置。
 	{
 		let eventDetail: { columnName?: string } | undefined;
 		const section = renderSection(makeColumn('projects', [makeCard()], undefined, false), callbacks, app) as unknown as El;
@@ -150,17 +157,16 @@ function main(): void {
 			addEventListener: (type: string, fn: (ev: { detail?: { columnName?: string } }) => void) => void;
 		}).addEventListener('dashboard-library-config', (ev) => { eventDetail = ev.detail; });
 
-		const gear = findTag(section, 'button').find(b => b.getAttribute('aria-label') === '分区设置');
-		assert.ok(gear, '5: settings gear rendered on coverless notes section');
-		gear!.click();
-		assert.equal(eventDetail?.columnName, 'projects', '5: gear dispatches the config event with column name');
+		const settings = sectionMenu(section).find(item => item.title === '分区设置');
+		assert.ok(settings, '5: settings item rendered on coverless notes section');
+		settings.click();
+		assert.equal(eventDetail?.columnName, 'projects', '5: settings item dispatches config event with column name');
 
 		const projects = renderSection(makeColumn('projects', [makeCard()]), callbacks, app) as unknown as El;
-		const gear2 = findTag(projects, 'button').find(b => b.getAttribute('aria-label') === '分区设置');
-		assert.ok(gear2, '5: settings gear rendered on projects section');
+		assert.ok(sectionMenu(projects).some(item => item.title === '分区设置'), '5: settings item rendered on projects section');
 
 		const memo = renderSection(makeColumn('memo', [makeCard()]), callbacks, app) as unknown as El;
-		assert.ok(!findTag(memo, 'button').some(b => b.getAttribute('aria-label') === '分区设置'), '5: memo section has no gear');
+		assert.ok(!sectionMenu(memo).some(item => item.title === '分区设置'), '5: memo section has no notes settings');
 	}
 
 	// 6. sectionNewNoteFolder: the configured save folder wins (trimmed);
