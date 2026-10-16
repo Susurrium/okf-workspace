@@ -77,6 +77,7 @@ export function createPomodoroMiniPanel(
 	let widthFrozen = false;
 	let silent = false;
 	let idleTimer: number | null = null;
+	let themeSignature = '';
 
 	/** Fold/unfold the pill. The CSS class only animates widths/gaps/chrome,
 	 *  so the mount-time frozen info width survives the fold underneath and
@@ -136,19 +137,27 @@ export function createPomodoroMiniPanel(
 		}
 		if (!refs) mount();
 		if (!refs) return;
+		const root = doc.querySelector<HTMLElement>('.apex-dashboard-root');
+		const nextTheme = `${doc.body.className}|${root?.dataset.theme}|${root?.style.cssText}`;
+		if (nextTheme !== themeSignature) {
+			applyModalTheme(refs.panel);
+			themeSignature = nextTheme;
+		}
 
 		const paused = state.status === 'paused';
 		refs.timeText.textContent = formatMiniTime(state.remainingSeconds);
 		refs.phaseText.textContent = phaseLabel(state.phase, paused);
 		if (!widthFrozen) freezeInfoWidth();
-		const progress = state.totalSeconds > 0 ? state.remainingSeconds / state.totalSeconds : 1;
+		// Stopwatch mode carries the ELAPSED count in remainingSeconds, so the
+		// fill ratio can exceed 1 past the reminder/work reference — clamp full.
+		const progress = state.totalSeconds > 0 ? Math.min(1, state.remainingSeconds / state.totalSeconds) : 1;
 		const circumference = 2 * Math.PI * refs.ringRadius;
 		refs.progressCircle.setAttribute(
 			'stroke-dashoffset',
 			String(circumference * (1 - progress)),
 		);
 		refs.panel.toggleClass('dashboard-pomodoro-mini--paused', paused);
-		refs.panel.toggleClass('dashboard-pomodoro-mini--break', state.phase !== 'work');
+		refs.panel.toggleClass('dashboard-pomodoro-mini--break', state.mode === 'timer' && state.phase !== 'work');
 
 		setIcon(refs.toggleBtn, state.status === 'running' ? 'pause' : 'play');
 		refs.toggleBtn.setAttribute(
@@ -159,6 +168,7 @@ export function createPomodoroMiniPanel(
 
 	function mount(): void {
 		widthFrozen = false;
+		themeSignature = '';
 		const panel = doc.body.createDiv({ cls: 'dashboard-pomodoro-mini' });
 		applyModalTheme(panel);
 

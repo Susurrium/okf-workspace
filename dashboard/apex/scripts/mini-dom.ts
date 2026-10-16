@@ -99,6 +99,10 @@ export class El {
 		return this.attrs.get(name) ?? null;
 	}
 
+	removeAttribute(name: string): void {
+		this.attrs.delete(name);
+	}
+
 	/** DOM-style dataset: camelCase keys map to/from data-* attributes. */
 	get dataset(): Record<string, string> {
 		const self = this;
@@ -279,7 +283,7 @@ export class El {
 		return el;
 	}
 
-	createDiv(o?: { cls?: string; text?: string }): El {
+	createDiv(o?: { cls?: string; text?: string; attr?: Record<string, string> }): El {
 		return this.createEl('div', o);
 	}
 

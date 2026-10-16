@@ -7,6 +7,32 @@ import pytest
 
 from okf_workspace import cli
 from okf_workspace.cli import build_parser
+from okf_workspace.config import default_template_root
+from okf_workspace.okf.frontmatter import OkfDocument, write_document
+from okf_workspace.okf.templates import initialize_vault
+
+
+def test_resources_sync_updates_contracts_without_migrating_user_notes(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    source = vault / "sources/records/pdf/original-only.md"
+    write_document(source, OkfDocument({
+        "type": "Source", "title": "仅保存原件", "created_at": "2026-10-15T09:00:00+08:00",
+        "resource": "/sources/originals/sample.pdf", "kind": "pdf", "ingested_via": "file-import",
+        "uses": [{"purpose": "reference"}],
+    }, "# 仅保存原件\n"))
+    before = source.read_bytes()
+    contract = vault / "system/contracts/source.yaml"
+    template_contract = default_template_root() / "system/contracts/source.yaml"
+    assert template_contract.is_file()
+    contract.write_text("obsolete", encoding="utf-8")
+    interactive = next((vault / "system/templates/interactive").rglob("*.md"))
+    interactive.write_text("用户模板\n", encoding="utf-8")
+
+    assert cli.main(["resources", "sync", "--vault", str(vault)]) == 0
+    assert contract.read_bytes() == template_contract.read_bytes()
+    assert interactive.read_text(encoding="utf-8") == "用户模板\n"
+    assert source.read_bytes() == before
+    assert not (vault / "sources/text/pdf/original-only.md").exists()
 
 
 def test_cli_exposes_m1_commands() -> None:

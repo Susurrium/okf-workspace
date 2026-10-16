@@ -1,13 +1,16 @@
 import type { App } from 'obsidian';
 
 import type { DashboardColumn, RenderCallbacks } from './types';
+import type { SectionActions } from './section-actions';
 
 export interface CustomSectionRenderContext {
 	container: HTMLElement;
+	headerActions?: HTMLElement;
+	sectionActions?: SectionActions;
 	column: DashboardColumn;
 	app: App;
 	callbacks: RenderCallbacks;
-	setConfig(config: Record<string, unknown>): void;
+	setConfig(config: Record<string, unknown>): void | Promise<void>;
 }
 
 export interface CustomSectionDefinition {
@@ -15,6 +18,10 @@ export interface CustomSectionDefinition {
 	icon: string;
 	label: string;
 	defaultName: string;
+	group?: string;
+	description?: string;
+	hidden?: boolean;
+	configure?(context: CustomSectionRenderContext): void;
 	render(context: CustomSectionRenderContext): void | (() => void) | Promise<void | (() => void)>;
 }
 

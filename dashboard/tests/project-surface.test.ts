@@ -17,7 +17,11 @@ function project(name: string, status: ProjectSummary["project_status"]): Projec
 }
 
 function surface(projects: ProjectSummary[], tasks: VaultTask[] = []) {
-  const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({} as App);
+  const files = [...new Map(tasks.map(task => [task.path, task.file])).values()];
+  const leaf = new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)({
+    vault: { getAbstractFileByPath: (path: string) => files.find(file => file.path === path) },
+    metadataCache: { getFileCache: () => ({}) },
+  } as unknown as App);
   const view = new OkfDashboardView(leaf, {
     getDashboardUiState: () => normalizeDashboardUiState(undefined),
     updateDashboardPageUiState: vi.fn(),

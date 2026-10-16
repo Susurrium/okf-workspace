@@ -1,12 +1,15 @@
 {
 	"name": "apex-dashboard",
 	"version": "3.6.5",
-	"description": "Your personal command center for Obsidian \u2014 memos, todos, projects, and quick links in one stunning glassmorphism dashboard.",
+	"description": "Your personal command center for Obsidian — memos, todos, projects, and quick links in one stunning glassmorphism dashboard.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"test:pomodoro-stopwatch": "esbuild scripts/verify-pomodoro-stopwatch.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-pomodoro-stopwatch.cjs --alias:obsidian=./scripts/obsidian-stub.ts --log-level=warning && node node_modules/.tmp/verify-pomodoro-stopwatch.cjs",
+		"test:pomodoro-settings": "esbuild scripts/verify-pomodoro-settings.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-pomodoro-settings.cjs --alias:obsidian=./scripts/obsidian-stub.ts --log-level=warning && node node_modules/.tmp/verify-pomodoro-settings.cjs",
+		"test:icon-picker": "esbuild scripts/verify-icon-picker.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-icon-picker.cjs --alias:obsidian=./scripts/obsidian-stub.ts --log-level=warning && node node_modules/.tmp/verify-icon-picker.cjs",
 		"test:mobile-stability": "esbuild scripts/verify-mobile-stability.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-mobile-stability.cjs --log-level=warning && node node_modules/.tmp/verify-mobile-stability.cjs",
 		"test:weather-mapping": "esbuild scripts/verify-weather-mapping.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-weather-mapping.cjs --alias:obsidian=./scripts/obsidian-stub.ts --log-level=warning && node node_modules/.tmp/verify-weather-mapping.cjs",
 		"test:folder-tag-search": "esbuild scripts/verify-folder-tag-search.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-folder-tag-search.cjs --alias:obsidian=./scripts/obsidian-stub.ts --log-level=warning && node node_modules/.tmp/verify-folder-tag-search.cjs",
@@ -70,6 +73,7 @@
 	"dependencies": {
 		"chart.js": "^4.5.1",
 		"lunar-typescript": "^1.8.6",
+		"markdown-it": "^15.0.2",
 		"obsidian": "^1.13.1",
 		"yaml": "^2.9.0"
 	}

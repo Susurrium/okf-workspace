@@ -21,7 +21,7 @@ export function renderQuickNoteRegion(
 	const presets = settings.quickNotePresets ?? [];
 	const pinned = settings.pinnedNotes ?? [];
 	const commands = settings.quickCommands ?? [];
-	const captureOn = !!settings.quickCaptureEnabled;
+	const captureOn = !!settings.quickCaptureEnabled && !callbacks.managedCapture;
 	const dailyOn = !!settings.quickDailyEnabled;
 	const hasChips = presets.length > 0 || pinned.length > 0 || commands.length > 0 || dailyOn;
 
@@ -88,18 +88,24 @@ export function renderQuickNoteRegion(
 			region.toggleClass('dashboard-quicknote--capture-expanded', expanded);
 		};
 		input.addEventListener('input', resize);
-		const submit = () => {
+		let submitting = false;
+		const submit = async () => {
 			const text = input.value.trim();
-			if (text) {
-				callbacks.onQuickNoteCapture(text);
+			if (!text || submitting) return;
+			submitting = true;
+			input.disabled = true;
+			try {
+				await callbacks.onQuickNoteCapture(text);
 				input.value = '';
-			}
-			resize();
+				resize();
+			} catch (error) {
+				new Notice(error instanceof Error ? error.message : String(error));
+			} finally { submitting = false; input.disabled = false; }
 		};
 		input.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
 				e.preventDefault();
-				submit();
+				void submit();
 			}
 		});
 	}

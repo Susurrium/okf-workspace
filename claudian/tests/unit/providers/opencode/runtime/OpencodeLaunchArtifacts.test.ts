@@ -203,7 +203,9 @@ describe('prepareOpencodeLaunchArtifacts', () => {
   });
 
   it.each([true, false])('shares configuration and distinct prompts with hard-link support: %s', async (supportsLinks) => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'claudian-opencode-prompts-'));
+    const fixtureDirectory = path.resolve(process.cwd(), '..', 'work', 'claudian-opencode-prompts');
+    await fs.mkdir(fixtureDirectory, { recursive: true });
+    const root = await fs.mkdtemp(path.join(fixtureDirectory, 'launch-'));
     const base = { workspaceRoot: root, runtimeEnv: { HOME: root }, settings: { vaultPath: root } };
     const link = supportsLinks ? undefined : jest.spyOn(fs, 'link').mockRejectedValue(
       Object.assign(new Error('Hard links are unsupported'), { code: 'ENOTSUP' }),
@@ -239,7 +241,8 @@ describe('prepareOpencodeLaunchArtifacts', () => {
       expect(JSON.parse(title.configContent).default_agent).toBe('claudian-title');
     } finally {
       link?.mockRestore();
-      await fs.rm(root, { recursive: true, force: true });
+      // Windows can briefly retain hard-linked directory entries after handles close.
+      await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 

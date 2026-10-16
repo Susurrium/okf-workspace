@@ -201,7 +201,7 @@ export function renderQuickActions(
 
 	for (const { action, isPreset, key } of ordered) {
 		const item = list.createDiv({
-			cls: 'dashboard-qa-item' + (isPreset ? ' dashboard-qa-item--preset' : ''),
+			cls: 'dashboard-qa-item' + (isPreset ? ' dashboard-qa-item--preset' : '') + (action.defaultCapture ? ' okf-capture-global-entry' : ''),
 			attr: {
 				draggable: 'true',
 				'data-qa-key': key,

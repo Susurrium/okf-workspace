@@ -44,7 +44,7 @@ from okf_workspace.importers import (
     ImportRequest,
     ParserName,
 )
-from okf_workspace.migration import migrate_current_layout
+from okf_workspace.migration import migrate_current_layout, sync_workspace_resources
 from okf_workspace.notes import NoteService
 from okf_workspace.notes.captures import CaptureDestination, process_capture
 from okf_workspace.okf.templates import initialize_vault
@@ -120,6 +120,12 @@ def build_parser() -> argparse.ArgumentParser:
     migrate.add_argument("--vault", type=Path, default=defaults.vault)
     migrate.add_argument("--state", type=Path, default=defaults.state)
 
+    resources = commands.add_parser(
+        "resources", help="update managed resources without migrating notes"
+    )
+    resources.add_argument("action", choices=("sync",))
+    resources.add_argument("--vault", type=Path, required=True)
+
     validate = commands.add_parser("validate", help="validate an OKF Bundle")
     validate.add_argument("--vault", type=Path, default=defaults.vault)
     validate.add_argument("--json", action="store_true", dest="json_output")
@@ -164,6 +170,7 @@ def build_parser() -> argparse.ArgumentParser:
     project_note.add_argument("--vault", type=Path, default=defaults.vault)
     project_note.add_argument("--slug", required=True)
     project_note.add_argument("--title", required=True)
+    project_note.add_argument("--category")
 
     project = commands.add_parser("project", help="project workflows")
     project_commands = project.add_subparsers(dest="project_command", required=True)
@@ -171,6 +178,12 @@ def build_parser() -> argparse.ArgumentParser:
     log.add_argument("slug")
     log.add_argument("content")
     log.add_argument("--vault", type=Path, default=defaults.vault)
+    category = project_commands.add_parser(
+        "category", help="set or clear a project's main category"
+    )
+    category.add_argument("slug")
+    category.add_argument("--category", required=True, help="empty string clears the category")
+    category.add_argument("--vault", type=Path, default=defaults.vault)
 
     tasks = commands.add_parser("tasks", help="refresh tasks in the root navigation")
     tasks.add_argument("action", choices=("rebuild",))
@@ -430,7 +443,7 @@ def _note_command(args: argparse.Namespace) -> Path:
     if args.kind == "lesson":
         return service.create_lesson(args.course, args.title, lesson_date=args.date)
     if args.kind == "project":
-        return service.create_project(args.slug, args.title)
+        return service.create_project(args.slug, args.title, category=args.category)
     _fail(f"unsupported note kind: {args.kind}")
 
 
@@ -471,6 +484,10 @@ def main(argv: list[str] | None = None) -> int:
             changes = migrate_current_layout(args.vault, default_template_root(), args.state)
             _print_json({"changes": changes})
             return 0
+        if args.command == "resources":
+            changes = sync_workspace_resources(args.vault, default_template_root())
+            _print_json({"changes": changes})
+            return 0
         if args.command == "validate":
             report = validate_bundle(args.vault, profile=not args.standard)
             if args.json_output:
@@ -501,6 +518,9 @@ def main(argv: list[str] | None = None) -> int:
             print(_note_command(args))
             return 0
         if args.command == "project":
+            if args.project_command == "category":
+                print(NoteService(args.vault).set_project_category(args.slug, args.category))
+                return 0
             print(NoteService(args.vault).append_project_log(args.slug, args.content))
             return 0
         if args.command == "tasks":

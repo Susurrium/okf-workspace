@@ -149,6 +149,16 @@ class NamedAreaRequest(BaseModel):
     slug: str | None = Field(default=None, max_length=160)
 
 
+class ProjectCreateRequest(NamedAreaRequest):
+    project_category: str | None = Field(default=None, max_length=80)
+
+
+class ProjectCategoryRequest(BaseModel):
+    project_category: str | None = Field(max_length=80)
+    expected_category: str | None = None
+    check_expected: bool = False
+
+
 class LessonRequest(BaseModel):
     course: str = Field(min_length=1, max_length=160)
     title: str = Field(min_length=1, max_length=160)
@@ -684,10 +694,19 @@ def create_app(
         return {"path": _relative(path, configured.vault)}
 
     @app.post("/projects", dependencies=protected)
-    def create_project(request: NamedAreaRequest) -> dict[str, str]:
+    def create_project(request: ProjectCreateRequest) -> dict[str, str]:
         path = NoteService(configured.vault).create_project(
             request.slug or request.title,
             request.title,
+            category=request.project_category,
+        )
+        return {"path": _relative(path, configured.vault)}
+
+    @app.post("/projects/{slug}/category", dependencies=protected)
+    def update_project_category(slug: str, request: ProjectCategoryRequest) -> dict[str, str]:
+        path = NoteService(configured.vault).set_project_category(
+            slug, request.project_category,
+            expected=request.expected_category, check_expected=request.check_expected,
         )
         return {"path": _relative(path, configured.vault)}
 
@@ -978,12 +997,18 @@ def create_app(
         source_path: str,
         request: DocumentRouteRequest,
     ) -> dict[str, object]:
+        if request.generate and semantic_service is None:
+            raise HTTPException(
+                status_code=503,
+                detail="后台生成未启用，请先配置生成服务或选择稍后生成",
+            )
         source, extract, draft = route_existing_import(
             configured.vault,
             resolve_bundle_path(configured.vault, source_path),
             intent=ImportIntent(request.intent),
             course=request.course,
             project=request.project,
+            require_text=request.generate,
         )
         public: dict[str, object] = {
             "source": _relative(source, configured.vault),

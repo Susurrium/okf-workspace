@@ -1,4 +1,5 @@
 import { saveSyncedDocument } from "../imports/synced-intake.js";
+import { originalsForNote } from "../imports/original-references.js";
 import { ensureDocumentSyncCapacity } from "../imports/sync-capacity.js";
 import { noteStatusLabel } from "../ui/display-labels.js";
 import { FileSystemAdapter, Notice, Platform, Plugin, TFile, TFolder, type WorkspaceLeaf } from "obsidian";
@@ -7,6 +8,7 @@ import { LocalApi } from "../api/client.js";
 import { assertMatchingVault, currentVaultFingerprint } from "../api/vault-identity.js";
 import {
   relationVaultPath,
+  normalizeCaptureRelation,
   routeCaptureUsingLinkedContext,
   type CaptureRelation,
 } from "../domain/capture-context.js";
@@ -54,11 +56,23 @@ import type {
 import { methodLabels } from "../imports/types.js";
 import { renderFeedDecisionFlow } from "../ui/feed-decision-flow.js";
 import { DashboardSettingTab } from "../../apex/src/settings.js";
-import { DashboardView, DASHBOARD_VIEW_TYPE } from "../../apex/src/view.js";
-import { updateTaskDatesInFile, type VaultTask } from "../../apex/src/alltasks-scan.js";
+import { DashboardView, DASHBOARD_VIEW_TYPE, DASHBOARD_SECTION_VIEW_TYPE } from "../../apex/src/view.js";
+import { collectVaultTasks, scanFileTasks, updateTaskDatesInFile, replaceTaskInFile, toggleTaskInFile, invalidateAllTasks, invalidatePath, isTaskSourcePath, type VaultTask } from "../../apex/src/alltasks-scan.js";
+import { TaskReminderService, type ReminderStore } from '../tasks/reminders.js';
+import type { SavedTaskView } from "../tasks/task-catalog.js";
+import { TaskViewsModal } from "../tasks/task-views-modal.js";
+import { TaskTargetModal } from "../tasks/task-target-modal.js";
+import { readTaskBoundaryReport, TaskBoundaryReportModal } from '../tasks/task-boundary-report.js';
+import { moveTaskToNote, copyTaskSubtree } from '../../apex/src/task-operations.js';
+import { createTaskNote } from '../../apex/src/calendar-task-note.js';
+import { configureTasks, taskStatusTypes, setTaskSourceFilter, prepareTaskLine, getSettings as getTaskSettings } from "../../tasks-generated/core.js";
+import { taskSourceKind } from '../../apex/src/task-source.js';
+import type { TasksRuntime } from "../../tasks-generated/plugin.js";
 import { registerSectionDefinition } from "../../apex/src/section-registry.js";
 import { ApexHostAdapter } from "../adapters/apex-host.js";
 import { ArtifactEditPolicy } from "../application/artifact-edit-policy.js";
+import { ProjectCategoryModal } from "./project-category-modal.js";
+import { projectCategory } from "../domain/project-organization.js";
 import {
   readLegacyApexSettings,
   takeoverApexNativeData,
@@ -71,7 +85,11 @@ import {
   createOkfSurfaceSectionDefinitions,
   OKF_SECTION_TYPES,
   okfSectionDefaultName,
+  type SurfaceMountContext,
 } from "../features/workbench/okf-surface-sections.js";
+import { workbenchInstanceKey } from "../features/workbench/section-config.js";
+import { parse as parseWorkbench } from "../../apex/src/parser.js";
+import { chooseWorkspaceContext } from "./workspace-context-modal.js";
 import {
   DASHBOARD_COMMAND_ID,
   registerDashboardRibbon,
@@ -83,7 +101,11 @@ import { OriginalFiles } from "./original-files.js";
 import { SyncedImportsModal } from "./synced-imports-modal.js";
 import { ChoiceModal, FieldsPromptModal, ProjectLogModal, TextPromptModal } from "./prompts.js";
 import { QuickCaptureModal } from "./quick-capture-modal.js";
-import { DocumentConversionResultModal, DocumentImportModal, DocumentReconversionModal, type ImportOrigin } from "./document-import-modal.js";
+import { CaptureSession, type PreparedCapture } from './capture-session.js';
+import { assertCaptureDraftPersisted } from './capture-persistence.js';
+import { mountQuickCapture } from './quick-capture-inline.js';
+import { DocumentConversionResultModal, DocumentImportModal, DocumentReconversionModal, type ImportOrigin,
+  type DocumentImportDraft } from "./document-import-modal.js";
 import { hasPendingGeneration } from "../domain/inbox-work-queue.js";
 import {
   FeedSubscriptionAddModal,
@@ -149,6 +171,8 @@ export default class OkfBrainPlugin extends Plugin {
   private localService: LocalServiceManager | undefined;
   private claudianBridge: ClaudianBridgeAdapter | undefined;
   private vaultNotes: VaultNoteService | undefined;
+  private readonly captureSessions = new Map<string, CaptureSession>();
+  private readonly captureEditors = new Map<string, QuickCaptureModal>();
   private readonly semanticMonitor = new SemanticOperationMonitor();
   private semanticOperationsCache: SemanticOperationRecord[] = [];
   private semanticLastIdlePoll = 0;
@@ -160,10 +184,18 @@ export default class OkfBrainPlugin extends Plugin {
   private dashboardUiStateStore: DashboardUiStateStore | undefined;
   private readonly unregisterApexSections: Array<() => void> = [];
   private readonly embeddedDashboardSurfaces = new Set<OkfDashboardView>();
+  private readonly importDrafts = new Map<string, DocumentImportDraft>();
+  private readonly importDraftVersions = new Map<string, number>();
   public originalFiles: OriginalFiles | undefined;
+  private taskRuntime: TasksRuntime | undefined;
+  private taskReminders: TaskReminderService | undefined;
+  private readonly workbenchPages = new Map<string, WorkspaceLeaf>();
+  private readonly pageIds = new WeakMap<WorkspaceLeaf, string>();
+  private focusedNavigationQueue: Promise<void> = Promise.resolve();
 
   public async onload(): Promise<void> {
     await this.loadSettings();
+    await this.initializeTasks();
     this.originalFiles = new OriginalFiles(this.app);
     this.app.workspace.onLayoutReady(() => {
       void ensureDocumentSyncCapacity(this.app).catch((error: unknown) =>
@@ -200,6 +232,36 @@ export default class OkfBrainPlugin extends Plugin {
         this.notes().appendDailyTask(date, taskLine, position),
       workspacePresets: WORKBENCH_PRESETS,
       createWorkspaceMarkdown: generateWorkbenchPresetMarkdown,
+      chooseWorkspaceContext: (presetId) => chooseWorkspaceContext(this.app, presetId),
+      openTodayNote: async () => { const daily = await this.notes().createDaily(); await this.openVaultPath(daily.path); },
+      executeQuickAction: async (action) => {
+        if (action.type !== "command" || action.target !== "daily-notes") return false;
+        const daily = await this.notes().createDaily();
+        await this.openVaultPath(daily.path);
+        return true;
+      },
+      saveTasksToDaily: (block) => this.notes().appendDailyTaskBlock(block),
+      editTask: task => this.promptTaskDetails(task),
+      handlesTaskReminders: false,
+      checklistsInWorkbenchOnly: true,
+      prepareTaskLine: line => this.prepareFormalTaskLine(line),
+      calendarDefaultDate: 'scheduled',
+      editTaskDates: task => this.promptTaskDates(task),
+      createTask: date => this.promptNewTask({ date, calendar: true }),
+      openTaskSource: task => this.openTaskSource(task),
+      canWriteTaskTarget: file => this.taskTargetAllowed(file),
+      taskStatistics: async excludeFolders => {
+        const tasks = (await collectVaultTasks(this.app, excludeFolders)).filter(task => task.formal && task.statusType !== 'CANCELLED');
+        const doneTasks = tasks.filter(task => task.statusType === 'DONE').length;
+        return { totalTasks: tasks.length, doneTasks, pendingTasks: tasks.filter(task => !task.checked).length,
+          taskCompletion: tasks.length ? Math.round(doneTasks / tasks.length * 100) : 0 };
+      },
+      recentDocumentExclusions: ["system/", "inbox/uploads/"],
+      quickCapture: {
+        enabled: () => this.apexHost?.settings.widgetQuickCaptureEnabled !== false,
+        mount: container => mountQuickCapture(container, this.captureSession(), () => this.openQuickCapture({})),
+        submit: async text => { const session = this.captureSession(); session.setText(text); await session.submit(); },
+      },
       mutateManagedArtifact: (mutation) =>
         new ArtifactEditPolicy(this.notes()).mutate(mutation),
       convertMemoToCapture: (workspacePath, card) => {
@@ -233,6 +295,7 @@ export default class OkfBrainPlugin extends Plugin {
       ...createOkfSurfaceSectionDefinitions(this).map(registerSectionDefinition),
     );
     this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new DashboardView(leaf, this.apexHost!));
+    this.registerView(DASHBOARD_SECTION_VIEW_TYPE, (leaf) => new DashboardView(leaf, this.apexHost!, true));
     this.registerView(OKF_DASHBOARD_VIEW, (leaf) => new OkfDashboardItemView(leaf, this));
     registerDashboardRibbon(this, () => void this.openDashboard());
     this.dashboardUiStateStore = new DashboardUiStateStore(
@@ -242,7 +305,10 @@ export default class OkfBrainPlugin extends Plugin {
         await this.saveSettings();
       },
       400,
-      (error) => console.error("[okf-workspace] could not save Dashboard UI state", error),
+      (error) => {
+        console.error("[okf-workspace] could not save Dashboard UI state", error);
+        for (const session of this.captureSessions.values()) session.reportDraftError(error);
+      },
     );
     this.registerDashboardRecentFiles();
     if (!this.isMobile) {
@@ -261,8 +327,11 @@ export default class OkfBrainPlugin extends Plugin {
     }
     this.addSettingTab(new DashboardSettingTab(this.app, this.apexHost, this, {
       heading: "连接与导入",
-      getSettingDefinitions: () => okfServiceSettingDefinitions(this),
-      renderFallback: (container) => renderOkfServiceSettings(container, this),
+      getSettingDefinitions: () => [...okfServiceSettingDefinitions(this), ...(this.taskRuntime?.settingsDefinitions() ?? [])],
+      renderFallback: (container) => {
+        renderOkfServiceSettings(container, this);
+        this.taskRuntime?.displaySettings(container.createDiv());
+      },
     }));
     this.registerCommands();
     this.registerApexCommands();
@@ -285,10 +354,13 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public onunload(): void {
+    for (const editor of this.captureEditors.values()) editor.close();
+    this.captureEditors.clear();
     if (this.indexSyncTimer !== undefined) window.clearTimeout(this.indexSyncTimer);
     if (this.dashboardRefreshTimer !== undefined) window.clearTimeout(this.dashboardRefreshTimer);
     this.watchedConversionIds.clear();
     this.app.workspace.detachLeavesOfType(DASHBOARD_VIEW_TYPE);
+    this.app.workspace.detachLeavesOfType(DASHBOARD_SECTION_VIEW_TYPE);
     this.app.workspace.detachLeavesOfType(OKF_DASHBOARD_VIEW);
     for (const surface of [...this.embeddedDashboardSurfaces]) void surface.onClose();
     this.embeddedDashboardSurfaces.clear();
@@ -338,6 +410,7 @@ export default class OkfBrainPlugin extends Plugin {
       dashboardUiState,
       feedReadingPositions,
       apex: this.settings.apex,
+      tasks: this.settings.tasks,
     });
   }
 
@@ -357,7 +430,9 @@ export default class OkfBrainPlugin extends Plugin {
   public updateDashboardPageUiState(
     section: DashboardSection,
     patch: DashboardPageUiStatePatch,
+    instanceKey?: string,
   ): DashboardUiState {
+    if (instanceKey) return this.updateDashboardUiState({ instances: { [instanceKey]: patch } });
     return this.updateDashboardUiState({ pages: { [section]: patch } });
   }
 
@@ -421,40 +496,71 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   private async openQuickCapture(initial: CaptureRelation): Promise<void> {
+    const key = JSON.stringify(normalizeCaptureRelation(initial));
+    const existing = this.captureEditors.get(key);
+    if (existing) { existing.contentEl.querySelector('textarea')?.focus(); return; }
     const contexts = await this.notes().captureContexts();
-    new QuickCaptureModal(this.app, contexts, initial, async (value, relation) => {
-      const title = value.split(/\r?\n/u)[0]?.trim() || "随手记录";
-      const result = await this.notes().createCapture(title, value, relation);
-      const notice = new Notice("", 15_000);
-      notice.noticeEl.empty();
-      notice.noticeEl.createEl("strong", { text: "已保存到待处理" });
-      const context = relation.course
-        ? {
-            kind: "Course",
-            option: contexts.courses.find((item) =>
-              relationVaultPath(item.path) === relationVaultPath(relation.course ?? "")
-            ),
+    if (this.captureEditors.has(key)) { this.captureEditors.get(key)!.contentEl.querySelector('textarea')?.focus(); return; }
+    const session = this.captureSession(initial);
+    const state = session.snapshot();
+    const editor = new QuickCaptureModal(this.app, contexts, initial, () => session.submit(), {
+      text: state.text, relation: state.relation,
+      save: text => session.setText(text), saveRelation: relation => session.setRelation(relation),
+    }, session);
+    const close = editor.onClose.bind(editor);
+    editor.onClose = () => { close(); this.captureEditors.delete(key); };
+    this.captureEditors.set(key, editor);
+    editor.open();
+  }
+
+  private captureSession(initial: CaptureRelation = {}): CaptureSession {
+    const draftKey = `captureDraft:${JSON.stringify(normalizeCaptureRelation(initial))}`;
+    const existing = this.captureSessions.get(draftKey);
+    if (existing) return existing;
+    const relationKey = `${draftKey}:relation`;
+    const filters = this.getDashboardUiState().pages.inbox.filters;
+    const relation = filters[relationKey];
+    const storedRequest = filters[`${draftKey}:prepared`];
+    const prepared = typeof storedRequest === 'string' ? JSON.parse(storedRequest) as PreparedCapture : undefined;
+    if (prepared && (typeof prepared.path !== 'string' || typeof prepared.markdown !== 'string' || !prepared.relation || typeof prepared.relation !== 'object')) throw new Error('快速记录重试信息损坏，请保留草稿并检查配置');
+    const session = new CaptureSession({
+      initialRelation: initial,
+      text: String(filters[draftKey] ?? ''), relation: typeof relation === 'string' ? normalizeCaptureRelation(JSON.parse(relation)) : initial, prepared,
+      persist: (text, nextRelation, request) => {
+        this.updateDashboardPageUiState('inbox', { filters: {
+          [draftKey]: text || null,
+          [relationKey]: nextRelation.course || nextRelation.project ? JSON.stringify(nextRelation) : null,
+          [`${draftKey}:prepared`]: request ? JSON.stringify(request) : null,
+        } });
+      },
+      flush: async () => {
+        if (this.dashboardUiStateStore) await this.dashboardUiStateStore.flush();
+        else await this.saveSettings();
+        // Obsidian 的设置写入可能吞掉磁盘异常；关键草稿必须回读确认。
+        const directory = this.manifest.dir;
+        if (!directory) throw new Error('快速记录缺少插件设置目录');
+        const stored = JSON.parse(await this.app.vault.adapter.read(`${directory}/data.json`));
+        assertCaptureDraftPersisted(stored, this.getDashboardUiState().pages.inbox.filters, draftKey);
+      },
+      prepare: (text, nextRelation) => this.notes().prepareCapture(text.split(/\r?\n/u)[0]!.trim(), text, nextRelation),
+      write: request => this.notes().writePreparedCapture(request),
+      refresh: async () => {
+        for (const type of [DASHBOARD_VIEW_TYPE, DASHBOARD_SECTION_VIEW_TYPE]) {
+          for (const leaf of this.app.workspace.getLeavesOfType(type)) {
+            if (leaf.view instanceof DashboardView) await leaf.view.refresh();
           }
-        : relation.project
-          ? {
-              kind: "Project",
-              option: contexts.projects.find((item) =>
-                relationVaultPath(item.path) === relationVaultPath(relation.project ?? "")
-              ),
-            }
-          : undefined;
-      if (context) {
-        notice.noticeEl.createDiv({
-          text: `已关联 ${context.kind === "course" ? "课程" : "项目"}${context.option ? `：${context.option.title}` : ""}，可稍后整理`,
-        });
-      }
-      const open = notice.noticeEl.createEl("button", { text: "打开记录" });
-      open.addEventListener("click", () => {
-        notice.hide();
-        void this.openVaultPath(result.path);
-      });
-      this.refreshDashboardViews();
-    }).open();
+        }
+        for (const leaf of this.app.workspace.getLeavesOfType(OKF_DASHBOARD_VIEW)) {
+          if (leaf.view instanceof OkfDashboardItemView) await leaf.view.refresh();
+        }
+      },
+      saved: path => {
+        const notice = new Notice('已保存到收集箱', 10000);
+        notice.noticeEl.createEl('button', { text: '打开记录' }).addEventListener('click', () => { notice.hide(); void this.openVaultPath(path); });
+      },
+    });
+    this.captureSessions.set(draftKey, session);
+    return session;
   }
 
   public promptDailyCapture(): void {
@@ -474,6 +580,7 @@ export default class OkfBrainPlugin extends Plugin {
       this.app,
       [
         { value: "daily", label: "继续写今日日记", description: "打开今天的日记" },
+        { value: "search", label: "搜索笔记", description: "打开全局搜索" },
         { value: "jot", label: "打开随手记录", description: "定位到今日日记的原生 Markdown 编辑区" },
         {
           value: "capture",
@@ -485,11 +592,23 @@ export default class OkfBrainPlugin extends Plugin {
         { value: "project", label: "新建项目", description: "创建项目主页与日志" },
         { value: "import", label: "导入资料", description: "PDF、Word 或 PowerPoint" },
         { value: "uploads", label: "已保存的资料", description: "打开原件、转换正文或查看处理结果" },
+        { value: "new-task", label: "新建任务", description: "安排一个行动，可关联课程或项目" },
+        { value: "tasks", label: "打开任务", description: "查看未完成任务，切换日期视图或完成与取消历史" },
+        ...(["inbox", "reading", "sources", "learning", "projects", "knowledge", "life", "system"] as const)
+          .map((section) => ({ value: `view:${section}` as const, label: `打开${okfSectionDefaultName(section)}`, description: "浏览完整功能，可添加到工作台" })),
         ...(!this.isMobile ? [{ value: "ask", label: "问我的笔记", description: "在 Claudian 中读取相关笔记后回答" } as const] : []),
       ] as const,
       "快捷操作",
       async (choice) => {
-        if (choice === "daily") {
+        if (choice === "search") {
+          const commands = (this.app as typeof this.app & { commands?: { executeCommandById(id: string): boolean } }).commands;
+          if (!commands?.executeCommandById("global-search:open")) throw new Error("全局搜索不可用");
+        } else if (choice === "new-task") this.promptNewTask();
+        else if (choice === "tasks") {
+          await this.navigateToOkfSection("tasks", undefined, undefined, { taskView: "all" });
+        } else if (choice.startsWith("view:")) {
+          await this.navigateToOkfSection(choice.slice(5) as EmbeddedDashboardSection);
+        } else if (choice === "daily") {
           const result = await this.createDaily();
           await this.openVaultPath(result.path);
         } else if (choice === "jot") this.promptDailyCapture();
@@ -736,18 +855,26 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public promptProject(onCreated?: (slug: string) => void): void {
+    void this.openProjectPrompt(onCreated).catch(error => new Notice(error instanceof Error ? error.message : String(error)));
+  }
+
+  private async openProjectPrompt(onCreated?: (slug: string) => void): Promise<void> {
+    const { projects } = await new VaultDashboardReader(this.app).projects();
+    const categories = [...new Set(projects.map(project => projectCategory(project.project_category)).filter((value): value is string => value !== null))].sort();
     new FieldsPromptModal(
       this.app,
       "新建项目",
       [
         { key: "title", label: "项目名称", placeholder: "个人知识库" },
         { key: "slug", label: "目录名（可留空）", placeholder: "workspace", required: false },
+        { key: "category", label: "项目类别（可留空）", placeholder: "选择已有类别或输入新名称", required: false, suggestions: categories },
       ],
       "创建项目",
       async (values) => {
         const result = await this.notes().createProject(
           values.title ?? "项目",
           values.slug || undefined,
+          values.category || undefined,
         );
         new Notice("项目已创建：" + result.path);
         await this.openVaultPath(result.path);
@@ -824,26 +951,24 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public promptTaskDates(task: VaultTask): void {
-    new FieldsPromptModal(
-      this.app,
-      `编辑任务日期：${task.text}`,
-      [
-        { key: "reminder", label: "提醒", placeholder: "YYYY-MM-DD 或 YYYY-MM-DD HH:MM", initialValue: task.reminder ?? "", required: false },
-        { key: "scheduled", label: "计划日", placeholder: "YYYY-MM-DD", initialValue: task.scheduled ?? "", required: false },
-        { key: "due", label: "截止日", placeholder: "YYYY-MM-DD", initialValue: task.due ?? "", required: false },
-      ],
-      "保存日期",
-      async (values) => {
-        const wrote = await updateTaskDatesInFile(this.app, task, {
-          reminder: values.reminder,
-          scheduled: values.scheduled,
-          due: values.due,
-        });
-        if (!wrote) throw new Error("任务已变化或日期没有改变，请刷新后重试。");
-        new Notice("任务日期已更新");
-        this.refreshDashboardViews();
-      },
-    ).open();
+    if (!this.taskRuntime) { new Notice('任务功能尚未启用，请先完成 Tasks 接管'); return; }
+    const dates = (item: VaultTask): Record<string, string> => ({ reminder: item.reminder ?? '',
+      scheduled: [item.scheduled, item.scheduledTime].filter(Boolean).join(' '), due: [item.due, item.dueTime].filter(Boolean).join(' '),
+      start: [item.start, item.startTime].filter(Boolean).join(' '), end: [item.end, item.endTime].filter(Boolean).join(' ') });
+    const initial = dates(task);
+    this.taskRuntime.editDates(task.text, initial, async values => {
+      const changed = Object.fromEntries(Object.entries(values).filter(([key, value]) => value !== initial[key]));
+      if (!Object.keys(changed).length) return;
+      const records = scanFileTasks(task.file, await this.app.vault.read(task.file));
+      const matches = records.filter(item => task.blockId ? item.blockId === task.blockId : item.originalLine === task.originalLine);
+      if (matches.length !== 1) throw new Error('无法唯一定位任务，请保留输入并检查来源');
+      const current = matches[0]!;
+      const currentDates = dates(current);
+      if (Object.keys(changed).some(key => currentDates[key] !== initial[key])) throw new Error('这些日期在编辑期间已被修改，请检查来源后再保存');
+      if (!await updateTaskDatesInFile(this.app, current, changed)) throw new Error('任务已经变化，请重试');
+      new Notice('任务日期已更新');
+      this.refreshDashboardViews();
+    });
   }
 
   public promptWikiFromSources(): void {
@@ -886,6 +1011,13 @@ export default class OkfBrainPlugin extends Plugin {
         );
       },
     ).open();
+  }
+
+  public promptNewWikiMap(): void {
+    new TextPromptModal(this.app, "新建知识导航", "导航主题与组织要求", "在 Claudian 中准备", async value => {
+      await this.openCodexPrompt(`请根据相关真实知识笔记创建或维护知识导航。主题与要求：${value}`,
+        { actionMode: "write", skill: "maintain-wiki-map" });
+    }).open();
   }
 
   public promptRewriteCurrentSection(): void {
@@ -1048,9 +1180,10 @@ export default class OkfBrainPlugin extends Plugin {
   public promptRoutePendingSource(
     path: string,
     intent: "learn" | "wiki" | "source",
+    initialContext?: { course?: string; project?: string },
   ): void {
-    if (intent !== "learn") {
-      this.promptPendingSourceContext(path, intent, intent === "wiki");
+    if (intent === "source") {
+      this.promptPendingSourceContext(path, intent, false, initialContext);
       return;
     }
     new ChoiceModal(
@@ -1058,17 +1191,17 @@ export default class OkfBrainPlugin extends Plugin {
       [
         {
           value: "generate",
-          label: "立即生成辅助学习材料",
+          label: intent === "wiki" ? "立即生成知识笔记" : "立即生成辅助学习材料",
           description: "保存资料后在后台生成",
         },
         {
           value: "later",
-          label: "加入待学习列表",
-          description: "之后可在学习页面主动生成",
+          label: intent === "wiki" ? "保存用途，稍后生成" : "加入待学习列表",
+          description: intent === "wiki" ? "之后从知识待生成列表继续" : "之后可在学习页面主动生成",
         },
       ] as const,
-      "是否现在生成辅助学习材料？",
-      async (choice) => this.promptPendingSourceContext(path, intent, choice === "generate"),
+      intent === "wiki" ? "是否现在生成知识笔记？" : "是否现在生成辅助学习材料？",
+      async (choice) => this.promptPendingSourceContext(path, intent, choice === "generate", initialContext),
     ).open();
   }
 
@@ -1076,7 +1209,12 @@ export default class OkfBrainPlugin extends Plugin {
     path: string,
     intent: "learn" | "wiki" | "source",
     generate: boolean,
+    initialContext?: { course?: string; project?: string },
   ): void {
+    if (initialContext !== undefined) {
+      void this.routePendingSource(path, { intent, generate, ...initialContext });
+      return;
+    }
     this.promptMaterialContext("要将这份资料关联到课程或项目吗？", (relation) =>
       this.routePendingSource(path, { intent, generate, ...relation }),
     );
@@ -1092,10 +1230,15 @@ export default class OkfBrainPlugin extends Plugin {
         { value: "independent", label: "独立资料", description: "不关联课程或项目" },
         { value: "course", label: "关联已有课程", description: "从当前课程列表中选择" },
         { value: "project", label: "关联已有项目", description: "从当前项目列表中选择" },
+        { value: "both", label: "关联课程和项目", description: "分别选择课程和项目，同一用途保留两个关系" },
       ] as const,
       title,
       async (context) => {
-        if (context === "course") {
+        if (context === "both") {
+          this.selectCourse("选择课程", course => this.selectProject("选择项目", project => {
+            void onSelect({ course, project });
+          }));
+        } else if (context === "course") {
           this.selectCourse("选择资料所属课程", (course) => {
             void onSelect({ course });
           });
@@ -1125,8 +1268,8 @@ export default class OkfBrainPlugin extends Plugin {
         this.watchSemanticOperation(result.semantic_operation.operation_id);
       }
       const target = result.semantic_operation?.status === "completed"
-        ? result.routed_target ?? result.source_text
-        : result.source_text;
+        ? result.routed_target ?? result.source_text ?? result.source
+        : result.source_text ?? result.source;
       const notice = new Notice("", 20_000);
       notice.noticeEl.empty();
       notice.noticeEl.createEl("strong", {
@@ -1191,34 +1334,88 @@ export default class OkfBrainPlugin extends Plugin {
       await target.view.switchWorkspace(workbenchPath);
     }
     await this.app.workspace.revealLeaf(target.leaf);
+    this.app.workspace.setActiveLeaf(target.leaf, { focus: true });
   }
 
-  public hasOkfSectionInActiveWorkbench(section: EmbeddedDashboardSection, workbenchPath?: string): boolean {
+  public async hasOkfSectionInActiveWorkbench(section: EmbeddedDashboardSection, workbenchPath?: string): Promise<boolean> {
     const target = this.activeApexView(undefined, workbenchPath);
-    return !!target && (!workbenchPath || target.view.currentWorkspacePath() === workbenchPath) &&
-      target.view.hasSectionType(OKF_SECTION_TYPES[section]);
+    const types = section === "tasks" ? [OKF_SECTION_TYPES.tasks, "alltasks"] : [OKF_SECTION_TYPES[section]];
+    if (target && (!workbenchPath || target.view.currentWorkspacePath() === workbenchPath)) return types.some(type => target.view.hasSectionType(type));
+    const path = (workbenchPath ?? this.settings.apex.dashboardFile).replace(/\.md$/iu, "");
+    const file = this.app.vault.getAbstractFileByPath(`${path}.md`);
+    if (!(file instanceof TFile)) return false;
+    return parseWorkbench(await this.app.vault.read(file)).columns.some(column => types.includes(column.sectionType ?? ""));
   }
 
-  public async navigateToOkfSection(section: EmbeddedDashboardSection, origin?: HTMLElement, workbenchPath?: string): Promise<void> {
+  public async navigateToOkfSection(section: EmbeddedDashboardSection, origin?: HTMLElement, workbenchPath?: string,
+    config?: Record<string, unknown>, stateKey?: string): Promise<void> {
+    const request = this.focusedNavigationQueue.then(() => this.navigateFocusedPage(section, origin, workbenchPath, config, stateKey));
+    this.focusedNavigationQueue = request.catch(() => undefined);
+    return request;
+  }
+
+  private async navigateFocusedPage(section: EmbeddedDashboardSection, origin?: HTMLElement, workbenchPath?: string,
+    config?: Record<string, unknown>, stateKey?: string): Promise<void> {
     const target = this.activeApexView(origin, workbenchPath);
-    if (target && (!workbenchPath || target.view.currentWorkspacePath() === workbenchPath) &&
-      target.view.hasSectionType(OKF_SECTION_TYPES[section])) {
-      await this.app.workspace.revealLeaf(target.leaf);
-      target.view.refreshSectionType(OKF_SECTION_TYPES[section]);
-      if (target.view.revealSectionType(OKF_SECTION_TYPES[section])) return;
-    }
     this.updateDashboardUiState({ activeSection: section });
-    const existing = this.app.workspace.getLeavesOfType(OKF_DASHBOARD_VIEW)[0];
-    const leaf = existing ?? this.app.workspace.getLeaf("tab");
+    const pages = this.app.workspace.getLeavesOfType(OKF_DASHBOARD_VIEW);
+    const existing = origin ? pages.find(page => page.view.containerEl.contains(origin))
+      : pages.find(page => page === this.app.workspace.activeLeaf);
+    const boardPath = target?.view.currentWorkspacePath() ?? workbenchPath;
+    const linked = origin && !existing && boardPath ? this.workbenchPages.get(boardPath) : undefined;
+    const leaf = existing ?? (linked && pages.includes(linked) ? linked : this.app.workspace.getLeaf("tab"));
+    if (existing?.view instanceof OkfDashboardItemView) existing.view.rememberNavigation();
+    else if (leaf.view instanceof OkfDashboardItemView) leaf.view.navigationHistory.length = 0;
+    if (origin && boardPath) this.workbenchPages.set(boardPath, leaf);
+    let pageId = this.pageIds.get(leaf);
+    if (!pageId) { pageId = crypto.randomUUID(); this.pageIds.set(leaf, pageId); }
+    const scope = [config?.course, config?.project, config?.statuses, config?.feedStreams, config?.folders,
+      config?.excludeFolders, config?.notePaths, config?.readingView, config?.readingSourceId,
+      config?.catalogueKey, config?.taskView, config?.savedViewId];
+    const instance = stateKey ?? workbenchInstanceKey(boardPath ?? "", `page:${pageId}:${section}:${JSON.stringify(scope)}`);
+    if (section === 'tasks' && config?.resetTaskQuery) this.updateDashboardPageUiState('tasks', { filters: { taskAdvancedQuery: null, taskQueryDraft: null } }, instance);
+    const storedConfig = config ? { ...config } : undefined;
+    if (storedConfig) {
+      delete storedConfig.resetTaskQuery;
+      delete storedConfig.mode;
+      delete storedConfig.limit;
+      delete storedConfig.pageSize;
+    }
+    if (config?.viewState && typeof config.viewState === "object") this.updateDashboardPageUiState(section, config.viewState as DashboardPageUiStatePatch, instance);
     await leaf.setViewState({
       type: OKF_DASHBOARD_VIEW,
-      state: { section, workbenchPath: target?.view.currentWorkspacePath() ?? workbenchPath },
+      state: { section, workbenchPath: boardPath,
+        ...(storedConfig ? { config: storedConfig } : {}), stateKey: instance },
       active: true,
     });
     await this.app.workspace.revealLeaf(leaf);
   }
 
-  public async addOkfSectionToActiveWorkbench(section: EmbeddedDashboardSection, workbenchPath?: string): Promise<void> {
+  private dashboardPage(origin?: HTMLElement): WorkspaceLeaf | undefined {
+    return this.app.workspace.getLeavesOfType(OKF_DASHBOARD_VIEW).find(leaf => origin
+      ? leaf.view.containerEl.contains(origin) : leaf === this.app.workspace.activeLeaf);
+  }
+
+  public canReturnToPreviousDashboardPage(origin?: HTMLElement): boolean {
+    const view = this.dashboardPage(origin)?.view;
+    return view instanceof OkfDashboardItemView && view.navigationHistory.length > 0;
+  }
+
+  public async returnToPreviousDashboardPage(workbenchPath?: string, origin?: HTMLElement): Promise<void> {
+    const leaf = this.dashboardPage(origin);
+    const request = this.focusedNavigationQueue.then(() => this.restorePreviousDashboardPage(workbenchPath, leaf));
+    this.focusedNavigationQueue = request.catch(() => undefined);
+    return request;
+  }
+
+  private async restorePreviousDashboardPage(workbenchPath?: string, leaf?: WorkspaceLeaf): Promise<void> {
+    const previous = leaf?.view instanceof OkfDashboardItemView ? leaf.view.navigationHistory.pop() : undefined;
+    if (!previous || !leaf) { await this.returnToOkfWorkbench(workbenchPath); return; }
+    await leaf.setViewState({ type: OKF_DASHBOARD_VIEW, state: previous, active: true });
+    await this.app.workspace.revealLeaf(leaf);
+  }
+
+  public async addOkfSectionToActiveWorkbench(section: EmbeddedDashboardSection, workbenchPath?: string, config?: Record<string, unknown>): Promise<void> {
     if (workbenchPath && !this.settings.apex.workspaceFiles.includes(workbenchPath)) {
       new Notice("原工作台已不存在，请返回工作台后再添加卡片。");
       return;
@@ -1233,7 +1430,14 @@ export default class OkfBrainPlugin extends Plugin {
       this.settings.apex.workspaceFiles.includes(workbenchPath)) {
       await target.view.switchWorkspace(workbenchPath);
     }
-    await target.view.addSectionType(OKF_SECTION_TYPES[section], okfSectionDefaultName(section));
+    const initial = { ...config };
+    const viewState = initial.viewState as { filters?: Record<string, unknown>; tab?: string } | undefined;
+    if (viewState) {
+      const filters = Object.fromEntries(Object.entries(viewState.filters ?? {}).filter(([key]) => !key.startsWith("loaded:") && !key.startsWith("details:") && key !== "taskQueryDraft"));
+      initial.initialView = { tab: viewState.tab, filters };
+    }
+    for (const key of ["mode", "limit", "pageSize", "viewState", "taskQueryDraft"]) delete initial[key];
+    await target.view.addSectionType(OKF_SECTION_TYPES[section], okfSectionDefaultName(section), initial);
     await this.app.workspace.revealLeaf(target.leaf);
   }
 
@@ -1520,6 +1724,16 @@ export default class OkfBrainPlugin extends Plugin {
     return result;
   }
 
+  public async setProjectCategory(path: string, category: string | null, expected?: string | null): Promise<void> {
+    await this.notes().setProjectCategory(path, category, expected);
+    this.refreshDashboardViews();
+  }
+
+  public async promptProjectCategory(path?: string): Promise<void> {
+    const { projects } = await new VaultDashboardReader(this.app).projects();
+    new ProjectCategoryModal(this.app, projects, () => this.refreshDashboardViews(), path).open();
+  }
+
   private notes(): VaultNoteService {
     if (!this.vaultNotes) throw new Error("笔记保存功能尚未就绪，请稍后重试");
     return this.vaultNotes;
@@ -1543,18 +1757,26 @@ export default class OkfBrainPlugin extends Plugin {
 
   public refreshDashboardViews(): void {
     this.apexHost?.refreshAllDashboards();
+    for (const leaf of this.app.workspace.getLeavesOfType(OKF_DASHBOARD_VIEW)) {
+      if (leaf.view instanceof OkfDashboardItemView) void leaf.view.refresh();
+    }
   }
 
   public async mountOkfDashboardSurface(
     container: HTMLElement,
     section: EmbeddedDashboardSection,
+    context?: SurfaceMountContext,
   ): Promise<() => void> {
-    const leaf = this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE)[0];
+    const target = this.activeApexView(container);
+    const leaf = target?.leaf;
     if (!leaf) throw new Error("请先打开一个工作台，再打开此页面");
     const surface = new OkfDashboardView(leaf, this, {
       container,
       initialSection: section,
       embedded: true,
+      ...(context ? { config: context.config, headerActions: context.headerActions, sectionActions: context.sectionActions,
+        instanceKey: workbenchInstanceKey(target!.view.currentWorkspacePath(), context.columnId),
+        workbenchPath: target!.view.currentWorkspacePath() } : {}),
     });
     this.embeddedDashboardSurfaces.add(surface);
     try {
@@ -1743,8 +1965,20 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   private registerCommands(): void {
+    this.addCommand({ id: "open-appearance-studio", name: "打开外观工作室", callback: () => this.apexHost?.openAppearanceStudio() });
+    this.addCommand({ id: "new-task", name: "新建任务", callback: () => this.promptNewTask() });
+    this.addCommand({ id: "open-tasks", name: "打开任务", callback: () =>
+      void this.navigateToOkfSection("tasks", undefined, undefined, { taskView: "all" }) });
+    for (const section of ["today", "inbox", "reading", "sources", "learning", "projects", "knowledge", "life"] as const) {
+      this.addCommand({ id: `open-${section}`, name: `打开${okfSectionDefaultName(section)}`,
+        callback: () => void this.navigateToOkfSection(section) });
+    }
     this.addCommand({ id: "view-document-uploads", name: "查看已保存的资料",
       callback: () => this.openDocumentSubmissions() });
+    this.addCommand({ id: 'inspect-task-boundary', name: '检查任务范围与历史配置', callback: () => {
+      void readTaskBoundaryReport(this.app, this.settings.tasks).then(report => new TaskBoundaryReportModal(this.app, report).open())
+        .catch(error => new Notice(String(error), 8000));
+    } });
     this.addCommand({
       id: DASHBOARD_COMMAND_ID,
       name: "打开工作台",
@@ -1752,7 +1986,7 @@ export default class OkfBrainPlugin extends Plugin {
     });
     this.addCommand({
       id: "open-system",
-      name: "打开系统状态",
+      name: "打开后台与诊断",
       callback: () => void this.navigateToOkfSection("system"),
     });
     this.addCommand({
@@ -1891,6 +2125,9 @@ export default class OkfBrainPlugin extends Plugin {
     relation: Pick<DocumentImportOptions, "course" | "project"> = {},
     origin: ImportOrigin = "command",
   ): void {
+    const key = JSON.stringify(relation);
+    const version = (this.importDraftVersions.get(key) ?? 0) + 1;
+    this.importDraftVersions.set(key, version);
     new DocumentImportModal(
         this.app, files, relation, origin,
         async (file, options) => {
@@ -1903,7 +2140,11 @@ export default class OkfBrainPlugin extends Plugin {
             : await this.notes().createProject(title, slug);
           this.refreshDashboardViews();
           return result;
-        }, true,
+        }, true, "store", false, false, "learn", this.importDrafts.get(key), draft => {
+          if (this.importDraftVersions.get(key) !== version) return;
+          if (draft) this.importDrafts.set(key, draft);
+          else this.importDrafts.delete(key);
+        },
     ).open();
   }
 
@@ -1921,6 +2162,26 @@ export default class OkfBrainPlugin extends Plugin {
         new Notice("已按指定方式重新排队；沿用原件与资料身份");
       },
     ).open();
+  }
+
+  public async processSourceOriginal(path: string, relation: Pick<DocumentImportOptions, "course" | "project"> = {},
+    generate = false, generationKind: "learn" | "wiki" = "learn"): Promise<void> {
+    const references = await originalsForNote(this.app, path);
+    if (!references.length) throw new Error("该资料没有可用的文件原件，无法请求转换");
+    const open = async (digest: string): Promise<void> => {
+      const reference = references.find(item => item.digest === digest)!;
+      const original = this.app.vault.getAbstractFileByPath(reference.path ?? `sources/originals/${digest}/${reference.filename}`);
+      if (!(original instanceof TFile)) throw new Error("原件尚未同步到本机，请等待同步完成");
+      const input = { file: new File([await this.app.vault.readBinary(original)], reference.filename), relativePath: reference.filename };
+      const draft: DocumentImportDraft = { files: [input], relation, action: "convert", intent: generate ? generationKind : "source",
+        generate, generationKind, quality: "quick", method: "auto" };
+      new DocumentImportModal(this.app, [input], relation, "context",
+        (file, options) => saveSyncedDocument(this.app, file, options), undefined, undefined, true,
+        "convert", generate, false, generationKind, draft).open();
+    };
+    if (references.length === 1) await open(references[0]!.digest);
+    else new ChoiceModal(this.app, references.map(item => ({ value: item.digest, label: item.filename, description: "选择要转换的原件" })),
+      "选择原件", open).open();
   }
 
   public async showDocumentConversionResult(record: ConversionRecord): Promise<void> {
@@ -2262,11 +2523,351 @@ export default class OkfBrainPlugin extends Plugin {
       ),
       feedReadingPositions: { ...DEFAULT_SETTINGS.feedReadingPositions, ...loaded?.feedReadingPositions },
       apex: normalizeApexSettings(recoveredWorkspace.settings),
+      tasks: loaded.tasks && typeof loaded.tasks === 'object' ? loaded.tasks : {},
     };
     await this.reloadLocalToken();
     if (importedLegacyApexSettings || recoveredWorkspace.recovered) await this.saveSettings();
   }
+
+  private async initializeTasks(): Promise<void> {
+    if (!Object.keys(this.settings.tasks).length) {
+      const legacyPath = `${this.app.vault.configDir}/plugins/obsidian-tasks-plugin/data.json`;
+      if (await this.app.vault.adapter.exists(legacyPath)) {
+        const legacy: unknown = JSON.parse(await this.app.vault.adapter.read(legacyPath));
+        if (!legacy || typeof legacy !== 'object' || Array.isArray(legacy)) throw new Error('Tasks 设置格式无效');
+        this.settings.tasks = legacy as Record<string, unknown>;
+        await this.saveSettings();
+      }
+    }
+    await configureTasks(this.settings.tasks);
+    setTaskSourceFilter(path => {
+      if (!path) return true;
+      const file = this.app.vault.getAbstractFileByPath(path);
+      return taskSourceKind(path, file instanceof TFile ? this.app.metadataCache.getFileCache(file)?.frontmatter ?? {} : {}) === 'tasks';
+    });
+    this.register(() => setTaskSourceFilter());
+    const installed = (this.app as AppWithTaskPlugins).plugins?.plugins?.['obsidian-tasks-plugin'];
+    if (installed) {
+      const notice = new Notice('', 0);
+      notice.noticeEl.createDiv({ text: '独立 Tasks 插件正在运行。切换后由工作台内置的 Tasks 接管笔记操作，原任务和设置均保留。' });
+      const button = notice.noticeEl.createEl('button', { text: '使用内置 Tasks' });
+      button.addEventListener('click', () => {
+        button.disabled = true;
+        void (async () => {
+          await (this.app as AppWithTaskPlugins).plugins!.disablePluginAndSave('obsidian-tasks-plugin');
+          await this.initializeTasks();
+          if (this.apexHost) this.apexHost.handlesTaskReminders = false;
+          notice.hide();
+          this.refreshDashboardViews();
+        })().catch(error => { button.disabled = false; new Notice(error instanceof Error ? error.message : '切换 Tasks 失败', 8000); });
+      });
+      return;
+    }
+    const { installTasks } = await import('../../tasks-generated/plugin.js');
+    this.taskRuntime = await installTasks(this, {
+      settings: { ...this.settings.tasks, statusSettings: getTaskSettings().statusSettings },
+      save: async settings => {
+        this.settings.tasks = { ...this.settings.tasks, ...settings };
+        invalidateAllTasks();
+        await this.saveTaskStatusContract();
+        await this.saveSettings();
+      },
+      onError: error => {
+        console.error('[okf-workspace] task index refresh failed', error);
+        new Notice(error instanceof Error ? error.message : '任务索引刷新失败', 8000);
+      },
+      invalidate: path => {
+        if (path) invalidatePath(path); else invalidateAllTasks();
+        this.refreshDashboardViews();
+      },
+      writeTask: async (task, lines) => {
+        const file = this.app.vault.getAbstractFileByPath(task.path);
+        if (!(file instanceof TFile)) throw new Error('任务来源已经变化');
+        const source = await this.app.vault.read(file);
+        if (!scanFileTasks(file, source).some(candidate => candidate.eligible && candidate.originalLine === task.originalMarkdown)) throw new Error('任务或来源已经变化，请刷新后重试');
+        if (!await replaceTaskInFile(this.app, { file, path: task.path, line: task.lineNumber, originalLine: task.originalMarkdown }, lines)) throw new Error('无法唯一定位任务');
+        this.refreshDashboardViews();
+      },
+    });
+    await this.saveTaskStatusContract();
+    this.taskReminders = new TaskReminderService({
+      read: async () => (await collectVaultTasks(this.app)).filter(task => task.eligible),
+      acknowledged: this.settings.tasks.reminderAcknowledgements as ReminderStore | undefined,
+      save: async state => { this.settings.tasks.reminderAcknowledgements = state; await this.saveSettings(); },
+      show: (task, acknowledge) => this.showTaskReminder(task, acknowledge),
+    });
+    const check = () => void this.taskReminders!.tick().catch(error => {
+      console.error('[okf-workspace] task reminders failed', error);
+      new Notice(error instanceof Error ? error.message : '任务提醒检查失败', 8000);
+    });
+    this.registerInterval(window.setInterval(check, 30_000));
+    check();
+  }
+
+  private showTaskReminder(task: VaultTask, acknowledge: () => Promise<void>): void {
+    const notice = new Notice('', 0);
+    notice.noticeEl.createEl('strong', { text: task.text });
+    notice.noticeEl.createDiv({ text: `${task.reminder} · ${task.path}` });
+    notice.noticeEl.createEl('button', { text: '打开任务', attr: { type: 'button' } }).addEventListener('click', () =>
+      void (task.formal ? this.promptTaskDetails(task) : this.openTaskSource(task)).catch(error => new Notice(String(error))));
+    const action = (label: string, execute: () => Promise<void>) => {
+      const button = notice.noticeEl.createEl('button', { text: label });
+      button.addEventListener('click', () => {
+        button.disabled = true;
+        void execute().then(async () => { await acknowledge(); notice.hide(); }).catch(error => {
+          button.disabled = false;
+          new Notice(error instanceof Error ? error.message : '提醒操作失败', 8000);
+        });
+      });
+    };
+    action('完成', async () => {
+      if (!await toggleTaskInFile(this.app, task, true)) throw new Error('任务已经变化，请刷新后重试');
+      this.refreshDashboardViews();
+    });
+    action('稍后一小时', async () => {
+      const date = new Date(Date.now() + 3_600_000);
+      const pad = (value: number) => String(value).padStart(2, '0');
+      const reminder = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+      if (!await updateTaskDatesInFile(this.app, task, { reminder })) throw new Error('任务已经变化，请刷新后重试');
+      this.refreshDashboardViews();
+    });
+    action('关闭提醒', async () => {});
+  }
+
+  private async saveTaskStatusContract(): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath('system/views/Tasks.md');
+    if (!(file instanceof TFile)) return;
+    const statuses = taskStatusTypes();
+    await this.app.fileManager.processFrontMatter(file, frontmatter => {
+      frontmatter.task_statuses = statuses;
+      frontmatter.task_projection = { version: 1, global_filter: getTaskSettings().globalFilter,
+        global_query: getTaskSettings().globalQuery, task_format: getTaskSettings().taskFormat };
+    });
+  }
+
+  public async promptTaskDetails(task: VaultTask): Promise<void> {
+    if (!this.taskRuntime) throw new Error('任务功能尚未启用，请停用独立 Tasks 插件并重新载入 Dashboard');
+    const contexts = await this.notes().captureContexts();
+    let published: string | undefined;
+    this.taskRuntime.editTask(task.originalLine, task.path, async lines => {
+      const payload = lines.join('\n');
+      if (published !== undefined && published !== payload) throw new Error('任务已保存，但刷新尚未完成；请先完成刷新，再重新打开编辑');
+      if (published === undefined) {
+        if (!await replaceTaskInFile(this.app, task, lines)) throw new Error('任务已发生变化，无法唯一定位');
+        published = payload;
+      }
+      await this.taskRuntime!.refresh();
+      this.refreshDashboardViews();
+    }, { courses: contexts.courses, projects: contexts.projects,
+      inheritedCourse: this.taskInheritedContext(task, 'course'), inheritedProject: this.taskInheritedContext(task, 'project'),
+      openSource: () => void this.openTaskSource(task).catch(error => new Notice(String(error))),
+      beforeApply: async () => {
+        if (published !== undefined) return;
+        const source = await this.app.vault.read(task.file);
+        const matches = scanFileTasks(task.file, source).filter(item => item.originalLine === task.originalLine);
+        if (!matches.length || matches.length > 1 && !matches.some(item => item.line === task.line)) throw new Error('任务在编辑期间已经变化，请保留输入并重新打开来源检查');
+      },
+    });
+  }
+
+  private taskInheritedContext(task: VaultTask, kind: 'course' | 'project'): string | undefined {
+    const metadata = this.app.metadataCache.getFileCache(task.file)?.frontmatter;
+    const reference = metadata?.[kind];
+    if (typeof reference === 'string') return reference;
+    if (kind === 'project' && /^projects\/[^/]+\//u.test(task.path)) return task.path.split('/')[1];
+    if (kind === 'course' && /^learning\/courses\/[^/]+\//u.test(task.path)) return task.path.split('/')[2];
+    return undefined;
+  }
+
+  public promptNewTask(context: Record<string, unknown> = {}): void {
+    void (async () => {
+      if (!this.taskRuntime) throw new Error('任务功能尚未启用');
+      const day = new Date();
+      const iso = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+      const contexts = await this.notes().captureContexts();
+      const fields = ['course', 'project'].flatMap(key => typeof context[key] === 'string' && context[key]
+        ? [`[${key}:: /${String(context[key]).replace(/^\//u, '')}]`] : []);
+      const scheduled = typeof context.date === 'string' ? context.date : context.taskView === 'today' ? iso : '';
+      const line = prepareTaskLine(`- [ ] ${fields.join(' ')}${scheduled ? ` ⏳ ${scheduled}` : ''}`);
+      const initialTarget = String(context.target ?? context.project ?? context.course ?? '').replace(/^\//u, '');
+      const calendarTarget = context.calendar ? this.settings.apex.calendarTaskTarget : undefined;
+      const targetHint = calendarTarget?.path ? `留空使用日历保存位置：${calendarTarget.path}${calendarTarget.kind === 'note' ? '（每条任务一篇）' : calendarTarget.kind === 'folder' ? '（每天一篇）' : ''}。也可选择已有笔记。` : undefined;
+      let published: { path: string; payload: string } | undefined;
+      let prepared: { input: string; payload: string } | undefined;
+      this.taskRuntime.editTask(line, initialTarget, async (lines, destination) => {
+        const input = JSON.stringify(lines);
+        if (prepared?.input !== input) prepared = { input, payload: lines.map(line => this.prepareFormalTaskLine(line)).join('\n') };
+        const taskLine = prepared.payload;
+        if (!taskLine) throw new Error('新建任务必须保留至少一个执行项');
+        if (published && published.payload !== taskLine) throw new Error(`任务已经保存到 ${published.path}，刷新尚未完成；请先刷新后再编辑`);
+        if (!published) {
+          const path = destination?.trim().replace(/^\//u, '') ?? '';
+          if (path) {
+            const file = this.app.vault.getAbstractFileByPath(path);
+            if (!(file instanceof TFile) || !this.taskTargetAllowed(file)) throw new Error('请选择已有的可编辑笔记；来源资料、模板和派生视图不作为任务保存位置');
+            await this.notes().appendTaskToNote(file, taskLine);
+            published = { path, payload: taskLine };
+          } else if (calendarTarget?.path) {
+            const destination = calendarTarget.path.trim().replace(/^\/+|\/+$/gu, '');
+            if (!isTaskSourcePath(destination) || destination.split('/').some(part => ['.', '..'].includes(part) || part.includes(':'))) throw new Error('日历保存位置无效');
+            if (calendarTarget.kind === 'note') {
+              const result = await createTaskNote(this.app, { iso: scheduled || iso, taskLine, folder: destination,
+                templatePath: calendarTarget.templatePath, untitled: '任务' });
+              published = { path: result.file.path, payload: taskLine };
+              if (result.templateMissing) new Notice('任务已保存；指定模板尚未读取，当前笔记仅包含任务。');
+            } else {
+              const path = calendarTarget.kind === 'folder' ? `${destination}/${scheduled || iso}.md` : destination.endsWith('.md') ? destination : `${destination}.md`;
+              const file = this.app.vault.getAbstractFileByPath(path);
+              if (file instanceof TFile) { if (!this.taskTargetAllowed(file)) throw new Error('此日历目标不能保存任务'); await this.notes().appendTaskToNote(file, taskLine); }
+              else await this.notes().createTaskContainer(path, taskLine);
+              published = { path, payload: taskLine };
+            }
+          } else {
+            const result = await this.notes().appendDailyTaskBlock(taskLine);
+            published = { path: result.path, payload: taskLine };
+          }
+        }
+        await this.taskRuntime!.refresh();
+        this.refreshDashboardViews();
+        const notice = new Notice(`任务已保存：${published.path}`, 7000);
+        notice.noticeEl.createEl('button', { text: '查看来源', attr: { type: 'button' } }).addEventListener('click', () => void this.openVaultPath(published!.path));
+      }, { isNew: true, target: initialTarget, targetHint, courses: contexts.courses, projects: contexts.projects,
+        beforeApply: async target => {
+          if (published) return;
+          const path = target?.trim().replace(/^\//u, '') ?? '';
+          if (path) {
+            const file = this.app.vault.getAbstractFileByPath(path);
+            if (!(file instanceof TFile) || !this.taskTargetAllowed(file)) throw new Error('请选择已有的可编辑笔记作为保存位置');
+          }
+          if (calendarTarget?.path && (!isTaskSourcePath(calendarTarget.path) || calendarTarget.path.split('/').some(part => ['.', '..'].includes(part) || part.includes(':')))) throw new Error('日历保存位置无效');
+        },
+        targets: this.app.vault.getMarkdownFiles().filter(file => this.taskTargetAllowed(file)).map(file => ({ path: file.path,
+          title: String(this.app.metadataCache.getFileCache(file)?.frontmatter?.title ?? file.basename) })) });
+    })().catch(error => new Notice(error instanceof Error ? error.message : '新建任务失败', 8000));
+  }
+
+  private taskTargetAllowed(file: TFile): boolean {
+    const metadata = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    return taskSourceKind(file.path, metadata ?? {}) === 'tasks';
+  }
+
+  public promptMoveTask(task: VaultTask): void {
+    const choices = this.app.vault.getMarkdownFiles().filter(file => file.path !== task.path && this.taskTargetAllowed(file))
+      .map(file => ({ path: file.path, title: String(this.app.metadataCache.getFileCache(file)?.frontmatter?.title ?? file.basename) }));
+    new TaskTargetModal(this.app, task.path, choices, async path => {
+      await moveTaskToNote(this.app, task, path);
+      await this.taskRuntime?.refresh();
+      this.refreshDashboardViews();
+    }).open();
+  }
+
+  public async addTaskToDaily(task: VaultTask, independent = false): Promise<void> {
+    task = await this.resolveCurrentTask(task);
+    if (independent) {
+      await this.notes().appendDailyTaskBlock(await copyTaskSubtree(this.app, task));
+    } else {
+      let id = task.blockId;
+      if (!id) {
+        id = `task-${crypto.randomUUID()}`;
+        if (!await replaceTaskInFile(this.app, task, [`${task.originalLine.trimEnd()} ^${id}`])) throw new Error('任务已经变化，请重新读取');
+      }
+      const daily = await this.notes().createDaily();
+      const link = this.app.fileManager.generateMarkdownLink(task.file, daily.path, `#^${id}`, task.text);
+      await this.notes().appendDailyTaskBlock(`- ${link}`);
+    }
+    await this.taskRuntime?.refresh();
+    this.refreshDashboardViews();
+    new Notice(independent ? '已复制为独立日记任务' : '已加入当日日记，继续操作原任务');
+  }
+
+  public async openTaskSource(task: VaultTask, origin?: HTMLElement): Promise<void> {
+    const current = await this.resolveCurrentTask(task);
+    const view = this.activeApexView(origin)?.view;
+    if (view) view.revealTaskSource(current.file, current.line, current.blockId);
+    else await this.app.workspace.getLeaf('tab').openFile(current.file, { eState: { line: current.line } });
+  }
+
+  private async resolveCurrentTask(task: VaultTask): Promise<VaultTask> {
+    const tasks = await collectVaultTasks(this.app);
+    const path = task.file.path;
+    let current = task.blockId ? tasks.find(candidate => candidate.path === path && candidate.blockId === task.blockId)
+      : tasks.find(candidate => candidate.path === path && candidate.line === task.line && candidate.originalLine === task.originalLine);
+    if (!current && task.blockId) {
+      const matches = tasks.filter(candidate => candidate.eligible && candidate.blockId === task.blockId);
+      if (matches.length === 1) current = matches[0];
+    }
+    if (!current) throw new Error('任务已经变化，无法确定来源位置');
+    return current;
+  }
+
+  public prepareFormalTaskLine(line: string): string {
+    let prepared = line.trimEnd();
+    if (prepared.includes('\n')) throw new Error('任务必须为单行 Markdown 清单');
+    prepared = prepareTaskLine(prepared);
+    if (!/\s+\^[\w-]+\s*$/u.test(prepared)) prepared += ` ^task-${crypto.randomUUID()}`;
+    return prepared;
+  }
+
+  public taskQueryViews(): SavedTaskView[] {
+    const views = this.settings.tasks.savedViews;
+    if (views === undefined) return [];
+    if (!Array.isArray(views)) throw new Error("保存视图配置必须为列表");
+    return views.map((view, index) => {
+      if (!view || typeof view.name !== "string" || typeof view.query !== "string" || !view.context || typeof view.context !== "object") throw new Error("保存视图缺少名称、查询或范围");
+      return { ...view, id: typeof view.id === "string" ? view.id : `legacy-${index}-${encodeURIComponent(view.name)}`,
+        context: { ...view.context, ...(!view.id && view.query ? { taskView: "custom" } : {}) } };
+    });
+  }
+
+  public taskRuntimeTasks(): import('../../tasks-generated/core.js').UpstreamTask[] {
+    return this.taskRuntime?.getTasks() ?? [];
+  }
+
+  public async saveTaskQueryView(query: string, context: Record<string, unknown>, id?: string): Promise<void> {
+    const tasks = (await collectVaultTasks(this.app)).filter(task => task.formal && task.upstream).map(task => task.upstream!);
+    const { executeTaskQuery } = await import('../../tasks-generated/core.js');
+    executeTaskQuery(query, tasks);
+    const savedContext = { ...context, taskQuery: query };
+    for (const key of ["mode", "limit", "pageSize", "taskQueryDraft", "viewState", "taskShown"]) delete (savedContext as Record<string, unknown>)[key];
+    if (id) {
+      const views = this.taskQueryViews();
+      const view = views.find(view => view.id === id);
+      if (!view) throw new Error("保存视图已经变化，请重新选择");
+      view.query = query;
+      view.context = savedContext;
+      this.settings.tasks.savedViews = views;
+      await this.saveSettings();
+      new Notice("保存视图已更新");
+      return;
+    }
+    new FieldsPromptModal(this.app, '保存任务视图', [
+      { key: 'name', label: '视图名称', placeholder: '例如：本周课程任务' },
+    ], '保存视图', async values => {
+      const name = values.name!;
+      const views = this.taskQueryViews();
+      if (views.some(view => view.name === name)) throw new Error("已有同名视图，请选择其他名称，或使用“更新当前保存视图”");
+      views.push({ id: crypto.randomUUID(), name, query, context: savedContext });
+      this.settings.tasks.savedViews = views;
+      await this.saveSettings();
+      this.refreshDashboardViews();
+    }).open();
+  }
+
+  public manageTaskQueryViews(): void {
+    const save = async (views: SavedTaskView[]) => { this.settings.tasks.savedViews = views; await this.saveSettings(); this.refreshDashboardViews(); };
+    new TaskViewsModal(this.app, this.taskQueryViews(), async (id, name) => {
+      if (!name.trim()) throw new Error("请填写视图名称");
+      const views = this.taskQueryViews();
+      if (views.some(view => view.id !== id && view.name === name.trim())) throw new Error("已有同名视图");
+      const view = views.find(view => view.id === id);
+      if (!view) throw new Error("视图已经变化");
+      view.name = name.trim();
+      await save(views);
+    }, id => save(this.taskQueryViews().filter(view => view.id !== id))).open();
+  }
 }
+
+type AppWithTaskPlugins = import('obsidian').App & { plugins?: { plugins?: Record<string, unknown>; disablePluginAndSave(id: string): Promise<void> } };
 
 function conversionVisibleFingerprint(record: ConversionRecord): string {
   return JSON.stringify({

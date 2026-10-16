@@ -1,7 +1,9 @@
 export const DASHBOARD_SECTIONS = [
   "today",
+  "tasks",
   "inbox",
   "reading",
+  "sources",
   "learning",
   "projects",
   "knowledge",
@@ -52,6 +54,7 @@ export interface DashboardUiState {
   feeds: Record<DashboardFeed, DashboardFeedUiState>;
   readingSources: Record<string, DashboardReadingSourceUiState>;
   recentFiles: RecentDashboardFile[];
+  instances?: Record<string, DashboardPageUiState>;
 }
 
 export interface DashboardPageUiStatePatch {
@@ -79,6 +82,7 @@ export interface DashboardUiStatePatch {
   feeds?: Partial<Record<DashboardFeed, DashboardFeedUiStatePatch>>;
   readingSources?: Record<string, DashboardReadingSourceUiStatePatch | null>;
   recentFiles?: readonly RecentDashboardFile[];
+  instances?: Record<string, DashboardPageUiStatePatch>;
 }
 
 export interface LegacyFeedReadingPosition {
@@ -139,7 +143,7 @@ export function normalizeDashboardUiState(
   const storedPages = objectValue(record?.pages);
   const pages = { ...defaults.pages };
   for (const section of DASHBOARD_SECTIONS) {
-    pages[section] = normalizePageState(storedPages?.[section]);
+    pages[section] = normalizePageState(storedPages?.[section] ?? (section === "tasks" ? storedPages?.today : undefined));
   }
   const storedFeeds = objectValue(record?.feeds);
   const aiDaily = normalizeFeedState(storedFeeds?.["ai-daily"], legacy?.["ai-daily"]);
@@ -173,6 +177,8 @@ export function normalizeDashboardUiState(
     feeds,
     readingSources: normalizeReadingSources(record?.readingSources),
     recentFiles: normalizeRecentFiles(record?.recentFiles),
+    ...(record?.instances ? { instances: Object.fromEntries(Object.entries(objectValue(record.instances) ?? {})
+      .map(([key, item]) => [key, normalizePageState(item)])) } : {}),
   };
 }
 
@@ -194,6 +200,10 @@ export function patchDashboardUiState(
     ]),
   ) as Record<DashboardFeed, DashboardFeedUiState>;
   const readingSources = patchReadingSources(current.readingSources, patch.readingSources);
+  const instances = { ...current.instances };
+  for (const [key, value] of Object.entries(patch.instances ?? {})) {
+    instances[key] = patchPageState(instances[key] ?? { scrollTop: 0, filters: {} }, value);
+  }
   return {
     version: 1,
     activeSection: isDashboardSection(patch.activeSection)
@@ -202,6 +212,7 @@ export function patchDashboardUiState(
     pages,
     feeds,
     readingSources,
+    ...(current.instances || patch.instances ? { instances } : {}),
     recentFiles: patch.recentFiles === undefined
       ? current.recentFiles
       : normalizeRecentFiles(patch.recentFiles),
@@ -314,7 +325,8 @@ export class DashboardUiStateStore {
     const snapshot = this.snapshot();
     this.persistQueue = this.persistQueue
       .catch(() => undefined)
-      .then(() => this.persist(snapshot));
+      .then(() => this.persist(snapshot))
+      .catch(error => { this.dirty = true; throw error; });
     await this.persistQueue;
   }
 

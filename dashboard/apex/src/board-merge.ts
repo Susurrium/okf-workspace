@@ -82,6 +82,12 @@ export function mergeBoardData(
 				conflicts,
 			);
 		}
+		const configuration: Record<string, unknown> = {};
+		for (const key of new Set([...Object.keys(baseColumn.extensionConfig ?? {}), ...Object.keys(localColumn.extensionConfig ?? {}), ...Object.keys(remoteColumn.extensionConfig ?? {})])) {
+			const value = mergeValue(`section.${ref}.config.${key}`, baseColumn.extensionConfig?.[key], localColumn.extensionConfig?.[key], remoteColumn.extensionConfig?.[key], conflicts);
+			if (value !== undefined) configuration[key] = value;
+		}
+		merged.extensionConfig = Object.keys(configuration).length ? configuration : undefined;
 		columns.push(merged);
 	}
 

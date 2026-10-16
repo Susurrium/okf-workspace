@@ -14,12 +14,15 @@ import {
 } from './alltasks-scan';
 import { insertTaskForDay, type TaskInsertTarget } from './daily-notes';
 import { createTaskNote } from './calendar-task-note';
+import { renderTaskCheckbox } from './task-checkbox';
 import { applyModalTheme } from './modal-theme';
 import { getRegisteredApexHost } from './host';
 import type { DashboardSettings } from './types';
+import { calendarScopeControls, readCalendarScope, filterCalendarScope, calendarTimeEvents, type CalendarScope } from './calendar-scope';
+import { scanFileTasks, indexTasksByDay } from './alltasks-scan';
 
 interface CalendarModalCallbacks {
-	onToggle: (task: VaultTask, nextChecked: boolean) => Promise<void> | void;
+	onToggle: (task: VaultTask, nextChecked: boolean) => Promise<boolean | void> | boolean | void;
 	/** Open a task's source note, optionally scrolling to the task's line. */
 	onOpenNote?: (file: TFile, line?: number) => void;
 }
@@ -54,6 +57,14 @@ export function writeCalendarTaskFilter(app: App, filter: CalendarTaskFilter): v
 	void plugin.saveSettings?.();
 }
 
+export function readCalendarScopeForApp(app: App): CalendarScope { return readCalendarScope({ ...lookupDashboardPlugin(app)?.settings }); }
+export async function writeCalendarScopeForApp(app: App, scope: CalendarScope): Promise<void> {
+	const plugin = lookupDashboardPlugin(app);
+	if (!plugin?.settings || !plugin.saveSettings) throw new Error('日历配置尚未初始化');
+	plugin.settings = { ...plugin.settings, ...scope };
+	await plugin.saveSettings();
+}
+
 /** User-pinned destination override (undefined = the daily-note chain). */
 function readTaskTarget(app: App): import('./types').CalendarTaskTarget | undefined {
 	const target = lookupDashboardPlugin(app)?.settings?.calendarTaskTarget;
@@ -86,6 +97,7 @@ export class CalendarMonthModal extends Modal {
 	/** Active task filter (which tasks may occupy the grid), persisted in
 	 *  plugin settings so the choice survives across sessions. */
 	private filter: CalendarTaskFilter;
+	private calendarScope: CalendarScope;
 
 	constructor(
 		app: App,
@@ -100,6 +112,7 @@ export class CalendarMonthModal extends Modal {
 		this.cb = cb;
 		this.dashboardFile = dashboardFile;
 		this.filter = readCalendarTaskFilter(app);
+		this.calendarScope = readCalendarScopeForApp(app);
 		const now = new Date();
 		this.year = now.getFullYear();
 		this.month = now.getMonth();
@@ -177,11 +190,14 @@ export class CalendarMonthModal extends Modal {
 		const caret = filterBtn.createSpan({ cls: 'dashboard-calendar-filter-caret' });
 		setIcon(caret, 'chevron-down');
 		filterBtn.addEventListener('click', (e) => this.showFilterMenu(e, filterBtn));
+		calendarScopeControls(header, this.app, this.calendarScope, async scope => {
+			await writeCalendarScopeForApp(this.app, scope); this.calendarScope = scope; this.render();
+		});
 
 		// Filtered day view, recomputed every render (nav, view switch, toggle
 		// and filter changes all re-render) so the 'active' today-boundary and
 		// checked-drops-out behavior stay fresh.
-		const viewByDay = filterTasksByDay(this.byDay, this.filter, toIsoDate(new Date()));
+		const viewByDay = filterCalendarScope(filterTasksByDay(this.byDay, this.filter, toIsoDate(new Date())), this.calendarScope);
 
 		const body = container.createDiv({ cls: 'dashboard-modal-body dashboard-calendar-fullscreen-body' });
 		const gridOpts = {
@@ -199,7 +215,7 @@ export class CalendarMonthModal extends Modal {
 			},
 		};
 		const { label } = this.view === 'week'
-			? renderWeekTimeGrid(body, this.weekStart, viewByDay, gridOpts)
+			? renderWeekTimeGrid(body, this.weekStart, calendarTimeEvents(viewByDay, this.calendarScope.calendarDateFact), gridOpts)
 			: renderMonthGrid(body, this.year, this.month, viewByDay, gridOpts);
 		labelEl.textContent = label;
 	}
@@ -225,7 +241,7 @@ export class CalendarMonthModal extends Modal {
 	 *  ArrowLeft/Right paging) is never involved. */
 	private showFilterMenu(evt: MouseEvent, anchor: HTMLElement): void {
 		const menu = new Menu();
-		for (const f of CALENDAR_TASK_FILTERS) {
+		for (const f of (['formal', 'all', ...(!['formal', 'all'].includes(this.filter) ? [this.filter] : [])] as CalendarTaskFilter[])) {
 			menu.addItem(item => item
 				.setTitle(t(`calendar.filter.${f}`))
 				.setChecked(f === this.filter)
@@ -244,10 +260,11 @@ export class CalendarMonthModal extends Modal {
 		this.render();
 	}
 
-	private async toggle(task: VaultTask, nextChecked: boolean): Promise<void> {
-		await this.cb.onToggle(task, nextChecked);
+	private async toggle(task: VaultTask, nextChecked: boolean): Promise<boolean> {
+		if (await this.cb.onToggle(task, nextChecked) === false) return false;
 		task.checked = nextChecked;
 		this.render();
+		return true;
 	}
 
 	onClose(): void {
@@ -333,6 +350,8 @@ export class DayAgendaModal extends Modal {
 			text: t('calendar.addTask'),
 		});
 		addBtn.addEventListener('click', () => void addTask());
+		const registered = getRegisteredApexHost();
+		if (registered?.createTask) addRow.createEl('button', { text: '完整新建', attr: { type: 'button' } }).addEventListener('click', () => registered.createTask?.(this.iso));
 
 		if (this.tasks.length === 0) {
 			body.createDiv({ cls: 'dashboard-library-empty', text: t('calendar.noEvents') });
@@ -355,9 +374,8 @@ export class DayAgendaModal extends Modal {
 	private renderRow(task: VaultTask): HTMLElement {
 		const row = createDiv();
 		row.className = 'dashboard-alltasks-row' + (task.checked ? ' is-done' : '');
-		const check = row.createEl('input', { cls: 'dashboard-alltasks-check', attr: { type: 'checkbox' } });
-		check.checked = task.checked;
-		check.addEventListener('click', (e) => { e.preventDefault(); void this.toggle(task, !task.checked); });
+		renderTaskCheckbox(row, { text: task.text, checked: task.checked, className: 'dashboard-alltasks-check',
+			toggle: checked => this.toggle(task, checked), notifyConflict: false, notify: message => new Notice(message) });
 
 		const tm = taskDayTimeRange(task, this.iso);
 		if (tm) row.createDiv({ cls: 'dashboard-calendar-event-time', text: tm });
@@ -369,20 +387,28 @@ export class DayAgendaModal extends Modal {
 		const bodyEl = row.createDiv({ cls: 'dashboard-alltasks-body' });
 		const textEl = bodyEl.createDiv({ cls: 'dashboard-alltasks-text' });
 		renderTextWithLinks(textEl, task.text, this.app);
+		const registered = getRegisteredApexHost();
+		if (registered?.editTask && task.formal) {
+			textEl.setAttribute('role', 'button'); textEl.setAttribute('tabindex', '0');
+			textEl.addEventListener('click', event => { if ((event.target as HTMLElement).closest('a')) return; event.stopPropagation(); void registered.editTask?.(task).catch(error => new Notice(String(error))); });
+			textEl.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); void registered.editTask?.(task).catch(error => new Notice(String(error))); } });
+		}
+		if (registered?.editTaskDates) row.createEl('button', { text: '安排', attr: { type: 'button' } }).addEventListener('click', event => { event.stopPropagation(); registered.editTaskDates?.(task); });
 
 		const source = row.createDiv({ cls: 'dashboard-alltasks-source' });
 		const chip = source.createDiv({ cls: 'dashboard-alltasks-chip', text: task.file.basename });
 		chip.title = task.path;
 		chip.setAttribute('role', 'button');
-		chip.addEventListener('click', (e) => { e.stopPropagation(); this.cb.onOpenNote?.(task.file, task.line); });
+		chip.addEventListener('click', (e) => { e.stopPropagation();
+			if (registered?.openTaskSource) void registered.openTaskSource(task).catch(error => new Notice(String(error)));
+			else this.cb.onOpenNote?.(task.file, task.line); });
 
-		// Whole-row jump (when wired): click anywhere except the checkbox, the
-		// source chip, or an inline link to open the note at the task's line.
+		// 来源跳转保留；任务标题和日期按钮分别打开对应编辑界面。
 		if (this.cb.onOpenNote) {
 			row.addClass('is-jumpable');
 			row.addEventListener('click', (e) => {
 				const target = e.target as HTMLElement;
-				if (target.tagName === 'INPUT' || target.closest('a') || target.closest('.dashboard-alltasks-chip')) return;
+				if (target.tagName === 'INPUT' || target.closest('a,button,[role=button]')) return;
 				this.cb.onOpenNote?.(task.file, task.line);
 			});
 		}
@@ -392,7 +418,7 @@ export class DayAgendaModal extends Modal {
 	/** Add the entered task for this day. Time groups (start / deadline /
 	 *  scheduled, each an optional date + time) become [start::]/[due::]/
 	 *  [scheduled::] markers — a time-only group anchors to this day, and a
-	 *  task with no group keeps the date-only 📅 anchor here. Destination per
+	 *  日期未指定时使用宿主声明的默认日期含义。Destination per
 	 *  the calendar settings (default daily-note chain / pinned file or
 	 *  folder / a new note per task). */
 	private async addTask(
@@ -405,7 +431,8 @@ export class DayAgendaModal extends Modal {
 		for (const g of groups) {
 			times[g.key] = { date: g.date.value, time: g.time.value };
 		}
-		const line = buildTaskLine(title, this.iso, times);
+		const rawLine = buildTaskLine(title, this.iso, times, getRegisteredApexHost()?.calendarDefaultDate ?? 'due');
+		const line = getRegisteredApexHost()?.prepareTaskLine?.(rawLine) ?? rawLine;
 
 		let target: TaskInsertTarget | null = null;
 		try {
@@ -414,6 +441,11 @@ export class DayAgendaModal extends Modal {
 			// template-seeded); the file/folder/default kinds go through the
 			// shared daily-note chain.
 			const targetCfg = readTaskTarget(this.app);
+			if (targetCfg && targetCfg.kind !== 'note') {
+				const path = targetCfg.kind === 'folder' ? `${targetCfg.path}/${this.iso}.md` : targetCfg.path.endsWith('.md') ? targetCfg.path : `${targetCfg.path}.md`;
+				const file = this.app.vault.getFileByPath(path);
+				if (file && host?.canWriteTaskTarget && !host.canWriteTaskTarget(file)) throw new Error('此日历目标不能保存人工待办');
+			}
 			const position = readTaskInsertPosition(this.app);
 			if (!targetCfg && host?.insertCalendarTask) {
 				target = await host.insertCalendarTask(this.iso, line, position);
@@ -453,37 +485,24 @@ export class DayAgendaModal extends Modal {
 		// The row mirrors what scanFileTasks will parse back from the line; a
 		// task anchored entirely to OTHER days (cross-day groups) shows there,
 		// not in this agenda, so it is not appended here.
-		const groupDates = (key: 'start' | 'due' | 'scheduled'): { date?: string; time?: string } => {
-			const g = groups.find(entry => entry.key === key);
-			if (!g) return {};
-			return { date: g.date.value.trim() || (g.time.value.trim() ? this.iso : undefined), time: g.time.value.trim() || undefined };
-		};
-		const start = groupDates('start');
-		const due = groupDates('due');
-		const scheduled = groupDates('scheduled');
-		const anchoredHere = (!start.date && !due.date && !scheduled.date)
-			|| start.date === this.iso || due.date === this.iso || scheduled.date === this.iso;
-		if (anchoredHere) {
-			this.tasks = [...this.tasks, {
-				file: target.file, path: target.file.path, line: target.line, originalLine: target.writtenLine, checked: false,
-				blockId: /\s\^([a-zA-Z0-9-]+)\s*$/u.exec(target.writtenLine)?.[1], formal: true,
-				text: title,
-				start: start.date, due: due.date ?? (!start.date && !scheduled.date ? this.iso : undefined),
-				scheduled: scheduled.date, scheduledTime: scheduled.time,
-				time: start.time ?? due.time,
-				endTime: due.time && start.date && due.date === start.date ? due.time : undefined,
-				priority: undefined, mtime: Date.now(), ctime: Date.now(),
-			}].sort(byDayTaskTime(this.iso));
+		try {
+			const actual = scanFileTasks(target.file, await this.app.vault.read(target.file)).find(task => task.originalLine === target.writtenLine);
+			if (!actual) throw new Error('无法重新读取实际任务');
+			if (indexTasksByDay([actual]).has(this.iso)) this.tasks = [...this.tasks, actual].sort(byDayTaskTime(this.iso));
+		} catch (error) {
+			new Notice(`任务已写入 ${target.file.path}，界面刷新失败：${error instanceof Error ? error.message : String(error)}`, 8000);
+			return;
 		}
 		titleInput.value = '';
 		for (const g of groups) { g.date.value = ''; g.time.value = ''; }
 		this.onOpen();
 	}
 
-	private async toggle(task: VaultTask, nextChecked: boolean): Promise<void> {
-		await this.cb.onToggle(task, nextChecked);
+	private async toggle(task: VaultTask, nextChecked: boolean): Promise<boolean> {
+		if (await this.cb.onToggle(task, nextChecked) === false) return false;
 		task.checked = nextChecked;
 		this.onOpen();
+		return true;
 	}
 
 	onClose(): void {

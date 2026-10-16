@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -32,7 +33,12 @@ def _fixture(tmp_path: Path, role: str = "test", port: int = 34876) -> tuple[Pat
         "state": str(state), "api_port": port,
     }
     _write(config, deployment)
-    _write(state / "config/test-environment.json", {**deployment, "environment": role})
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        cdp_port = listener.getsockname()[1]
+    _write(state / "config/test-environment.json", {
+        **deployment, "environment": role, "cdp_port": cdp_port,
+    })
     settings = vault / ".obsidian/plugins/okf-workspace-dashboard/data.json"
     _write(settings, {
         "deploymentConfig": str(config), "tokenFile": str(state / "secrets/local-api-token"),
@@ -94,3 +100,61 @@ def test_closed_test_stop_disables_autostart_and_sync_preserving_preferences(
     assert parsed["livesync_enabled"] is False
     assert parsed["vault_open"] is False
     assert settings.read_bytes() == before
+
+
+@pytest.mark.parametrize("registry_kind", ["test-profile", "default-profile"])
+def test_mixed_or_concurrent_profiles_rejected_before_writes(
+    tmp_path: Path, registry_kind: str,
+) -> None:
+    config, settings = _fixture(tmp_path)
+    deployment = json.loads(config.read_text(encoding="utf-8"))
+    if registry_kind == "test-profile":
+        registry = tmp_path / "state/obsidian-profile/obsidian.json"
+        vault = tmp_path / "production"
+    else:
+        registry = tmp_path / "appdata/obsidian/obsidian.json"
+        vault = Path(deployment["vault"])
+    _write(registry, {"vaults": {"other": {"path": str(vault), "open": True}}})
+    before = settings.read_bytes()
+    registry_before = registry.read_bytes()
+    result = _run(tmp_path, config, "Start")
+    assert result.returncode != 0
+    assert "profile" in result.stderr
+    assert settings.read_bytes() == before
+    assert registry.read_bytes() == registry_before
+
+
+@pytest.mark.parametrize("field", ["installation_id", "vault", "state", "api_port"])
+def test_mismatched_test_identity_rejected_before_writes(tmp_path: Path, field: str) -> None:
+    config, settings = _fixture(tmp_path)
+    marker_path = config.parent / "test-environment.json"
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    marker[field] = 34877 if field == "api_port" else "different"
+    _write(marker_path, marker)
+    before = settings.read_bytes()
+    result = _run(tmp_path, config)
+    assert result.returncode != 0
+    assert settings.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "script", ["install-dashboard", "install-okf-claudian", "update-test-workspace"],
+)
+def test_development_install_rejects_production_before_build(
+    tmp_path: Path, script: str,
+) -> None:
+    config, settings = _fixture(tmp_path, role="production", port=8765)
+    _write(settings.parents[0] / "manifest.json", {"id": "okf-workspace-dashboard"})
+    before = settings.read_bytes()
+    command = (
+        f"& {_quote(ROOT / f'scripts/{script}.ps1')} "
+        f"-Vault {_quote(tmp_path / 'vault')} -State {_quote(tmp_path / 'state')}"
+    )
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", command], capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=20, check=False,
+    )
+    assert result.returncode != 0
+    assert "matching isolated test marker" in result.stderr
+    assert settings.read_bytes() == before
+    assert config.exists()

@@ -1,7 +1,12 @@
 import { TFile, type App } from "obsidian";
+import { projectCategory } from "../domain/project-organization.js";
+import { prepareTaskLine } from '../../tasks-generated/core.js';
+import { readTaskSourceKind } from '../../apex/src/task-source.js';
+import type { PreparedCapture } from './capture-session.js';
 
 import {
   normalizeCaptureRelation,
+  CaptureRelationError,
   relationVaultPath,
   type CaptureContextOptions,
   type CaptureRelation,
@@ -115,6 +120,7 @@ function document(
 export class VaultNoteService {
   private readonly pendingProjects = new Map<string, Map<string, string>>();
   private readonly projectCreates = new Map<string, Promise<{ path: string }>>();
+  private readonly projectRequests = new Map<string, string>();
   private readonly dailyCreates = new Map<string, Promise<{ path: string }>>();
   public constructor(private readonly app: App) {}
 
@@ -123,12 +129,16 @@ export class VaultNoteService {
     content: string,
     relation: CaptureRelation = {},
   ): Promise<{ path: string }> {
+    return this.writePreparedCapture(await this.prepareCapture(title, content, relation));
+  }
+
+  public async prepareCapture(title: string, content: string, relation: CaptureRelation = {}): Promise<PreparedCapture> {
     const normalizedRelation = normalizeCaptureRelation(relation);
     this.assertCaptureRelationTargets(normalizedRelation);
     const now = new Date();
     const stamp = `${localDate(now)}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
     const base = `inbox/captures/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${stamp}-${slugify(title).slice(0, 72)}`;
-    const path = this.availablePath(base);
+    const path = this.availablePath(`${base}-${crypto.randomUUID().slice(0, 8)}`);
     const normalizedContent = content.trim();
     const [firstLine = "", ...remainingLines] = normalizedContent.split(/\r?\n/u);
     const bodyContent = firstLine.trim() === title.trim()
@@ -144,8 +154,22 @@ export class VaultNoteService {
     };
     if (normalizedRelation.course) fields.course = normalizedRelation.course;
     if (normalizedRelation.project) fields.project = normalizedRelation.project;
-    await this.create(path, document("Capture", title, body, fields));
-    return { path };
+    return { path, markdown: document("Capture", title, body, fields), relation: normalizedRelation };
+  }
+
+  public async writePreparedCapture(prepared: PreparedCapture): Promise<{ path: string }> {
+    if (!/^inbox\/captures\/\d{4}\/\d{2}\/\d{4}-\d{2}-\d{2}-\d{6}-[^/\\]+\.md$/u.test(prepared.path)) {
+      throw new Error('快速记录写入目标无效');
+    }
+    const existing = this.app.vault.getAbstractFileByPath(prepared.path);
+    if (existing instanceof TFile) {
+      if (await this.app.vault.read(existing) !== prepared.markdown) throw new Error(`记录目标已存在且内容不同，请先检查：${prepared.path}`);
+      return { path: prepared.path };
+    }
+    if (await this.app.vault.adapter.stat(prepared.path)) throw new Error(`记录目标在磁盘中已存在，请重新加载后重试：${prepared.path}`);
+    this.assertCaptureRelationTargets(normalizeCaptureRelation(prepared.relation));
+    await this.create(prepared.path, prepared.markdown);
+    return { path: prepared.path };
   }
 
   /**
@@ -232,6 +256,36 @@ export class VaultNoteService {
     return { path };
   }
 
+  public async appendDailyTaskBlock(block: string): Promise<{ path: string }> {
+    if (!block.trim()) throw new Error("任务内容不能为空");
+    const { path } = await this.createDaily();
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) throw new Error(`日记尚未到达：${path}`);
+    await this.app.vault.process(file, current => {
+      if (readTaskSourceKind(file.path, current) !== 'tasks') throw new Error('日记目标不能保存 Tasks 任务');
+      const lines = current.split(/\r?\n/u);
+      const heading = lines.findIndex(line => /^## 任务\s*$/u.test(line));
+      if (heading < 0) throw new Error(`日记缺少“任务”区域：${path}`);
+      const next = lines.findIndex((line, index) => index > heading && /^##\s+/u.test(line));
+      lines.splice(next < 0 ? lines.length : next, 0, block.trim(), "");
+      return lines.join("\n");
+    });
+    return { path };
+  }
+
+  public async appendTaskToNote(file: TFile, block: string): Promise<void> {
+    if (!block.trim()) throw new Error("任务或清单内容不能为空");
+    await this.app.vault.process(file, current => {
+      if (readTaskSourceKind(file.path, current) !== 'tasks') throw new Error('目标笔记不能保存 Tasks 任务');
+      return `${current.trimEnd()}\n\n${block.trim()}\n`;
+    });
+  }
+
+  public async createTaskContainer(path: string, block: string): Promise<void> {
+    if (!path.endsWith('.md') || path.replace(/\\/gu, '/').split('/').some(part => ['.', '..'].includes(part) || part.includes(':'))) throw new Error('任务目标笔记路径无效');
+    await this.create(path, `${block.trim()}\n`);
+  }
+
   public async appendDailyTask(
     date: string,
     taskLine: string,
@@ -242,9 +296,7 @@ export class VaultNoteService {
     if (!/^- \[[ xX]\]\s+/u.test(oneLine) || oneLine.includes("\n")) {
       throw new Error("任务必须是单行 Markdown 清单");
     }
-    const formal = /(?:^|\s)#task(?:\s|$)/iu.test(oneLine)
-      ? oneLine
-      : oneLine.replace(/^(- \[[ xX]\]\s*)/u, "$1#task ");
+    const formal = prepareTaskLine(oneLine);
     const writtenLine = /\s\^[a-zA-Z0-9-]+\s*$/u.test(formal)
       ? formal
       : `${formal} ^task-${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}`;
@@ -256,6 +308,7 @@ export class VaultNoteService {
 
     let insertedLine = -1;
     await this.app.vault.process(file, (current) => {
+      if (readTaskSourceKind(file.path, current) !== 'tasks') throw new Error('日记目标不能保存 Tasks 任务');
       const lines = current.split(/\r?\n/u);
       const existing = lines.indexOf(writtenLine);
       if (existing >= 0) {
@@ -313,6 +366,35 @@ export class VaultNoteService {
       frontmatter.project_status = status;
     });
     return { path: normalized };
+  }
+
+  public async setProjectCategory(path: string, category: string | null, expected?: string | null): Promise<{ path: string }> {
+    const normalized = path.replace(/^\/+|\/+$/gu, "");
+    const next = projectCategory(category);
+    if (!/^projects\/[^/]+\/project\.md$/u.test(normalized) || normalized.split("/").some(part => part === "." || part === ".." || part.includes(":"))) throw new Error("请选择规范路径下的项目主页");
+    const file = this.app.vault.getAbstractFileByPath(normalized);
+    if (!(file instanceof TFile) || file.path !== normalized) throw new Error("请选择规范路径下的项目主页");
+    await this.app.fileManager.processFrontMatter(file, fields => {
+      if (fields.type !== "Project") throw new Error("目标笔记不是 Project");
+      const current = projectCategory(fields.project_category);
+      if (next !== null && fields.project_category === next || next === null && !("project_category" in fields)) return;
+      if (expected !== undefined && current !== projectCategory(expected)) throw new Error("项目类别已经变化，请重新读取后操作");
+      if (next === null) delete fields.project_category;
+      else fields.project_category = next;
+    });
+    return { path: normalized };
+  }
+
+  public async renameProjectCategory(paths: readonly string[], from: string, to: string | null): Promise<{ path: string; error?: string }[]> {
+    const previous = projectCategory(from);
+    const next = projectCategory(to);
+    if (!previous) throw new Error("请选择要重命名的类别");
+    const results: { path: string; error?: string }[] = [];
+    for (const path of new Set(paths)) {
+      try { await this.setProjectCategory(path, next, previous); results.push({ path }); }
+      catch (error) { results.push({ path, error: error instanceof Error ? error.message : String(error) }); }
+    }
+    return results;
   }
 
   public async createReflection(title: string, content: string): Promise<{ path: string }> {
@@ -385,20 +467,25 @@ export class VaultNoteService {
     return { path };
   }
 
-  public async createProject(title: string, requestedSlug?: string): Promise<{ path: string }> {
+  public async createProject(title: string, requestedSlug?: string, category?: string | null): Promise<{ path: string }> {
+    const normalizedCategory = projectCategory(category);
     const slug = slugify(requestedSlug || title);
+    const identity = JSON.stringify([title, normalizedCategory]);
+    if (this.projectRequests.has(slug) && this.projectRequests.get(slug) !== identity) throw new Error("项目创建尚未完成，请使用原名称与类别重试");
+    this.projectRequests.set(slug, identity);
     const inFlight = this.projectCreates.get(slug);
     if (inFlight) return inFlight;
-    const request = this.publishProject(title, slug);
+    const request = this.publishProject(title, slug, normalizedCategory);
     this.projectCreates.set(slug, request);
     try {
       return await request;
     } finally {
       this.projectCreates.delete(slug);
+      if (!this.pendingProjects.has(`projects/${slug}`)) this.projectRequests.delete(slug);
     }
   }
 
-  private async publishProject(title: string, slug: string): Promise<{ path: string }> {
+  private async publishProject(title: string, slug: string, category: string | null): Promise<{ path: string }> {
     const root = `projects/${slug}`;
     const pending = this.pendingProjects.get(root);
     if (this.app.vault.getAbstractFileByPath(root) && !pending) throw new Error(`项目目录已存在：${root}`);
@@ -417,7 +504,7 @@ export class VaultNoteService {
     // this operation's payload for retry, but never overwrite user edits.
     const files = pending ?? new Map([
       [`${root}/log.md`, logBody],
-      [path, document("Project", title, body, { project_status: "active" })],
+      [path, document("Project", title, body, { project_status: "active", ...(category ? { project_category: category } : {}) })],
     ]);
     this.pendingProjects.set(root, files);
     for (const [target, content] of files) {
@@ -494,7 +581,7 @@ export class VaultNoteService {
       if (!target) continue;
       const path = relationVaultPath(target);
       if (!(this.app.vault.getAbstractFileByPath(path) instanceof TFile)) {
-        throw new Error(`${kind} 关联目标不存在：${path}`);
+        throw new CaptureRelationError(`${kind} 关联目标不存在：${path}`);
       }
     }
   }

@@ -6,6 +6,7 @@ paths:
 required_fields: [project_status]
 field_types:
   project_status: string
+  project_category: string
 states:
   project_status: [active, paused, completed]
 regions:

@@ -1097,6 +1097,36 @@
 		#f7f2fb 100%);
 }
 
+.theme-dark .apex-dashboard-root[data-theme="lilac"] {
+	--db-bg: #292232;
+	--db-bg-card: rgba(58, 47, 69, 0.92);
+	--db-bg-card-hover: rgba(70, 56, 84, 0.96);
+	--db-bg-input: #302738;
+	--db-bg-btn: rgba(197, 155, 231, 0.12);
+	--db-bg-btn-hover: rgba(197, 155, 231, 0.22);
+	--db-bg-banner: rgba(197, 155, 231, 0.07);
+	--db-bg-hover: rgba(197, 155, 231, 0.10);
+	--db-bg-hover-strong: rgba(197, 155, 231, 0.18);
+	--db-bg-add-section: rgba(197, 155, 231, 0.08);
+	--db-border: rgba(224, 203, 240, 0.16);
+	--db-border-card: rgba(224, 203, 240, 0.18);
+	--db-border-input: rgba(224, 203, 240, 0.24);
+	--db-border-input-focus: #c59be7;
+	--db-border-btn: rgba(224, 203, 240, 0.20);
+	--db-border-add-section: rgba(224, 203, 240, 0.26);
+	--db-text: #f2eafa;
+	--db-text-muted: #c5b6ce;
+	--db-text-faint: #a896b5;
+	--db-accent: #c59be7;
+	--db-accent-light: #dec0f5;
+	--db-danger: #ff86a8;
+	--db-checkbox: #c59be7;
+	--db-link: #dec0f5;
+	--db-bg-modal: #332b3d;
+	--db-bg-modal-raised: rgba(197, 155, 231, 0.10);
+	--db-aurora-bg: linear-gradient(135deg, #292232 0%, #35283e 33%, #302a42 66%, #292232 100%);
+}
+
 /* Lilac: slow garden wash drifting behind the ivory cards */
 .apex-dashboard-root[data-theme="lilac"] {
 	background: var(--db-aurora-bg);
@@ -2099,6 +2129,16 @@
 	color: var(--db-text-inverse-muted);
 	font-style: normal;
 	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.dashboard-banner--plain .dashboard-banner-quote {
+	color: var(--db-text);
+	text-shadow: none;
+}
+
+.dashboard-banner--plain .dashboard-banner-author {
+	color: var(--db-text-muted);
+	text-shadow: none;
 }
 
 .dashboard-banner-quote--fading,
@@ -3598,9 +3638,9 @@
 	text-align: left;
 }
 
-.dashboard-sidebar-expense-amount::placeholder {
-	color: var(--db-text-faint);
-	opacity: 0.5;
+.dashboard-sidebar-expense .dashboard-sidebar-expense-amount::placeholder {
+	color: var(--db-text-muted);
+	opacity: 1;
 }
 
 .dashboard-sidebar-expense-invalid {
@@ -3711,9 +3751,9 @@
 	background-color: var(--db-bg-hover-strong, rgba(128, 128, 128, 0.16)) !important;
 }
 
-.dashboard-sidebar-expense-note::placeholder {
-	color: var(--db-text-faint);
-	opacity: 0.5;
+.dashboard-sidebar-expense .dashboard-sidebar-expense-note::placeholder {
+	color: var(--db-text-muted);
+	opacity: 1;
 }
 
 .dashboard-sidebar-expense-note:focus {
@@ -4586,6 +4626,10 @@
 	bottom: 12px;
 	left: 50%;
 	transform: translateX(-50%);
+}
+
+.dashboard-sidebar-pomodoro-dots.is-hidden {
+	display: none;
 }
 
 .dashboard-sidebar-pomodoro-dot {
@@ -7495,11 +7539,26 @@
 }
 
 /* ===== Expense category manager (confirm-card overlay) ===== */
-.dashboard-expense-catmgr {
+.dashboard-confirm-card.dashboard-expense-catmgr {
 	text-align: left;
-	max-width: 460px;
+	width: min(560px, calc(100vw - 24px));
+	max-width: min(560px, calc(100vw - 24px));
+	max-height: 85vh;
+	padding: 20px;
 	align-items: stretch;
 }
+
+.dashboard-expense-catmgr-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 12px;
+}
+
+.dashboard-expense-catmgr-header .dashboard-confirm-title { margin: 0; }
+.dashboard-expense-catmgr-close { flex: 0 0 auto; padding: 4px; }
+.dashboard-expense-catmgr-close svg { width: 18px; height: 18px; }
 
 .dashboard-expense-catmgr-body {
 	display: flex;
@@ -11831,7 +11890,8 @@
 	box-shadow: none !important;
 }
 
-/* Glass modal: override Obsidian's .modal container */
+/* 弹窗标记位于外层容器，内部窗口负责高度限制和滚动。 */
+.modal-container.modal--dashboard .modal,
 .modal.modal--dashboard {
 	background: transparent !important;
 	border: none !important;
@@ -11840,23 +11900,28 @@
 	border-radius: var(--db-radius-lg, 12px);
 	overflow-y: auto;
 	max-height: 85vh;
+	overscroll-behavior: contain;
 	scrollbar-width: thin;
 	scrollbar-color: color-mix(in srgb, var(--db-accent, var(--interactive-accent)) 18%, transparent) transparent;
 }
 
+.modal-container.modal--dashboard .modal::-webkit-scrollbar,
 .modal.modal--dashboard::-webkit-scrollbar {
 	width: 4px;
 }
 
+.modal-container.modal--dashboard .modal::-webkit-scrollbar-track,
 .modal.modal--dashboard::-webkit-scrollbar-track {
 	background: transparent;
 }
 
+.modal-container.modal--dashboard .modal::-webkit-scrollbar-thumb,
 .modal.modal--dashboard::-webkit-scrollbar-thumb {
 	background: color-mix(in srgb, var(--db-accent, var(--interactive-accent)) 18%, transparent);
 	border-radius: 4px;
 }
 
+.modal-container.modal--dashboard .modal::-webkit-scrollbar-thumb:hover,
 .modal.modal--dashboard::-webkit-scrollbar-thumb:hover {
 	background: color-mix(in srgb, var(--db-accent, var(--interactive-accent)) 35%, transparent);
 }
@@ -11868,7 +11933,8 @@
 }
 
 .modal.modal--dashboard > .modal-close-button,
-.modal.modal--dashboard .modal-close-button {
+.modal.modal--dashboard .modal-close-button,
+.modal-container.modal--dashboard .modal-close-button {
 	color: var(--db-text-muted) !important;
 }
 
@@ -22310,4 +22376,708 @@ body.is-mobile .dashboard-media-item .dashboard-media-tagbtn { opacity: 1; }
 	display: flex;
 	justify-content: flex-end;
 	margin-top: 4px;
+}
+
+.dashboard-section-type-group { grid-column: 1 / -1; }
+.dashboard-note-row-main { flex: 1; min-width: 0; }
+.dashboard-note-row-title { text-align: start; white-space: normal; }
+.dashboard-note-row-meta { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+
+/* 选择性上游更新：主题、表单、计时器设置与分区导航。 */
+
+.dashboard-section-rail {
+	position: absolute;
+	top: 50%;
+	right: 4px;
+	transform: translateY(-50%);
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	justify-content: center;
+	/* Many sections squeeze the dashes (flex shrink on the items) instead of
+	   overflowing the viewport. */
+	max-height: 82%;
+	gap: 5px;
+	z-index: 30;
+	pointer-events: none;
+}
+
+.dashboard-section-rail-item {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	flex: 0 1 auto;
+	/* Desktop hit zone stays slim — the rail floats over section toolbars
+	   and resize handles, so wide corridors would block their right-edge
+	   buttons. Phones widen it in the media block below. */
+	min-height: 12px;
+	padding: 2px 4px 2px 4px;
+	cursor: pointer;
+	pointer-events: auto;
+}
+
+.dashboard-section-rail-dash {
+	width: 14px;
+	height: 3px;
+	border-radius: 2px;
+	/* Neutral faint gray (Rae: column-color tints read as visual noise —
+	   the rail must stay quiet). Theme-text-based so it adapts to light and
+	   dark themes; the hover/active states step the same gray up. */
+	background: color-mix(in srgb, var(--db-text, var(--text-normal)) 18%, transparent);
+	transition: width 0.15s ease, background-color 0.15s ease;
+}
+
+.dashboard-section-rail-item:hover .dashboard-section-rail-dash {
+	width: 20px;
+	background: color-mix(in srgb, var(--db-text, var(--text-normal)) 50%, transparent);
+}
+
+.dashboard-section-rail-item.is-active .dashboard-section-rail-dash {
+	width: 20px;
+	background: color-mix(in srgb, var(--db-text, var(--text-normal)) 68%, transparent);
+}
+.dashboard-section-rail-item::after {
+	content: attr(data-name);
+	position: absolute;
+	right: calc(100% + 6px);
+	top: 50%;
+	transform: translateY(-50%) translateX(4px);
+	white-space: nowrap;
+	font-size: 0.72em;
+	padding: 2px 8px;
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--db-bg-section, rgb(20, 20, 26)) 92%, transparent);
+	border: 1px solid var(--db-border-section, rgba(128, 128, 128, 0.25));
+	color: var(--db-text, var(--text-normal));
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.dashboard-section-rail-item:hover::after {
+	opacity: 1;
+	transform: translateY(-50%) translateX(0);
+}
+@media (hover: hover) {
+	.dashboard-section-rail {
+		opacity: 0;
+		transition: opacity 0.22s ease;
+	}
+
+	.dashboard-section-rail.is-revealed {
+		opacity: 1;
+	}
+	.dashboard-section-rail:not(.is-revealed) .dashboard-section-rail-item {
+		pointer-events: none;
+	}
+}
+
+@media (max-width: 640px) {
+	.dashboard-section-rail {
+		right: 3px;
+		gap: 3px;
+	}
+
+	.dashboard-section-rail-item {
+		min-height: 16px;
+		padding-left: 16px;
+	}
+
+	.dashboard-section-rail-dash {
+		width: 11px;
+	}
+
+	.dashboard-section-rail-item:hover .dashboard-section-rail-dash,
+.dashboard-section-rail-item.is-active .dashboard-section-rail-dash {
+		width: 15px;
+	}
+}
+
+.dashboard-sidebar-pomodoro-top-right {
+	flex: 1 1 0;
+	min-width: 0;
+	display: flex;
+	justify-content: flex-end;
+}
+.dashboard-pomodoro-settings {
+	width: 100%;
+	max-width: 520px;
+}
+
+.dashboard-pomodoro-settings .dashboard-modal-body {
+	max-height: 68vh;
+	overflow-y: auto;
+}
+
+.dashboard-pomodoro-settings-section {
+	margin-bottom: 16px;
+	padding-bottom: 12px;
+	border-bottom: 1px solid var(--db-border, var(--background-modifier-border));
+}
+
+.dashboard-pomodoro-settings-section:last-child {
+	border-bottom: none;
+	margin-bottom: 0;
+	padding-bottom: 0;
+}
+
+.dashboard-pomodoro-settings-section h3 {
+	margin: 0 0 4px;
+	font-size: 1em;
+}
+
+.dashboard-pomodoro-settings-desc {
+	margin: 0 0 10px;
+	font-size: 0.8em;
+	color: var(--db-text-muted);
+	opacity: 0.85;
+}
+.dashboard-pomodoro-settings-reminder {
+	width: 90px;
+}
+.dashboard-pomodoro-settings-bg-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.dashboard-pomodoro-settings-bg-desc {
+	flex: 1;
+	min-width: 0;
+	font-size: 0.75em;
+	color: var(--db-text-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.dashboard-theme-studio-mythemes-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.dashboard-theme-studio-mytheme-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 10px;
+	border-radius: var(--db-radius-sm, 6px);
+	background: var(--db-bg-hover, rgba(128, 128, 128, 0.08));
+	border: 1px solid var(--db-border, var(--background-modifier-border));
+}
+
+.dashboard-theme-studio-mytheme-item.is-active {
+	border-color: var(--db-accent, var(--interactive-accent));
+}
+
+.dashboard-theme-studio-mytheme-name {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	font-size: 0.85em;
+	color: var(--db-text, var(--text-normal));
+	overflow: hidden;
+}
+
+.dashboard-theme-studio-mytheme-base {
+	font-size: 0.78em;
+	color: var(--db-text-faint, var(--text-faint));
+	text-transform: capitalize;
+}
+
+.dashboard-theme-studio-mytheme-apply {
+	flex-shrink: 0;
+	font-size: 0.75em;
+	padding: 3px 10px;
+	border-radius: var(--db-radius-sm, 6px);
+	border: 1px solid var(--db-border-btn, var(--background-modifier-border));
+	background: var(--db-bg-btn, transparent);
+	color: var(--db-text-muted, var(--text-muted));
+	cursor: pointer;
+	font-family: var(--db-font, var(--font-interface));
+	transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.dashboard-theme-studio-mytheme-apply:hover {
+	background: var(--db-bg-btn-hover, rgba(128, 128, 128, 0.12));
+	color: var(--db-text, var(--text-normal));
+}
+
+.dashboard-theme-studio-mytheme-item.is-active .dashboard-theme-studio-mytheme-apply {
+	border-color: var(--db-accent, var(--interactive-accent));
+	color: var(--db-accent, var(--interactive-accent));
+}
+
+.dashboard-theme-studio-mytheme-delete {
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: none !important;
+	background: transparent !important;
+	box-shadow: none !important;
+	color: var(--db-text-faint, var(--text-faint));
+	cursor: pointer;
+	border-radius: var(--db-radius-sm, 6px);
+	transition: color 0.15s ease, background 0.15s ease;
+}
+
+.dashboard-theme-studio-mytheme-delete:hover {
+	color: var(--db-danger, #ef4444) !important;
+	background: var(--db-bg-hover-strong, rgba(128, 128, 128, 0.16)) !important;
+}
+
+.dashboard-theme-studio-mytheme-delete svg {
+	width: 13px;
+	height: 13px;
+}
+.dashboard-theme-studio-savetheme {
+	margin-right: auto;
+}
+.apex-dashboard-root[data-theme="aqua"] {
+	--db-bg: #eef2f3;
+	--db-bg-section: #e3e9ea;
+	--db-bg-card: #fbfdfe;
+	--db-bg-card-hover: #f2f6f7;
+	--db-bg-sidebar: transparent;
+	--db-bg-input: #e6ecee;
+	--db-bg-btn: rgba(58, 157, 144, 0.10);
+	--db-bg-btn-hover: rgba(58, 157, 144, 0.16);
+	--db-bg-banner: #eaeff0;
+	--db-bg-overlay: linear-gradient(135deg, rgba(23, 31, 35, 0.5) 0%, rgba(23, 31, 35, 0.22) 100%);
+	--db-bg-hover: #e7edee;
+	--db-bg-hover-strong: #dde4e6;
+	--db-bg-add-section: #e6ecee;
+	--db-bg-drop-indicator: rgba(58, 157, 144, 0.10);
+
+	--db-border: #d7dee0;
+	--db-border-card: rgba(47, 60, 66, 0.10);
+	--db-border-section: transparent;
+	--db-border-sidebar: transparent;
+	--db-border-input: #d7dee0;
+	--db-border-input-focus: #3a9d90;
+	--db-border-btn: rgba(58, 157, 144, 0.22);
+	--db-border-add-section: #cfd8da;
+
+	--db-text: #2d3640;
+	--db-text-muted: #67737c;
+	--db-text-faint: #9aa6ad;
+	--db-text-inverse: #ffffff;
+	--db-text-inverse-muted: rgba(255, 255, 255, 0.6);
+
+	/* Tiffany, one step deep — white text safe */
+	--db-accent: #3a9d90;
+	--db-accent-light: #57b8aa;
+	--db-danger: #e0564f;
+
+	--db-shadow-card: 0 2px 4px rgba(23, 31, 35, 0.12);
+	--db-shadow-card-hover: 0 4px 10px rgba(23, 31, 35, 0.16);
+	--db-backdrop-blur: none;
+
+	--db-radius-sm: 8px;
+	--db-radius-md: 14px;
+	--db-radius-lg: 20px;
+
+	--db-font: 'Inter', 'DM Sans', 'Noto Sans SC', var(--font-interface);
+	--db-progress-from: #3a9d90;
+	--db-progress-to: #8ed6cf;
+	--db-checkbox: #3a9d90;
+	--db-quote-border: #2d3640;
+	--db-link: #3a9d90;
+
+	--db-bg-modal: #fbfdfe;
+	--db-bg-modal-raised: #f0f4f5;
+
+	--db-aurora-bg: linear-gradient(135deg,
+		#eef2f3 0%,
+		rgba(142, 214, 207, 0.10) 30%,
+		rgba(231, 233, 236, 0.4) 60%,
+		#eef2f3 100%);
+	--db-aurora-size: 220% 220%;
+	--db-aurora-speed: 36s;
+}
+.theme-dark .apex-dashboard-root[data-theme="aqua"] {
+	--db-bg: #171d21;
+	--db-bg-section: #12181c;
+	--db-bg-card: #232b30;
+	--db-bg-card-hover: #2a3439;
+	--db-bg-sidebar: transparent;
+	--db-bg-input: #1a2126;
+	--db-bg-btn: rgba(84, 200, 186, 0.10);
+	--db-bg-btn-hover: rgba(84, 200, 186, 0.16);
+	--db-bg-banner: #1a2125;
+	--db-bg-overlay: linear-gradient(135deg, rgba(0, 0, 0, 0.62) 0%, rgba(0, 0, 0, 0.34) 100%);
+	--db-bg-hover: #1e262b;
+	--db-bg-hover-strong: #262f35;
+	--db-bg-add-section: #1a2126;
+	--db-bg-drop-indicator: rgba(84, 200, 186, 0.10);
+
+	--db-border: #27303a;
+	--db-border-card: rgba(232, 236, 239, 0.09);
+	--db-border-section: transparent;
+	--db-border-sidebar: transparent;
+	--db-border-input: #27303a;
+	--db-border-input-focus: #54c8ba;
+	--db-border-btn: rgba(84, 200, 186, 0.24);
+
+	--db-text: #e8ecef;
+	--db-text-muted: #97a3ab;
+	--db-text-faint: #626d75;
+	--db-text-inverse: #ffffff;
+	--db-text-inverse-muted: rgba(255, 255, 255, 0.55);
+
+	--db-accent: #54c8ba;
+	--db-accent-light: #7adfd2;
+	--db-danger: #ef5a52;
+
+	--db-shadow-card: 0 2px 5px rgba(0, 0, 0, 0.34);
+	--db-shadow-card-hover: 0 5px 12px rgba(0, 0, 0, 0.42);
+
+	--db-progress-from: #54c8ba;
+	--db-progress-to: #3a6f68;
+	--db-checkbox: #54c8ba;
+	--db-quote-border: #e8ecef;
+	--db-link: #54c8ba;
+
+	--db-bg-modal: #232b30;
+	--db-bg-modal-raised: #2b343a;
+
+	--db-aurora-bg: linear-gradient(135deg,
+		#171d21 0%,
+		rgba(84, 200, 186, 0.05) 30%,
+		rgba(84, 124, 132, 0.04) 60%,
+		#171d21 100%);
+}
+.apex-dashboard-root[data-theme="aqua"] .dashboard-section-row {
+	box-shadow: inset 0 2px 5px rgba(23, 31, 35, 0.10), inset 0 -1px 0 rgba(255, 255, 255, 0.5);
+	border: none;
+}
+.theme-dark .apex-dashboard-root[data-theme="aqua"] .dashboard-section-row {
+	box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.32), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+}
+.apex-dashboard-root[data-theme="aqua"] .dashboard-card {
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.8),
+		inset 0 -2px 3px rgba(23, 31, 35, 0.05),
+		0 2px 4px rgba(23, 31, 35, 0.13);
+}
+.theme-dark .apex-dashboard-root[data-theme="aqua"] .dashboard-card {
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.10),
+		inset 0 -2px 3px rgba(0, 0, 0, 0.26),
+		0 2px 4px rgba(0, 0, 0, 0.32);
+}
+.apex-dashboard-root[data-theme="aqua"] .dashboard-library-card {
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.75),
+		inset 0 -2px 3px rgba(23, 31, 35, 0.05),
+		0 2px 4px rgba(23, 31, 35, 0.13);
+}
+.theme-dark .apex-dashboard-root[data-theme="aqua"] .dashboard-library-card {
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.09),
+		inset 0 -2px 3px rgba(0, 0, 0, 0.26),
+		0 2px 4px rgba(0, 0, 0, 0.32);
+}
+.apex-dashboard-root[data-theme="aqua"] .dashboard-quicknote {
+	box-shadow: inset 0 2px 4px rgba(23, 31, 35, 0.09), inset 0 -1px 0 rgba(255, 255, 255, 0.5);
+}
+.theme-dark .apex-dashboard-root[data-theme="aqua"] .dashboard-quicknote {
+	box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+}
+.apex-dashboard-root[data-theme="aqua"] button.dashboard-section-add-btn {
+	border-radius: 9px;
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.55),
+		inset 0 -1px 2px rgba(23, 31, 35, 0.10),
+		0 1px 2px rgba(23, 31, 35, 0.12);
+}
+.theme-dark .apex-dashboard-root[data-theme="aqua"] button.dashboard-section-add-btn {
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.10),
+		inset 0 -1px 2px rgba(0, 0, 0, 0.26),
+		0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.apex-dashboard-root[data-theme="aqua"] .dashboard-modal-btn--confirm {
+	box-shadow:
+		inset 0 1px 0 rgba(255, 255, 255, 0.35),
+		inset 0 -2px 3px rgba(0, 0, 0, 0.14),
+		0 2px 3px rgba(23, 31, 35, 0.18);
+}
+.apex-dashboard-root[data-theme="aqua"] .dashboard-modal-btn--confirm:active {
+	transform: translateY(1px);
+	box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2), 0 1px 1px rgba(23, 31, 35, 0.10);
+}
+.apex-dashboard-root[data-theme="aqua"] .dashboard-todo-item input[type="checkbox"],
+.apex-dashboard-root[data-theme="aqua"] .card input[type="checkbox"] {
+	border-radius: 6px;
+	box-shadow: inset 0 1px 2px rgba(23, 31, 35, 0.18), 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+.apex-dashboard-root[data-theme="aqua"] .dashboard-banner {
+	box-shadow: inset 0 1px 3px rgba(23, 31, 35, 0.06);
+}
+.apex-dashboard-root[data-theme="aqua"] .dashboard-section-row[data-section-type="sticky"] { --db-sec-hue: #d9a88f; --db-sec-glow: rgba(217, 168, 143, 0.12); }
+.apex-dashboard-root[data-theme="aqua"] .dashboard-section-row[data-section-type="projects"] { --db-sec-hue: #92aec9; --db-sec-glow: rgba(146, 174, 201, 0.12); }
+.apex-dashboard-root[data-theme="aqua"] .dashboard-section-row[data-section-type="library"] { --db-sec-hue: #b5a3d1; --db-sec-glow: rgba(181, 163, 209, 0.12); }
+.apex-dashboard-root[data-theme="aqua"] .dashboard-section-row[data-section-type="folder"] { --db-sec-hue: #b9c4a8; --db-sec-glow: rgba(185, 196, 168, 0.12); }
+.apex-dashboard-root[data-theme="aqua"] .dashboard-section-row[data-section-type="weread"] { --db-sec-hue: #a8cbc0; --db-sec-glow: rgba(168, 203, 192, 0.12); }
+.apex-dashboard-root[data-theme="aqua"] .dashboard-section-row[data-section-type="ticktick"] { --db-sec-hue: #9dc3a4; --db-sec-glow: rgba(157, 195, 164, 0.12); }
+.apex-dashboard-root[data-theme="aqua"] .dashboard-section-row[data-section-type="calendar"] { --db-sec-hue: #e0b1a2; --db-sec-glow: rgba(224, 177, 162, 0.12); }
+.apex-dashboard-root[data-theme="aqua"] .dashboard-section-row[data-section-type="heatmap"] { --db-sec-hue: #e0a8b8; --db-sec-glow: rgba(224, 168, 184, 0.12); }
+.apex-dashboard-root[data-theme="aqua"] .dashboard-section-row[data-section-type="dataview"] { --db-sec-hue: #a9c8c8; --db-sec-glow: rgba(169, 200, 200, 0.12); }
+.apex-dashboard-root[data-theme="aqua"] .dashboard-section-row[data-section-type="web"] { --db-sec-hue: #aeb8d8; --db-sec-glow: rgba(174, 184, 216, 0.12); }
+.apex-dashboard-root[data-theme="aqua"] .dashboard-section-row[data-section-type="images"] { --db-sec-hue: #dca8b8; --db-sec-glow: rgba(220, 168, 184, 0.12); }
+.apex-dashboard-root[data-theme="aqua"] .dashboard-section-row[data-section-type="videos"] { --db-sec-hue: #c8b3d8; --db-sec-glow: rgba(200, 179, 216, 0.12); }
+
+.theme-dark .apex-dashboard-root[data-theme="matcha"] {
+	--db-bg: #1a2014;
+	--db-bg-section: transparent;
+	--db-bg-card: rgba(110, 148, 52, 0.10);
+	--db-bg-card-hover: rgba(110, 148, 52, 0.18);
+	--db-bg-sidebar: transparent;
+	--db-bg-input: rgba(110, 148, 52, 0.06);
+	--db-bg-btn: rgba(110, 148, 52, 0.10);
+	--db-bg-btn-hover: rgba(110, 148, 52, 0.18);
+	--db-bg-banner: rgba(200, 169, 106, 0.08);
+	--db-bg-overlay: linear-gradient(135deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.3) 100%);
+	--db-bg-hover: rgba(255, 255, 255, 0.04);
+	--db-bg-hover-strong: rgba(255, 255, 255, 0.07);
+	--db-bg-add-section: rgba(110, 148, 52, 0.06);
+	--db-bg-drop-indicator: rgba(110, 148, 52, 0.14);
+
+	--db-border: rgba(184, 212, 174, 0.12);
+	--db-border-card: rgba(184, 212, 174, 0.18);
+	--db-border-section: transparent;
+	--db-border-sidebar: transparent;
+	--db-border-input: rgba(184, 212, 174, 0.12);
+	--db-border-input-focus: #b8d4ae;
+	--db-border-btn: rgba(184, 212, 174, 0.14);
+	--db-border-add-section: rgba(184, 212, 174, 0.20);
+
+	--db-text: #ece7d5;
+	--db-text-muted: #c2bda6;
+	--db-text-faint: #8f8b74;
+	--db-text-inverse: rgba(30, 36, 22, 0.92);
+	--db-text-inverse-muted: rgba(30, 36, 22, 0.55);
+
+	--db-accent: #a4c86a;
+	--db-accent-light: #c8e096;
+	--db-danger: #ff5c7a;
+
+	--db-shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3);
+	--db-shadow-card-hover: 0 6px 20px rgba(0, 0, 0, 0.25);
+	--db-backdrop-blur: none;
+
+	--db-radius-sm: 10px;
+	--db-radius-md: 16px;
+	--db-radius-lg: 20px;
+
+	--db-font: 'Nunito', 'LXGW WenKai', var(--font-interface);
+	--db-progress-from: #a4c86a;
+	--db-progress-to: #c8a96a;
+	--db-checkbox: #a4c86a;
+	--db-quote-border: #c8a96a;
+	--db-link: #a4c86a;
+
+	--db-bg-modal: #20261a;
+	--db-bg-modal-raised: rgba(255, 255, 255, 0.04);
+
+	--db-aurora-bg: linear-gradient(135deg,
+		#1a2014 0%,
+		rgba(110, 148, 52, 0.16) 18%,
+		rgba(200, 169, 106, 0.10) 38%,
+		#1a2014 52%,
+		rgba(79, 112, 40, 0.18) 70%,
+		#1c2316 86%,
+		#1a2014 100%);
+	--db-aurora-size: 250% 250%;
+	--db-aurora-speed: 26s;
+}
+
+.apex-dashboard-root {
+	--background-modifier-form-field: var(--db-bg-input);
+	--background-modifier-form-field-hover: var(--db-bg-input);
+}
+
+.dashboard-library-config-modal .dashboard-modal-input.dashboard-modal-input:not(.dashboard-section-name-input):is(input[type='text'], input[type='search']),
+.modal--dashboard .dashboard-modal .dashboard-modal-input.dashboard-modal-input:not(.dashboard-section-name-input):is(input[type='text'], input[type='search']),
+.modal-container .dashboard-workspace-path-input.dashboard-workspace-path-input,
+.modal-container .dashboard-settings-folder-input.dashboard-settings-folder-input {
+	border: 1px solid var(--db-border-input, var(--background-modifier-border)) !important;
+	border-radius: var(--db-radius-sm, 6px) !important;
+	padding: 8px 12px !important;
+	background: var(--db-bg-input, var(--background-modifier-form-field)) !important;
+	box-shadow: none !important;
+	font-family: var(--db-font, var(--font-interface)) !important;
+	color: var(--db-text, var(--text-normal)) !important;
+}
+
+.dashboard-library-config-modal .dashboard-modal-input.dashboard-modal-input:is(input[type='text'], input[type='search']):focus,
+.modal--dashboard .dashboard-modal .dashboard-modal-input.dashboard-modal-input:is(input[type='text'], input[type='search']):focus,
+.modal-container .dashboard-workspace-path-input.dashboard-workspace-path-input:focus,
+.modal-container .dashboard-settings-folder-input.dashboard-settings-folder-input:focus {
+	border-color: var(--db-border-input-focus, var(--interactive-accent)) !important;
+	box-shadow: none !important;
+}
+
+.dashboard-confirm-overlay .dashboard-confirm-card .dashboard-prompt-input.dashboard-prompt-input {
+	padding: 8px 12px !important;
+	border: 1px solid var(--db-border-input, var(--background-modifier-border)) !important;
+	border-radius: 8px !important;
+	background: var(--db-bg-input, var(--background-modifier-form-field)) !important;
+	box-shadow: none !important;
+	font-family: var(--db-font, var(--font-interface)) !important;
+}
+
+.apex-dashboard-root .dashboard-task-input.dashboard-task-input {
+	padding: 4px 0 !important;
+	border-radius: 0 !important;
+	font-family: var(--db-font) !important;
+}
+
+.apex-dashboard-root .dashboard-library-search.dashboard-library-search,
+.apex-dashboard-root .dashboard-library-table-edit-input.dashboard-library-table-edit-input,
+.apex-dashboard-root .dashboard-dataview-search.dashboard-dataview-search,
+.apex-dashboard-root .dashboard-expense-ledger-search.dashboard-expense-ledger-search {
+	padding: 4px 10px !important;
+	border-radius: var(--db-radius-sm, 6px) !important;
+	border: 1px solid var(--db-border-input, rgba(255, 255, 255, 0.08)) !important;
+	font-family: var(--db-font, var(--font-interface)) !important;
+}
+
+.apex-dashboard-root .dashboard-library-table-edit-input.dashboard-library-table-edit-input {
+	padding: 2px 4px !important;
+	border-radius: 3px !important;
+	border: 1px solid var(--db-accent, var(--interactive-accent)) !important;
+}
+
+.apex-dashboard-root .dashboard-dataview-search.dashboard-dataview-search {
+	padding: 3px 8px !important;
+}
+
+.apex-dashboard-root .dashboard-expense-ledger-search.dashboard-expense-ledger-search {
+	padding: 4px 8px !important;
+}
+
+.apex-dashboard-root .dashboard-section-rename-input.dashboard-section-rename-input,
+.apex-dashboard-root .dashboard-title-edit-input.dashboard-title-edit-input {
+	padding: 2px 6px !important;
+	border-radius: var(--db-radius-sm) !important;
+	border: 1px solid var(--db-border-input-focus) !important;
+	font-family: var(--db-font) !important;
+}
+
+.apex-dashboard-root .dashboard-ticktick-rename-input.dashboard-ticktick-rename-input {
+	padding: 1px 4px !important;
+	border-radius: 4px !important;
+	border: 1px solid var(--db-accent, var(--interactive-accent)) !important;
+}
+
+.apex-dashboard-root .dashboard-media-filter-date.dashboard-media-filter-date {
+	padding: 4px 6px !important;
+	border-radius: var(--db-radius-sm, 6px) !important;
+	border: 1px solid var(--db-border-input, rgba(255, 255, 255, 0.08)) !important;
+}
+
+.apex-dashboard-root .dashboard-media-filter-folder.dashboard-media-filter-folder {
+	padding: 4px 8px !important;
+	border-radius: var(--db-radius-sm, 6px) !important;
+	border: 1px solid var(--db-border-input, rgba(255, 255, 255, 0.08)) !important;
+}
+
+.apex-dashboard-root .dashboard-sidebar-music-search-input.dashboard-sidebar-music-search-input,
+.apex-dashboard-root .dashboard-sidebar-music-import-input.dashboard-sidebar-music-import-input {
+	padding: 5px 8px !important;
+	border-radius: var(--db-radius-sm, 6px) !important;
+	border: 1px solid var(--db-border-card) !important;
+	background: var(--db-bg-section, rgba(127, 127, 127, 0.08)) !important;
+	font-family: var(--db-font) !important;
+}
+
+.dashboard-quicknote .dashboard-quicknote-capture .dashboard-quicknote-capture-input.dashboard-quicknote-capture-input {
+	padding: 0 10px 0 32px !important;
+	border-radius: var(--db-radius-sm) !important;
+	border: none !important;
+	font-family: var(--db-font, var(--font-interface)) !important;
+}
+
+.modal--dashboard .dashboard-reading-book-input.dashboard-reading-book-input,
+.apex-dashboard-root .dashboard-reading-book-input.dashboard-reading-book-input {
+	padding: 8px 12px !important;
+	border-radius: 8px !important;
+	border: 1px solid var(--db-border, rgba(0, 0, 0, 0.15)) !important;
+	font-family: var(--db-font) !important;
+}
+
+.modal.dashboard-section-picker-modal { width: min(760px, calc(100vw - 24px)); max-width: calc(100vw - 24px); max-height: calc(100vh - 32px); padding: 0; overflow: hidden; background: var(--db-bg-modal, var(--background-primary)) !important; border: 1px solid var(--db-border-card, var(--background-modifier-border)) !important; box-shadow: var(--shadow-l) !important; }
+.dashboard-section-picker-modal .modal-content { overflow: hidden; display: flex; min-height: 0; padding: 0; }
+.dashboard-section-picker.dashboard-modal { display: flex; flex-direction: column; width: 100%; min-height: 0; max-height: calc(100vh - 88px); padding: 0; border: 0; box-shadow: none; }
+.dashboard-section-picker .dashboard-modal-header { display: flex; flex-direction: column; align-items: stretch; gap: 12px; flex: 0 0 auto; padding: 18px 20px 12px; }
+.dashboard-section-picker-search { width: 100%; }
+.dashboard-section-picker-categories { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 20px 12px; }
+.dashboard-section-picker-categories button { font-size: var(--font-ui-small); height: auto; min-height: 30px; padding: 5px 9px; box-shadow: none; }
+.dashboard-section-picker-categories button.is-active { color: var(--db-accent, var(--interactive-accent)); background: var(--background-modifier-hover); }
+.dashboard-section-picker-options { overflow-y: auto; min-height: 0; padding: 0 20px; flex: 1 1 auto; }
+.dashboard-section-picker .dashboard-section-type-group h4 { margin: 12px 0 9px; font-size: var(--font-ui-small); font-weight: 600; }
+.dashboard-section-picker .dashboard-add-section-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; margin: 0 0 16px; }
+.dashboard-section-picker button.dashboard-add-section-card { position: relative; height: 82px; min-width: 0; box-shadow: none; padding: 10px 6px; white-space: normal; }
+.dashboard-section-picker .dashboard-add-section-card-name { font-size: var(--font-ui-small); line-height: 1.4; }
+.dashboard-section-picker .dashboard-add-section-card.active::after { content: '✓'; position: absolute; top: 3px; right: 7px; color: var(--db-accent, var(--interactive-accent)); font-size: 13px; }
+.dashboard-section-picker .dashboard-add-section-card:focus-visible { outline: 2px solid var(--db-accent, var(--interactive-accent)); outline-offset: 2px; }
+.dashboard-section-picker-footer { flex: 0 0 auto; padding: 12px 20px 16px; border-top: 1px solid var(--db-border-card, var(--background-modifier-border)); background: var(--db-bg-card, var(--background-primary)); }
+.dashboard-section-picker-selection { margin-bottom: 8px; font-size: var(--font-ui-small); color: var(--text-muted); }
+.dashboard-section-picker .dashboard-add-section-name-row { display: flex; align-items: center; gap: 10px; margin: 0; }
+.dashboard-section-picker .dashboard-modal-footer { margin-top: 12px; padding: 0; border: 0; }
+.dashboard-section-picker-empty { padding: 30px 0; color: var(--text-muted); }
+.dashboard-section-picker-error { color: var(--text-error); font-size: var(--font-ui-small); margin-bottom: 6px; }
+.dashboard-section-picker-error:empty { display: none; }
+.dashboard-section-header-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.dashboard-section-header-actions .dashboard-section-action { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; min-width: 30px; padding: 5px; border: 0; box-shadow: none; background: transparent; color: var(--db-text-muted, var(--text-muted)); opacity: 1; }
+.dashboard-section-header-actions .dashboard-section-action:hover { background: var(--background-modifier-hover); color: var(--db-text, var(--text-normal)); }
+.dashboard-section-action svg { width: 17px; height: 17px; flex: 0 0 auto; }
+.dashboard-section-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 12px 10px; }
+.dashboard-section-toolbar:empty { display: none; }
+.dashboard-section-toolbar .dashboard-section-action { width: auto; height: auto; min-height: 30px; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; opacity: 1; }
+.dashboard-section-toolbar .dashboard-section-action::after { content: attr(aria-label); font-size: var(--font-ui-small); }
+.dashboard-section-row--collapsed > .dashboard-section-toolbar { display: none; }
+.dashboard-section-focus .dashboard-main { height: 100%; min-height: 0; }
+.dashboard-section-focus .dashboard-kanban-wrapper { width: 100%; }
+.dashboard-section-focus .dashboard-kanban { padding: 16px; }
+.dashboard-section-focus .dashboard-section-row { width: 100%; max-height: none !important; height: auto !important; margin-top: 12px; }
+.dashboard-section-focus .dashboard-section-grip, .dashboard-section-focus .dashboard-section-resize-handle, .dashboard-section-focus .dashboard-section-pair-handle { display: none; }
+.modal.dashboard-section-focus-modal { width: min(1280px, calc(100vw - 32px)); max-width: calc(100vw - 32px); height: min(900px, calc(100vh - 32px)); background: var(--db-bg-modal, var(--background-primary)) !important; border: 1px solid var(--db-border-card, var(--background-modifier-border)) !important; box-shadow: var(--shadow-l) !important; }
+.dashboard-section-focus-modal .modal-content { overflow-y: auto; padding: 18px; }
+@media (max-width: 520px) {
+	.dashboard-section-picker .dashboard-modal-header, .dashboard-section-picker-footer { padding-left: 12px; padding-right: 12px; }
+	.dashboard-section-picker-options { padding: 0 12px; }
+	.dashboard-section-picker-categories { padding-left: 12px; padding-right: 12px; gap: 4px; }
+	.dashboard-section-picker-categories button { font-size: 12px; }
+	.dashboard-section-picker .dashboard-add-section-grid { grid-template-columns: repeat(auto-fill, minmax(82px, 1fr)); }
+	.dashboard-section-header-actions .dashboard-section-action { width: 36px; height: 36px; }
+}
+
+.modal--dashboard .dashboard-reading-book-manual-input.dashboard-reading-book-manual-input,
+.apex-dashboard-root .dashboard-reading-book-manual-input.dashboard-reading-book-manual-input {
+	padding: 4px 8px !important;
+	border-radius: 6px !important;
+	border: 1px solid var(--db-border, rgba(0, 0, 0, 0.15)) !important;
+	font-family: var(--db-font) !important;
+}
+
+@media (max-width: 520px) {
+	.dashboard-theme-studio-slider-row,
+	.dashboard-theme-studio-fontscale-row,
+	.dashboard-theme-studio-size-row { flex-wrap: wrap; }
+	.dashboard-theme-studio-slider-row > .dashboard-theme-studio-color-label,
+	.dashboard-theme-studio-fontscale-row > .dashboard-theme-studio-color-label,
+	.dashboard-theme-studio-size-row > .dashboard-theme-studio-color-label {
+		flex: 1 0 100%;
+		min-width: 0;
+	}
 }

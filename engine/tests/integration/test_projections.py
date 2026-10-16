@@ -4,6 +4,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from okf_workspace.notes.create import NoteService
 from okf_workspace.okf.templates import initialize_vault
 from okf_workspace.projections.navigation import rebuild_root_index
@@ -67,6 +69,35 @@ def test_task_projection_ignores_runtime_instruction_files(tmp_path: Path) -> No
     instruction.write_text("- [ ] #task 这不是用户任务\n", encoding="utf-8")
 
     assert collect_tasks(vault) == []
+
+
+@pytest.mark.parametrize("global_filter, expected", [("", ["#todo A", "B"]), ("#todo", ["A"])])
+def test_task_projection_uses_exported_filter_and_excludes_workbenches(
+    tmp_path: Path, global_filter: str, expected: list[str]
+) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    settings = vault / "system/views/Tasks.md"
+    settings.write_text(
+        '---\ntype: System View\ntask_projection:\n  version: 1\n'
+        f'  global_filter: "{global_filter}"\n---\n',
+        encoding="utf-8",
+    )
+    (vault / "notes.md").write_text("- [ ] #todo A\n- [ ] B\n", encoding="utf-8")
+    (vault / "中文工作台.md").write_text(
+        "---\ndashboard: true\n---\n- [ ] #todo Hidden\n", encoding="utf-8"
+    )
+    assert [task.text for task in collect_tasks(vault)] == expected
+
+
+def test_task_projection_reports_unsupported_global_query(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "vault")
+    (vault / "system/views/Tasks.md").write_text(
+        '---\ntype: System View\ntask_projection:\n  version: 1\n'
+        '  global_filter: ""\n  global_query: "not done"\n---\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="global query"):
+        collect_tasks(vault)
 
 
 def test_unchanged_navigation_projection_does_not_rewrite_root_index(

@@ -4,23 +4,44 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "tsc --noEmit",
+    "build:tasks": "node build-tasks.mjs",
+    "pretest": "npm run build:tasks",
+    "check": "tsc --noEmit && tsc --project tasks-integration/tsconfig.json",
     "test": "vitest run",
-    "build": "tsc --noEmit && node esbuild.mjs && node build-assets.mjs"
+    "build": "npm run build:tasks && tsc --noEmit && node esbuild.mjs && node build-assets.mjs"
   },
   "devDependencies": {
     "@codemirror/state": "6.5.0",
     "@codemirror/view": "6.38.6",
+    "@types/markdown-it": "^14.2.0",
+    "@types/mustache": "^4.2.6",
     "@types/node": "^24.0.0",
     "esbuild": "^0.28.2",
+    "esbuild-svelte": "^0.9.5",
     "fake-indexeddb": "^6.2.5",
+    "moment": "^2.31.0",
     "obsidian": "1.13.1",
+    "sass": "^1.105.1",
+    "source-map-js": "^1.2.2",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   },
   "dependencies": {
+    "@floating-ui/dom": "^1.7.6",
+    "async-mutex": "^0.5.0",
+    "boon-js": "^2.0.5",
     "chart.js": "^4.5.1",
+    "chrono-node": "^2.3.9",
+    "eventemitter2": "^6.4.5",
+    "flatpickr": "^4.6.13",
+    "i18next": "^24.2.1",
     "lunar-typescript": "^1.8.6",
+    "markdown-it": "^15.0.2",
+    "mustache": "^4.2.0",
+    "mustache-validator": "^0.2.0",
+    "rrule": "^2.8.1",
+    "safe-regex2": "^5.1.1",
+    "svelte": "^5.57.0",
     "yaml": "^2.9.0"
   }
 }

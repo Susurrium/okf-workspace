@@ -3,6 +3,7 @@ import { App, TFile } from 'obsidian';
 import type { DashboardSettings, DashboardCard, DashboardColumn, DashboardData, TaskItem, DocNode, QuickAction, BannerData, CardType } from './types';
 import { parse, serialize, generateDefaultMarkdown } from './parser';
 import { getRegisteredApexHost } from './host';
+import { taskSourceKind } from './task-source';
 import { t } from './i18n';
 import {
 	type TaskPath,
@@ -16,6 +17,10 @@ import {
 	promoteToTopLevel,
 	recalcChecked,
 	archiveCompleted,
+	serializeTasksForNote,
+	getTaskByPath,
+	transitionTaskItem,
+	insertAt,
 } from './task-tree';
 import {
 	type DocPath,
@@ -36,6 +41,12 @@ import type { DashboardUpdateSource } from './render-update';
 type DataCallback = (data: DashboardData, source: DashboardUpdateSource) => void;
 
 type TaskDropMode = 'before' | 'after' | 'nest';
+
+interface SectionConfigPatch {
+	columnId: string;
+	previous: Record<string, unknown>;
+	next: Record<string, unknown>;
+}
 
 interface SharedSyncEntry {
 	engine: SyncEngine;
@@ -100,6 +111,7 @@ export class SyncEngine {
 	private file: TFile | null = null;
 	private data: DashboardData | null = null;
 	private baseData: DashboardData | null = null;
+	private readonly extensionConfigRevisions = new Map<string, number>();
 	private debounceTimer: number | null = null;
 	private readonly debounceMs = 300;
 	private writeQueue: Promise<void> = Promise.resolve();
@@ -246,22 +258,35 @@ export class SyncEngine {
 		};
 	}
 
-	async archiveTasks(columnName: string): Promise<void> {
+	async archiveTasks(columnName: string, keepInWorkbench = false): Promise<void> {
 		if (!this.data) return;
-
+		const archive: string[] = [];
 		this.data = {
 			...this.data,
 			columns: this.data.columns.map((col) => {
-				if (col.name !== columnName) return col;
+				if (!this.columnMatches(col, columnName)) return col;
 				return {
 					...col,
 					cards: col.cards.map((card) => {
 						const { archived, remaining } = archiveCompleted(card.tasks);
+						if (keepInWorkbench && archived.length) archive.push(`### ${card.title}\n${serializeTasksForNote(archived)}`);
 						return archived.length === 0 ? card : { ...card, tasks: remaining };
 					}),
 				};
 			}),
 		};
+		if (archive.length) this.data = { ...this.data, bodyPreamble: [this.data.bodyPreamble,
+			`### 清单归档 · ${new Date().toISOString()}\n${archive.join('\n\n')}`].filter(Boolean).join('\n\n') };
+		await this.writeToDisk();
+	}
+
+	async ensureTaskIdentities(cardId: string): Promise<void> {
+		if (!this.data) return;
+		const identify = (tasks: TaskItem[]): TaskItem[] => tasks.map(task => ({ ...task,
+			text: /\s+\^[a-zA-Z0-9-]+\s*$/u.test(task.text) ? task.text : `${task.text} ^task-${crypto.randomUUID()}`,
+			children: task.children ? identify(task.children) : undefined,
+		}));
+		this.data = this.mapCardTasks(this.data, cardId, identify);
 		await this.writeToDisk();
 	}
 
@@ -269,18 +294,19 @@ export class SyncEngine {
 		if (!this.data) return;
 
 		this.data = this.mapCardTasks(this.data, cardId, (tasks) => {
-			let next = updateTaskAt(tasks, taskPath, (t) => {
-				if (t.children && t.children.length > 0) {
-					return { ...t, checked, children: t.children.map(c => ({ ...c, checked })) };
-				}
-				return { ...t, checked };
-			});
+			const target = getTaskByPath(tasks, taskPath);
+			if (!target) return tasks;
+			const replacements = transitionTaskItem(target, checked);
+			let next = removeTaskAt(tasks, taskPath).tasks;
+			for (let index = 0; index < replacements.length; index++) {
+				next = insertAt(next, taskPath.slice(0, -1), taskPath.at(-1)! + index, replacements[index]!);
+			}
 
 			for (let depth = taskPath.length - 1; depth > 0; depth--) {
 				next = updateTaskAt(next, taskPath.slice(0, depth), recalcChecked);
 			}
 
-			if (checked && taskPath.length === 1) {
+			if (checked && replacements.length === 1 && taskPath.length === 1) {
 				const target = next[taskPath[0]!];
 				if (target) {
 					const without = removeTaskAt(next, taskPath).tasks;
@@ -436,7 +462,8 @@ export class SyncEngine {
 		if (!this.data) return;
 
 		this.data = this.mapCardTasks(this.data, cardId, (tasks) =>
-			updateTaskAt(tasks, taskPath, (t) => ({ ...t, reminder })));
+			updateTaskAt(tasks, taskPath, (t) => ({ ...t, reminder,
+				text: reminder && !/\s+\^[\w-]+\s*$/u.test(t.text) ? `${t.text} ^task-${crypto.randomUUID()}` : t.text })));
 		await this.writeToDisk();
 	}
 
@@ -497,8 +524,12 @@ export class SyncEngine {
 		await this.writeToDisk();
 	}
 
-	async addColumn(name: string, sectionType?: string): Promise<void> {
-		if (!this.data) return;
+	async addColumn(name: string, sectionType?: string, extensionConfig?: Record<string, unknown>, creationId?: string): Promise<void> {
+		if (!this.data) throw new Error('工作台尚未读取，无法添加分区');
+		if (creationId && this.data.columns.some(column => column.id === creationId)) {
+			await this.writeToDisk();
+			return;
+		}
 		const uniqueName = this.uniqueColumnName(name);
 
 		// New library sections start unfiltered. An earlier default pinned a
@@ -516,7 +547,7 @@ export class SyncEngine {
 
 		this.data = {
 			...this.data,
-			columns: [...this.data.columns, { id: `section-${Date.now().toString(36)}`, name: uniqueName, color: '#6366f1', sectionType, cards: [], libraryConfig }],
+			columns: [...this.data.columns, { id: creationId ?? `section-${Date.now().toString(36)}`, name: uniqueName, color: '#6366f1', sectionType, cards: [], libraryConfig, ...(extensionConfig ? { extensionConfig } : {}) }],
 		};
 		await this.writeToDisk();
 	}
@@ -587,16 +618,47 @@ export class SyncEngine {
 		await this.writeToDisk();
 	}
 
-	async updateExtensionConfig(columnName: string, config: Record<string, unknown>): Promise<void> {
-		if (!this.data) return;
+	async updateExtensionConfig(columnName: string, config: Record<string, unknown>, baseline?: Record<string, unknown>): Promise<void> {
+		if (!this.data || !this.file) throw new Error('工作台尚未读取，无法保存分区配置');
+		const column = this.data.columns.find(col => this.columnMatches(col, columnName));
+		if (!column) throw new Error('分区已经变化，请重新读取后再保存');
+		const previous = column.extensionConfig;
+		const original = baseline ?? previous ?? {};
+		const desired = { ...previous };
+		for (const key of new Set([...Object.keys(original), ...Object.keys(config)])) {
+			if (JSON.stringify(original[key]) === JSON.stringify(config[key])) continue;
+			if (JSON.stringify(previous?.[key]) !== JSON.stringify(original[key]) && JSON.stringify(previous?.[key]) !== JSON.stringify(config[key])) throw new Error(`分区配置 ${key} 存在保存冲突，请重新读取后再修改`);
+			if (key in config) desired[key] = config[key];
+			else delete desired[key];
+		}
+		const revision = (this.extensionConfigRevisions.get(columnName) ?? 0) + 1;
+		this.extensionConfigRevisions.set(columnName, revision);
 
 		this.data = {
 			...this.data,
 			columns: this.data.columns.map(col =>
-				this.columnMatches(col, columnName) ? { ...col, extensionConfig: config } : col
+				this.columnMatches(col, columnName) ? { ...col, extensionConfig: desired } : col
 			),
 		};
-		await this.writeToDisk();
+		try {
+			await this.writeToDisk(false, { columnId: column.id ?? column.name, previous: original, next: config });
+		} catch (error) {
+			if (this.data && this.data !== this.baseData && this.extensionConfigRevisions.get(columnName) === revision) {
+				this.data = { ...this.data, columns: this.data.columns.map(col => {
+					if (!this.columnMatches(col, columnName)) return col;
+					const restored = { ...col.extensionConfig };
+					for (const key of new Set([...Object.keys(previous ?? {}), ...Object.keys(config)])) {
+						if (JSON.stringify(previous?.[key]) === JSON.stringify(config[key]) ||
+							JSON.stringify(restored[key]) !== JSON.stringify(config[key])) continue;
+						if (previous && key in previous) restored[key] = previous[key];
+						else delete restored[key];
+					}
+					return { ...col, extensionConfig: restored };
+				}) };
+				this.notifyCallbacks('external');
+			}
+			throw error;
+		}
 	}
 
 	async updateWebConfig(columnName: string, config: import('./types').WebEmbedConfig): Promise<void> {
@@ -1109,9 +1171,18 @@ export class SyncEngine {
 
 	private async load(): Promise<void> {
 		if (!this.file) return;
-
-		const content = await this.app.vault.read(this.file);
+		const file = this.file;
+		const dataAtRead = this.data;
+		const baseAtRead = this.baseData;
+		const content = await this.app.vault.read(file);
+		if (file !== this.file) return;
+		// 文件读取期间可能已经添加分区或完成写入；旧回声必须重新读取。
+		if (dataAtRead !== this.data || baseAtRead !== this.baseData || this.writeQueuePending > 0 || this.deferredWriteTimer !== null) {
+			this.onFileModify();
+			return;
+		}
 		const newData = parse(content);
+		this.assertWorkbenchSource(this.file, newData);
 
 		// Skip the re-render when the on-disk data is logically equivalent to what
 		// we already hold. Our own writes echo back through the file watcher, and a
@@ -1132,12 +1203,12 @@ export class SyncEngine {
 	 * already updated in place and only need the new state flushed to disk,
 	 * without triggering a full-board re-render.
 	 */
-	private async writeToDisk(silent = false): Promise<void> {
+	private async writeToDisk(silent = false, configPatch?: SectionConfigPatch): Promise<void> {
 		if (!this.data || !this.file) return;
 
 		const fileRef = this.file;
 		this.writeQueuePending++;
-		this.writeQueue = this.writeQueue.then(async () => {
+		const operation = this.writeQueue.then(async () => {
 			try {
 				// Serialize at EXECUTION time, not enqueue time: content captured
 				// earlier can be stale by the time earlier queued writes drain,
@@ -1145,6 +1216,7 @@ export class SyncEngine {
 				// between (external inserts included).
 				const current = await this.app.vault.read(fileRef);
 				const remote = parse(current);
+				this.assertWorkbenchSource(fileRef, remote);
 				if (this.baseData && serialize(remote) !== serialize(this.baseData)) {
 					const merged = mergeBoardData(this.baseData, this.data!, remote);
 					if (merged.conflicts.length > 0) {
@@ -1152,7 +1224,7 @@ export class SyncEngine {
 						this.data = remote;
 						this.baseData = remote;
 						this.notifyCallbacks('external');
-						return;
+						throw new Error('工作台内容已变化，存在保存冲突，请重新读取后再修改');
 					}
 					this.data = merged.data;
 				}
@@ -1161,23 +1233,61 @@ export class SyncEngine {
 				// Safety: skip write if new content is drastically smaller
 				if (current.length > 0 && content.length < current.length * 0.3) {
 					console.warn('Dashboard write skipped: new content significantly smaller than current file');
-					return;
+					throw new Error('工作台内容缩减异常，已停止保存');
 				}
 
 				// Backup current file before overwriting
 				await this.createBackup(current);
 
-				await this.app.vault.modify(fileRef, content);
-				this.baseData = parse(content);
+				if (configPatch) {
+					await this.app.fileManager.processFrontMatter(fileRef, (value: unknown) => {
+						if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('工作台 YAML 必须为对象');
+						const metadata = value as Record<string, unknown>;
+						this.assertWorkbenchSource(fileRef, { ...remote, sourceFrontmatter: metadata });
+						if (!Array.isArray(metadata.columns)) throw new Error('工作台分区定义已经变化');
+						const columns = metadata.columns as unknown[];
+						const matches = columns.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
+							.filter(item => (item.id ?? item.name) === configPatch.columnId);
+						if (matches.length !== 1) throw new Error('分区身份已经变化，请重新读取后再保存');
+						const target = matches[0]!;
+						if (target.config !== undefined && (!target.config || typeof target.config !== 'object' || Array.isArray(target.config))) throw new Error('分区配置必须为对象');
+						const currentConfig = (target.config ?? {}) as Record<string, unknown>;
+						const updated = { ...currentConfig };
+						for (const key of new Set([...Object.keys(configPatch.previous), ...Object.keys(configPatch.next)])) {
+							if (JSON.stringify(configPatch.previous[key]) === JSON.stringify(configPatch.next[key])) continue;
+							if (JSON.stringify(currentConfig[key]) !== JSON.stringify(configPatch.previous[key]) && JSON.stringify(currentConfig[key]) !== JSON.stringify(configPatch.next[key])) throw new Error(`分区配置 ${key} 存在保存冲突，请重新读取后再修改`);
+							if (key in configPatch.next) updated[key] = configPatch.next[key];
+							else delete updated[key];
+						}
+						target.config = updated;
+					});
+					const persisted = parse(await this.app.vault.read(fileRef));
+					const merged = mergeBoardData(remote, this.data!, persisted);
+					this.data = merged.data;
+					this.baseData = persisted;
+					if (merged.conflicts.length) throw new Error(`配置已写入，其他工作台内容发生冲突：${merged.conflicts.join('、')}`);
+				} else {
+					await this.app.vault.modify(fileRef, content);
+					this.baseData = parse(content);
+				}
 			} catch (err) {
 				console.error('Dashboard sync write failed:', err);
+				throw err;
 			} finally {
 				this.writeQueuePending--;
 			}
 		});
+		this.writeQueue = operation.catch(() => undefined);
+		await operation;
 
 		if (!silent) {
 			this.notifyCallbacks('local');
+		}
+	}
+
+	private assertWorkbenchSource(file: TFile, data: DashboardData): void {
+		if (getRegisteredApexHost()?.checklistsInWorkbenchOnly && taskSourceKind(file.path, data.sourceFrontmatter ?? {}) !== 'checklists') {
+			throw new Error('清单只能读写带 dashboard: true 的工作台文件');
 		}
 	}
 

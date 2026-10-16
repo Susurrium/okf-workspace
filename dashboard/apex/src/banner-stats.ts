@@ -4,6 +4,7 @@ import { momentOf, nowMoment, parseStrict } from './datetime';
 import { getDailyNotesConfig } from './daily-notes';
 import { getHabitService } from './habit-service';
 import { t } from './i18n';
+import { getRegisteredApexHost } from './host';
 
 export const DEFAULT_STATS_CONFIG: BannerStatsConfig = {
 	showDetails: true,
@@ -284,7 +285,7 @@ export function renderBannerStats(
 	applyBackdropVars(parent, resolved);
 	applyAccentVar(parent, resolved.accent);
 	const el = parent.createDiv({ cls: 'dashboard-banner-stats' });
-	renderStatColumns(el, resolved, computeBannerStats(app, config), true);
+	renderUnifiedStatColumns(el, resolved, app, true);
 	return el;
 }
 
@@ -297,7 +298,28 @@ export function refreshBannerStats(container: HTMLElement, config: BannerStatsCo
 		applyAccentVar(bannerEl, resolved.accent);
 	}
 	container.empty();
-	renderStatColumns(container, resolved, computeBannerStats(app, config), false);
+	renderUnifiedStatColumns(container, resolved, app, false);
+}
+
+const taskStatsRevision = new WeakMap<HTMLElement, number>();
+function renderUnifiedStatColumns(container: HTMLElement, config: BannerStatsConfig, app: App, animate: boolean): void {
+	const host = getRegisteredApexHost();
+	if (host?.app !== app || !host.taskStatistics) {
+		renderStatColumns(container, config, computeBannerStats(app, config), animate);
+		return;
+	}
+	const revision = (taskStatsRevision.get(container) ?? 0) + 1;
+	taskStatsRevision.set(container, revision);
+	container.createSpan({ text: '读取待办统计…' });
+	void host.taskStatistics(config.excludeFolders).then(tasks => {
+		if (!container.isConnected || taskStatsRevision.get(container) !== revision) return;
+		container.empty();
+		renderStatColumns(container, config, { ...computeBannerStats(app, config), ...tasks }, animate);
+	}).catch(error => {
+		if (taskStatsRevision.get(container) !== revision) return;
+		container.empty();
+		container.createSpan({ text: error instanceof Error ? error.message : '待办统计读取失败' });
+	});
 }
 
 /** Accent lives on the banner element so both the ::after tint (pseudo of the

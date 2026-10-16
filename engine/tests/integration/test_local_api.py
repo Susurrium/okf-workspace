@@ -23,8 +23,71 @@ from okf_workspace.importers import DocumentImporter
 from okf_workspace.importers.models import ParserExport, ParserName
 from okf_workspace.notes import NoteService
 from okf_workspace.okf.frontmatter import read_document
+from okf_workspace.okf.templates import initialize_vault
 
 FEED_FIXTURES = Path(__file__).parents[1] / "fixtures" / "feeds"
+
+
+def test_project_category_api_preserves_identity_and_rejects_stale_edits(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "category-vault")
+    client, headers, _ = _client(vault, tmp_path)
+    created = client.post("/projects", headers=headers, json={
+        "title": "类别接口", "slug": "category-api", "project_category": "科研",
+    })
+    assert created.status_code == 200, created.text
+    path = vault / "projects/category-api/project.md"
+    body = read_document(path).body
+    edited = client.post("/projects/category-api/category", headers=headers, json={
+        "project_category": "工具", "expected_category": "科研", "check_expected": True,
+    })
+    assert edited.status_code == 200, edited.text
+    assert read_document(path).body == body
+    before = path.read_bytes()
+    stale = client.post("/projects/category-api/category", headers=headers, json={
+        "project_category": "生活", "expected_category": "科研", "check_expected": True,
+    })
+    assert stale.status_code == 400
+    assert path.read_bytes() == before
+    denied = client.post("/projects/category-api/category", headers={
+        **headers, "x-okf-vault-fingerprint": "different",
+    }, json={"project_category": None})
+    assert denied.status_code == 409
+    assert path.read_bytes() == before
+    assert client.post("/projects/category-api/category", headers=headers,
+                        json={"project_category": None}).status_code == 200
+    assert "project_category" not in read_document(path).frontmatter
+
+
+def test_original_only_source_can_save_deferred_use_but_requires_text_for_generation(
+    tmp_path: Path,
+) -> None:
+    vault = tmp_path / "vault"
+    initialize_vault(vault)
+    client, headers, _paths = _client(vault, tmp_path, semantic_enabled=True)
+    stored = client.post(
+        "/documents/import", headers=headers,
+        data={"intent": "source", "action": "store"},
+        files={"file": ("manual.pdf", b"synthetic-pdf", "application/pdf")},
+    )
+    assert stored.status_code == 200, stored.text
+    path = stored.json()["outputs"]["source"]
+    route = client.post(
+        f"/documents/sources/{path}/route", headers=headers,
+        json={"intent": "learn", "generate": False},
+    )
+    assert route.status_code == 200, route.text
+    assert route.json()["source_text"] is None
+    assert route.json()["routed_target"] is None
+    before = (vault / path).read_bytes()
+    assert {"purpose": "study"} in read_document(vault / path).frontmatter["uses"]
+    assert not list((vault / "learning" / "guides").glob("*.md"))
+    rejected = client.post(
+        f"/documents/sources/{path}/route", headers=headers,
+        json={"intent": "wiki", "generate": True},
+    )
+    assert rejected.status_code == 400
+    assert "请先转换正文" in rejected.json()["detail"]
+    assert (vault / path).read_bytes() == before
 
 
 def _client(
@@ -32,6 +95,7 @@ def _client(
     tmp_path: Path,
     *,
     importer: DocumentImporter | None = None,
+    semantic_enabled: bool | None = None,
 ) -> tuple[TestClient, dict[str, str], BrainPaths]:
     paths = BrainPaths(
         vault=vault,
@@ -40,7 +104,9 @@ def _client(
     )
     token = LocalTokenStore(paths.state).ensure()
     return (
-        TestClient(create_app(paths, document_importer=importer)),
+        TestClient(create_app(
+            paths, document_importer=importer, semantic_enabled=semantic_enabled,
+        )),
         {"Authorization": f"Bearer {token}"},
         paths,
     )

@@ -1,4 +1,4 @@
-import { appendChild, getTaskByPath } from './task-tree';
+import { appendChild, getTaskByPath, serializeTaskItemLine } from './task-tree';
 import type {
 	BannerData,
 	BannerLeftStat,
@@ -91,8 +91,6 @@ function normalizeHexColor(value?: string): string {
 	return trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
 }
 
-const REMINDER_REGEX = /\s*⏰\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})\s*$/;
-const COLLAPSED_REGEX = /\s*<!--collapsed-->\s*$/;
 // Doc lines are `- [[path]]` / `[[path]]` (optionally indented for nesting).
 // The path may itself contain single brackets (z-library books carry `[美]`
 // etc.), so a lone `]` is allowed — the link only terminates on `]]`. Paths
@@ -229,6 +227,7 @@ export function serialize(data: DashboardData): string {
 			lines.push(`    icon: "${escapeYamlString(action.icon)}"`);
 			lines.push(`    type: ${action.type}`);
 			lines.push(`    target: "${escapeYamlString(action.target)}"`);
+			if (action.defaultCapture) lines.push('    defaultCapture: true');
 		}
 	}
 
@@ -586,9 +585,7 @@ export function serialize(data: DashboardData): string {
 			if (card.tasks.length > 0) {
 				const writeTask = (task: TaskItem, indent: number) => {
 					const prefix = indent > 0 ? '    '.repeat(indent) : '';
-					let taskLine = `${prefix}- [${task.checked ? 'x' : ' '}] ${task.text}`;
-					if (task.reminder) taskLine += ` ⏰ ${task.reminder}`;
-					if (task.collapsed) taskLine += ` <!--collapsed-->`;
+					const taskLine = serializeTaskItemLine(task, prefix, true);
 					lines.push(taskLine);
 					for (const child of task.children ?? []) writeTask(child, indent + 1);
 				};
@@ -1050,6 +1047,7 @@ function parseQuickActions(fm: Record<string, unknown>): QuickAction[] {
 			icon: item.icon ?? (item.type === 'command' ? 'terminal' : 'file-text'),
 			type: item.type === 'command' ? 'command' as const : 'file' as const,
 			target: item.target ?? '',
+			...((item as unknown as { defaultCapture?: boolean }).defaultCapture === true ? { defaultCapture: true } : {}),
 		})).filter(a => a.name && a.target);
 	}
 
@@ -1498,22 +1496,23 @@ export function extractCardParts(body: string): {
 			continue;
 		}
 
-		const taskMatch = trimmed.match(/^- \[([ xX])\]\s*(.+)$/);
+		const taskMatch = trimmed.match(/^- \[(.)\]\s*(.+)$/);
 		if (taskMatch && taskMatch[1] && taskMatch[2]) {
 			let taskText = taskMatch[2];
 			let taskReminder: string | undefined;
 			let taskCollapsed = false;
-			const collapsedMatch = taskText.match(COLLAPSED_REGEX);
+			const collapsedMatch = taskText.match(/\s*<!--collapsed-->/u);
 			if (collapsedMatch) {
-				taskText = taskText.replace(COLLAPSED_REGEX, '');
+				taskText = taskText.replace(/\s*<!--collapsed-->/u, '');
 				taskCollapsed = true;
 			}
-			const reminderMatch = taskText.match(REMINDER_REGEX);
+			const reminderMatch = taskText.match(/\s*⏰\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)/u);
 			if (reminderMatch) {
-				taskText = taskText.replace(REMINDER_REGEX, '');
+				taskText = taskText.replace(/\s*⏰\s*\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?/u, '');
 				taskReminder = reminderMatch[1];
 			}
-			const node: TaskItem = { checked: taskMatch[1] !== ' ', text: taskText, reminder: taskReminder, collapsed: taskCollapsed };
+			const node: TaskItem = { checked: ['x', 'X'].includes(taskMatch[1]), text: taskText, reminder: taskReminder, collapsed: taskCollapsed,
+				...(![' ', 'x', 'X'].includes(taskMatch[1]) ? { status: taskMatch[1] } : {}) };
 			ancestors = ancestors.filter(parent => parent.indent < indent);
 			const parent = ancestors[ancestors.length - 1];
 			const path = parent

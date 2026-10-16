@@ -57,7 +57,10 @@ def fts_query(text: str) -> str:
 
 def _retrieval_metadata(frontmatter: Mapping[str, Any]) -> str:
     values: list[str] = []
-    for name in ("title", "type", "description", "course", "project"):
+    names = ["title", "type", "description", "course", "project"]
+    if frontmatter.get("type") == "Project":
+        names.append("project_category")
+    for name in names:
         value = frontmatter.get(name)
         if isinstance(value, str) and value.strip():
             values.append(value.strip())
@@ -141,13 +144,13 @@ class SearchIndex:
             row = connection.execute(
                 "SELECT value FROM metadata WHERE key = 'schema_version'"
             ).fetchone()
-            if row is None or str(row["value"]) != "2":
+            if row is None or str(row["value"]) != "3":
                 connection.execute("DELETE FROM fts_chunks")
                 connection.execute("DELETE FROM links")
                 connection.execute("DELETE FROM chunks")
                 connection.execute("DELETE FROM documents")
             connection.execute(
-                "INSERT OR REPLACE INTO metadata(key, value) VALUES('schema_version', '2')"
+                "INSERT OR REPLACE INTO metadata(key, value) VALUES('schema_version', '3')"
             )
 
     def _metadata(self, markdown: str, fallback: str) -> tuple[str, str, Mapping[str, Any], str]:

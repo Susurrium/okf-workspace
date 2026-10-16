@@ -17,6 +17,7 @@ import { TableColumnsModal } from './table-columns-modal';
 import { KANBAN_FILE_DRAG_TYPE } from './dnd';
 import { resolveCoverAsObjectUrl } from './book-service';
 import { applyModalTheme } from './modal-theme';
+import { renderNoteRow } from './note-row';
 import { GALLERY_COVER_PLACEHOLDER_DATA_URL } from './assets/gallery-cover-placeholder';
 
 // Set once per render by renderLibrarySection so the grid/list/table/kanban
@@ -511,6 +512,7 @@ export function renderLibrarySection(
 	onConfigChange: (config: LibraryConfig) => void,
 	hoverParent: HoverParent | null = null,
 	onOpenNote: ((file: TFile) => void) | null = null,
+	showConfigButton = true,
 ): void {
 	libHoverParent = hoverParent;
 	libOpener = onOpenNote;
@@ -975,6 +977,7 @@ export function renderLibrarySection(
 	const configBtn = toolbar.createDiv({ cls: 'dashboard-library-config-btn' });
 	setIcon(configBtn, 'settings');
 	configBtn.title = t('library.configure');
+	if (!showConfigButton) configBtn.remove();
 
 	// Content area
 	const contentArea = sectionContent.createDiv({ cls: 'dashboard-library-files' });
@@ -1694,13 +1697,10 @@ function renderListView(container: HTMLElement, results: LibraryFileResult[], ap
 	const list = container.createDiv({ cls: 'dashboard-library-list' });
 
 	for (const result of results) {
-		const item = list.createDiv({ cls: 'dashboard-library-list-item' });
+		const item = renderNoteRow(list, { title: result.basename, metadata: formatDate(result.ctime),
+			className: 'dashboard-library-list-item', onOpen: () => openFile(app, result.file), openWholeRow: true,
+			classes: { title: 'dashboard-note-row-title dashboard-library-list-name', metadata: 'dashboard-note-row-meta dashboard-library-list-date' } });
 		attachItemHover(app, item, result.file);
-		item.addEventListener('click', () => openFile(app, result.file));
-
-		item.createDiv({ cls: 'dashboard-library-list-name', text: result.basename });
-		item.createDiv({ cls: 'dashboard-library-list-spacer' });
-		item.createDiv({ cls: 'dashboard-library-list-date', text: formatDate(result.ctime) });
 	}
 }
 

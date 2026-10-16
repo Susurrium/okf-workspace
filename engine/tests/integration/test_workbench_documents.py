@@ -134,12 +134,7 @@ def test_migration_preserves_workbench_bytes_and_tasks_ignore_backups(vault: Pat
     before = {relative: (vault / relative).read_bytes() for relative in contents}
     migrate_current_layout(vault, default_template_root())
     assert {relative: (vault / relative).read_bytes() for relative in contents} == before
-    assert {task.path for task in collect_tasks(vault)} >= {
-        "2.md",
-        "boards/学习.md",
-        "boards/index.md",
-        "boards/log.md",
-    }
+    assert not {task.path for task in collect_tasks(vault)}.intersection(contents)
     assert not any(task.path.startswith(".dashboard-backup/") for task in collect_tasks(vault))
 
 
@@ -203,7 +198,7 @@ def test_rename_preserves_workbench_role_without_plugin_registry(
     renamed = vault / "中文工作台.md"
     path.rename(renamed)
     assert validate_paths(vault, [renamed]).valid
-    assert any(task.path == renamed.name for task in collect_tasks(vault))
+    assert not any(task.path == renamed.name for task in collect_tasks(vault))
     index = SearchIndex(vault, tmp_path / "state/search.sqlite")
     index.sync()
     assert index.get_file_hash(renamed.name) is None

@@ -38,7 +38,8 @@
 
 单机使用无需 LiveSync 或 CouchDB，多设备使用通过二者同步 Vault 笔记和完整原件。Engine Runtime State、本机路径与密钥不随 Vault 同步；CouchDB 数据卷与服务器凭据也不进入源码仓库。部署资产不代表服务已在某台服务器启用，实际位置以部署配置和现场验证为准。同步不能替代备份，详见[同步与备份](docs/DEPLOYMENT.md#sync-backup)。
 
-测试 Vault 与正式 Vault 应分别配置独立的 State；使用 LiveSync 时也应隔离远端数据库。正式启用时新建 Vault 并安装当前 Workspace 资源，仅按用户选择迁入有价值的内容。历史测试 Vault 应先停止相关写入与同步、归档核验，再决定是否删除，不能直接把测试任务状态或旧同步配置复制到正式环境。具体步骤见[从测试环境启用正式 Vault](docs/DEPLOYMENT.md#production-cutover)。
+开发验收遵循[固定测试环境流程](docs/DEVELOPMENT.md#正式发布后的继续开发)。正式环境的
+首次启用、已有环境升级及历史环境退役见[部署指南](docs/DEPLOYMENT.md#production-cutover)。
 
 ## 开始开发
 
@@ -54,10 +55,8 @@
 
 组件各自维护依赖与 lockfile，根脚本统一调度。旧 Originals 服务使用 `./scripts/check-legacy-originals.ps1` 单独检查；当前 Vault 原件迁移与旧设备上传恢复仍进入默认检查。
 
-正式发布后继续开发使用独立的测试 Vault、State、端口和 CouchDB 数据库。
-已配置的测试环境通过 `scripts/test-workspace.ps1 -Action Start|Stop|Status` 按需运行，
-只有测试同步功能时才增加 `-EnableSync`。源码修改经测试和重新打包后再更新正式环境，
-具体配置与插件更新命令见[继续开发](docs/DEVELOPMENT.md#正式发布后的继续开发)。
+固定测试环境的配置、更新、启停和验收命令见[继续开发](docs/DEVELOPMENT.md#正式发布后的继续开发)；
+正式发布使用[已验收版本包](docs/DEPLOYMENT.md#install)。
 
 ## 文档入口
 

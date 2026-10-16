@@ -32,6 +32,7 @@ const MODAL_THEME_VARS: readonly string[] = [
 	'--db-shadow-card', '--db-shadow-card-hover',
 	'--db-link', '--db-checkbox', '--db-quote-border',
 	'--db-progress-from', '--db-progress-to',
+	'--background-modifier-form-field', '--background-modifier-form-field-hover',
 ];
 
 /**

@@ -72,6 +72,7 @@ export function courseStatusLabel(status: string | null | undefined): string {
 export function systemStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     configured: "已配置",
+    "not-configured": "未配置",
     available: "可用",
     current: "最新",
     ok: "正常",

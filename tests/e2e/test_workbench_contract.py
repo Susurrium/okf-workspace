@@ -55,7 +55,7 @@ esbuild.build({
     )
     assert result.returncode == 0, result.stderr
     boards = cast(list[str], json.loads(result.stdout))
-    assert len(boards) == 7
+    assert len(boards) == 8
     vault = initialize_vault(tmp_path / "vault")
     snapshots: dict[str, bytes] = {}
     for index, board in enumerate(boards):
@@ -72,7 +72,7 @@ esbuild.build({
     migrate_current_layout(vault, default_template_root())
     assert {relative: (vault / relative).read_bytes() for relative in snapshots} == snapshots
     tasks = collect_tasks(vault)
-    assert len([task for task in tasks if task.text == "CrossComponentNonce"]) == 7
+    assert not any(task.text == "CrossComponentNonce" for task in tasks)
     index = SearchIndex(vault, tmp_path / "state/search.sqlite")
     index.sync()
     assert not HybridSearcher(index).search("ApexMemoNonce", scope="all", refresh_index=False)

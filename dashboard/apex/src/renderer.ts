@@ -12,6 +12,7 @@ import { getRegisteredApexHost } from './host';
 import { renderTickTickSection } from './ticktick-section';
 import { renderDataviewSection, setDataviewApp } from './dataview-section';
 import { renderWebSection } from './web-section';
+import { isValidWebUrl, normalizeWebUrl } from './web-precheck';
 import { renderQuickNoteRegion } from './quick-note-section';
 import { resolveVaultImage } from './banner';
 import { focalToBackgroundPosition, isCenterFocal } from './focal-point-picker';
@@ -39,13 +40,15 @@ import { renderSidebarHabitWidget } from './habit-widget';
 import { renderSidebarExpenseWidget } from './expense-widget';
 import { renderSidebarAlbumWidget } from './album-widget';
 import { renderSidebarAnniversaryWidget } from './anniversary-widget';
-import { applyWidgetBackground, appendInlineBackgroundButton, getWidgetPlugin } from './widget-background';
+import { applyWidgetBackground, appendInlineBackgroundButton, appendInlineConfigButton, getWidgetPlugin } from './widget-background';
+import { PomodoroSettingsModal } from './pomodoro-settings-modal';
 import { startGuardedDrag } from './drag-guard';
 import { renderSidebarMusicWidget } from './music-widget';
 import { SUPPORTED_FILE_EXTS, iconForExtension } from './file-types';
 import type { HolidayInfo } from './holiday-service';
 import { CountdownSettingsModal } from './countdown-modal';
 import { getSectionDefinition } from './section-registry';
+import { SectionActions, sectionOpenKind } from './section-actions';
 import { createSectionCollapseToggle } from './section-collapse-state';
 import { Chart, LineController, LineElement, PointElement, BarController, BarElement, LinearScale, CategoryScale, Filler, Tooltip } from 'chart.js';
 
@@ -56,6 +59,7 @@ const chartInstances = new Map<string, Chart>();
  *  they animate. destroyAllCharts skips entries still inside a preserved widget
  *  area, so re-attaching the sidebar widgets DOM keeps them running. */
 const countdownTimers = new Map<number, HTMLElement>();
+const pomodoroSubscriptions = new Map<HTMLElement, () => void>();
 
 function destroyChart(cardId: string): void {
 	const chart = chartInstances.get(cardId);
@@ -70,7 +74,13 @@ function destroyChart(cardId: string): void {
  *  previous render (see renderSidebarWidgets): timers animating its countdowns
  *  survive so the re-attached DOM keeps ticking. Timers are also self-cleaning
  *  (they check isConnected), so any survivors of a discarded DOM unwind themselves. */
-export function destroyAllCharts(preserveWidgets?: HTMLElement | null): void {
+export function destroyAllCharts(preserveWidgets?: HTMLElement | null, owner?: HTMLElement): void {
+	for (const [widget, dispose] of pomodoroSubscriptions) {
+		if (owner && !owner.contains(widget)) continue;
+		if (preserveWidgets?.contains(widget)) continue;
+		dispose();
+		pomodoroSubscriptions.delete(widget);
+	}
 	for (const [, chart] of chartInstances) {
 		chart.destroy();
 	}
@@ -304,6 +314,8 @@ export function sidebarWidgetSignature(
 		weatherLon: settings.widgetWeatherLon,
 		pomodoroEnabled: settings.pomodoroEnabled,
 		pomodoroLongBreakInterval: settings.pomodoroLongBreakInterval,
+		pomodoroMode: settings.pomodoroMode,
+		pomodoroStopwatchReminderMinutes: settings.pomodoroStopwatchReminderMinutes,
 		lunarEnabled: settings.widgetLunarEnabled,
 		yearProgressEnabled: settings.widgetYearProgressEnabled,
 		calendarEnabled: settings.widgetCalendarEnabled,
@@ -335,6 +347,7 @@ export function sidebarWidgetSignature(
 		countdowns: settings.countdowns,
 		readingEnabled: settings.readingEnabled,
 		quickActionsEnabled: settings.widgetQuickActionsEnabled,
+		quickCaptureEnabled: settings.widgetQuickCaptureEnabled,
 		// Quick buttons live inside the widget area now; their content (actions,
 		// order, hidden presets) must break the reuse signature so add/remove/edit
 		// rebuilds the area instead of re-attaching a stale quick-actions DOM.
@@ -381,9 +394,10 @@ export function renderSidebarWidgets(
 	reuse?: HTMLElement | null,
 	onOpenNote?: (file: TFile, line?: number) => void,
 	renderQuickActions?: (container: HTMLElement) => void,
+	renderQuickCapture?: (container: HTMLElement) => void,
 ): HTMLElement | null {
 	const anyEnabled = settings.widgetWeatherEnabled || settings.pomodoroEnabled || settings.widgetLunarEnabled || settings.widgetYearProgressEnabled || settings.widgetCalendarEnabled || settings.widgetHabitEnabled || settings.widgetExpenseEnabled || (settings.albums?.length ?? 0) > 0 || (settings.anniversaryEnabled && (settings.anniversaries?.length ?? 0) > 0) || (settings.countdownEnabled && (settings.countdowns?.length ?? 0) > 0) || settings.readingEnabled || (settings.widgetQuickActionsEnabled && !!renderQuickActions) || (settings.widgetMusicEnabled && !Platform.isPhone);
-	if (!anyEnabled) return null;
+	if (!anyEnabled && !renderQuickCapture) return null;
 
 	const stacked = isStackedLayout(settings);
 	// Unchanged inputs: keep the previous DOM (and its live timers/listeners).
@@ -400,7 +414,7 @@ export function renderSidebarWidgets(
 	const widgetArea = container.createDiv({ cls: 'dashboard-sidebar-widgets' });
 	widgetArea.dataset.layout = stacked ? 'stacked' : 'side';
 
-	const DEFAULT_ORDER = ['quickActions', 'lunar', 'weather', 'pomodoro', 'reading', 'countdown', 'anniversary', 'yearProgress', 'calendar', 'habit', 'expense', 'album', 'music'];
+	const DEFAULT_ORDER = ['quickCapture', 'quickActions', 'lunar', 'weather', 'pomodoro', 'reading', 'countdown', 'anniversary', 'yearProgress', 'calendar', 'habit', 'expense', 'album', 'music'];
 	// Legacy: an order saved before quick buttons were a widget lacks the
 	// 'quickActions' key. Render it first there (its historical spot, above the
 	// other widgets) until the user drags it elsewhere.
@@ -408,6 +422,7 @@ export function renderSidebarWidgets(
 
 	type WidgetEntry = { key: string; render: (host: HTMLElement) => void };
 	const enabled: WidgetEntry[] = [];
+	if (renderQuickCapture) enabled.push({ key: 'quickCapture', render: renderQuickCapture });
 	if (settings.widgetQuickActionsEnabled && renderQuickActions) {
 		const renderQuick = renderQuickActions;
 		enabled.push({ key: 'quickActions', render: (host) => { renderQuick(host); } });
@@ -564,8 +579,8 @@ function sortByOrder(items: WidgetEntry[], order: string[]): WidgetEntry[] {
 	const sorted = [...items].sort((a, b) => {
 		// quickActions predates the widget system; a saved order without it
 		// keeps it first (its historical spot above the widgets).
-		const ai = orderMap.get(a.key) ?? (a.key === 'quickActions' ? -1 : order.length);
-		const bi = orderMap.get(b.key) ?? (b.key === 'quickActions' ? -1 : order.length);
+		const ai = orderMap.get(a.key) ?? (a.key === 'quickCapture' ? -2 : a.key === 'quickActions' ? -1 : order.length);
+		const bi = orderMap.get(b.key) ?? (b.key === 'quickCapture' ? -2 : b.key === 'quickActions' ? -1 : order.length);
 		return ai - bi;
 	});
 	return sorted;
@@ -788,7 +803,7 @@ export function renderSidebarPomodoro(
 	if (app) applyWidgetBackground(widget, settings.pomodoroBackground, app);
 
 	const state = service.getState();
-	const isRunning = state.status === 'running';
+	const stopwatch = state.mode === 'stopwatch';
 
 	// Top row: today count left + activity selector centered + stats button right
 	const topRow = widget.createDiv({ cls: 'dashboard-sidebar-pomodoro-top' });
@@ -805,15 +820,20 @@ export function renderSidebarPomodoro(
 	const currentActivity = service.getActivity();
 	createActivitySelector(topRow, service, currentActivity);
 
-	const statsBtn = topRow.createDiv({ cls: 'dashboard-sidebar-pomodoro-stats-btn' });
-	setIcon(statsBtn, 'bar-chart-2');
-
-	// Background gear rides the top row's right cluster (before stats), the
-	// inline pattern shared with habit/music/quick-actions.
+	// Top-right cluster: settings gear + stats key. The countdown/stopwatch
+	// toggle used to be a third key here; it lives in the gear's settings
+	// modal now, so the activity selector can center on the row (three-zone
+	// layout; the today-hint pins absolutely at the left, outside the flow).
+	const rightCluster = topRow.createDiv({ cls: 'dashboard-sidebar-pomodoro-top-right' });
 	if (app && onBgChange) {
-		const gear = appendInlineBackgroundButton(topRow, app, settings.pomodoroBackground, onBgChange);
-		topRow.insertBefore(gear, statsBtn);
+		appendInlineConfigButton(rightCluster, t('pomodoro.settingsTitle'), () => {
+			const plugin = getWidgetPlugin(app);
+			if (!plugin) return;
+			new PomodoroSettingsModal(app, service, plugin, settings.pomodoroBackground, onBgChange).open();
+		});
 	}
+	const statsBtn = rightCluster.createDiv({ cls: 'dashboard-sidebar-pomodoro-stats-btn' });
+	setIcon(statsBtn, 'bar-chart-2');
 
 	// Ring
 	const ringWrap = widget.createDiv({ cls: 'dashboard-sidebar-pomodoro-ring-wrap' });
@@ -851,24 +871,13 @@ export function renderSidebarPomodoro(
 			cls: 'dashboard-sidebar-pomodoro-dot' + (i < state.completedWorkSessions ? ' dashboard-sidebar-pomodoro-dot--filled' : ''),
 		});
 	}
+	// The interval dots narrate countdown cycles; a stopwatch run has none.
+	dotsWrap.toggleClass('is-hidden', stopwatch);
 
-	// Start/stop button. When AutoStartBreak is off and a phase completed, the
-	// service parks in paused-ready — label the button with the next action
-	// instead of a generic start.
-	const state2 = service.getState();
-	const isStandby = state2.status === 'paused' && state2.remainingSeconds === state2.totalSeconds;
-	const mainLabel = isRunning
-		? t('pomodoro.stop')
-		: isStandby
-			? (state2.phase === 'work' ? t('pomodoro.resumeFocus') : t('pomodoro.startBreak'))
-			: t('pomodoro.startFocus');
 	const mainBtn = widget.createEl('button', {
 		cls: 'dashboard-sidebar-pomodoro-main-btn',
-		text: mainLabel,
+		text: t('pomodoro.startFocus'),
 	});
-	if (isRunning) {
-		mainBtn.addClass('dashboard-sidebar-pomodoro-main-btn--running');
-	}
 
 	// --- Helpers ---
 	function updateRing(remaining: number, total: number): void {
@@ -878,8 +887,22 @@ export function renderSidebarPomodoro(
 	}
 	updateRing(state.remainingSeconds, state.totalSeconds);
 
-	function updateUI(): void {
+	/** One state-driven repaint for both modes: ring, time, main-button label,
+	 *  dots. Called on mount, every tick, and after every button action. */
+	function applyState(): void {
 		const s = service.getState();
+		if (s.mode === 'stopwatch') {
+			// remainingSeconds carries the ELAPSED count here; the ring fills
+			// toward the reminder (or work-length) reference and clamps full.
+			timeText.textContent = formatTime(s.remainingSeconds);
+			const progress = s.totalSeconds > 0 ? Math.min(1, s.remainingSeconds / s.totalSeconds) : 0;
+			progressCircle.setAttribute('stroke-dashoffset', String(circumference * (1 - progress)));
+			mainBtn.textContent = s.status === 'running'
+				? t('pomodoro.stop')
+				: s.status === 'paused' ? t('pomodoro.resumeFocus') : t('pomodoro.startFocus');
+			mainBtn.toggleClass('dashboard-sidebar-pomodoro-main-btn--running', s.status === 'running');
+			return;
+		}
 		updateRing(s.remainingSeconds, s.totalSeconds);
 		const running = s.status === 'running';
 		const standby = s.status === 'paused' && s.remainingSeconds === s.totalSeconds;
@@ -895,38 +918,37 @@ export function renderSidebarPomodoro(
 		statsHint.textContent = t('pomodoro.today') + ' ' + tc;
 	}
 
-	let unsubscribeTick: (() => void) | undefined;
-	unsubscribeTick = service.subscribeTick(() => {
-		if (!widget.isConnected) {
-			unsubscribeTick?.();
-			return;
-		}
-		const s = service.getState();
-		updateRing(s.remainingSeconds, s.totalSeconds);
-	});
-
-	let unsubscribeComplete: (() => void) | undefined;
-	unsubscribeComplete = service.subscribeComplete(() => {
-		if (!widget.isConnected) {
-			unsubscribeComplete?.();
-			return;
-		}
-		updateUI();
-	});
+	for (const [previous, dispose] of pomodoroSubscriptions) {
+		if (previous.isConnected) continue;
+		dispose();
+		pomodoroSubscriptions.delete(previous);
+	}
+	const unsubscribeTick = service.subscribeTick(applyState);
+	const unsubscribeComplete = service.subscribeComplete(applyState);
+	pomodoroSubscriptions.set(widget, () => { unsubscribeTick(); unsubscribeComplete(); });
 
 	mainBtn.addEventListener('click', () => {
-		if (service.getState().status === 'running') {
+		const s = service.getState();
+		if (s.mode === 'stopwatch') {
+			// Stopping a count-up ENDS the run and records its actual minutes
+			// (that is the whole point of the stopwatch counting pomodoros).
+			if (s.status === 'running') service.stopStopwatch();
+			else service.start();
+		} else if (s.status === 'running') {
 			service.reset();
-			updateUI();
 		} else {
 			service.start();
-			updateUI();
 		}
+		applyState();
 	});
 
 	statsBtn.addEventListener('click', () => {
 		showPomodoroStats(widget.ownerDocument, service);
 	});
+
+	// Initial paint through the same mode-aware path the ticks use (covers
+	// the paused-ready standby labels a fresh mount would otherwise miss).
+	applyState();
 }
 
 function createActivitySelector(
@@ -2054,6 +2076,12 @@ function attachSectionResizeHandle(el: HTMLElement, column: DashboardColumn, cal
 
 		startGuardedDrag(e, {
 			cursor: 'ns-resize',
+			onCancel: () => {
+				el.removeClass('dashboard-section-row--resizing');
+				shieldHost?.removeClass('dashboard-frames-muted');
+				el.style.maxHeight = column.height ? `${column.height}px` : '';
+				if (isFixedHeight) el.style.height = column.height ? `${column.height}px` : '';
+			},
 			onMove: (ev) => {
 				// The row can be torn down mid-drag by a re-render; resizing a
 				// detached element is stale work, so stop touching it.
@@ -2138,6 +2166,12 @@ function attachPairWidthHandle(el: HTMLElement, column: DashboardColumn, callbac
 		shieldHost.addClass('dashboard-frames-muted');
 		startGuardedDrag(e, {
 			cursor: 'col-resize',
+			onCancel: () => {
+				el.removeClass('dashboard-section-row--resizing');
+				shieldHost.removeClass('dashboard-frames-muted');
+				el.style.setProperty('--db-pair-basis', `${startPct}%`);
+				partnerEl.style.setProperty('--db-pair-basis', `${100 - startPct}%`);
+			},
 			onMove: (ev) => {
 				// The row can be torn down mid-drag by a re-render; stop rather
 				// than resize a detached element.
@@ -2283,11 +2317,45 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		persistCollapse(!isNowCollapsed);
 	});
 
-		const headerActions = header.createDiv({ cls: 'dashboard-section-header-actions' });
+	const headerActions = new SectionActions(header, el);
+	const settingsLabel = t(callbacks.sectionPage ? 'section.pageSettings' : 'section.settings');
+	headerActions.set({ id: 'rename', label: t('section.rename'), icon: 'pencil', placement: 'menu',
+		run: () => { titleEl.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); } });
+	if (!callbacks.sectionPage && data) {
+		const index = data.columns.findIndex(item => sectionRef(item) === reference);
+		if (index > 0) headerActions.set({ id: 'move-up', label: t('section.moveUp'), icon: 'arrow-up', placement: 'menu', run: () => callbacks.onColumnMove(index, index - 1) });
+		if (index >= 0 && index < data.columns.length - 1) headerActions.set({ id: 'move-down', label: t('section.moveDown'), icon: 'arrow-down', placement: 'menu', run: () => callbacks.onColumnMove(index, index + 1) });
+		if (column.half) headerActions.set({ id: 'full-row', label: t('section.fullRow'), icon: 'panel-top', placement: 'menu', run: () => callbacks.onColumnMove(index, index) });
+		else if (index > 0 && !data.columns[index - 1]?.half) headerActions.set({ id: 'beside', label: t('section.beside'), icon: 'columns-2', placement: 'menu', run: () => callbacks.onColumnMoveBeside(index, index - 1, 'right') });
+		if (column.height) headerActions.set({ id: 'reset-height', label: t('section.resetHeight'), icon: 'move-vertical', placement: 'menu', run: () => callbacks.onColumnHeightChange(reference, 0) });
+	}
+	if (callbacks.onSectionOpen && !getSectionDefinition(sectionType)) headerActions.set({
+		id: 'open', label: t(sectionOpenKind(sectionType) === 'tab' ? 'section.openTab' : 'section.enlarge'), icon: sectionOpenKind(sectionType) === 'tab' ? 'external-link' : 'maximize-2',
+		run: () => callbacks.onSectionOpen!(reference, sectionOpenKind(sectionType)),
+	});
+	if (sectionType === 'web' && column.webConfig?.url) headerActions.set({ id: 'browser', label: t('section.openBrowser'), icon: 'globe', placement: 'menu', run: () => {
+		const url = normalizeWebUrl(column.webConfig!.url);
+		if (!isValidWebUrl(url)) throw new Error(t('web.invalidUrl'));
+		window.open(url);
+	} });
 
 	const customDefinition = getSectionDefinition(sectionType);
 	if (customDefinition) {
-		const deleteSectionBtn = headerActions.createEl('button', {
+		titleEl.title = column.name;
+		if (customDefinition.configure) {
+			const configure = headerActions.createButton('menu', {
+				cls: 'dashboard-section-add-btn', attr: { 'aria-label': settingsLabel },
+			});
+			setIcon(configure, 'settings');
+			configure.addEventListener('click', () => {
+				const baseline = structuredClone(column.extensionConfig ?? {});
+				customDefinition.configure?.({
+					container: el, column, app, callbacks,
+					setConfig: config => callbacks.onExtensionConfigChange(reference, config, baseline),
+				});
+			});
+		}
+		const deleteSectionBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
 			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
 		});
@@ -2300,6 +2368,8 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		const body = el.createDiv({ cls: 'dashboard-custom-section' });
 		void Promise.resolve(customDefinition.render({
 			container: body,
+			headerActions: headerActions.element,
+			sectionActions: headerActions,
 			column,
 			app,
 			callbacks,
@@ -2323,7 +2393,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	}
 
 	if (!SUPPORTED_SECTION_TYPES.has(sectionType)) {
-		const deleteSectionBtn = headerActions.createEl('button', {
+		const deleteSectionBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
 			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
 		});
@@ -2343,7 +2413,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	// archive button like todo sections, but NOT the task-template button — cards
 	// are always created through the type chooser (onCardAdd -> StickyCardTypeModal).
 	if (sectionType === 'todo' || sectionType === 'sticky') {
-		const archiveBtn = headerActions.createEl('button', {
+		const archiveBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn',
 			attr: { 'aria-label': t('renderer.archiveTasks') },
 		});
@@ -2352,7 +2422,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	}
 
 	if (sectionType === 'todo') {
-		const templateBtn = headerActions.createEl('button', {
+		const templateBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn',
 			attr: { 'aria-label': t('template.addFromTemplate') },
 		});
@@ -2362,19 +2432,12 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 
 	// Library section: render differently
 	if (sectionType === 'library' || sectionType === 'folder') {
-		// A folder section with no folder set would otherwise list the entire vault
-		// (queryVaultFiles skips the folder filter when it is empty). In that state
-		// renderLibrarySection never runs, so the toolbar (which hosts the always-
-		// visible config button) does not exist yet — keep a header config button
-		// as the only entry point. For a configured folder or any library section,
-		// renderLibrarySection renders that toolbar config button, so we skip this
-		// header one to avoid a duplicate next to the delete button.
 		const folderUnconfigured = sectionType === 'folder' && !(column.libraryConfig?.folders && column.libraryConfig.folders.some(f => f.trim()));
 
-		if (folderUnconfigured) {
-			const configBtn = headerActions.createEl('button', {
+		{
+			const configBtn = headerActions.createButton('menu', {
 				cls: 'dashboard-section-add-btn',
-				attr: { 'aria-label': t('folder.configure') },
+				attr: { 'aria-label': settingsLabel },
 			});
 			setIcon(configBtn, 'settings');
 			configBtn.addEventListener('click', () => {
@@ -2383,7 +2446,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 			});
 		}
 
-		const deleteSectionBtn = headerActions.createEl('button', {
+		const deleteSectionBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
 			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
 		});
@@ -2400,16 +2463,16 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 
 		renderLibrarySection(el, column, app, (config) => {
 			callbacks.onLibraryConfigChange(reference, config);
-		}, activeHoverParent, activeNoteOpener);
+		}, activeHoverParent, activeNoteOpener, false);
 		return el;
 	}
 
 	// Images / videos sections: full-vault media thumbnail wall; the config
 	// modal (gear) currently manages the excluded-folder set.
 	if (sectionType === 'images' || sectionType === 'videos') {
-		const configBtn = headerActions.createEl('button', {
+		const configBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn',
-			attr: { 'aria-label': t('media.configure') },
+			attr: { 'aria-label': settingsLabel },
 		});
 		setIcon(configBtn, 'settings');
 		configBtn.addEventListener('click', () => {
@@ -2417,7 +2480,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 			el.dispatchEvent(event);
 		});
 
-		const deleteSectionBtn = headerActions.createEl('button', {
+		const deleteSectionBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
 			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
 		});
@@ -2436,7 +2499,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	// sidebar widget's scan (calendarExcludeFolders) and refreshes in place on
 	// vault task changes (see refreshCalendarSections).
 	if (sectionType === 'calendar') {
-		const deleteSectionBtn = headerActions.createEl('button', {
+		const deleteSectionBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
 			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
 		});
@@ -2447,7 +2510,9 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		});
 
 		if (settings) {
-			renderCalendarSection(el, app, settings, callbacks.onOpenNoteAtLine);
+			renderCalendarSection(el, app, settings, callbacks.onOpenNoteAtLine,
+				column.extensionConfig?.initialView === 'week' ? 'week' : 'month', column.extensionConfig ?? {},
+				config => callbacks.onExtensionConfigChange(reference, config));
 		} else {
 			el.createDiv({ cls: 'dashboard-library-empty', text: t('calendar.noEvents') });
 		}
@@ -2456,9 +2521,9 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 
 	// Weread section: reading data from the official API.
 	if (sectionType === 'weread') {
-		const configBtn = headerActions.createEl('button', {
+		const configBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn',
-			attr: { 'aria-label': t('weread.configure') },
+			attr: { 'aria-label': settingsLabel },
 		});
 		setIcon(configBtn, 'settings');
 		configBtn.addEventListener('click', () => {
@@ -2468,7 +2533,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 
 		// Refresh button — same icon-button style as the other header actions,
 		// positioned just left of delete.
-		const refreshBtn = headerActions.createEl('button', {
+		const refreshBtn = headerActions.createButton('header', {
 			cls: 'dashboard-section-add-btn',
 			attr: { 'aria-label': t('weread.refresh') },
 		});
@@ -2476,7 +2541,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		let reload: (() => void) | null = null;
 		refreshBtn.addEventListener('click', () => reload?.());
 
-		const deleteSectionBtn = headerActions.createEl('button', {
+		const deleteSectionBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
 			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
 		});
@@ -2497,7 +2562,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		const ttView = column.ticktickConfig?.view === 'lists' ? 'lists' : 'today';
 
 		// View toggle: Today
-		const todayBtn = headerActions.createEl('button', {
+		const todayBtn = headerActions.createButton('content', {
 			cls: 'dashboard-section-add-btn' + (ttView === 'today' ? ' active' : ''),
 			attr: { 'aria-label': t('ticktick.viewToday') },
 		});
@@ -2507,7 +2572,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		});
 
 		// View toggle: Lists
-		const listsBtn = headerActions.createEl('button', {
+		const listsBtn = headerActions.createButton('content', {
 			cls: 'dashboard-section-add-btn' + (ttView === 'lists' ? ' active' : ''),
 			attr: { 'aria-label': t('ticktick.viewLists') },
 		});
@@ -2518,7 +2583,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 
 		// Project filter (only in lists view)
 		if (ttView === 'lists') {
-			const filterBtn = headerActions.createEl('button', {
+			const filterBtn = headerActions.createButton('content', {
 				cls: 'dashboard-section-add-btn',
 				attr: { 'aria-label': t('ticktick.filterProjects') },
 			});
@@ -2528,7 +2593,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 			});
 		}
 
-		const refreshBtn = headerActions.createEl('button', {
+		const refreshBtn = headerActions.createButton('header', {
 			cls: 'dashboard-section-add-btn',
 			attr: { 'aria-label': t('ticktick.refresh') },
 		});
@@ -2536,7 +2601,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		let reload: (() => void) | null = null;
 		refreshBtn.addEventListener('click', () => reload?.());
 
-		const deleteSectionBtn = headerActions.createEl('button', {
+		const deleteSectionBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
 			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
 		});
@@ -2567,7 +2632,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		setDataviewApp(app);
 
 		// Manual refresh (deliberately NOT wired to the vault-change debounce).
-		const refreshBtn = headerActions.createEl('button', {
+		const refreshBtn = headerActions.createButton('header', {
 			cls: 'dashboard-section-add-btn',
 			attr: { 'aria-label': t('dataview.refresh') },
 		});
@@ -2575,9 +2640,9 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		let reload: (() => void) | null = null;
 		refreshBtn.addEventListener('click', () => reload?.());
 
-		const configBtn = headerActions.createEl('button', {
+		const configBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn',
-			attr: { 'aria-label': t('dataview.configure') },
+			attr: { 'aria-label': settingsLabel },
 		});
 		setIcon(configBtn, 'settings');
 		configBtn.addEventListener('click', () => {
@@ -2585,7 +2650,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 			el.dispatchEvent(event);
 		});
 
-		const deleteSectionBtn = headerActions.createEl('button', {
+		const deleteSectionBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
 			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
 		});
@@ -2603,7 +2668,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	// Web section: an embedded page. Frameable sites load as an iframe; sites
 	// whose headers refuse framing load in a desktop webview (see web-section).
 	if (sectionType === 'web') {
-		const refreshBtn = headerActions.createEl('button', {
+		const refreshBtn = headerActions.createButton('header', {
 			cls: 'dashboard-section-add-btn',
 			attr: { 'aria-label': t('web.refresh') },
 		});
@@ -2611,9 +2676,9 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		let reload: (() => void) | null = null;
 		refreshBtn.addEventListener('click', () => reload?.());
 
-		const configBtn = headerActions.createEl('button', {
+		const configBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn',
-			attr: { 'aria-label': t('web.configure') },
+			attr: { 'aria-label': settingsLabel },
 		});
 		setIcon(configBtn, 'settings');
 		configBtn.addEventListener('click', () => {
@@ -2621,7 +2686,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 			el.dispatchEvent(event);
 		});
 
-		const deleteSectionBtn = headerActions.createEl('button', {
+		const deleteSectionBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
 			attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
 		});
@@ -2635,7 +2700,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		return el;
 	}
 
-	const addCardBtn = headerActions.createEl('button', {
+	const addCardBtn = headerActions.createButton('content', {
 		cls: 'dashboard-section-add-btn',
 		attr: { 'aria-label': t('renderer.addCardTo', { column: column.name }) },
 	});
@@ -2646,9 +2711,9 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	// template + save folder). Same dispatch the library sections' config button
 	// uses; view.ts routes it by sectionType.
 	if (sectionType === 'projects') {
-		const notesCfgBtn = headerActions.createEl('button', {
+		const notesCfgBtn = headerActions.createButton('menu', {
 			cls: 'dashboard-section-add-btn',
-			attr: { 'aria-label': t('notesCfg.title') },
+			attr: { 'aria-label': settingsLabel },
 		});
 		setIcon(notesCfgBtn, 'settings');
 		notesCfgBtn.addEventListener('click', () => {
@@ -2657,7 +2722,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		});
 	}
 
-	const deleteSectionBtn = headerActions.createEl('button', {
+	const deleteSectionBtn = headerActions.createButton('menu', {
 		cls: 'dashboard-section-add-btn dashboard-section-delete-btn',
 		attr: { 'aria-label': t('renderer.deleteSection', { column: column.name }) },
 	});
@@ -2814,7 +2879,7 @@ function renderCard(card: DashboardCard, columnName: string, sectionType: string
 		});
 	}
 
-	if (isMemo && (card.type === 'generic' || card.type === 'note') || isWidget) {
+	if (isWidget) {
 		const colorBtn = actions.createEl('button', {
 			cls: 'dashboard-card-btn dashboard-card-btn--color',
 			attr: { 'aria-label': t('renderer.setMemoColor') },
@@ -2901,6 +2966,11 @@ function renderCard(card: DashboardCard, columnName: string, sectionType: string
 			e.stopPropagation();
 			callbacks.onTaskSaveToDaily(card);
 		});
+		if (callbacks.onTaskCopyToDaily) {
+			const copy = actions.createEl('button', { cls: 'dashboard-card-btn', attr: { 'aria-label': '复制为独立日记清单', title: '复制为独立日记清单' } });
+			setIcon(copy, 'copy');
+			copy.addEventListener('click', event => { event.stopPropagation(); callbacks.onTaskCopyToDaily?.(card); });
+		}
 	}
 
 	const deleteBtn = actions.createEl('button', {
@@ -3281,7 +3351,8 @@ function renderTaskItem(
 	const label = item.createSpan({
 		cls: task.checked ? 'dashboard-task-text dashboard-task-text--done' : 'dashboard-task-text',
 	});
-	renderTextWithLinks(label, task.text, app);
+	const displayText = task.text.replace(/\s+\^[\w-]+\s*$/u, '');
+	renderTextWithLinks(label, displayText, app);
 	label.addEventListener('dblclick', (e) => {
 		e.stopPropagation();
 		const currentText = label.getText();
@@ -4051,7 +4122,8 @@ function createReminderButton(
 	btn.addEventListener('click', (e) => {
 		e.stopPropagation();
 		e.preventDefault();
-		showReminderPopup(btn, cardId, taskPath, task, callbacks);
+		if (callbacks.onTaskDateEdit) callbacks.onTaskDateEdit(cardId, taskPath);
+		else showReminderPopup(btn, cardId, taskPath, task, callbacks);
 	});
 
 	return btn;

@@ -216,13 +216,11 @@ export class MusicService {
 
 	// ===== Transport =====
 
-	/** Play playlist[index]; skips with a notice when the track needs an
-	    account entitlement the anonymous session does not have. */
+	/** 播放指定曲目；无播放权限时保持当前播放状态。 */
 	play(index: number): void {
 		const track = this.playlist[index];
 		if (!track) return;
 		if (!isPlayableByFee(track.fee, this.account.loggedIn)) {
-			new Notice(t('music.vipSkipped', { name: track.name }));
 			return;
 		}
 		this.playAttempts = 0;
@@ -414,10 +412,7 @@ export class MusicService {
 					else retry();
 					return;
 				}
-				// Concluded unplayable. Name the track and the constraint —
-				// silent hops left "it skipped a few songs and stopped"
-				// undiagnosable, and the fee guard never fires when signed in.
-				new Notice(t('music.unplayableSkipped', { name: track.name }));
+				// 单曲失败继续尝试下一曲；连续失败由停止通知统一说明。
 				this.advanceAfterFailure();
 				return;
 			}

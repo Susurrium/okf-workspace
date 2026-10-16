@@ -3,9 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { ArtifactEditPolicy } from "../src/application/artifact-edit-policy.js";
 
 describe("ArtifactEditPolicy", () => {
-  it("routes the only generic Project property action through the Project service", async () => {
+  it("routes the Project status action through the Project service", async () => {
     const setProjectStatus = vi.fn().mockResolvedValue({ path: "projects/demo/project.md" });
-    const policy = new ArtifactEditPolicy({ setProjectStatus });
+    const policy = new ArtifactEditPolicy({ setProjectStatus, setProjectCategory: vi.fn() });
 
     await expect(policy.mutate({
       kind: "frontmatter",
@@ -18,7 +18,7 @@ describe("ArtifactEditPolicy", () => {
   });
 
   it("prevents generic edits and moves from breaking managed contracts", async () => {
-    const policy = new ArtifactEditPolicy({ setProjectStatus: vi.fn() });
+    const policy = new ArtifactEditPolicy({ setProjectStatus: vi.fn(), setProjectCategory: vi.fn() });
 
     await expect(policy.mutate({
       kind: "frontmatter",

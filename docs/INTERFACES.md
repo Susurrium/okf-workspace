@@ -8,16 +8,18 @@ Engine API、CLI、Feed 协议与插件交接集中在这里。接口实现与�
 
 ## 本地 API 生命周期
 
-正式使用时不需要手工启动服务：Dashboard 插件随 Obsidian 加载时启动服务，插件卸载或 Obsidian 退出时停止。开发调试时可以手工启动；服务仍只允许绑定 loopback：
+Dashboard 插件在启用本地服务管理时随 Obsidian 加载启动 Engine，插件卸载或 Obsidian 退出时
+停止所持有的进程。常规测试环境的启动与退出见[开发指南](DEVELOPMENT.md#更新与启停)。
+需要单独诊断时先停止受管测试服务，再用已核对的测试部署配置手工启动；服务只允许绑定 loopback：
 
 ```powershell
-$env:OKF_BRAIN_VAULT = 'E:\ObsidianData\OKF-Brain'
-$env:OKF_BRAIN_ORIGINALS = 'E:\ObsidianData\OKF-Brain-Originals'
-$env:OKF_BRAIN_STATE = 'E:\ObsidianData\OKF-Brain-State'
-uv run --project engine okf-server
+uv run --project engine okf-server --config '<测试 State>\config\deployment.json'
 ```
 
-首次启动会在 `OKF_BRAIN_STATE/secrets/local-api-token` 生成随机 token。开发阶段把服务地址 `http://127.0.0.1:8765` 和 token 文件路径填入 Obsidian 插件设置；正式安装由 Windows 安装脚本完成。插件通过标准输入持有服务进程，服务器使用 `--exit-on-stdin-close` 感知宿主退出，不依赖反复轮询父进程。
+目标路径与端口按开发指南及部署配置核对。手动服务在调试结束后自行退出，再恢复受管启动，
+避免同一环境被重复启动。首次启动会在指定 State 的 `secrets/local-api-token` 生成随机 token。
+正式安装由版本包安装器配置插件。
+插件通过标准输入持有服务进程，服务器使用 `--exit-on-stdin-close` 感知宿主退出。
 
 ## 读取与命令边界
 
@@ -55,6 +57,7 @@ Dashboard 向 Engine 发起写入时附带当前 Vault fingerprint；Engine 拒�
 | `POST /captures/publish-web` | 将 Web Capture 确定性发布为 Source + Source Text，并按四个离散人工动作选择是否生成 |
 | `POST /courses`、`POST /lessons`、`POST /projects` | 创建课程、课堂笔记和项目 |
 | `POST /projects/{slug}/log` | 追加项目进展 |
+| `POST /projects/{slug}/category` | 设置或清除项目类别；可携带 `expected_category` 与 `check_expected: true` 拒绝覆盖旧值已变化的项目 |
 | `POST /ai/ask` | 检索、读取真实章节并返回 `actual_reads` |
 | `POST /ai/organize` | 把普通人工 Capture 的正文写入一个长期目标，成功后删除 Capture；Web Capture 必须走发布接口 |
 | `POST /ai/lessons/organize` | 读取 Lesson，只更新 `organized-lesson` 区域；目标在生成期间变化时返回 409 |
@@ -96,6 +99,10 @@ Dashboard 向 Engine 发起写入时附带当前 Vault fingerprint；Engine 拒�
 `stage_detail` 才表示当前步骤。每次检索和 Codex 生成都在可终止的子进程中执行；默认整项上限
 600 秒、单次检索上限 12 秒，可通过部署配置中的 `semantic_timeout_seconds` 和
 `semantic_retrieval_timeout_seconds` 调整。Worker 日志位于 Runtime State 的 `logs/semantic-worker-YYYYMMDD.log`。
+
+`POST /projects` 可携带可选 `project_category`；详细语义见[数据模型](DATA-MODEL.md)。
+CLI 创建使用 `okf note new project --slug <slug> --title <title> --category <类别>`；
+修改使用 `okf project category <slug> --category <类别>`，空字符串清除。
 
 <a id="conversion"></a>
 
@@ -206,9 +213,16 @@ Dashboard 的 Today、Reading 和原生 Digest 复用同一种条目语义与判
 
 ## CLI
 
-以下命令从仓库根目录执行；正式安装且 `okf` 已在 PATH 时可直接调用 `okf`。配置使用部署文件或 `OKF_BRAIN_VAULT`、`OKF_BRAIN_ORIGINALS`、`OKF_BRAIN_STATE` 环境变量，其中 `ORIGINALS` 仅表示旧迁移来源。
+以下命令从仓库根目录执行；正式安装且 `okf` 已在 PATH 时可直接调用 `okf`。
+普通 CLI 使用命令参数或 `OKF_BRAIN_VAULT`、`OKF_BRAIN_ORIGINALS`、`OKF_BRAIN_STATE`
+环境变量；只有支持 `--config` 的入口（例如 `okf-server`、`doctor`）直接读取部署文件。
+以下示例先为当前 PowerShell 会话设置已核对的测试路径，`ORIGINALS` 仅表示旧迁移来源。
+导入和 Feed 命令可能写入数据或调用外部服务，使用合成输入和测试配置执行。
 
 ```powershell
+$env:OKF_BRAIN_VAULT = '<测试 Vault>'
+$env:OKF_BRAIN_STATE = '<测试 State>'
+$env:OKF_BRAIN_ORIGINALS = '<测试兼容 Originals>'
 uv run --project engine okf --help
 uv run --project engine okf import paper.pdf --action store --intent source
 uv run --project engine okf import paper.pdf --action convert --intent source --method mineru-cloud
@@ -217,6 +231,25 @@ uv run --project engine okf doctor --verbose
 ```
 
 CLI/API 旧导入调用缺省仍为 `convert`；与工作台默认仅保存原件的交互分别定义。
+
+<a id="workspace-resources"></a>
+
+### 初始化、资源同步与数据迁移
+
+| 命令 | 用途与前置条件 |
+| --- | --- |
+| `okf init --vault <路径>` | 在空目录初始化 Vault；不建立完整的测试部署身份 |
+| `okf resources sync --vault <路径>` | 更新已有 Vault 的受管资源，要求目标已有根 `index.md`，`--vault` 必须显式传入 |
+| `okf migrate --vault <路径> --state <路径>` | 迁移旧字段及布局，并同步资源；会修改笔记，执行前明确迁移范围和恢复依据 |
+
+`resources sync` 更新 Contracts、canonical/core 模板、views、policies 和 Web Clipper 集成，
+并删除这些受管目录中已不在资源包内的文件。interactive 模板只补缺失文件，已有内容保留。
+它还合并 `.obsidian/app.json`、`daily-notes.json`、`templates.json` 中的受管设置，保留其他键。
+业务笔记不执行迁移；Skills、插件及 Vault 根 AGENTS.md 不由该接口安装。
+
+命令输出实际变更列表，失败返回非零退出码；不保证全部资源跨文件事务回滚。
+调用前核对目标及授权，执行后检查差异和 Contracts；日常测试更新优先通过
+[统一更新入口](DEVELOPMENT.md#更新与启停)完成身份校验及配套安装。
 
 ### Feed 调试
 
@@ -334,6 +367,18 @@ Workspace Kit 位于 `engine/workspace/`，安装时同步到 Vault 的 `AGENTS.
 | `okf-workspace-dashboard:new-lesson` | 选择已有课程后创建 Lesson |
 | `okf-workspace-dashboard:new-project` | 新建项目 |
 | `okf-workspace-dashboard:import-document` | 保存原件，或明确转换资料正文 |
+| `okf-workspace-dashboard:open-tasks` | 打开 Tasks 待办页面，提供日期视图、状态历史及查询 |
+| `okf-workspace-dashboard:inspect-task-boundary` | 读取历史工作台任务与原 Tasks 配置差异，提供来源定位 |
+| `okf-workspace-dashboard:new-task` | 打开共用待办表单，明确保存位置、关联与日期 |
+| `okf-workspace-dashboard:open-today` | 打开今天 |
+| `okf-workspace-dashboard:open-inbox` | 打开收集箱 |
+| `okf-workspace-dashboard:open-reading` | 打开订阅 |
+| `okf-workspace-dashboard:open-sources` | 打开资料 |
+| `okf-workspace-dashboard:open-learning` | 打开学习 |
+| `okf-workspace-dashboard:open-projects` | 打开项目 |
+| `okf-workspace-dashboard:open-knowledge` | 打开知识 |
+| `okf-workspace-dashboard:open-life` | 打开日记与复盘 |
+| `okf-workspace-dashboard:open-system` | 打开后台处理与系统诊断 |
 
 QuickAdd 最推荐只绑定第一个命令；具体路径、YAML 和模板仍由 Workspace Contracts 维护。这样 QuickAdd
 配置损坏或未安装时，命令面板和 Dashboard 仍能完成同样操作。

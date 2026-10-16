@@ -37,6 +37,8 @@ export interface DashboardSettings {
 	recentDocCount: number;
 	language: Language;
 	stylePreset: string;
+	customThemes?: CustomTheme[];
+	activeCustomThemeId?: string;
 	/** Board arrangement: widgets in a left rail ('side', default) or a
 	    horizontal strip under the banner ('stacked'). Desktop/tablet only;
 	    phones keep their own layout regardless of this value. */
@@ -62,6 +64,8 @@ export interface DashboardSettings {
 	pomodoroShortBreakMinutes: number;
 	pomodoroLongBreakMinutes: number;
 	pomodoroLongBreakInterval: number;
+	pomodoroMode: 'timer' | 'stopwatch';
+	pomodoroStopwatchReminderMinutes: number;
 	/** Daily pomodoro completion goal (count), shown as "1/8" in KPIs/gauge. */
 	pomodoroDailyGoal: number;
 	pomodoroAutoStartBreak: boolean;
@@ -78,6 +82,8 @@ export interface DashboardSettings {
 	/** Active task filter in the full-screen calendar modal ('all' default).
 	    Persisted memory only — the sidebar widget stays unfiltered. */
 	calendarTaskFilter: CalendarTaskFilter;
+	calendarTaskState?: 'open' | 'all' | 'done' | 'cancelled';
+	calendarDateFact?: 'all' | 'scheduled' | 'due' | 'start' | 'reminder' | 'span';
 	/** Where calendar-added tasks land in the day's daily note: right below
 	    frontmatter ('start') or at the bottom ('end'). */
 	calendarTaskInsertPosition: 'start' | 'end';
@@ -181,6 +187,8 @@ export interface DashboardSettings {
 	quickNotePresets: QuickNotePreset[];
 	/** Inline capture box shown in the Quick Notes region. */
 	quickCaptureEnabled: boolean;
+	/** 宿主提供统一快速记录时，控制侧栏输入框。 */
+	widgetQuickCaptureEnabled?: boolean;
 	/** Note path to append captures to. Empty = create a new fleeting note. */
 	quickCaptureTarget: string;
 	/** Folder for new fleeting notes when no capture target is set. */
@@ -265,6 +273,21 @@ export interface CustomColors {
 /** How a dashboard background image fills the background layer. */
 export type BgSize = 'cover' | 'contain';
 
+export interface CustomTheme {
+	id: string;
+	name: string;
+	base: string;
+	colors: CustomColors;
+	bgImage: string;
+	bgDim: number;
+	bgBlur: number;
+	bgSize: BgSize;
+	surfaceOpacity: number | null;
+	glassBlur: number | null;
+	radiusScale: number | null;
+	fontScale: DashboardSettings['fontScale'];
+}
+
 /** One "quick-create" button in the Quick Notes region: creates a note from a
  *  template file into a folder, with `{{date}}`/`{{time}}`/`{{title}}` resolved. */
 export interface QuickNotePreset {
@@ -325,6 +348,8 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
 	pomodoroShortBreakMinutes: 5,
 	pomodoroLongBreakMinutes: 15,
 	pomodoroLongBreakInterval: 4,
+	pomodoroMode: 'timer',
+	pomodoroStopwatchReminderMinutes: 0,
 	pomodoroDailyGoal: 8,
 	pomodoroAutoStartBreak: true,
 	pomodoroSoundEnabled: true,
@@ -478,6 +503,7 @@ export interface ImageFocalPoint {
 }
 
 export interface QuickAction {
+	defaultCapture?: boolean;
 	name: string;
 	icon: string;
 	type: 'file' | 'command';
@@ -531,6 +557,7 @@ export interface TrackerDataPoint {
 export interface TaskItem {
 	text: string;
 	checked: boolean;
+	status?: string;
 	reminder?: string;
 	children?: TaskItem[];
 	collapsed?: boolean;
@@ -918,6 +945,7 @@ export function sectionRef(column: DashboardColumn): string {
 }
 
 export interface RenderCallbacks {
+	sectionPage?: boolean;
 	/** Register resources owned by a custom section for the current render. */
 	onCustomSectionCleanup?(sectionReference: string, cleanup: () => void): void;
 	onCardEdit(card: DashboardCard): void;
@@ -932,6 +960,9 @@ export interface RenderCallbacks {
 	onTaskReorder(cardId: string, fromPath: number[], toPath: number[], before: boolean): void;
 	onTaskMoveToCard(srcCardId: string, fromPath: number[], destCardId: string, destPath: number[], mode: 'before' | 'after' | 'nest'): void;
 	onTaskEdit(cardId: string, taskPath: number[], newText: string): void;
+	onTaskDetails?(this: void, cardId: string, taskPath: number[]): void;
+	onTaskDateEdit?(this: void, cardId: string, taskPath: number[]): void;
+	onTaskPromote?(this: void, cardId: string, taskPath: number[]): void;
 	onCardAdd(columnName: string): void;
 	onColumnAdd(name: string, sectionType?: string): void;
 	onRequestAddSection(): void;
@@ -949,6 +980,7 @@ export interface RenderCallbacks {
 	onMemoUpdate(card: DashboardCard, updates: Pick<DashboardCard, 'body' | 'blockquote'> & Partial<Pick<DashboardCard, 'tasks' | 'docs' | 'wikiLink' | 'url' | 'type'>>): void;
 	onMemoSaveAsNote(card: DashboardCard): void;
 	onTaskSaveToDaily(card: DashboardCard): void;
+	onTaskCopyToDaily?(card: DashboardCard): void;
 	onDocAdd(cardId: string, path: string): void;
 	/** Per-card "new note" (notes/projects sections): create a vault note and
 	 *  attach it to the card's doc list. `pos` (the toolbar click point) anchors
@@ -971,6 +1003,7 @@ export interface RenderCallbacks {
 	 *  duplicate names it disambiguates which same-named column is meant. */
 	onColumnRename(oldName: string, newName: string, columnIndex?: number): void;
 	onColumnDelete(columnName: string, columnIndex?: number): void;
+	onSectionOpen?(reference: string, kind: 'tab' | 'enlarge'): void | Promise<void>;
 	onTaskReminderEdit(cardId: string, taskPath: number[], reminder: string | undefined): void;
 	onTaskNest(cardId: string, taskPath: number[]): void;
 	onTaskNestInto(cardId: string, srcPath: number[], destPath: number[]): void;
@@ -980,11 +1013,12 @@ export interface RenderCallbacks {
 	onArchiveTasks(columnName: string): void;
 	onLibraryConfigChange(columnName: string, config: LibraryConfig): void;
 	onDataviewConfigChange(columnName: string, config: DataviewConfig): void;
-	onExtensionConfigChange(columnName: string, config: Record<string, unknown>): void;
+	onExtensionConfigChange(columnName: string, config: Record<string, unknown>, baseline?: Record<string, unknown>): void | Promise<void>;
 	getCollapsedSections?(): Set<string>;
 	onCollapsedSectionsChange?(collapsed: Set<string>): void;
 	onQuickNoteCreate(preset: QuickNotePreset): void;
-	onQuickNoteCapture(text: string): void;
+	onQuickNoteCapture(text: string): void | Promise<void>;
+	managedCapture?: boolean;
 	onOpenPinnedNote(note: PinnedNote): void;
 	onQuickCommand(cmd: QuickCommand): void;
 	onQuickNoteDaily(): void;

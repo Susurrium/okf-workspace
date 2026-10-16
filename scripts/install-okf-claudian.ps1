@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$Vault = 'E:\ObsidianData\OKF-Brain',
+    [Parameter(Mandatory)][string]$Vault,
+    [string]$State = '',
     [string]$ClaudianRepository = '',
     [switch]$SkipBuild
 )
@@ -15,6 +16,10 @@ $sourceRoot = if ($ClaudianRepository.Trim()) {
     [System.IO.Path]::GetFullPath($ClaudianRepository)
 } else {
     [System.IO.Path]::GetFullPath((Join-Path $repository 'claudian'))
+}
+if (-not (Test-Path -LiteralPath (Join-Path $repository 'runtime-manifest.json'))) {
+    if (-not $State) { throw 'Source Claudian installation requires an explicit test State.' }
+    Assert-OkfTestEnvironment -Config (Join-Path $State 'config\deployment.json') -Vault $vaultRoot | Out-Null
 }
 foreach ($entry in @(
         @{ Path = $vaultRoot; Label = 'Vault' },

@@ -1,4 +1,5 @@
 import type { ApexHost } from './host';
+import { Notice } from 'obsidian';
 import { t } from './i18n';
 
 /** Direction of a bookkeeping entry. */
@@ -20,15 +21,14 @@ export interface ExpenseRecord {
 	createdAt: number;
 }
 
-/** v1 data layout, stored at .obsidian/plugins/apex-dashboard/expense.json. */
+/** 记账数据由当前宿主插件保存，分类清单是成员关系的唯一权威。 */
 export interface ExpenseData {
-	version: 1;
+	version: 2;
 	/** Append-ordered; never pruned (financial history spans years). */
 	records: ExpenseRecord[];
 	/** Last category picked per type, so the widget's selects reopen on it. */
 	lastCategory: { expense?: string; income?: string };
-	/** User-added category names per direction (absent in pre-1.9.6 files). */
-	customCategories?: { expense?: string[]; income?: string[] };
+	categories: Record<ExpenseType, string[]>;
 	/** Full display order per direction (preset keys + custom names mixed).
 	 *  Absent in files that never reordered; missing categories fall back to
 	 *  default order at read time (getOrderedCategories), never on save. */
@@ -64,6 +64,10 @@ export function categoriesFor(type: ExpenseType): readonly string[] {
 	return type === 'expense' ? EXPENSE_CATEGORIES : INCOME_CATEGORIES;
 }
 
+function categoryLabelOf(key: string): string {
+	return [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES].some(preset => preset === key) ? t(`expense.cat.${key}`) : key;
+}
+
 /** Custom-category guards shared with the manager UI. */
 export const EXPENSE_CATEGORY_NAME_MAX = 12;
 export const EXPENSE_MAX_CUSTOM_CATEGORIES = 30;
@@ -93,7 +97,7 @@ function isExpenseType(value: unknown): value is ExpenseType {
 }
 
 function emptyData(): ExpenseData {
-	return { version: 1, records: [], lastCategory: {} };
+	return { version: 2, records: [], lastCategory: {}, categories: { expense: [...EXPENSE_CATEGORIES], income: [...INCOME_CATEGORIES] } };
 }
 
 /** Round to 2 decimals (insert-time and display-time float guard). */
@@ -121,75 +125,21 @@ export function sanitizeAmountInput(raw: string): string {
 	return `${int}.${frac}`;
 }
 
-/** Union of two datasets, `session` winning per-record-id conflicts. Used when
- *  a load that failed at startup succeeds on a later retry: the disk copy and
- *  everything changed in-session are merged so neither side is lost. */
 function mergeData(disk: ExpenseData, session: ExpenseData): ExpenseData {
-	const byId = new Map(disk.records.map(r => [r.id, r] as const));
-	for (const r of session.records) byId.set(r.id, r);
-	const records = [...byId.values()].sort((a, b) =>
-		a.date === b.date ? a.createdAt - b.createdAt : (a.date < b.date ? -1 : 1));
-	const customCategories = mergeCustomCategories(disk.customCategories, session.customCategories);
-	const categoryOrder = mergeCategoryOrder(disk.categoryOrder, session.categoryOrder);
+	const byId = new Map(disk.records.map(record => [record.id, record]));
+	for (const record of session.records) byId.set(record.id, record);
 	const primaryCategories = mergePrimaryCategories(disk.primaryCategories, session.primaryCategories);
-	const categoryParents = mergeCategoryParents(disk.categoryParents, session.categoryParents, primaryCategories);
 	return {
-		version: 1,
-		records,
-		lastCategory: { ...disk.lastCategory, ...session.lastCategory },
-		...(customCategories ? { customCategories } : {}),
-		...(categoryOrder ? { categoryOrder } : {}),
-		...(primaryCategories ? { primaryCategories } : {}),
-		...(categoryParents ? { categoryParents } : {}),
+		...session,
+		records: [...byId.values()].sort((a, b) => a.date === b.date ? a.createdAt - b.createdAt : a.date.localeCompare(b.date)),
+		lastCategory: { ...disk.lastCategory, ...session.lastCategory }, primaryCategories,
+		categoryParents: normalizeCategoryParents(mergeCategoryParents(disk.categoryParents, session.categoryParents, primaryCategories), session.categories, primaryCategories),
 	};
 }
 
-/** Union of per-type custom category lists (disk order first, case-insensitive
- *  dedupe); undefined when both sides carry nothing. */
-function mergeCustomCategories(
-	disk: ExpenseData['customCategories'],
-	session: ExpenseData['customCategories'],
-): ExpenseData['customCategories'] {
-	const out: { expense?: string[]; income?: string[] } = {};
-	for (const type of ['expense', 'income'] as const) {
-		const names: string[] = [];
-		const seen = new Set<string>();
-		for (const name of [...(disk?.[type] ?? []), ...(session?.[type] ?? [])]) {
-			const key = name.toLowerCase();
-			if (seen.has(key)) continue;
-			seen.add(key);
-			names.push(name);
-		}
-		if (names.length > 0) out[type] = names.slice(0, EXPENSE_MAX_CUSTOM_CATEGORIES);
-	}
-	return out.expense === undefined && out.income === undefined ? undefined : out;
-}
 
-// The three merges below are SESSION-FIRST, unlike mergeCustomCategories'
-// disk-first union. Reason: persist() merges whenever the disk content
-// differs from our last write — including when the only external change is
-// another device adding one record. A disk-first order would then put the
-// stale on-disk order ahead of a reorder this session just made, silently
-// reverting it. Session-first keeps local intent; disk contributes only
-// entries the session never touched.
 
-/** Session-first union of per-type order lists (exact-match dedupe — keys
- *  are exact category identifiers, not display names). */
-function mergeCategoryOrder(
-	disk: ExpenseData['categoryOrder'],
-	session: ExpenseData['categoryOrder'],
-): ExpenseData['categoryOrder'] {
-	const out: { expense?: string[]; income?: string[] } = {};
-	for (const type of ['expense', 'income'] as const) {
-		const keys: string[] = [];
-		for (const v of [...(session?.[type] ?? []), ...(disk?.[type] ?? [])]) {
-			if (keys.includes(v)) continue;
-			keys.push(v);
-		}
-		if (keys.length > 0) out[type] = keys;
-	}
-	return out.expense === undefined && out.income === undefined ? undefined : out;
-}
+
 
 /** Session-first union of per-type primary-group lists (case-insensitive
  *  dedupe; session's casing wins a clash). */
@@ -231,91 +181,32 @@ function mergeCategoryParents(
 	return out.expense === undefined && out.income === undefined ? undefined : out;
 }
 
-/** Normalize a parsed expense.json: keep only well-formed records so a
- *  hand-edited or corrupted file degrades to partial data. */
 function normalizeData(raw: unknown): ExpenseData {
-	if (!raw || typeof raw !== 'object') return emptyData();
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('记账文件必须是对象');
 	const obj = raw as Partial<ExpenseData>;
-	const records = Array.isArray(obj.records)
-		? obj.records.filter((r): r is ExpenseRecord =>
-			!!r && typeof r === 'object'
-			&& typeof r.id === 'string' && r.id.length > 0
-			&& isExpenseType(r.type)
-			&& typeof r.amount === 'number' && Number.isFinite(r.amount) && r.amount > 0
-			&& typeof r.category === 'string' && r.category.length > 0
-			&& typeof r.date === 'string' && DATE_RE.test(r.date)
-			&& typeof r.createdAt === 'number' && Number.isFinite(r.createdAt))
-			.map(r => ({ ...r, amount: round2(r.amount) }))
-		: [];
-	const lastCategory: { expense?: string; income?: string } = {};
-	const lc = obj.lastCategory;
-	if (lc && typeof lc === 'object') {
-		if (typeof lc.expense === 'string' && lc.expense.length > 0) lastCategory.expense = lc.expense;
-		if (typeof lc.income === 'string' && lc.income.length > 0) lastCategory.income = lc.income;
+	if (obj.version !== 2) throw new Error('不支持的记账文件格式；原文件已保留');
+	if (!Array.isArray(obj.records) || !obj.lastCategory || typeof obj.lastCategory !== 'object') throw new Error('记账文件缺少流水或分类选择');
+	const categories = obj.categories;
+	for (const type of ['expense', 'income'] as const) {
+		const list = categories?.[type];
+		if (!Array.isArray(list) || list.length === 0 || list.some(key => typeof key !== 'string' || !key.trim()) || new Set(list.map(key => key.toLowerCase())).size !== list.length) throw new Error('记账分类清单无效');
 	}
-	const customCategories = normalizeCustomCategories(obj.customCategories);
-	const categoryOrder = normalizeCategoryOrder(obj.categoryOrder, customCategories);
+	const records = obj.records.map(record => {
+		if (!record || typeof record !== 'object' || typeof record.id !== 'string' || !record.id || !isExpenseType(record.type) || typeof record.amount !== 'number' || !Number.isFinite(record.amount) || record.amount <= 0 || typeof record.category !== 'string' || !record.category || typeof record.date !== 'string' || !DATE_RE.test(record.date) || typeof record.createdAt !== 'number' || !Number.isFinite(record.createdAt)) throw new Error('记账流水格式无效');
+		return { ...record, amount: round2(record.amount) };
+	});
 	const primaryCategories = normalizePrimaryCategories(obj.primaryCategories);
-	const categoryParents = normalizeCategoryParents(obj.categoryParents, customCategories, primaryCategories);
 	return {
-		version: 1,
-		records,
-		lastCategory,
-		...(customCategories ? { customCategories } : {}),
-		...(categoryOrder ? { categoryOrder } : {}),
-		...(primaryCategories ? { primaryCategories } : {}),
-		...(categoryParents ? { categoryParents } : {}),
+		version: 2, records, lastCategory: { ...obj.lastCategory },
+		categories: { expense: [...categories!.expense], income: [...categories!.income] },
+		categoryOrder: obj.categoryOrder, primaryCategories,
+		categoryParents: normalizeCategoryParents(obj.categoryParents, categories!, primaryCategories),
 	};
 }
 
-/** Keep only usable custom category names per type: non-empty trimmed strings
- *  that don't shadow a preset key, deduped case-insensitively and capped. A
- *  hand-edited file degrades to partial data instead of failing the load. */
-function normalizeCustomCategories(raw: unknown): ExpenseData['customCategories'] {
-	if (!raw || typeof raw !== 'object') return undefined;
-	const out: { expense?: string[]; income?: string[] } = {};
-	for (const type of ['expense', 'income'] as const) {
-		const list = (raw as Record<string, unknown>)[type];
-		if (!Array.isArray(list)) continue;
-		const names: string[] = [];
-		const seen = new Set<string>();
-		for (const v of list) {
-			if (typeof v !== 'string') continue;
-			const name = v.trim().slice(0, EXPENSE_CATEGORY_NAME_MAX);
-			if (name.length === 0 || collidesWithPreset(name, type)) continue;
-			const key = name.toLowerCase();
-			if (seen.has(key)) continue;
-			seen.add(key);
-			names.push(name);
-		}
-		if (names.length > 0) out[type] = names.slice(0, EXPENSE_MAX_CUSTOM_CATEGORIES);
-	}
-	return out.expense === undefined && out.income === undefined ? undefined : out;
-}
 
-/** Keep only order entries that are known categories for the direction,
- *  deduped. Missing categories are deliberately NOT appended here — a legacy
- *  file must not grow the field on its next save; lenient completion happens
- *  at read time (getOrderedCategories) and never persists. */
-function normalizeCategoryOrder(
-	raw: unknown,
-	custom: ExpenseData['customCategories'],
-): ExpenseData['categoryOrder'] {
-	if (!raw || typeof raw !== 'object') return undefined;
-	const out: { expense?: string[]; income?: string[] } = {};
-	for (const type of ['expense', 'income'] as const) {
-		const list = (raw as Record<string, unknown>)[type];
-		if (!Array.isArray(list)) continue;
-		const known = new Set<string>([...categoriesFor(type), ...(custom?.[type] ?? [])]);
-		const keys: string[] = [];
-		for (const v of list) {
-			if (typeof v !== 'string' || !known.has(v) || keys.includes(v)) continue;
-			keys.push(v);
-		}
-		if (keys.length > 0) out[type] = keys;
-	}
-	return out.expense === undefined && out.income === undefined ? undefined : out;
-}
+
+
 
 /** Keep only usable primary-group names per type: non-empty trimmed strings,
  *  deduped case-insensitively and capped. Deliberately no preset-collision
@@ -343,30 +234,15 @@ function normalizePrimaryCategories(raw: unknown): ExpenseData['primaryCategorie
 	return out.expense === undefined && out.income === undefined ? undefined : out;
 }
 
-/** Keep only parent mappings whose category is known for the direction and
- *  whose primary exists after normalization; dangling entries drop out. */
-function normalizeCategoryParents(
-	raw: unknown,
-	custom: ExpenseData['customCategories'],
-	primaries: ExpenseData['primaryCategories'],
-): ExpenseData['categoryParents'] {
+function normalizeCategoryParents(raw: unknown, categories: ExpenseData['categories'], primaries: ExpenseData['primaryCategories']): ExpenseData['categoryParents'] {
 	if (!raw || typeof raw !== 'object') return undefined;
-	const out: { expense?: Record<string, string>; income?: Record<string, string> } = {};
+	const out: NonNullable<ExpenseData['categoryParents']> = {};
 	for (const type of ['expense', 'income'] as const) {
 		const map = (raw as Record<string, unknown>)[type];
 		if (!map || typeof map !== 'object') continue;
-		const knownCats = new Set<string>([...categoriesFor(type), ...(custom?.[type] ?? [])]);
-		const knownPrimaries = primaries?.[type] ?? [];
-		const clean: Record<string, string> = {};
-		for (const [cat, primary] of Object.entries(map)) {
-			if (typeof primary !== 'string') continue;
-			const name = primary.trim();
-			if (!knownCats.has(cat) || !knownPrimaries.includes(name)) continue;
-			clean[cat] = name;
-		}
-		if (Object.keys(clean).length > 0) out[type] = clean;
+		out[type] = Object.fromEntries(Object.entries(map).filter(([category, primary]) => categories[type].includes(category) && typeof primary === 'string' && primaries?.[type]?.includes(primary)));
 	}
-	return out.expense === undefined && out.income === undefined ? undefined : out;
+	return out;
 }
 
 function formatDate(d: Date): string {
@@ -435,22 +311,18 @@ export class ExpenseService {
 
 	async load(): Promise<void> {
 		if (this.loaded) return;
-		this.loaded = true;
+		const adapter = this.plugin.app.vault.adapter;
+		const path = `${this.plugin.app.vault.configDir}/plugins/${this.plugin.manifest.id}/${DATA_FILE}`;
 		try {
-			const adapter = this.plugin.app.vault.adapter;
-			const path = `${this.plugin.app.vault.configDir}/plugins/${this.plugin.manifest.id}/${DATA_FILE}`;
 			if (await adapter.exists(path)) {
 				const raw = await adapter.read(path);
 				this.data = normalizeData(JSON.parse(raw));
 				this.lastWritten = raw;
 			}
+			this.loaded = true;
 		} catch (error) {
-			// Distinguish the two failure kinds: a JSON parse error means the
-			// file is unusable (start fresh); an adapter/IO error (mobile file
-			// lock, iCloud not yet downloaded) leaves the on-disk file intact —
-			// flag it so the next save cannot overwrite it with the empty state.
-			this.data = emptyData();
-			this.loadFailed = !(error instanceof SyntaxError);
+			this.loadFailed = true;
+			throw error;
 		}
 	}
 
@@ -458,68 +330,37 @@ export class ExpenseService {
 	 *  serializes at execution time, so a write delayed behind earlier ones
 	 *  still persists the freshest state (see habits.json race notes). */
 	private saveQueue: Promise<void> = Promise.resolve();
+	private saveError: Error | undefined;
 
 	private save(): void {
-		this.saveQueue = this.saveQueue.then(() => this.persist());
+		this.saveQueue = this.saveQueue.then(() => this.persist()).then(() => { this.saveError = undefined; }).catch((error: unknown) => {
+			this.saveError = error instanceof Error ? error : new Error(String(error));
+			console.error('记账保存失败', error);
+			new Notice(`记账尚未保存：${String(error)}`);
+		});
+	}
+
+	async flush(): Promise<void> {
+		await this.saveQueue;
+		if (this.saveError) throw this.saveError;
 	}
 
 	private async persist(): Promise<void> {
-		// A non-parse load failure must not brick persistence for the whole
-		// session; re-attempt the read and merge before deciding to skip.
-		if (this.loadFailed && !(await this.retryFailedLoad())) return;
-		try {
-			const adapter = this.plugin.app.vault.adapter;
-			const dir = `${this.plugin.app.vault.configDir}/plugins/${this.plugin.manifest.id}`;
-			const path = `${dir}/${DATA_FILE}`;
-			if (!(await adapter.exists(dir))) {
-				await adapter.mkdir(dir);
-			}
-			// Merge the disk state first when someone else wrote since our
-			// last write — blind full-file saves revert the other device's
-			// entries. Deletions stay deleted: without an external change the
-			// union never runs, so removed records are not resurrected.
-			try {
-				if (await adapter.exists(path)) {
-					const raw = await adapter.read(path);
-					if (raw !== this.lastWritten) {
-						this.data = mergeData(normalizeData(JSON.parse(raw)), this.data);
-					}
-				}
-			} catch {
-				// Disk unreadable at save time: write our state as before.
-			}
-			const json = JSON.stringify(this.data);
-			await adapter.write(path, json);
-			this.lastWritten = json;
-		} catch {
-			// silent fail: an unwriteable expense.json must not break entries in-session
+		if (this.loadFailed) throw new Error('记账文件未成功读取，已停止保存');
+		const adapter = this.plugin.app.vault.adapter;
+		const dir = `${this.plugin.app.vault.configDir}/plugins/${this.plugin.manifest.id}`;
+		const path = `${dir}/${DATA_FILE}`;
+		if (await adapter.exists(path)) {
+			const raw = await adapter.read(path);
+			if (raw !== this.lastWritten) this.data = mergeData(normalizeData(JSON.parse(raw)), this.data);
 		}
+		if (!(await adapter.exists(dir))) await adapter.mkdir(dir);
+		const json = JSON.stringify(this.data);
+		await adapter.write(path, json);
+		this.lastWritten = json;
 	}
 
-	/** Re-attempt the initial read after a non-parse load failure. On success
-	 *  the disk state merges with the in-session state (union by record id);
-	 *  while the file is still unreadable saving stays skipped rather than
-	 *  clobbering a file we cannot see. */
-	private async retryFailedLoad(): Promise<boolean> {
-		try {
-			const adapter = this.plugin.app.vault.adapter;
-			const path = `${this.plugin.app.vault.configDir}/plugins/${this.plugin.manifest.id}/${DATA_FILE}`;
-			let disk = emptyData();
-			if (await adapter.exists(path)) {
-				const raw = await adapter.read(path);
-				disk = normalizeData(JSON.parse(raw));
-				this.lastWritten = raw;
-			}
-			this.data = mergeData(disk, this.data);
-			this.loadFailed = false;
-			// The merge may resurrect records the UI has not seen yet.
-			this.notify();
-			return true;
-		} catch (error) {
-			this.loadFailed = !(error instanceof SyntaxError);
-			return !this.loadFailed;
-		}
-	}
+
 
 	/** Re-read the file and union external changes into memory (another
 	 *  device's entries arriving via sync). Notifies listeners when the merge
@@ -685,14 +526,14 @@ export class ExpenseService {
 
 	// ===== Custom categories =====
 
-	/** Preset keys followed by the user's custom names for a direction. */
+	/** 返回当前有效分类的副本。 */
 	getCategories(type: ExpenseType): string[] {
-		return [...categoriesFor(type), ...(this.data.customCategories?.[type] ?? [])];
+		return [...this.data.categories[type]];
 	}
 
 	/** Custom names only (shared copy). */
 	getCustomCategories(type: ExpenseType): string[] {
-		return [...(this.data.customCategories?.[type] ?? [])];
+		return this.data.categories[type].filter(key => !categoriesFor(type).includes(key));
 	}
 
 	/** Records using a category key (usage count in the manager). */
@@ -702,8 +543,7 @@ export class ExpenseService {
 
 	/** All categories of a direction in the user's display order: stored
 	 *  order entries first (unknown/duplicate entries skipped), then any
-	 *  categories the order never mentions in default order. Never persists
-	 *  the completion — untouched legacy files stay untouched. */
+	 *  categories the order never mentions in membership order. */
 	getOrderedCategories(type: ExpenseType): string[] {
 		const known = this.getCategories(type);
 		const order = this.data.categoryOrder?.[type];
@@ -724,56 +564,30 @@ export class ExpenseService {
 		return this.writeTypeList('categoryOrder', type, keys, this.getCategories(type));
 	}
 
-	/** Register a custom category name for a direction; rejected when empty/
-	 *  over-long, shadowing a preset, already present, or past the cap. */
 	addCustomCategory(type: ExpenseType, rawName: string): AddCategoryResult {
 		const name = rawName.trim().slice(0, EXPENSE_CATEGORY_NAME_MAX);
-		if (name.length === 0) return { ok: false, reason: 'invalid' };
-		const existing = this.data.customCategories?.[type] ?? [];
-		if (collidesWithPreset(name, type) || existing.some(n => n.toLowerCase() === name.toLowerCase())) {
-			return { ok: false, reason: 'duplicate' };
-		}
-		if (existing.length >= EXPENSE_MAX_CUSTOM_CATEGORIES) return { ok: false, reason: 'limit' };
-		const next = { ...this.data.customCategories, [type]: [...existing, name] };
-		this.data = { ...this.data, customCategories: next };
+		if (!name) return { ok: false, reason: 'invalid' };
+		const active = this.getCategories(type);
+		const lower = name.toLowerCase();
+		if (active.some(key => key.toLowerCase() === lower || categoryLabelOf(key).toLowerCase() === lower)) return { ok: false, reason: 'duplicate' };
+		if (active.length >= EXPENSE_MAX_CUSTOM_CATEGORIES + categoriesFor(type).length) return { ok: false, reason: 'limit' };
+		this.data = { ...this.data, categories: { ...this.data.categories, [type]: [...active, name] } };
 		this.save();
 		this.notify();
 		return { ok: true, name };
 	}
 
-	/** Remove a custom category (case-insensitive). Existing records keep the
-	 *  name — display falls back to the raw key (categoryLabel). The name is
-	 *  also dropped from the stored order and any primary mapping so it stops
-	 *  appearing in manager/filter lists immediately. */
-	removeCustomCategory(type: ExpenseType, name: string): boolean {
-		const existing = this.data.customCategories?.[type] ?? [];
-		const next = existing.filter(n => n.toLowerCase() !== name.toLowerCase());
-		if (next.length === existing.length) return false;
-		const custom = { ...this.data.customCategories, [type]: next };
-		// Drop the key entirely when empty so the JSON stays tidy.
-		if (next.length === 0) delete custom[type];
-
-		const orderList = this.data.categoryOrder?.[type] ?? [];
-		let categoryOrder = this.data.categoryOrder;
-		if (orderList.length > 0) {
-			const order = orderList.filter(n => n.toLowerCase() !== name.toLowerCase());
-			categoryOrder = { ...this.data.categoryOrder, [type]: order };
-			if (order.length === 0) delete categoryOrder[type];
-		}
-
-		const parentMap = this.data.categoryParents?.[type];
-		let categoryParents = this.data.categoryParents;
-		if (parentMap && parentMap[name] !== undefined) {
-			const { [name]: _dropped, ...rest } = parentMap;
-			categoryParents = { ...this.data.categoryParents, [type]: rest };
-		}
-
-		this.data = {
-			...this.data,
-			customCategories: custom,
-			...(categoryOrder !== this.data.categoryOrder ? { categoryOrder } : {}),
-			...(categoryParents !== this.data.categoryParents ? { categoryParents } : {}),
-		};
+	removeCategory(type: ExpenseType, name: string): boolean {
+		const active = this.getCategories(type);
+		if (active.length <= 1 || !active.includes(name)) return false;
+		const categories = { ...this.data.categories, [type]: active.filter(key => key !== name) };
+		const lastCategory = { ...this.data.lastCategory };
+		if (lastCategory[type] === name) delete lastCategory[type];
+		const categoryOrder = { ...this.data.categoryOrder, [type]: this.getOrderedCategories(type).filter(key => key !== name) };
+		const parentMap = { ...this.data.categoryParents?.[type] };
+		delete parentMap[name];
+		const categoryParents = { ...this.data.categoryParents, [type]: parentMap };
+		this.data = { ...this.data, categories, lastCategory, categoryOrder, categoryParents };
 		this.save();
 		this.notify();
 		return true;

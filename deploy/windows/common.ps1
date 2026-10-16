@@ -109,6 +109,34 @@ function Read-OkfConfig {
     return Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
 }
 
+function Assert-OkfTestEnvironment {
+    param([Parameter(Mandatory)][string]$Config, [string]$Vault = '')
+    $deployment = Read-OkfJsonHashtable -Path $Config -Description 'Test deployment config'
+    $markerPath = Join-Path (Split-Path -Parent $Config) 'test-environment.json'
+    $marker = Read-OkfJsonHashtable -Path $markerPath -Description 'Test environment marker'
+    foreach ($field in @('installation_id', 'vault', 'state', 'api_port')) {
+        if (-not $deployment.ContainsKey($field) -or -not $marker.ContainsKey($field)) {
+            throw "Missing test identity field: $field"
+        }
+    }
+    if ($marker['environment'] -ne 'test' -or
+        -not [string]$deployment['installation_id'] -or
+        $marker['installation_id'] -ne $deployment['installation_id'] -or
+        -not (Test-OkfSamePath -Left $marker['vault'] -Right $deployment['vault']) -or
+        -not (Test-OkfSamePath -Left $marker['state'] -Right $deployment['state']) -or
+        [int]$marker['api_port'] -ne [int]$deployment['api_port'] -or
+        [int]$deployment['api_port'] -notin 1024..65535 -or
+        [int]$deployment['api_port'] -eq 8765) {
+        throw 'Refusing to control an environment without a matching isolated test marker.'
+    }
+    $expectedConfig = Join-Path $deployment['state'] 'config\deployment.json'
+    if (-not (Test-OkfSamePath -Left $Config -Right $expectedConfig) -or
+        ($Vault -and -not (Test-OkfSamePath -Left $Vault -Right $deployment['vault']))) {
+        throw 'Requested paths do not match the test environment marker.'
+    }
+    return $deployment
+}
+
 function Get-OkfRuntimeRoot {
     param([Parameter(Mandatory)][object]$Deployment)
     if ($Deployment.PSObject.Properties.Name -contains 'runtime_root' -and [string]$Deployment.runtime_root) {

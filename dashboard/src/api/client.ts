@@ -86,11 +86,16 @@ export class LocalApi {
     });
   }
 
-  public createProject(title: string, slug?: string): Promise<{ path: string }> {
+  public createProject(title: string, slug?: string, category?: string): Promise<{ path: string }> {
     return this.request("/projects", {
       method: "POST",
-      body: JSON.stringify({ title, slug }),
+      body: JSON.stringify({ title, slug, project_category: category }),
     });
+  }
+
+  public setProjectCategory(slug: string, category: string | null, expected?: string | null): Promise<{ path: string }> {
+    return this.request(`/projects/${encodeURIComponent(slug)}/category`, { method: "POST",
+      body: JSON.stringify({ project_category: category, expected_category: expected, check_expected: expected !== undefined }) });
   }
 
   public organizeCapture(
@@ -283,7 +288,7 @@ export class LocalApi {
     },
   ): Promise<{
     source: string;
-    source_text: string;
+    source_text: string | null;
     routed_target?: string;
     semantic_operation?: SemanticOperationRecord;
   }> {

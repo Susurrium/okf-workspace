@@ -1,4 +1,4 @@
-import { App, FuzzyMatch, FuzzySuggestModal, setIcon } from 'obsidian';
+import { App, FuzzyMatch, FuzzySuggestModal, getIconIds, setIcon } from 'obsidian';
 import { t } from './i18n';
 
 /**
@@ -15,7 +15,7 @@ const ICONS: readonly string[] = [
 	// Reading & media
 	'book-open', 'book-plus', 'camera', 'image', 'mic', 'music', 'film', 'link',
 	// Tasks & goals
-	'list', 'list-checks', 'check-square', 'checkbox', 'target', 'flag', 'flame', 'award', 'trophy', 'star', 'heart',
+	'list', 'list-checks', 'check-square', 'square-check-big', 'target', 'flag', 'flame', 'award', 'trophy', 'star', 'heart',
 	// Life & misc
 	'coffee', 'utensils', 'dumbbell', 'briefcase', 'shopping-cart', 'map-pin', 'compass', 'plane', 'gift', 'leaf', 'droplet', 'palette',
 	// People & comms
@@ -33,13 +33,20 @@ export class IconPickerModal extends FuzzySuggestModal<string> {
 
 	constructor(app: App, onPick: (icon: string) => void) {
 		super(app);
+		this.limit = 400;
 		this.onPick = onPick;
 		this.setPlaceholder(t('quickNote.iconPickerPlaceholder'));
 		this.emptyStateText = t('quickNote.iconPickerEmpty');
 	}
 
 	getItems(): string[] {
-		return [...ICONS];
+		// 原生字典带 lucide- 前缀，setIcon 同时接受常用的简写名称。
+		const available = new Set(getIconIds().map(name => name.startsWith('lucide-') ? name.slice(7) : name));
+		return [...ICONS.filter(name => available.has(name)), ...[...available].filter(name => !ICONS.includes(name)).sort()];
+	}
+
+	getSuggestions(query: string): FuzzyMatch<string>[] {
+		return super.getSuggestions(query).slice(0, 400);
 	}
 
 	getItemText(item: string): string {

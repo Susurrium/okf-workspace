@@ -10,10 +10,20 @@ import {
   MAX_DOCUMENT_BYTES,
   type ImportFile,
 } from "../imports/drop.js";
-import { VaultDashboardReader } from "./vault-dashboard.js";
+import { VaultNoteService } from "./vault-note-service.js";
 
 export type ImportOrigin = "today" | "inbox" | "learning" | "context" | "command";
 type Relation = Pick<DocumentImportOptions, "course" | "project">;
+export interface DocumentImportDraft {
+  files: ImportFile[];
+  relation: Relation;
+  action: "store" | "convert";
+  intent: ImportIntent;
+  generate: boolean;
+  generationKind: "learn" | "wiki";
+  quality: DocumentImportOptions["quality"];
+  method: ConversionMethod | "auto";
+}
 export type ImportRelationKind = "course" | "project";
 export type CreateImportRelation = (
   kind: ImportRelationKind, title: string, slug?: string,
@@ -45,6 +55,8 @@ export class DocumentImportModal extends Modal {
   private submitButton?: HTMLButtonElement;
   private unbindDrop?: () => void;
   private relationSelect?: HTMLSelectElement;
+  private secondaryRelationSelect?: HTMLSelectElement;
+  private relationOptions = new Map<string, string>();
   private relationHint?: HTMLElement;
   private relationForm?: HTMLElement;
   private readonly relationCreateButtons: HTMLButtonElement[] = [];
@@ -66,15 +78,21 @@ export class DocumentImportModal extends Modal {
     initialGeneration = false,
     private readonly reuseText = false,
     initialGenerationKind: "learn" | "wiki" = "learn",
+    draft?: DocumentImportDraft,
+    private readonly saveDraft?: (draft: DocumentImportDraft | undefined) => void,
   ) {
     super(app);
-    this.files = files;
-    this.relation = { ...initialRelation };
+    this.files = files.length ? [...files] : [...(draft?.files ?? [])];
+    this.relation = { ...(draft?.relation ?? {}), ...initialRelation };
     if (synced) this.method = "auto";
     this.action = initialAction;
     this.generate = initialGeneration;
     this.generationKind = initialGenerationKind;
     this.intent = "source";
+    if (draft) {
+      this.action = draft.action; this.intent = draft.intent; this.generate = draft.generate;
+      this.generationKind = draft.generationKind; this.quality = draft.quality; this.method = draft.method;
+    }
   }
 
   public onOpen(): void {
@@ -102,8 +120,10 @@ export class DocumentImportModal extends Modal {
       });
     this.processingContainer = settings.createDiv();
     this.renderProcessing();
-    this.select(settings, "整理", [["source", "保存为资料"], ["later", "暂不确定，放入待归类"]],
-      this.intent, (value) => { this.intent = value as ImportIntent; });
+    this.select(settings, "资料用途", [["source", "参考资料"], ["later", "尚未决定"], ["learn", "用于学习"], ["wiki", "用于知识"]],
+      this.intent, (value) => { this.intent = value as ImportIntent;
+        if (value === "learn" || value === "wiki") this.generationKind = value;
+        this.renderGeneration(); this.updateSubmit(); });
     this.renderRelation(settings);
     if (this.synced) settings.createDiv({ text: "原件保存在笔记库，随 LiveSync 全量同步；同步后可直接离线阅读。" });
 
@@ -150,9 +170,16 @@ export class DocumentImportModal extends Modal {
   }
 
   public onClose(): void {
+    this.persistDraft();
     this.closed = true;
     this.unbindDrop?.();
     this.contentEl.empty();
+  }
+
+  private persistDraft(): void {
+    const files = this.files.filter(item => !["已提交", "已保存到本机"].includes(this.fileStates.get(item) ?? ""));
+    this.saveDraft?.(files.length ? { files, relation: { ...this.relation }, action: this.action,
+      intent: this.intent, generate: this.generate, generationKind: this.generationKind, quality: this.quality, method: this.method } : undefined);
   }
 
   private picker(parent: HTMLElement, label: string, directory: boolean): void {
@@ -195,7 +222,7 @@ export class DocumentImportModal extends Modal {
       const label = parent.createEl("label", { cls: "okf-document-import__checkbox" });
       const input = label.createEl("input", { attr: { type: "checkbox" } });
       input.checked = this.generate;
-      label.createSpan({ text: "转换完成后生成笔记" });
+      label.createSpan({ text: "正文就绪后生成笔记" });
       input.addEventListener("change", () => { if (this.running) return; this.generate = input.checked; this.renderGeneration(); this.updateSubmit(); });
     }
     if (this.generate) this.select(parent, "笔记类型", [["learn", "学习指南"], ["wiki", "Wiki 知识笔记"]],
@@ -213,6 +240,17 @@ export class DocumentImportModal extends Modal {
         return;
       }
       this.setRelation(value);
+      this.refreshSecondaryRelation();
+    });
+    this.secondaryRelationSelect = this.select(section, "同时关联", [["", "不额外关联"]], "", (value) => {
+      const primary = this.relationValue();
+      if (primary.startsWith("course:")) {
+        delete this.relation.project;
+        if (value.startsWith("project:")) this.relation.project = value.slice(8);
+      } else if (primary.startsWith("project:")) {
+        delete this.relation.course;
+        if (value.startsWith("course:")) this.relation.course = value.slice(7);
+      }
     });
     this.relationHint = section.createDiv({ cls: "okf-dashboard__muted", attr: { "aria-live": "polite" } });
     if (this.createRelation) {
@@ -235,7 +273,7 @@ export class DocumentImportModal extends Modal {
   }
 
   private relationLabel(value: string): string {
-    return `${value.startsWith("course:") ? "Course" : "Project"}：${value.slice(value.indexOf(":") + 1)}`;
+    return `${value.startsWith("course:") ? "课程" : "项目"}：${value.slice(value.indexOf(":") + 1)}`;
   }
 
   private setRelation(value: string): void {
@@ -245,25 +283,42 @@ export class DocumentImportModal extends Modal {
     if (value.startsWith("project:")) this.relation.project = value.slice(8);
   }
 
+  private refreshSecondaryRelation(): void {
+    const select = this.secondaryRelationSelect;
+    if (!select) return;
+    const primary = this.relationSelect?.value ?? this.relationValue();
+    const kind = primary.startsWith("course:") ? "project" : "course";
+    const value = this.relation[kind] ? `${kind}:${this.relation[kind]}` : "";
+    select.empty();
+    select.createEl("option", { text: "不额外关联" }).value = "";
+    for (const [key, label] of this.relationOptions) {
+      if (key.startsWith(`${kind}:`)) select.createEl("option", { text: label }).value = key;
+    }
+    if (value && !this.relationOptions.has(value)) select.createEl("option", { text: this.relationLabel(value) }).value = value;
+    select.value = value;
+    select.disabled = !primary || this.running || this.creatingRelation;
+  }
+
   private async refreshRelations(): Promise<void> {
     const version = ++this.relationLoadVersion;
     this.relationHint?.empty();
     this.relationHint?.setText("正在读取已有课程和项目…");
     try {
-      const data = await new VaultDashboardReader(this.app).learning();
+      const data = await new VaultNoteService(this.app).captureContexts();
       if (this.closed || version !== this.relationLoadVersion) return;
       const choices = new Map<string, string>();
       for (const course of data.courses) {
-        const slug = course.path.split("/")[2];
-        if (slug) choices.set(`course:${slug}`, `Course：${course.title}`);
+        const slug = course.path.replace(/^\//u, "").split("/")[2];
+        if (slug) choices.set(`course:${slug}`, `课程：${course.title}`);
       }
       for (const project of data.projects) {
-        const slug = project.path.split("/")[1];
-        if (slug) choices.set(`project:${slug}`, `Project：${project.title}`);
+        const slug = project.path.replace(/^\//u, "").split("/")[1];
+        if (slug) choices.set(`project:${slug}`, `项目：${project.title}`);
       }
       for (const [value, title] of this.createdRelations) {
         if (!choices.has(value)) choices.set(value, title);
       }
+      this.relationOptions = choices;
       const selected = this.relationValue();
       if (selected && !choices.has(selected)) choices.set(selected, this.relationLabel(selected));
       const select = this.relationSelect!;
@@ -271,6 +326,7 @@ export class DocumentImportModal extends Modal {
       select.createEl("option", { text: "独立资料" }).value = "";
       for (const [value, title] of choices) select.createEl("option", { text: title }).value = value;
       select.value = selected;
+      this.refreshSecondaryRelation();
       this.relationHint?.setText(choices.size ? "没有合适的归属时，可以新建课程或项目。"
         : "还没有课程或项目，可以新建，也可以保持独立资料。");
     } catch (error) {
@@ -324,7 +380,7 @@ export class DocumentImportModal extends Modal {
           : /^projects\/([^/]+)\/project\.md$/u).exec(result.path);
         if (!match?.[1]) throw new Error(`无法识别新建${name}的路径：${result.path}`);
         const value = `${kind}:${match[1]}`;
-        const label = `${kind === "course" ? "Course" : "Project"}：${title}`;
+        const label = `${kind === "course" ? "课程" : "项目"}：${title}`;
         this.createdRelations.set(value, label);
         this.setRelation(value);
         this.relationSelect!.createEl("option", { text: label }).value = value;
@@ -357,7 +413,7 @@ export class DocumentImportModal extends Modal {
       const catalogue = await this.loadConverters!();
       if (this.closed) return;
       this.catalogue = catalogue;
-      this.method = catalogue.default_method;
+      if (this.method === "auto") this.method = catalogue.default_method;
     } catch (error) {
       this.catalogueError = error instanceof Error ? error.message : String(error);
     } finally {
@@ -437,6 +493,7 @@ export class DocumentImportModal extends Modal {
   private updateSubmit(): void {
     const relationDisabled = this.running || this.creatingRelation;
     if (this.relationSelect) this.relationSelect.disabled = relationDisabled;
+    this.refreshSecondaryRelation();
     for (const button of this.relationCreateButtons) button.disabled = relationDisabled;
     const info = this.catalogue?.methods.find((item) => item.id === this.method);
     if (this.submitButton) this.submitButton.setText(this.running ? "正在保存…" : this.hadFailures ? "重试失败项" : this.reuseText ? "生成笔记" : this.action === "store"
@@ -487,6 +544,7 @@ export class DocumentImportModal extends Modal {
       }
     };
     await Promise.all(Array.from({ length: Math.min(this.synced ? 1 : 2, files.length) }, () => worker()));
+    this.persistDraft();
     if (this.status) this.status.setText(this.action === "store"
       ? `已保存 ${completed} 个原件，失败 ${failed} 个。原件随笔记同步，不会自动转换。`
       : this.synced

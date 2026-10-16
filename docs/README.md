@@ -6,10 +6,10 @@
 | --- | --- |
 | [架构](architecture/README.md) | 系统概览、模块边界、数据归属 |
 | [数据模型](DATA-MODEL.md) | Artifact 字段、用途、受管正文 |
-| [开发与验收](DEVELOPMENT.md) | 环境、检查、测试矩阵、文案与维护约定 |
+| [开发与验收](DEVELOPMENT.md) | 固定测试环境、临时夹具、检查矩阵、验收证据与退出 |
 | [使用指南](USER-GUIDE.md) | 工作台、导入、剪藏、学习、项目与多设备阅读 |
-| [部署运维](DEPLOYMENT.md) | 安装、转换服务、同步、备份与迁移 |
-| [接口与集成](INTERFACES.md) | API、CLI、Feed、插件命令与 Bridge |
+| [部署运维](DEPLOYMENT.md) | 首次启用、升级、测试环境恢复、同步、备份与退役 |
+| [接口与集成](INTERFACES.md) | API、CLI、资源同步与迁移、Feed、插件命令与 Bridge |
 | [当前计划](DEVELOPMENT-PLAN.md) | 后续事项和完成依据 |
 
 ## 组件说明与证据

@@ -13,7 +13,8 @@ from okf_workspace.ingestion import DIRECT_ENTRY
 from okf_workspace.okf.artifacts import render_artifact_body
 from okf_workspace.okf.file_io import atomic_write_bytes, document_lock
 from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
-from okf_workspace.okf.paths import slugify
+from okf_workspace.okf.paths import resolve_bundle_path, slugify
+from okf_workspace.okf.project_category import normalize_project_category
 from okf_workspace.okf.relations import explicit_context_fields, inherited_context_fields
 
 from .organize import replace_managed_region
@@ -273,7 +274,8 @@ class NoteService:
             },
         )
 
-    def create_project(self, slug: str, title: str) -> Path:
+    def create_project(self, slug: str, title: str, *, category: str | None = None) -> Path:
+        category = normalize_project_category(category)
         project_slug = slugify(slug)
         root = self.vault / "projects" / project_slug
         if root.exists():
@@ -289,8 +291,38 @@ class NoteService:
             note_type="Project",
             title=title,
             body=render_artifact_body(self.vault, "project", title=title),
-            fields={"project_status": "active"},
+            fields={
+                "project_status": "active",
+                **({"project_category": category} if category else {}),
+            },
         )
+
+    def set_project_category(
+        self, slug: str, category: str | None, *, expected: str | None = None,
+        check_expected: bool = False,
+    ) -> Path:
+        category = normalize_project_category(category)
+        if not slug or slug in {".", ".."} or any(char in slug for char in "/\\:"):
+            raise ValueError("项目目录名必须是单个 Vault 目录名称")
+        path = resolve_bundle_path(self.vault, f"projects/{slug}/project.md")
+        with document_lock(path):
+            before = path.read_bytes()
+            document = read_document(path)
+            if document.type != "Project":
+                raise ValueError("目标笔记不是 Project")
+            current = normalize_project_category(document.frontmatter.get("project_category"))
+            if document.frontmatter.get("project_category") == category and (
+                category is not None or "project_category" not in document.frontmatter
+            ):
+                return path
+            if check_expected and current != normalize_project_category(expected):
+                raise ValueError("项目类别已经变化，请重新读取后操作")
+            if category is None:
+                document.frontmatter.pop("project_category", None)
+            else:
+                document.frontmatter["project_category"] = category
+            write_document(path, document, expected_sha256=hashlib.sha256(before).hexdigest())
+        return path
 
     def append_project_log(self, project_slug: str, content: str) -> Path:
         slug = slugify(project_slug)

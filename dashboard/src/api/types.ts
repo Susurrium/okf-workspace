@@ -15,11 +15,14 @@ export interface NoteSummary {
   material_ready?: boolean;
   ai_unverified?: boolean;
   project_status?: string | null;
+  project_category?: string | null;
   course_status?: string | null;
   capture_status?: string | null;
   purpose?: string | null;
   ingested_via?: IngestedVia | null;
   resource?: string | null;
+  text_path?: string | null;
+  sha256?: string | null;
   kind?: string | null;
   course?: string | null;
   project?: string | null;
@@ -81,6 +84,8 @@ export interface TaskItem {
   path: string;
   line: number;
   text: string;
+  course?: string | null;
+  project?: string | null;
 }
 
 export interface TodayFeedSummary {
@@ -110,12 +115,15 @@ export interface LocalTodayView {
   daily: { path: string; exists: boolean };
   daily_excerpt: string;
   tasks: TaskItem[];
+  overdue_tasks?: TaskItem[];
   active_projects: ProjectSummary[];
   active_courses: CourseSummary[];
   recent_study: NoteSummary[];
   open_inbox_count: number;
   pending_study_count: number;
   pending_wiki_count: number;
+  pending_study?: NoteSummary[];
+  pending_wiki?: NoteSummary[];
   stale_knowledge: NoteSummary[];
 }
 
@@ -147,6 +155,8 @@ export interface ConversionRecord {
   conversion_id: string;
   status: ConversionStatus;
   source_filename: string;
+  course?: string | null;
+  project?: string | null;
   intent: string;
   quality: string;
   parser: string;

@@ -1,214 +1,107 @@
 import { App, Modal, Notice, Setting } from "obsidian";
-
-import {
-  CAPTURE_ENTRY_ACTION_LABELS,
-  filterCaptureContextOptions,
-  normalizeCaptureRelation,
-  relationVaultPath,
-  type CaptureContextOption,
-  type CaptureContextOptions,
-  type CaptureRelation,
-} from "../domain/capture-context.js";
-
-type ContextKind = "course" | "project";
+import { normalizeCaptureRelation, relationVaultPath, type CaptureContextOptions, type CaptureRelation } from "../domain/capture-context.js";
+import type { CaptureSession } from './capture-session.js';
 
 export class QuickCaptureModal extends Modal {
-  private value = "";
-  private readonly initial: CaptureRelation;
-  private contextKind: ContextKind | undefined;
+  private value: string;
+  private readonly relation: CaptureRelation;
   private submitting = false;
-  private readonly submitButtons = new Set<HTMLButtonElement>();
+  private textarea: HTMLTextAreaElement | undefined;
+  private readonly controls: Array<HTMLInputElement | HTMLSelectElement | HTMLButtonElement> = [];
+  private unsubscribe?: () => void;
 
-  public constructor(
-    app: App,
-    private readonly contexts: CaptureContextOptions,
-    initial: CaptureRelation,
+  public constructor(app: App, private readonly contexts: CaptureContextOptions, initial: CaptureRelation,
     private readonly onSubmit: (value: string, relation: CaptureRelation) => Promise<void>,
-  ) {
+    private readonly draft?: { text: string; save(text: string): void; relation?: CaptureRelation; saveRelation?(relation: CaptureRelation): void },
+    private readonly session?: CaptureSession) {
     super(app);
-    this.initial = normalizeCaptureRelation(initial);
+    this.value = draft?.text ?? "";
+    this.relation = normalizeCaptureRelation(draft?.relation ?? initial);
   }
 
   public onOpen(): void {
     this.modalEl.addClass("okf-workflow-modal", "okf-quick-capture-modal");
     this.titleEl.setText("快速记录");
-
-    let textarea: HTMLTextAreaElement | undefined;
-    new Setting(this.contentEl)
-      .setName("内容")
-      .setDesc("先记下来；没有明确归属就直接进入待处理。")
-      .addTextArea((area) => {
-        textarea = area.inputEl;
-        area.setPlaceholder("一个想法、问题，或暂时不想打断当前工作的内容……");
+    new Setting(this.contentEl).setName("内容").setDesc("保存到收集箱，随后再决定去向。")
+      .addTextArea(area => {
+        this.textarea = area.inputEl;
+        area.setValue(this.value);
+        area.setPlaceholder("想法、问题，或暂时不想打断当前工作的内容……");
         area.inputEl.rows = 7;
-        area.onChange((value) => {
-          this.value = value;
-        });
+        area.onChange(value => { this.value = value; this.draft?.save(value); });
       });
-
-    const workflow = this.contentEl.createDiv({ cls: "okf-quick-capture-modal__workflow" });
-    if (this.hasFixedRelation()) this.renderFixedRelation(workflow);
-    else this.renderPrimaryActions(workflow);
-
-    textarea?.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" || !event.ctrlKey) return;
-      event.preventDefault();
-      if (this.contextKind) {
-        new Notice(`请先选择具体的${this.contextKind === "course" ? "课程" : "项目"}`);
-        return;
-      }
-      void this.submit(this.initial);
+    const context = this.contentEl.createEl("details", { cls: "okf-capture-context" });
+    context.open = Boolean(this.relation.course || this.relation.project);
+    context.createEl("summary", { text: "关联课程和项目（可选，可同时选择）" });
+    for (const kind of ["course", "project"] as const) {
+      const options = kind === "course" ? this.contexts.courses : this.contexts.projects;
+      new Setting(context).setName(kind === "course" ? "课程" : "项目").addDropdown(input => {
+        input.addOption("", "不关联");
+        for (const option of options) input.addOption(`/${relationVaultPath(option.path)}`, option.title);
+        const current = this.relation[kind] ?? "";
+        if (current && !options.some(option => `/${relationVaultPath(option.path)}` === current)) input.addOption(current, `${current}（保留原关联）`);
+        input.setValue(current).onChange(value => {
+          if (value) this.relation[kind] = value; else delete this.relation[kind];
+          this.draft?.saveRelation?.({ ...this.relation });
+        });
+        input.selectEl.setAttribute("aria-label", kind === "course" ? "关联课程" : "关联项目");
+        this.controls.push(input.selectEl);
+      });
+    }
+    new Setting(this.contentEl).setDesc("Ctrl + Enter 保存记录。选择关联时不会自动提交。")
+      .addButton(button => {
+        button.setButtonText("保存到收集箱").setCta().onClick(() => void this.submit());
+        this.controls.push(button.buttonEl);
+      });
+    this.textarea?.addEventListener("keydown", event => {
+      if (event.key === "Enter" && event.ctrlKey && !event.isComposing) { event.preventDefault(); void this.submit(); }
     });
-    textarea?.focus();
+    this.textarea?.focus();
+    if (this.session) {
+      const feedback = this.contentEl.createDiv({ cls: 'okf-capture-feedback', attr: { role: 'status', 'aria-live': 'polite' } });
+      this.unsubscribe = this.session.subscribe(state => {
+        this.value = state.text;
+        delete this.relation.course; delete this.relation.project;
+        Object.assign(this.relation, state.relation);
+        if (this.textarea && this.textarea.value !== state.text) this.textarea.value = state.text;
+        if (this.textarea) { this.textarea.disabled = state.busy; this.textarea.readOnly = state.locked; }
+        for (const control of this.controls) {
+          const kind = control.getAttribute('aria-label') === '关联课程' ? 'course' : control.getAttribute('aria-label') === '关联项目' ? 'project' : undefined;
+          control.disabled = state.busy || (!!kind && state.locked);
+          if (kind) control.value = state.relation[kind] ?? '';
+        }
+        feedback.setText(state.error);
+      });
+    }
   }
 
   public onClose(): void {
-    this.submitButtons.clear();
+    this.unsubscribe?.();
+    if (!this.session) {
+      this.draft?.save(this.value);
+      this.draft?.saveRelation?.(this.value.trim() ? { ...this.relation } : {});
+    }
     this.contentEl.empty();
   }
 
-  private hasFixedRelation(): boolean {
-    return Boolean(this.initial.course || this.initial.project);
-  }
-
-  private renderFixedRelation(parent: HTMLElement): void {
-    const context = parent.createDiv({ cls: "okf-quick-capture-modal__fixed-context" });
-    context.createEl("strong", { text: "保存时将自动关联" });
-    context.createDiv({ text: this.fixedRelationLabel() });
-    const label = this.initial.course && !this.initial.project
-      ? "关联课程后保存"
-      : this.initial.project && !this.initial.course
-        ? "关联项目后保存"
-        : "按当前关联保存";
-    const actions = parent.createDiv({ cls: "okf-quick-capture-modal__actions" });
-    this.actionButton(actions, label, "mod-cta", () => this.submit(this.initial));
-    actions.createSpan({ cls: "okf-quick-capture-modal__hint", text: "Ctrl + Enter" });
-  }
-
-  private fixedRelationLabel(): string {
-    const labels: string[] = [];
-    if (this.initial.course) {
-      labels.push(`课程 · ${this.contextTitle("course", this.initial.course)}`);
-    }
-    if (this.initial.project) {
-      labels.push(`项目 · ${this.contextTitle("project", this.initial.project)}`);
-    }
-    return labels.join(" · ");
-  }
-
-  private contextTitle(kind: ContextKind, path: string): string {
-    const options = kind === "course" ? this.contexts.courses : this.contexts.projects;
-    return options.find((option) =>
-      relationVaultPath(option.path) === relationVaultPath(path)
-    )?.title ?? relationVaultPath(path).split("/").at(-2) ?? path;
-  }
-
-  private renderPrimaryActions(parent: HTMLElement): void {
-    this.contextKind = undefined;
-    parent.empty();
-    parent.createDiv({
-      cls: "okf-quick-capture-modal__prompt",
-      text: "这条记录现在有明确归属吗？",
-    });
-    const actions = parent.createDiv({ cls: "okf-quick-capture-modal__actions" });
-    this.actionButton(actions, CAPTURE_ENTRY_ACTION_LABELS[0], "mod-cta", () => this.submit({}));
-    this.actionButton(actions, CAPTURE_ENTRY_ACTION_LABELS[1], "okf-workflow-modal__secondary", () => {
-      this.renderContextPicker(parent, "course");
-    });
-    this.actionButton(actions, CAPTURE_ENTRY_ACTION_LABELS[2], "okf-workflow-modal__secondary", () => {
-      this.renderContextPicker(parent, "project");
-    });
-    parent.createDiv({ cls: "okf-quick-capture-modal__hint", text: "Ctrl + Enter 直接保存到待处理" });
-  }
-
-  private renderContextPicker(parent: HTMLElement, kind: ContextKind): void {
-    this.contextKind = kind;
-    parent.empty();
-    const noun = kind === "course" ? "课程" : "项目";
-    const heading = parent.createDiv({ cls: "okf-quick-capture-modal__picker-heading" });
-    heading.createEl("strong", { text: `选择 ${noun}` });
-    const back = heading.createEl("button", {
-      text: "返回",
-      cls: "okf-workflow-modal__ghost",
-      attr: { type: "button" },
-    });
-    back.addEventListener("click", () => this.renderPrimaryActions(parent));
-
-    const search = parent.createEl("input", {
-      cls: "okf-quick-capture-modal__search",
-      attr: {
-        type: "search",
-        placeholder: `搜索 ${noun}…`,
-        "aria-label": `搜索 ${noun}`,
-      },
-    });
-    const results = parent.createDiv({ cls: "okf-quick-capture-modal__results" });
-    const options = kind === "course" ? this.contexts.courses : this.contexts.projects;
-    const render = (): void => {
-      results.empty();
-      const filtered = filterCaptureContextOptions(options, search.value);
-      if (!filtered.length) {
-        results.createDiv({
-          cls: "okf-quick-capture-modal__empty",
-          text: options.length ? `没有匹配的 ${noun}` : `还没有可关联的 ${noun}`,
-        });
-        return;
-      }
-      for (const option of filtered) this.contextButton(results, kind, option);
-    };
-    search.addEventListener("input", render);
-    render();
-    search.focus();
-  }
-
-  private contextButton(parent: HTMLElement, kind: ContextKind, option: CaptureContextOption): void {
-    const button = parent.createEl("button", {
-      cls: "okf-quick-capture-modal__context",
-      attr: { type: "button" },
-    });
-    button.createEl("strong", { text: option.title });
-    button.createSpan({ text: option.path });
-    this.submitButtons.add(button);
-    button.addEventListener("click", () => {
-      const relation = kind === "course"
-        ? normalizeCaptureRelation({ course: option.path })
-        : normalizeCaptureRelation({ project: option.path });
-      void this.submit(relation);
-    });
-  }
-
-  private actionButton(
-    parent: HTMLElement,
-    label: string,
-    className: string,
-    action: () => void | Promise<void>,
-  ): void {
-    const button = parent.createEl("button", {
-      text: label,
-      cls: className,
-      attr: { type: "button" },
-    });
-    this.submitButtons.add(button);
-    button.addEventListener("click", () => void action());
-  }
-
-  private async submit(relation: CaptureRelation): Promise<void> {
+  private async submit(): Promise<void> {
     if (this.submitting) return;
-    const value = this.value.trim();
-    if (!value) {
-      new Notice("请输入要记录的内容");
-      return;
-    }
+    if (!this.value.trim()) { new Notice("请输入要记录的内容"); return; }
     this.submitting = true;
-    for (const button of this.submitButtons) button.disabled = true;
+    if (this.textarea) this.textarea.disabled = true;
+    this.controls.forEach(control => { control.disabled = true; });
     try {
-      await this.onSubmit(value, normalizeCaptureRelation(relation));
+      await this.onSubmit(this.value.trim(), normalizeCaptureRelation(this.relation));
+      this.value = "";
+      this.draft?.save("");
       this.close();
-    } catch (error) {
-      new Notice(error instanceof Error ? error.message : "保存失败", 10_000);
-    } finally {
+    } catch (error) { new Notice(error instanceof Error ? error.message : "保存失败", 10000); }
+    finally {
       this.submitting = false;
-      for (const button of this.submitButtons) button.disabled = false;
+      if (!this.session) {
+        if (this.textarea) this.textarea.disabled = false;
+        this.controls.forEach(control => { control.disabled = false; });
+      }
     }
   }
 }

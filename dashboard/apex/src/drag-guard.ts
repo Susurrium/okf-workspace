@@ -21,6 +21,7 @@
 export interface GuardedDragHandlers {
 	onMove: (ev: PointerEvent) => void;
 	onUp: (ev: PointerEvent) => void;
+	onCancel?: () => void;
 	/** Cursor shown over the shield for the drag's lifetime
 	 *  (e.g. 'col-resize'); the mousedown cursor can lag without it. */
 	cursor?: string;
@@ -40,7 +41,9 @@ export function startGuardedDrag(e: PointerEvent, handlers: GuardedDragHandlers)
 		done = true;
 		shield.removeEventListener('pointermove', onMove);
 		shield.removeEventListener('pointerup', onUp);
-		shield.removeEventListener('pointercancel', finish);
+		shield.removeEventListener('pointercancel', cancel);
+		shield.removeEventListener('lostpointercapture', cancel);
+		doc.defaultView?.removeEventListener('blur', cancel);
 		doc.removeEventListener('pointermove', onMove);
 		doc.removeEventListener('pointerup', onUp);
 		try {
@@ -52,17 +55,26 @@ export function startGuardedDrag(e: PointerEvent, handlers: GuardedDragHandlers)
 	};
 	const onMove = (ev: PointerEvent): void => {
 		if (done) return;
+		if (ev.pointerId !== e.pointerId) return;
 		handlers.onMove(ev);
 	};
 	const onUp = (ev: PointerEvent): void => {
 		if (done) return;
+		if (ev.pointerId !== e.pointerId) return;
 		finish();
 		handlers.onUp(ev);
+	};
+	const cancel = (): void => {
+		if (done) return;
+		finish();
+		handlers.onCancel?.();
 	};
 
 	shield.addEventListener('pointermove', onMove);
 	shield.addEventListener('pointerup', onUp);
-	shield.addEventListener('pointercancel', finish);
+	shield.addEventListener('pointercancel', cancel);
+	shield.addEventListener('lostpointercapture', cancel);
+	doc.defaultView?.addEventListener('blur', cancel);
 	// Belt-and-braces alongside the capture (and the carrier when an engine
 	// rejects capture on a freshly-mounted element).
 	doc.addEventListener('pointermove', onMove);

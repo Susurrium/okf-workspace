@@ -198,7 +198,7 @@ describe("shared document import window", () => {
     const content = modal.contentEl as unknown as TestElement;
     const options = content.descendants().filter((item) => item.tagName === "select");
     expect(options[0]?.value).toBe("store");
-    expect(content.descendants().some((item) => item.textContent.includes("Course：algebra"))).toBe(true);
+    expect(content.descendants().some((item) => item.textContent.includes("课程：algebra"))).toBe(true);
     const submit = content.descendants().find((item) => item.textContent === "保存原件")!;
     submit.click();
 

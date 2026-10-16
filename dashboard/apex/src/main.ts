@@ -2,10 +2,11 @@ import { Notice, Platform, Plugin, TAbstractFile, TFile } from 'obsidian';
 import { DEFAULT_SETTINGS, type DashboardSettings, type CountdownConfig, type AlbumConfig, type AnniversaryConfig } from './types';
 import { normalizeTransition } from './album-widget';
 import { DashboardSettingTab } from './settings';
-import { DashboardView, DASHBOARD_VIEW_TYPE } from './view';
+import { DashboardView, DASHBOARD_VIEW_TYPE, DASHBOARD_SECTION_VIEW_TYPE } from './view';
 import { BackupService } from './backup-service';
 import { setLanguage, t } from './i18n';
 import { DataviewGuideModal } from './dataview-guide-modal';
+import { ThemeStudioModal } from './theme-studio-modal';
 
 /** Version of the CURRENT announcement content (DataviewGuideModal). The
  *  announcement pops only when the user's stored version differs from this —
@@ -29,7 +30,7 @@ import {
 } from './workspace-registry';
 
 /** All valid style preset keys — single source of truth for migration. */
-const VALID_STYLE_PRESETS = ['earth', 'nordic', 'aurora', 'blossom', 'lilac', 'island', 'tundra', 'matcha', 'mono', 'neon', 'volt', 'magma', 'onyx'] as const;
+const VALID_STYLE_PRESETS = ['earth', 'nordic', 'aurora', 'blossom', 'lilac', 'aqua', 'island', 'tundra', 'matcha', 'mono', 'neon', 'volt', 'magma', 'onyx'] as const;
 
 /** Removed or renamed presets mapped to a sensible replacement. */
 const DEPRECATED_STYLE_PRESETS: Readonly<Record<string, string>> = {
@@ -121,6 +122,7 @@ export default class DashboardPlugin extends Plugin {
 			await this.loadSettings();
 
 			this.registerView(DASHBOARD_VIEW_TYPE, (leaf) => new DashboardView(leaf, this));
+			this.registerView(DASHBOARD_SECTION_VIEW_TYPE, (leaf) => new DashboardView(leaf, this, true));
 
 		this.backupService = new BackupService(this);
 		// The 60s tick is registered so Obsidian clears it on unload automatically.
@@ -163,10 +165,10 @@ export default class DashboardPlugin extends Plugin {
 			id: 'cycle-theme',
 			name: t('main.cycleTheme'),
 			callback: async () => {
-				const themes = ['earth', 'nordic', 'aurora', 'blossom', 'lilac', 'island', 'tundra', 'matcha', 'mono', 'neon', 'volt', 'magma', 'onyx'];
+				const themes = ['earth', 'nordic', 'aurora', 'blossom', 'lilac', 'aqua', 'island', 'tundra', 'matcha', 'mono', 'neon', 'volt', 'magma', 'onyx'];
 				const idx = themes.indexOf(this.settings.stylePreset);
 				const next = themes[(idx + 1) % themes.length] ?? 'earth';
-				this.settings = { ...this.settings, stylePreset: next };
+				this.settings = { ...this.settings, stylePreset: next, activeCustomThemeId: '' };
 				await this.saveSettings();
 				this.refreshAllDashboards();
 			},
@@ -177,6 +179,7 @@ export default class DashboardPlugin extends Plugin {
 			name: t('main.nextWorkspace'),
 			callback: () => this.cycleWorkspace(1),
 		});
+		this.addCommand({ id: 'open-appearance-studio', name: t('main.openAppearanceStudio'), callback: () => new ThemeStudioModal(this.app, this).open() });
 
 		this.addCommand({
 			id: 'previous-workspace',

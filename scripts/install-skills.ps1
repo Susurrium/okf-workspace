@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Vault = 'E:\ObsidianData\OKF-Brain',
+    [Parameter(Mandatory)][string]$Vault,
     [string]$SourceRoot = ''
 )
 

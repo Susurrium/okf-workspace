@@ -9,7 +9,7 @@
  * 2. Default projects sections keep covers and write no showCover key.
  * 3. Rendering: showCover:false cards carry no cover markup but keep the
  *    retired type's other affordances (per-card new-note button, header
- *    settings gear); sticky per-card noteStyle still decides on its own.
+ *    settings menu item); sticky per-card noteStyle still decides on its own.
  * 4. AddSectionModal no longer offers the 'notes' type.
  * 5. NotesSectionConfigModal: the show-cover checkbox prefills from the
  *    current setting and save returns the edited value.
@@ -22,7 +22,7 @@
  * Run: `npm run test:notes-cover`
  */
 import { strict as assert } from 'node:assert';
-import { TFile, type App } from 'obsidian';
+import { Menu, TFile, type App } from 'obsidian';
 import type { DashboardCard, DashboardColumn, RenderCallbacks } from '../src/types';
 import { El, findByClass, findTag } from './mini-dom';
 import { parse, serialize } from '../src/parser';
@@ -141,7 +141,7 @@ type: project
 	}
 
 	// 3. Coverless rendering: no cover markup, but the per-card new-note
-	//    button and header settings gear survive; sticky noteStyle still
+	//    button and section settings menu survive; sticky noteStyle still
 	//    decides per card. The parse→render bridge proves an old `type: notes`
 	//    section renders coverless through the whole pipeline.
 	{
@@ -161,8 +161,11 @@ type: project
 		const section = renderSection(makeColumn({ showCover: false }), callbacks, app) as unknown as El;
 		assert.equal(findByClass(section, 'dashboard-card--cover').length, 0, '3: coverless card has no cover class');
 		assert.equal(findByClass(section, 'dashboard-project-cover').length, 0, '3: no cover element rendered');
-		const gearLabel = t('notesCfg.title');
-		assert.ok(findTag(section, 'button').some(b => b.getAttribute('aria-label') === gearLabel), '3: settings gear still rendered');
+		const more = findTag(section, 'button').find(b => b.getAttribute('aria-label') === t('section.more'));
+		assert.ok(more, '3: section menu trigger rendered');
+		more.click();
+		const menu = (Menu as unknown as { last: { items: { title: string }[] } }).last;
+		assert.ok(menu.items.some(item => item.title === t('section.settings')), '3: section settings menu item rendered');
 		assert.ok(findByClass(section, 'dashboard-card-btn--newnote').length > 0, '3: per-card new-note button still rendered');
 
 		const sticky = renderSection(makeColumn({ sectionType: 'sticky', cards: [makeCard({ noteStyle: 'plain' }), makeCard({ id: 'c2', noteStyle: 'cover' })] }), callbacks, app) as unknown as El;

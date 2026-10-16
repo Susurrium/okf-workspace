@@ -205,6 +205,17 @@ export function recalcChecked(task: TaskItem): TaskItem {
 	return { ...task, checked: allChecked };
 }
 
+export function transitionTaskItem(task: TaskItem, checked: boolean): TaskItem[] {
+	return [{ ...task, checked, status: undefined,
+		children: task.children?.flatMap(child => transitionTaskItem(child, checked)) }];
+}
+
+export function serializeTaskItemLine(task: TaskItem, prefix = '', collapsed = false): string {
+	const block = /\s+\^[a-zA-Z0-9-]+\s*$/u.exec(task.text)?.[0] ?? '';
+	const text = block ? task.text.slice(0, -block.length) : task.text;
+	return `${prefix}- [${task.status ?? (task.checked ? 'x' : ' ')}] ${text}${task.reminder ? ` ⏰ ${task.reminder}` : ''}${collapsed && task.collapsed ? ' <!--collapsed-->' : ''}${block}`;
+}
+
 /**
  * Partition a task tree into completed (to be archived) and remaining items.
  *
@@ -253,8 +264,7 @@ export function serializeTasksForNote(tasks: TaskItem[]): string {
 
 	const write = (task: TaskItem, indent: number) => {
 		const prefix = indent > 0 ? '    '.repeat(indent) : '';
-		let line = `${prefix}- [${task.checked ? 'x' : ' '}] ${task.text}`;
-		if (task.reminder) line += ` ⏰ ${task.reminder}`;
+		const line = serializeTaskItemLine(task, prefix);
 		lines.push(line);
 		for (const child of task.children ?? []) write(child, indent + 1);
 	};

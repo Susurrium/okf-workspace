@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "reviewed_at": "2026-10-06",
-  "baseline_commit": "8706ed2f",
-  "scope": "参考该提交，并核对当前工作区的文档整合与共享视图清理；不代表生产部署状态。",
+  "reviewed_at": "2026-10-16",
+  "baseline_commit": "364d4570",
+  "scope": "核对快速记录、项目类别与工作台交互整合后的接口和数据归属；不代表生产部署状态。",
   "charts": [
     {
       "id": "overview",
@@ -741,7 +741,7 @@
             "system/imports/<uuid>/request.md"
           ],
           "kind": "vault",
-          "detail": "Capture 与 Import Request 是不同入口。v4 申请明确 action: store/convert，原件先保存；移动端只写文件和申请，不维护业务执行状态。",
+          "detail": "快速记录入口共用草稿与提交控制，每次提交持久保存一篇 Capture，并保留明确选择的课程和项目关联。v4 Import Request 明确 action: store/convert，原件先保存；移动端只写文件和申请，不维护业务执行状态。",
           "source": "engine/workspace/vault/system/contracts/document-import-request.yaml",
           "w": 270,
           "h": 105
@@ -846,7 +846,7 @@
             "projects/<project>/"
           ],
           "kind": "vault",
-          "detail": "Project 保存状态、下一步等领域信息，log 追加真实进展，Decision 保存决定。项目相关 Capture 和学习材料通过关系关联。",
+          "detail": "Project 保存状态、下一步和可选主类别，log 追加真实进展，Decision 保存决定。项目相关 Capture 和学习材料通过关系关联；置顶、排列和看板分组依据保存在工作台视图配置中。",
           "source": "engine/workspace/vault/system/contracts/project.yaml",
           "w": 390,
           "h": 105

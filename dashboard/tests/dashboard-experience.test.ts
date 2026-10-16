@@ -359,7 +359,7 @@ describe("Dashboard experience selectors", () => {
       notes,
       "project",
       "/projects/workspace/project.md",
-    )).toEqual({ key: "learning-entries", label: "待学习", count: 2 });
+    )).toEqual({ key: "learning-entries", label: "学习条目", count: 2 });
     expect(filterDashboardLearningScope(notes, "all")).toEqual([
       course,
       project,

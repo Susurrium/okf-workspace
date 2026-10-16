@@ -6,14 +6,14 @@
  *    pairs, elapsedDays clamping (past period = full span, current period =
  *    day index), periodShift month/year anchor normalization (03-31 must
  *    shift to 02-01, never the Date-overflow 03-02), periodLabel formats.
- * 2. Service normalize: legacy file without the new fields stays untouched;
+ * 2. Service normalize: current category membership remains explicit;
  *    dirty categoryOrder drops unknown keys without materializing missing
  *    ones; dangling parent mappings drop out; over-cap primary lists clip.
  * 3. Order API: reorderCategories exact-cover rule (dup/short/foreign
  *    rejected), read-time lenient completion, persisted order round-trip.
  * 4. Primary API: add (case-insensitive + preset-key + preset-label
  *    collisions, cap), setCategoryParent round-trip + null clear,
- *    removePrimaryCategory ungroups members, removeCustomCategory cleans
+ *    removePrimaryCategory ungroups members, removeCategory cleans
  *    order + parents.
  * 5. Merge (persist with an external writer): session-first order/primaries
  *    union, per-key session-wins parents, dangling parents dropped.
@@ -25,6 +25,8 @@
 import { strict as assert } from 'node:assert';
 import {
 	EXPENSE_MAX_PRIMARY_CATEGORIES,
+	EXPENSE_CATEGORIES,
+	INCOME_CATEGORIES,
 	type ExpenseService,
 	ExpenseService as ExpenseServiceClass,
 	regroupBreakdownByPrimary,
@@ -74,8 +76,8 @@ interface Harness {
 	flush: () => Promise<void>;
 }
 
-const boot = (file: string): Harness => {
-	const { adapter, disk, written, overwrite } = makeAdapter({ [DATA_PATH]: file });
+const boot = (file?: string): Harness => {
+	const { adapter, disk, written, overwrite } = makeAdapter(file === undefined ? {} : { [DATA_PATH]: file });
 	(globalThis as { activeDocument?: unknown }).activeDocument = {
 		body: {},
 		addEventListener: (): void => {},
@@ -91,13 +93,14 @@ const boot = (file: string): Harness => {
 		service,
 		h: { disk, written, overwrite },
 		flush: async () => {
-			await (service as unknown as { saveQueue: Promise<void> }).saveQueue;
+			await service.flush();
 		},
 	};
 };
 
 const record = (over: Record<string, unknown>): string => JSON.stringify({
-	version: 1,
+	version: 2,
+	categories: { expense: [...EXPENSE_CATEGORIES], income: [...INCOME_CATEGORIES] },
 	records: [{ id: 'ex-1', type: 'expense', amount: 10, category: 'food', date: '2026-01-05', createdAt: 1 }],
 	lastCategory: { expense: 'food' },
 	...over,
@@ -167,12 +170,12 @@ const fmtCheck = (d: Date): string =>
 // ---- 2-5. Service ----------------------------------------------------------
 
 const serviceChecks = async (): Promise<void> => {
-	// Legacy file without the new fields: defaults everywhere, no growth.
+	// 当前格式允许没有分组，排序修改后完整保存。
 	{
 		const { service, h, flush } = boot(record({}));
 		await service.load();
-		assert.equal(service.getPrimaryCategories('expense').length, 0, 'no primaries on legacy file');
-		assert.equal(service.getCategoryParent('expense', 'food'), undefined, 'no mapping on legacy file');
+		assert.equal(service.getPrimaryCategories('expense').length, 0, 'no primary groups configured');
+		assert.equal(service.getCategoryParent('expense', 'food'), undefined, 'no mapping configured');
 		// Default order = presets + customs, before any reorder.
 		assert.equal(service.getOrderedCategories('expense')[0], 'food');
 		service.reorderCategories('expense', service.getCategories('expense').slice().reverse());
@@ -186,7 +189,7 @@ const serviceChecks = async (): Promise<void> => {
 	{
 		const primaries = Array.from({ length: 15 }, (_, i) => `组${i}`);
 		const { service } = boot(record({
-			customCategories: { expense: ['咖啡', '健身'] },
+			categories: { expense: [...EXPENSE_CATEGORIES, '咖啡', '健身'], income: [...INCOME_CATEGORIES] },
 			categoryOrder: { expense: ['咖啡', 'bogus', 'food'] },
 			primaryCategories: { expense: primaries },
 			categoryParents: { expense: { '咖啡': '组0', 'food': 'ghost', 'transport': '组1' } },
@@ -218,7 +221,7 @@ const serviceChecks = async (): Promise<void> => {
 
 	// Primary API round-trip.
 	{
-		const { service } = boot(record({ customCategories: { expense: ['咖啡'] } }));
+		const { service } = boot(record({ categories: { expense: [...EXPENSE_CATEGORIES, '咖啡'], income: [...INCOME_CATEGORIES] } }));
 		await service.load();
 		assert.equal(service.addPrimaryCategory('expense', '生活').ok, true);
 		assert.equal(service.addPrimaryCategory('expense', '生活').ok, false, 'exact duplicate rejected');
@@ -249,12 +252,12 @@ const serviceChecks = async (): Promise<void> => {
 		assert.equal(service.getCategoryParent('expense', 'food'), undefined, 'member ungrouped on primary delete');
 		assert.equal(service.getPrimaryCategories('expense').includes('生活'), false);
 
-		// removeCustomCategory cleans order + parents alongside customs.
+		// 删除分类同时清理顺序和分组引用。
 		service.addCustomCategory('expense', '奶茶');
 		service.setCategoryParent('expense', '奶茶', '生活X');
 		const withMilk = service.getOrderedCategories('expense');
 		service.reorderCategories('expense', ['奶茶', ...withMilk.filter(c => c !== '奶茶')]);
-		assert.equal(service.removeCustomCategory('expense', '奶茶'), true);
+		assert.equal(service.removeCategory('expense', '奶茶'), true);
 		assert.equal(service.getCategoryParent('expense', '奶茶'), undefined, 'mapping cleaned with the custom');
 		assert.ok(!service.getOrderedCategories('expense').includes('奶茶'), 'order cleaned with the custom');
 	}
@@ -263,7 +266,7 @@ const serviceChecks = async (): Promise<void> => {
 	// per-key session-wins parents, dangling disk parents dropped.
 	{
 		const { service, h, flush } = boot(record({
-			customCategories: { expense: ['咖啡'] },
+			categories: { expense: [...EXPENSE_CATEGORIES, '咖啡'], income: [...INCOME_CATEGORIES] },
 			categoryOrder: { expense: ['food', '咖啡'] },
 			primaryCategories: { expense: ['生活'] },
 			categoryParents: { expense: { '咖啡': '生活' } },
@@ -279,13 +282,13 @@ const serviceChecks = async (): Promise<void> => {
 		// Another device writes: adds a record, its own order starting with
 		// the stale 'food', a new primary '住行', and parents for transport.
 		h.overwrite(DATA_PATH, JSON.stringify({
-			version: 1,
+			version: 2,
 			records: [
 				{ id: 'ex-9', type: 'expense', amount: 5, category: 'transport', date: '2026-01-06', createdAt: 9 },
 				{ id: 'ex-1', type: 'expense', amount: 10, category: 'food', date: '2026-01-05', createdAt: 1 },
 			],
 			lastCategory: { expense: 'food' },
-			customCategories: { expense: ['咖啡'] },
+			categories: { expense: [...EXPENSE_CATEGORIES, '咖啡'], income: [...INCOME_CATEGORIES] },
 			categoryOrder: { expense: ['food', '咖啡'] },
 			primaryCategories: { expense: ['住行'] },
 			categoryParents: { expense: { '咖啡': '住行', 'transport': 'ghost' } },
@@ -320,6 +323,29 @@ const serviceChecks = async (): Promise<void> => {
 const run = async (): Promise<void> => {
 	periodChecks();
 	await serviceChecks();
+	const fresh = boot();
+	await fresh.service.load();
+	assert.ok(fresh.service.addRecord({ type: 'expense', amount: 12.34, category: 'food', date: '2026-10-15' }));
+	assert.equal(fresh.service.removeCategory('expense', 'food'), true);
+	await fresh.flush();
+	assert.equal(fresh.service.getRecords()[0]?.amount, 12.34);
+	assert.equal(fresh.service.getRecords()[0]?.category, 'food');
+	const reopened = boot(fresh.h.disk[DATA_PATH]);
+	await reopened.service.load();
+	assert.equal(reopened.service.getCategories('expense').includes('food'), false);
+	assert.equal(reopened.service.getRecords().length, 1);
+	for (const category of reopened.service.getCategories('expense').slice(1)) assert.equal(reopened.service.removeCategory('expense', category), true);
+	assert.equal(reopened.service.removeCategory('expense', reopened.service.getCategories('expense')[0]!), false);
+	const unsupported = boot(record({ version: 1 }));
+	await assert.rejects(() => unsupported.service.load(), /不支持/);
+	assert.equal(unsupported.h.written.length, 0);
+	fresh.h.overwrite(DATA_PATH, '{broken');
+	fresh.service.addCustomCategory('expense', '额外分类');
+	await assert.rejects(fresh.flush, /JSON/);
+	assert.equal(fresh.h.disk[DATA_PATH], '{broken');
+	fresh.service.destroy();
+	reopened.service.destroy();
+	unsupported.service.destroy();
 	console.log('verify-expense: all assertions passed');
 };
 

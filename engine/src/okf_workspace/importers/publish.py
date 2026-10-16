@@ -275,6 +275,7 @@ def route_existing_import(
     intent: ImportIntent,
     course: str | None = None,
     project: str | None = None,
+    require_text: bool = False,
 ) -> tuple[Path, Path | None, Path | None]:
     vault = vault.resolve()
     source = source.resolve()
@@ -293,7 +294,7 @@ def route_existing_import(
     with publisher.transaction():
         document = publisher.read_record(source)
         if "text" not in document.frontmatter:
-            if intent not in {ImportIntent.SOURCE, ImportIntent.LATER}:
+            if require_text:
                 raise ValueError("这份资料仅保存了原件，请先转换正文再生成笔记")
             publisher.resolve_use(
                 document, purpose=_purpose(intent), course=course, project=project,

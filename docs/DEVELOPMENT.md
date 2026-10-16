@@ -4,7 +4,7 @@
 
 本文件维护开发命令、修改要求和验收方法。测试矩阵是要求，不代表本次或生产环境已经通过；已执行的验收证据保存在组件验收台账和发布记录。
 
-按需阅读：[环境](#开发环境) · [检查与构建](#检查与构建) · [合成 Vault 验收](#合成-vault-完整流程) · [实机验收](#实机与外部服务验收) · [文案](#界面命名与文案) · [文档维护](#文档维护)。
+按需阅读：[固定测试环境](#正式发布后的继续开发) · [检查与构建](#检查与构建) · [证据与退出](#验收证据与退出) · [合成 Vault 验收](#合成-vault-完整流程) · [实机验收](#实机与外部服务验收) · [文档维护](#文档维护)。
 
 ## 开发环境
 
@@ -23,18 +23,26 @@ Dashboard 与 Claudian 有各自的 lockfile；Engine 与 MarkItDown 也有各�
 
 ## 正式发布后的继续开发
 
-源码、正式程序和测试数据分别维护。正式程序通过版本包部署，例如 `D:\OKF-Workspace`；
-开发仍在本仓库进行。修改源码不会改变已安装的正式 Engine，构建插件时只部署到测试 Vault。
+源码、正式程序和测试数据分别维护。开发仍在本仓库进行；正式程序通过
+[版本包](DEPLOYMENT.md#install)部署到仓库外。开发构建只生成本地产物，安装时核对测试目标。
+
+### 固定测试环境
 
 保留一个按当前 Contracts 初始化的 `E:\ObsidianData\OKF-Test`，配套独立
 `OKF-Test-State`、本地端口 `8766`、本地 token 和远端 `okf-test` 数据库及专用账户。
-旧 `OKF-Brain`、`OKF-Workspace` 和 `okf-workspace` 数据库继续作为历史档案，
-不整体复制到新的测试或正式环境。测试内容使用合成资料；自动化测试仍自行建立临时 fixture Vault。
+测试内容使用合成资料；日常实机验收统一使用此固定测试环境，保留已有测试笔记和人工检查记录。
+测试 Obsidian 使用 `OKF-Test-State/obsidian-profile`，调试端口为 `9366`；此 profile 只登记
+`OKF-Test`。正式 Vault 仅由正式 profile 打开，同一 Vault 同时只允许一个 profile 写入。
+自动化测试的临时 fixture 与常驻测试环境分别管理。
 
-源码安装测试环境时显式指定这些路径、`-ApiPort 8766 -SkipScheduledTasks`；
-测试不持有正式环境的全局计划任务。安装后在测试 State 的 `config/test-environment.json`
-记录 `environment: test`、对应安装身份、Vault、State 和端口，供控制脚本校验。
-默认关闭 Engine 自动启动和 LiveSync。已有测试环境可使用：
+测试 State 的 `config/test-environment.json` 必须已记录 `environment: test`、安装身份、
+Vault、State 和 API 端口，并与部署配置匹配。源码安装和更新在构建及写入前验证该身份；
+源码完整安装还要求显式目标及 `-SkipScheduledTasks`，不注册全局计划任务。
+首次建立或恢复环境见[部署指南](DEPLOYMENT.md#test-environment)，不把更新入口用于空目录初始化。
+
+### 更新与启停
+
+默认关闭 Engine 自动启动和 LiveSync。已登记测试环境通过以下入口管理：
 
 ```powershell
 .\scripts\test-workspace.ps1 -Action Start
@@ -44,24 +52,31 @@ Dashboard 与 Claudian 有各自的 lockfile；Engine 与 MarkItDown 也有各�
 .\scripts\test-workspace.ps1 -Action Start -EnableSync
 ```
 
-Start 打开测试 Vault 并启动其 Engine；Stop 关闭测试窗口、关闭 Engine 自动启动和 LiveSync，
+Start 通过独立 profile 打开测试 Vault 并启动其 Engine，校验实际 Vault 与 Engine 指纹；
+Stop 关闭该 profile 的测试窗口、关闭 Engine 自动启动和 LiveSync，并检查进程及端口退出，
 不影响正式 Vault。脚本要求有效的测试环境标识，拒绝正式端口和不匹配的 Dashboard 配置。
 CouchDB 可以同时保留正式和测试库；平时停用测试客户端即可，不能停止正式库共用的容器。
 测试 CouchDB 版本或服务器配置时使用独立容器。
 
-更新插件时显式指定测试环境：
+更新完整测试环境前先 Stop，再显式指定路径：
 
 ```powershell
-.\scripts\install-dashboard.ps1 -Vault E:\ObsidianData\OKF-Test -State E:\ObsidianData\OKF-Test-State
-.\scripts\install-okf-claudian.ps1 -Vault E:\ObsidianData\OKF-Test
+.\scripts\update-test-workspace.ps1 -Vault E:\ObsidianData\OKF-Test -State E:\ObsidianData\OKF-Test-State
 ```
 
-Claudian 的本地 `.env.local` 若启用自动复制，只能指向测试 Vault。
-测试结束执行 Stop，避免自动同步和后台 AI 写入继续运行。
+更新入口校验测试身份与停机状态，同步 Engine 依赖、受管资源、Skills 和两套插件，重建索引，
+验证 Contracts，生成 `reports/development-build.json` 和 `reports/deployment-receipt.json`。
+日常更新使用[资源同步接口](INTERFACES.md#workspace-resources)，保留业务笔记和已有交互模板；
+该接口也更新受管 Obsidian 设置。数据格式升级单独明确迁移范围、备份和验证，再执行 `migrate`。
+单独更新插件见[安装入口](DEPLOYMENT.md#plugin-deployment)。更新中断后先检查已安装文件和日志，
+修正失败并完成验证；不能因部分复制成功就启动验收或记录更新完成。
 
-后续流程为：提交当前发布基线 → 新分支开发 → 相关自动化检查 → 测试 Vault 验证 →
-更新版本并打包 → 安装正式环境。保留上一个版本包以便回退；涉及数据 schema 的回退先恢复匹配数据。
-已经完成且与本次改动无关的 LiveSync／平板验收可以沿用。
+### 变更流程
+
+在本仓库完成修改与相关自动化检查，停止并更新固定测试环境，核对实际构建与 Engine 身份后
+执行受影响的实机场景，最后记录证据并退出测试。发布候选完成根检查和必要附加检查，
+正式版本固定提交并打包；正式安装按[部署指南](DEPLOYMENT.md#production-cutover)及用户授权执行。
+开发期间保留与本次任务无关的未提交修改，不把它们自动纳入提交或发布。
 
 ## 检查与构建
 
@@ -73,28 +88,47 @@ Claudian 的本地 `.env.local` 若启用自动复制，只能指向测试 Vault
 | --- | --- |
 | Engine Python | `uv run pytest <相关测试>`、`uv run ruff check src tests`、`uv run pyright` |
 | Dashboard | `npm run check`、`npm test -- <相关测试>`、`npm run build` |
+| Apex 源码或集成接缝 | Dashboard 检查，以及 `dashboard/apex/` 中受影响的 `test:*` 脚本、`npm run lint`、`npm run build`；上游升级执行全部 `test:*` |
 | Claudian | 先读最近的 `AGENTS.md`；代码修改运行 typecheck、lint、相关测试、build 及该指南要求的其他检查 |
+| Windows 安装或环境控制 | 脚本解析、相关安装与控制测试；身份拒绝在写入前生效，已有设置保留，进程和端口正确退出 |
 | 跨组件 | 根目录 `uv run --project engine pytest tests/e2e`，再运行根检查脚本 |
 | 文档 | `git diff --check`、本地链接与命令核对；组件文档有专用测试时运行该测试 |
 
+根检查当前不执行 Apex 专用检查和 Claudian `npm run check:performance`，也不覆盖真实 Obsidian、
+远端服务或多设备验收。按修改范围补齐这些检查；不能用根脚本成功代替其未执行的验证。
+
 历史 Originals 服务使用 `scripts/check-legacy-originals.ps1` 和独立 CI。当前 Vault 原件迁移、旧设备上传恢复仍进入默认 Engine／跨组件检查。
 
-Dashboard 正式构建入口是 `src/plugin/main.ts`。八个 OKF Section 经 `features/workbench/okf-surface-sections.ts` 挂载共享 Surface；界面回归应覆盖实际 `OkfDashboardView`，不建立仅供旧测试使用的第二套实现。
+Dashboard 正式构建入口是 `src/plugin/main.ts`。九个业务功能及今天、每日更新场景经 `features/workbench/okf-surface-sections.ts` 挂载共享视图；界面回归覆盖实际 `OkfDashboardView`、旧配置、就地操作、分页、声明式范围和独立页面的状态传递。分区行为以[使用指南](USER-GUIDE.md#分区与工作台)为准。
 
-Dashboard 产物是 `dist/main.js`、`dist/styles.css` 和根目录 `manifest.json`。Claudian 按其组件构建配置生成插件文件；其构建可能读取 `.env.local` 并向配置的 Vault 复制产物，执行前检查目标。快速安装与部署回执见[部署运维](DEPLOYMENT.md#plugin-deployment)。
+Dashboard 产物是 `dist/main.js`、`dist/styles.css` 和根目录 `manifest.json`。Claudian 按其组件构建配置生成插件文件，安装时显式指定并验证目标。快速安装与部署回执见[部署运维](DEPLOYMENT.md#plugin-deployment)。
 
 ## 测试原则
 
-测试使用隐私安全的合成 Vault，按当前 Contracts 生成。历史生产笔记、旧 Runtime State 和废弃开发样例不作为新写入器的兼容门槛。生产内容、索引、秘密和运行状态留在仓库外。模拟测试验证协议与工作流；真实外部服务是否可用需单独 smoke test。
+测试使用隐私安全的合成 Vault，按当前 Contracts 生成。历史生产笔记、旧 Runtime State 和废弃开发样例不作为新写入器的兼容门槛。生产内容、索引、秘密和运行状态留在仓库外；合成夹具及临时状态仅放在忽略的测试工作目录中。模拟测试验证协议与工作流；真实外部服务是否可用需单独 smoke test。
+
+## 验收证据与退出
+
+每次验收记录实际源码提交及未提交状态、组件版本、构建和安装文件哈希、环境身份、
+执行场景、结果与证据位置。源码回执记录部署时的 Python 源码哈希；同一版本号不代表同一构建。
+源码、依赖、资源或产物变化后，重新验证受影响部分并记录新的对应关系。
+自动化、Obsidian 实机、真实外部服务、视觉和多设备验证分别表述；视觉检查遵循用户授权。
+失败日志与最终结果分别保留，合成缓存或 mock 成功不作为在线服务证明。
+
+测试结束执行 `test-workspace.ps1 -Action Stop`，再用 `-Action Status` 确认
+`vault_open`、`api_listening`、`engine_autostart` 和 `livesync_enabled` 均为 false。
+另行核对测试 CDP 端口已无监听，profile 未登记其他 Vault；手动启动的服务由本次任务自行退出。
+停止失败时保留日志并报告仍运行的进程或端口，不终止正式实例或共享服务。
+结果保存在本次 `work/` 验收记录或对应组件台账；长期保留证据按[归档步骤](DEPLOYMENT.md#environment-retirement)处理。
 
 ## Engine 验收矩阵
 
 - Contract：所有 Workspace 写入器产生合法 YAML，并保留未知扩展字段。
 - 工作台边界：使用 Apex 实际序列化器与六种预设生成合成工作台；任意名称、中文路径、
   旧版与未来版本不要求 Artifact 字段，身份冲突、非布尔标记及异常 YAML 明确报错。
-  笔记迁移逐字节保留工作台；检索清理旧布局索引，显式附件读取最新正文；真实任务保留，
-  工作台备份不重复参与检索、任务或笔记治理，备份恢复仍保留工作台。
-- Sources：Source/Source Text 成对原子发布；Web/Feed 双向 URL 去重；文件哈希去重。
+  笔记迁移逐字节保留工作台；检索清理旧布局索引，显式附件读取最新正文；普通笔记任务保留，
+  工作台及其备份排除任务投影，备份恢复仍保留工作台。
+- Sources：存在正文时原子发布 Source/Source Text；仅保存原件时不创建占位正文；Web/Feed 双向 URL 去重；文件哈希去重。
 - Intake：默认仅保存原件不调用解析器；明确转换且未指定方式时使用 MinerU 云 API；本地 token 文件不进入仓库或 Vault；失败不隐式降级到旧服务。
 - Retry：切换 parser 不残留永远 queued 的旧 conversion。
 - Identity：原始文件名、resource、首个 `ingested_via` 不在 worker 中丢失。
@@ -111,11 +145,14 @@ Dashboard 产物是 `dist/main.js`、`dist/styles.css` 和根目录 `manifest.js
 ## Dashboard 验收矩阵
 
 - 测试真实 `OkfDashboardView`，不能只测未运行的旧 page model。
-- 导入窗口选择 Wiki 必须请求生成；已转换但尚未完成生成入队的项目继续显示在待处理区，并提供独立重试入口。
+- 导入窗口选择 Wiki 且确认生成时请求生成；生成入队失败通过后台处理与相关业务入口独立恢复。
 - Today 宽屏横向展示继续进行、待处理与待办，窄 pane 依次降为两栏和单栏；中国热点、AI 资讯、树洞热榜各自选择最近一期，卡片内滚动查看该期所有条目。
 - Reading 展示 `learning` 订阅来源及 `papers` 论文卡片，使用与 Today 相同的滚动列表和 Feed 条目交互；按来源搜索和浏览历史，连续加载不重复、不跳期，返回后恢复滚动位置；论文不出现在 Today。
-- Inbox 三阶段、渠道过滤、Web 四个离散动作及明确反馈。
-- Learning 的 `全部 = Course + Project-related + Independent`，具体关系筛选和双关联正确。
+- 收集箱保留每个用途上下文、渠道过滤、网页判断和明确反馈；资料目录按 Source 去重。
+- Learning 全部条目去重，课程与项目关系数量允许重叠；具体关系筛选、双关联和学习阶段正确。
+- 分区实例状态互不覆盖；未知配置与用户正文保留，范围失效不扩大为全局。
+- 同一任务在 Today、项目、日历共用身份与完成语义；当前、逾期和无日期任务范围明确。
+- Tasks 的过滤条件、格式、状态顺序、编辑选项及全局查询生效；工作台清单的勾选、归档与保存均限制在所属工作台。
 - Project 快速记录、关联学习入口、状态与下一步展示准确。
 - Vault-native 动作在 Engine 离线时仍可完成；后台动作显示排队、运行、完成、失败和重试。
 - 页面刷新不重置 tab、筛选、details、输入焦点和已保存 scrollTop。
@@ -140,9 +177,24 @@ Dashboard 产物是 `dist/main.js`、`dist/styles.css` 和根目录 `manifest.js
 
 ## 合成 Vault 完整流程
 
-每次发布使用临时目录重新生成，不复用旧状态：
+常规功能与发布候选的实机流程在固定 `OKF-Test` 中执行，保留人工检查记录和已有测试笔记。
+确实需要验证干净初始化、迁移、恢复或特殊插件组合时，才额外创建短期 fixture：
 
-1. 初始化 Vault 和 Contracts；
+```powershell
+.\scripts\new-test-fixture.ps1 -Name clean-install -Purpose '干净初始化验收' -ExpiresAt ([DateTimeOffset]::Now.AddDays(1))
+```
+
+到期时间按本次任务实际安排填写。工具仅在仓库忽略的 `work/fixtures/<名称>/` 中创建，记录用途、
+来源提交、期限和初始化状态，不自动注册到 Obsidian、不接入同步；来源提交之外的未提交状态
+与实际构建哈希写入本次验收记录。`expires_at` 仅作记录，工具不会到期自动停止或删除。
+创建夹具的任务负责按[证据与退出](#验收证据与退出)关闭写入者，并在验收记录中写明清理时间、
+结果或延期理由及新期限。归档与删除遵循[环境退役](DEPLOYMENT.md#environment-retirement)；
+失败日志保留到问题调查完成。正式 Vault、正式 State 和 `E:\ObsidianData` 均不用于创建临时夹具。
+自动化测试由测试框架分配独立夹具，本地临时根使用忽略的工作目录或组件既有约定。
+
+完整业务流程：
+
+1. 常规验收更新已有 `OKF-Test` 的受管资源并确认夹具有效；干净初始化场景才创建临时 Vault；
 2. 快速记录一个无归属 Capture、一个 Course 想法和一个 Project 想法；
 3. 先仅保存测试原件，确认不产生转换任务；再明确转换 PDF/DOCX/PPTX，确认默认云解析路径及图片完整性；
 4. 发布 Web Clip 和 Feed 中相同 URL，确认只产生一个 Source pair；
@@ -155,7 +207,8 @@ Dashboard 产物是 `dist/main.js`、`dist/styles.css` 和根目录 `manifest.js
 
 ## 实机与外部服务验收
 
-自动化全部通过后，只做一次短实机验收：
+相关自动化检查通过后，按本次改动选择必要的真实场景；完整发布候选覆盖以下适用项目。
+修正实现或更换产物后重新验证受影响场景，已有且未受影响的外部服务和多设备证据可注明依据沿用：
 
 - MinerU 云 API 真实转换带图 DOCX，并验证结果 ZIP/图片完整性；
 - 本机 Codex 完成一次可见会话和一次后台生成；
@@ -170,7 +223,7 @@ LiveSync 属于以后启用多设备时的独立验收，不阻塞当前单机�
 
 ```powershell
 uv run --project engine python scripts/smoke-mineru-cloud.py `
-  --token-file E:\ObsidianData\OKF-Brain-State\secrets\mineru-client.token
+  --token-file E:\ObsidianData\OKF-Test-State\secrets\mineru-client.token
 ```
 
 此命令会实际提交云端任务并消耗服务额度。它只打印解析器、正文长度、图片数量与 QC 结果。
@@ -201,7 +254,7 @@ uv run --project engine python scripts/smoke-mineru-cloud.py `
 ### 产品与导航
 
 - 工作台插件展示名为“工作台”，助手插件展示名为“Claudian”。上游项目与技术来源放在关于页。
-- 页面使用“今天、待处理、订阅阅读、学习、项目、知识库、生活、系统状态”。
+- 分区使用“今天、任务、收集箱、订阅阅读、资料、学习、项目、知识笔记、日记与复盘、后台与诊断”；保留命令 ID 与旧工作台标题。任务、清单项和后台处理分别命名，添加目录选项只显示图标与名称，便利贴保留原名。
 - 内部插件 ID、命令 ID、路径、YAML 类型、API 值和区域标记保持英文协议值。
 - 侧栏注册标题属于 Obsidian 持久化键；更改可见提示时保留原注册标识。
 

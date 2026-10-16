@@ -327,6 +327,17 @@ def _remove_nested_indexes(root: Path) -> list[str]:
     return changes
 
 
+def sync_workspace_resources(vault: Path, template_root: Path) -> tuple[str, ...]:
+    root = vault.resolve()
+    templates = template_root.resolve()
+    if not (root / "index.md").is_file():
+        raise FileNotFoundError(root / "index.md")
+    for relative in ("system/contracts", "system/templates", "system/views", "system/policies"):
+        if not (templates / relative).is_dir():
+            raise FileNotFoundError(templates / relative)
+    return tuple(_sync_system_resources(root, templates))
+
+
 def _sync_system_resources(root: Path, templates: Path) -> list[str]:
     """Install managed contracts/templates and preserve editable interactive files."""
 

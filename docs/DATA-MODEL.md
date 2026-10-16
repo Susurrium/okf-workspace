@@ -110,7 +110,7 @@ studied_at: 2026-08-20T18:30:00+08:00
 | `Daily` | `life/daily/YYYY/MM/` | 必填 `date`；含 `linked-activity`、`organized-daily` 区域。 |
 | `Reflection` | `life/reflections/` | 用户自由反思正文。 |
 | `Review` | `life/reviews/` | 阶段复盘；可含 `organized-review`。 |
-| `Project` | `projects/<project>/project.md` | `project_status: active/paused/completed`；正文保留 `project-current-state`。 |
+| `Project` | `projects/<project>/project.md` | `project_status: active/paused/completed`；可选 `project_category` 主类别；正文保留 `project-current-state`。 |
 | `Decision` | `projects/<project>/decisions/` | 必填 `decided_at`，路径表达所属项目。 |
 | `Course` | `learning/courses/<course>/course.md` | `course_status: active/paused/completed`。 |
 | `Lesson` | `learning/courses/<course>/lessons/` | 必填 `lesson_at`；人工笔记与 `organized-lesson` 分区。 |
@@ -125,6 +125,17 @@ studied_at: 2026-08-20T18:30:00+08:00
 | `System View` | `system/views/` | Obsidian 原生查询与导航视图。 |
 
 类型不再带无意义的 `Note` 后缀。`Wiki Map` 不按周期自动生成；当某主题已有多个 Wiki、关系需要导航，或用户明确要求时，由 `maintain-wiki-map` 创建或更新。
+
+Project 的 `project_category` 是用户维护的可选单值主类别，使用去除首尾空白的
+1–80 个 Unicode 字符，不含控制字符；名称区分大小写，不预置固定枚举。
+缺失表示未分类，清除时删除字段。多主题继续使用 `tags`。
+类别只保存在项目主页；任务、资料与学习内容通过既有项目关联查询，禁止复制类别字段。
+类别修改不改变路径、项目状态、正文、任务和关联；AI 不自行推断类别。
+现有项目无需补写或迁移。类别整体重命名是对明确列出的项目做批量属性修改，
+合并到已有名称时显示合并效果，逐项检查原类别并报告成功与失败。
+
+看板分组依据、置顶和手动顺序属于分区／页面显示状态。按类别跨列拖动修改
+`project_category`，按状态跨列拖动修改 `project_status`；同列排列只保存显示顺序。
 
 ## 7. Source 流水线
 
