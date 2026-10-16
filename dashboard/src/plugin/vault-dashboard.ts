@@ -9,6 +9,7 @@ import type {
   SourceUse,
   TaskItem,
 } from "../api/types.js";
+import { projectCategory } from "../domain/project-organization.js";
 import {
   compareNotesByRecency,
   dashboardLearningScopeEntryCounts,
@@ -473,6 +474,7 @@ export class VaultDashboardReader {
           material_ready: materialReady(body),
           ai_unverified: aiUnverified(frontmatter),
           project_status: textValue(frontmatter.project_status),
+          project_category: noteType === "Project" ? projectCategory(frontmatter.project_category) : null,
           course_status: textValue(frontmatter.course_status),
           capture_status: textValue(frontmatter.capture_status),
           purpose: textValue(frontmatter.purpose),

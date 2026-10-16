@@ -64,6 +64,10 @@ Passing a Git merge or TypeScript compilation alone is not an accepted upstream 
 草稿和收集箱流程；展开编辑与命令共用同一提交控制。OKF 内不提供独立的闪念目标笔记、文件夹或模板配置。
 历史 Apex 笔记和旧配置保留，不自动转换或搬移；独立 Apex 宿主维持其原生捕获行为。
 
+用户于 2026-10-16 追加采用 OKF 项目类别、分组、看板、置顶和手动排列。
+项目类别进入 Project Contract；界面复用现有 OKF 项目、任务与关联读写，
+不导入上游独立 PM 模型及其创建、归档、删除和任务编辑流程。
+
 记账分类按没有正式历史数据设计，不开发旧格式迁移、推断或双写；不主动删除磁盘文件。
 胶囊作为新增主题，保留丁香及现有选择。滚动条维持现有显示策略。
 
@@ -71,7 +75,6 @@ Passing a Git merge or TypeScript compilation alone is not an accepted upstream 
 
 - 沉浸式工作台及自由布局。
 - 文件搜索小组件和操作条输入用途切换。
-- 项目分组、看板、置顶及排序增强。
 
 以上仅在用户后续明确范围后开发，本轮不预埋入口、配置或实现。
 

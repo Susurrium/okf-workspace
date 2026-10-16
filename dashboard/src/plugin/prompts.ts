@@ -7,6 +7,7 @@ export interface PromptField {
   multiline?: boolean;
   required?: boolean;
   initialValue?: string;
+  suggestions?: readonly string[];
 }
 
 export interface ChoiceOption<T extends string> {
@@ -123,6 +124,12 @@ export class FieldsPromptModal extends Modal {
         setting.addText((input) => {
           input.setPlaceholder(field.placeholder);
           input.setValue(field.initialValue ?? "");
+          if (field.suggestions?.length) {
+            const id = `okf-prompt-${crypto.randomUUID()}`;
+            const list = this.contentEl.createEl("datalist", { attr: { id } });
+            for (const value of field.suggestions) list.createEl("option", { attr: { value } });
+            input.inputEl.setAttribute("list", id);
+          }
           input.onChange((value) => {
             this.values[field.key] = value;
           });

@@ -71,6 +71,8 @@ import type { TasksRuntime } from "../../tasks-generated/plugin.js";
 import { registerSectionDefinition } from "../../apex/src/section-registry.js";
 import { ApexHostAdapter } from "../adapters/apex-host.js";
 import { ArtifactEditPolicy } from "../application/artifact-edit-policy.js";
+import { ProjectCategoryModal } from "./project-category-modal.js";
+import { projectCategory } from "../domain/project-organization.js";
 import {
   readLegacyApexSettings,
   takeoverApexNativeData,
@@ -853,18 +855,26 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public promptProject(onCreated?: (slug: string) => void): void {
+    void this.openProjectPrompt(onCreated).catch(error => new Notice(error instanceof Error ? error.message : String(error)));
+  }
+
+  private async openProjectPrompt(onCreated?: (slug: string) => void): Promise<void> {
+    const { projects } = await new VaultDashboardReader(this.app).projects();
+    const categories = [...new Set(projects.map(project => projectCategory(project.project_category)).filter((value): value is string => value !== null))].sort();
     new FieldsPromptModal(
       this.app,
       "新建项目",
       [
         { key: "title", label: "项目名称", placeholder: "个人知识库" },
         { key: "slug", label: "目录名（可留空）", placeholder: "workspace", required: false },
+        { key: "category", label: "项目类别（可留空）", placeholder: "选择已有类别或输入新名称", required: false, suggestions: categories },
       ],
       "创建项目",
       async (values) => {
         const result = await this.notes().createProject(
           values.title ?? "项目",
           values.slug || undefined,
+          values.category || undefined,
         );
         new Notice("项目已创建：" + result.path);
         await this.openVaultPath(result.path);
@@ -1712,6 +1722,16 @@ export default class OkfBrainPlugin extends Plugin {
     const result = await this.notes().setProjectStatus(path, status);
     this.refreshDashboardViews();
     return result;
+  }
+
+  public async setProjectCategory(path: string, category: string | null, expected?: string | null): Promise<void> {
+    await this.notes().setProjectCategory(path, category, expected);
+    this.refreshDashboardViews();
+  }
+
+  public async promptProjectCategory(path?: string): Promise<void> {
+    const { projects } = await new VaultDashboardReader(this.app).projects();
+    new ProjectCategoryModal(this.app, projects, () => this.refreshDashboardViews(), path).open();
   }
 
   private notes(): VaultNoteService {

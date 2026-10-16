@@ -15,6 +15,7 @@ export interface NoteSummary {
   material_ready?: boolean;
   ai_unverified?: boolean;
   project_status?: string | null;
+  project_category?: string | null;
   course_status?: string | null;
   capture_status?: string | null;
   purpose?: string | null;

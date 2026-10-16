@@ -28,6 +28,36 @@ from okf_workspace.okf.templates import initialize_vault
 FEED_FIXTURES = Path(__file__).parents[1] / "fixtures" / "feeds"
 
 
+def test_project_category_api_preserves_identity_and_rejects_stale_edits(tmp_path: Path) -> None:
+    vault = initialize_vault(tmp_path / "category-vault")
+    client, headers, _ = _client(vault, tmp_path)
+    created = client.post("/projects", headers=headers, json={
+        "title": "类别接口", "slug": "category-api", "project_category": "科研",
+    })
+    assert created.status_code == 200, created.text
+    path = vault / "projects/category-api/project.md"
+    body = read_document(path).body
+    edited = client.post("/projects/category-api/category", headers=headers, json={
+        "project_category": "工具", "expected_category": "科研", "check_expected": True,
+    })
+    assert edited.status_code == 200, edited.text
+    assert read_document(path).body == body
+    before = path.read_bytes()
+    stale = client.post("/projects/category-api/category", headers=headers, json={
+        "project_category": "生活", "expected_category": "科研", "check_expected": True,
+    })
+    assert stale.status_code == 400
+    assert path.read_bytes() == before
+    denied = client.post("/projects/category-api/category", headers={
+        **headers, "x-okf-vault-fingerprint": "different",
+    }, json={"project_category": None})
+    assert denied.status_code == 409
+    assert path.read_bytes() == before
+    assert client.post("/projects/category-api/category", headers=headers,
+                        json={"project_category": None}).status_code == 200
+    assert "project_category" not in read_document(path).frontmatter
+
+
 def test_original_only_source_can_save_deferred_use_but_requires_text_for_generation(
     tmp_path: Path,
 ) -> None:

@@ -201,7 +201,9 @@ describe("workbench interaction contracts", () => {
     expect(root.descendants().some(item => item.attributes.get("aria-label") === "搜索项目")).toBe(true);
     root.descendants().find(item => item.textContent === "在新标签页打开")!.click();
     expect(navigate).toHaveBeenCalledWith("projects", root, "我的项目", expect.objectContaining({ project, mode: "summary", limit: 1,
-      viewState: { filters: { query: "", sort: "modified" }, tab: "active", scrollTop: 0 } }), "project-instance:expanded");
+      viewState: { filters: { query: "", sort: "modified", projectView: "list", projectGroup: "none",
+        projectSort: "modified", projectCategory: "*", projectPinned: "[]", projectOrder: "[]" },
+        tab: "active", scrollTop: 0 } }), "project-instance:expanded");
     expect(root.descendants().some(item => item.textContent === "完整项目目录")).toBe(false);
     await (view as unknown as { render(preserveScroll: boolean): Promise<void> }).render(true);
     expect(root.descendants("okf-surface-controls")).toHaveLength(1);

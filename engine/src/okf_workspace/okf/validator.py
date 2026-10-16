@@ -18,6 +18,7 @@ from .contracts import (
 )
 from .document_role import DocumentRole, document_role, is_workbench_backup, workbench_issue
 from .frontmatter import FrontmatterError, OkfDocument, parse_document, read_document
+from .project_category import normalize_project_category
 
 _DATE_HEADING = re.compile(r"^## (\d{4}-\d{2}-\d{2})\s*$")
 _SKIPPED_DIRECTORIES = {".agents", ".claudian", ".git", ".obsidian", ".trash"}
@@ -427,6 +428,11 @@ def _validate_document_artifact(
             continue
         if not valid:
             _issue(report, relative, "field-type", f"{name} must use Contract type {kind}")
+    if document.type == "Project":
+        try:
+            normalize_project_category(document.frontmatter.get("project_category"))
+        except ValueError as exc:
+            _issue(report, relative, "project-category", str(exc))
     states = {**catalog.common_states, **contract.states}
     for name, allowed in states.items():
         value = document.frontmatter.get(name)

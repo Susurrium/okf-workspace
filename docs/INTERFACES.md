@@ -57,6 +57,7 @@ Dashboard 向 Engine 发起写入时附带当前 Vault fingerprint；Engine 拒�
 | `POST /captures/publish-web` | 将 Web Capture 确定性发布为 Source + Source Text，并按四个离散人工动作选择是否生成 |
 | `POST /courses`、`POST /lessons`、`POST /projects` | 创建课程、课堂笔记和项目 |
 | `POST /projects/{slug}/log` | 追加项目进展 |
+| `POST /projects/{slug}/category` | 设置或清除项目类别；可携带 `expected_category` 与 `check_expected: true` 拒绝覆盖旧值已变化的项目 |
 | `POST /ai/ask` | 检索、读取真实章节并返回 `actual_reads` |
 | `POST /ai/organize` | 把普通人工 Capture 的正文写入一个长期目标，成功后删除 Capture；Web Capture 必须走发布接口 |
 | `POST /ai/lessons/organize` | 读取 Lesson，只更新 `organized-lesson` 区域；目标在生成期间变化时返回 409 |
@@ -98,6 +99,10 @@ Dashboard 向 Engine 发起写入时附带当前 Vault fingerprint；Engine 拒�
 `stage_detail` 才表示当前步骤。每次检索和 Codex 生成都在可终止的子进程中执行；默认整项上限
 600 秒、单次检索上限 12 秒，可通过部署配置中的 `semantic_timeout_seconds` 和
 `semantic_retrieval_timeout_seconds` 调整。Worker 日志位于 Runtime State 的 `logs/semantic-worker-YYYYMMDD.log`。
+
+`POST /projects` 可携带可选 `project_category`；详细语义见[数据模型](DATA-MODEL.md)。
+CLI 创建使用 `okf note new project --slug <slug> --title <title> --category <类别>`；
+修改使用 `okf project category <slug> --category <类别>`，空字符串清除。
 
 <a id="conversion"></a>
 

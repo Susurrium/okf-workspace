@@ -29,6 +29,40 @@
 初始部件跨度断言失败日志保留在 `work/capture-unification-apex-checks/`；最终检查包含新部件的跨度约定。
 本轮未验证真实移动设备或远端同步，未部署正式环境，未执行根检查。
 
+## OKF 项目类别与展示（2026-10-16）
+
+实现位于独立工作目录 `work/project-categories/`，分支 `codex/project-categories`，
+基于 `cf525e65` 开发，保留主工作区并行修改。项目类别为 Project 的可选属性；
+旧项目无需补写，类别编辑保持原路径、状态、正文、任务及未知字段。
+
+| 范围 | 验证结果 |
+| --- | --- |
+| Engine 与 Contract | 600 项测试通过，Ruff 与 Pyright 通过；可选类别、创建前输入校验、CLI/API 设置与清除、旧值检查、原文及扩展字段保留、真实全文索引命中与清除、旧派生索引重建均覆盖 |
+| 跨组件 | 根脚本的 12 项通过 / 1 项按条件跳过 |
+| Dashboard | 类型检查、59 个文件 / 422 项测试和构建通过；类别分组、状态独立、显示偏好保存、置顶不写项目、同组排序与跨组修改分别验证 |
+| Claudian | 类型、lint、420 suites / 6316 passed / 3 skipped、72 项脚本测试及构建通过；该组件源码未修改 |
+| Obsidian 实机 | 固定 OKF-Test、API 8766、CDP 9366。通过真实创建窗口建立四个合成项目，验证类别拖动、类别合并预览与保存、清除分类、状态跨列移动、置顶与手动顺序；检查真实 Markdown 正文、任务及未知字段，实际 HTTP 类别写入成功 |
+| 恢复与尺寸 | 重启后以保存的原生 ViewState 恢复同一页面，分组、看板、手动顺序和置顶均保留。430px 桌面视口中四张卡片宽 322px，分类窗口宽 344px，内容未横向溢出；此项为 DOM 尺寸检查 |
+| 产物与退出 | 最终安装的 main.js、styles.css、manifest.json 与构建哈希一致，保存在 `work/accepted-candidate/`。原有测试插件、配置及受管资源按快照恢复并比较字节，四个合成项目及其搜索索引条目已清除；测试窗口、Engine、自动启动、LiveSync 关闭，8766/9366 无监听 |
+
+本节证据路径均相对该独立工作目录。运行记录位于 `work/` 下的 `category-runtime-results.json`、
+`category-runtime-followup.json`、`category-cold-start.json`、
+`category-narrow-layout.json`、`category-artifacts.json` 和 `category-index-cleanup.json`。
+最终 main.js SHA-256 为
+`357f0dc4036ec5122c9b993ad6cc1196522f3007e6b51a800255b2592e7a8e38`。
+
+根脚本执行时先后在 Windows 文件替换和新增导航状态断言处中止。
+共享原子写入针对 Windows 暂时占用做有界重试，每次重试核对原版本；
+永久失败、外部改动保护和实际多进程写入均通过测试。
+最终项目路径保护与原子写入另行补验 14 项测试，Ruff、Pyright 通过。
+原始记录保留为 `work/project-root-check-first.log`、
+`project-root-check-second.log` 和 `project-root-check.log`。
+最后一份记录包含 Engine 和跨组件成功结果；修正状态断言后，
+Dashboard 与 Claudian 按根脚本的相同命令完成补验，日志为
+`work/dashboard-*-final.log` 与 `work/claudian-*-final.log`。
+
+本次未截图或进行视觉验收，未验证真实移动设备与远端同步，未部署正式环境。
+
 ## 分区目录、公共操作和任务命名（2026-10-16）
 
 按用户要求，在 `work/fixtures/section-experience-ui` 新建隔离环境，使用合成 Vault、独立 State、

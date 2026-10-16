@@ -149,6 +149,16 @@ class NamedAreaRequest(BaseModel):
     slug: str | None = Field(default=None, max_length=160)
 
 
+class ProjectCreateRequest(NamedAreaRequest):
+    project_category: str | None = Field(default=None, max_length=80)
+
+
+class ProjectCategoryRequest(BaseModel):
+    project_category: str | None = Field(max_length=80)
+    expected_category: str | None = None
+    check_expected: bool = False
+
+
 class LessonRequest(BaseModel):
     course: str = Field(min_length=1, max_length=160)
     title: str = Field(min_length=1, max_length=160)
@@ -684,10 +694,19 @@ def create_app(
         return {"path": _relative(path, configured.vault)}
 
     @app.post("/projects", dependencies=protected)
-    def create_project(request: NamedAreaRequest) -> dict[str, str]:
+    def create_project(request: ProjectCreateRequest) -> dict[str, str]:
         path = NoteService(configured.vault).create_project(
             request.slug or request.title,
             request.title,
+            category=request.project_category,
+        )
+        return {"path": _relative(path, configured.vault)}
+
+    @app.post("/projects/{slug}/category", dependencies=protected)
+    def update_project_category(slug: str, request: ProjectCategoryRequest) -> dict[str, str]:
+        path = NoteService(configured.vault).set_project_category(
+            slug, request.project_category,
+            expected=request.expected_category, check_expected=request.check_expected,
         )
         return {"path": _relative(path, configured.vault)}
 

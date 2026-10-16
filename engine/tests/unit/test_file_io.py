@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import okf_workspace.okf.file_io as file_io
 from okf_workspace.okf.file_io import (
     FileWriteConflict,
     atomic_write_bytes,
@@ -13,6 +14,18 @@ from okf_workspace.okf.file_io import (
     file_sha256,
 )
 from okf_workspace.okf.frontmatter import OkfDocument, write_document
+
+
+def _no_delay(_seconds: float) -> None:
+    pass
+
+
+class _WindowsPermissionError(PermissionError):
+    winerror: int
+
+    def __init__(self, message: str, code: int) -> None:
+        super().__init__(message)
+        self.winerror = code
 
 
 def _try_create(value: tuple[str, int]) -> int | None:
@@ -64,3 +77,67 @@ def test_stale_document_and_deleted_target_are_not_overwritten(tmp_path: Path) -
     with pytest.raises(FileWriteConflict):
         write_document(path, document, expected_sha256=expected)
     assert not path.exists()
+
+
+def test_windows_replace_retry_rechecks_external_edits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "retry.md"
+    path.write_bytes(b"original")
+    before = file_sha256(path)
+
+    def occupied(_source: Path, _target: Path) -> None:
+        raise _WindowsPermissionError("Windows sharing violation", 32)
+
+    def external_edit(_seconds: float) -> None:
+        path.write_bytes(b"new user content")
+
+    monkeypatch.setattr(file_io.os, "replace", occupied)
+    monkeypatch.setattr(file_io.time, "sleep", external_edit)
+    with pytest.raises(FileWriteConflict):
+        atomic_write_bytes(path, b"stale result", expected_sha256=before)
+    assert path.read_bytes() == b"new user content"
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_windows_replace_retry_is_bounded_and_eventually_publishes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "retry.md"
+    path.write_bytes(b"original")
+    replace = file_io.os.replace
+    calls = 0
+
+    def occupied_once(source: Path, target: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise _WindowsPermissionError("Windows access denied", 5)
+        replace(source, target)
+
+    monkeypatch.setattr(file_io.os, "replace", occupied_once)
+    monkeypatch.setattr(file_io.time, "sleep", _no_delay)
+    atomic_write_bytes(path, b"published")
+    assert path.read_bytes() == b"published"
+    assert calls == 3
+
+
+def test_permanent_windows_denial_keeps_original_and_reports_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "denied.md"
+    path.write_bytes(b"original")
+    calls = 0
+
+    def denied(_source: Path, _target: Path) -> None:
+        nonlocal calls
+        calls += 1
+        raise _WindowsPermissionError("permanent denial", 5)
+
+    monkeypatch.setattr(file_io.os, "replace", denied)
+    monkeypatch.setattr(file_io.time, "sleep", _no_delay)
+    with pytest.raises(PermissionError, match="permanent"):
+        atomic_write_bytes(path, b"must not publish")
+    assert calls == 5
+    assert path.read_bytes() == b"original"
+    assert not list(tmp_path.glob("*.tmp"))
