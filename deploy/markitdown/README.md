@@ -580,20 +580,22 @@ sudo bash ./smoke-test.sh
 每台客户端只保存自己的单个 Token，文件必须位于 Vault 外。客户端配置项为：
 
 ```text
-OBSIDIAN_PDF_INGEST_MARKITDOWN_API_URL=https://MARKITDOWN_FQDN
-OBSIDIAN_PDF_INGEST_MARKITDOWN_TOKEN_FILE=<客户端本地受限Token文件>
+OKF_MARKITDOWN_URL=https://MARKITDOWN_FQDN
+OKF_MARKITDOWN_TOKEN_FILE=<客户端本地受限Token文件>
 ```
 
 手动直用 MarkItDown 时选择：
 
-```text
-obsidian-ingest ingest <PDF|PPTX|DOCX|PPT> --flow learning --parser markitdown
+```powershell
+okf import <文件路径> --action convert --intent source --method markitdown-service
 ```
 
-该入口必须完全跳过 MinerU。首次结果通过硬安全检查后仍会进入人工复核；复核完成后再使用本地
-`approve <conversion-id>` 流程发布。`--profile quality` 只属于 MinerU，不能传给手动
-MarkItDown；`auto` 回退后也仍固定使用 `fallback-assets-v2`。MarkItDown 即使使用
-`--no-publish` 也会先停在 `review_required`，不会改为 `ready`。服务端不参与 Obsidian 写入。
+Engine 将明确选择固定到任务，校验服务能力、结果协议和附件哈希，执行 QC 后发布资料与正文。
+`auto` 在入队时解析为默认方式，失败保留该方式并显示错误；更换方式通过显式重新转换执行。
+MarkItDown 使用 `fallback-assets-v2` 结果配置，质量检查不改变解析能力；严格图片检查不能将
+PDF 文本提取声明为图片完整。服务器只返回转换结果，Vault 写入由 Engine 完成。
+完整的配置、质量选项和重试规则分别见[部署指南](../../docs/DEPLOYMENT.md#conversion)与
+[转换协议](../../docs/INTERFACES.md#conversion)。
 
 ## 14. 日常运维
 
@@ -735,7 +737,7 @@ Python 基础镜像、build 和双 manifest 身份，同时保留旧 `.env` 中�
 客户端转换身份，不能复用旧 build 的成功缓存。
 
 客户端仍可读取已经下载的 `markitdown-result/v2` 结果，但升级不会改写已经发布的 Source Text。
-若早期 UAT 导入存在缺失图片、失效图片链接或缺少正文 H1，应保留原件并在 `1.3.0` 部署完成后
+若早期 UAT 导入存在缺失图片、失效图片链接或缺少正文 H1，应保留原件并在匹配的服务与客户端部署完成后
 显式重新转换；这属于重新派生，不应通过迁移脚本猜测或修补旧正文。
 
 ### 16.2 回滚
@@ -820,10 +822,10 @@ store 的 `rollback-records/` 中。若旧版本验证失败，指针不变，�
 - [ ] 健康检查的版本、build ID、schema 和能力完全匹配；
 - [ ] `systemctl restart` 后完整预检和健康检查通过，计划内重启主机后服务仍能恢复；
 - [ ] `deploy.sh` 自动生成的固定文本 PDF 已通过上传、轮询、下载、manifest、哈希和内容验证；
-- [ ] 客户端手动 `--parser markitdown` 不接触 MinerU；
-- [ ] `auto` 的精确 MarkItDown 缓存优先与 MinerU 提交前回退语义均已验证；
-- [ ] `quality` 不传给 MarkItDown，`--no-publish` 的 MarkItDown 结果仍停在 `review_required`；
-- [ ] MarkItDown 输出停在人工复核门禁，不自动覆盖已有笔记；
+- [ ] 客户端明确选择 `--method markitdown-service` 时只调用对应服务；
+- [ ] 默认方式在入队时固定，缓存按方式隔离，失败不隐式切换解析器；
+- [ ] 标准检查和严格图片检查分别验证，PDF 图片完整性限制明确显示；
+- [ ] Engine QC、显式重新转换和人工修改保护通过，服务器不直接写入 Vault；
 - [ ] `.current-release*` 与 `.last-known-good*` 的镜像、双 manifest、完整环境和 Compose 审计完整；
 - [ ] bundle 级回滚已验证旧 Compose/镜像/Canary、systemd 单元和 `current`/`previous` 原子交换；
 - [ ] 升级、无参数运行镜像回滚、Token 轮换和灾难恢复记录完整。

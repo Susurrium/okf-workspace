@@ -1,30 +1,71 @@
-# Claudian upstream
+# Claudian upstream and OKF adapter
 
-- Upstream: <https://github.com/YishenTu/claudian>
-- Previous imported version: `2.1.4`
-- Previous imported commit: `40880cabec40d61766c84f2da9f403ed36016f08`
-- Synced upstream version: `2.3.6`
-- Synced upstream commit: `14a6abcc2f1628ad99122dbe6ad5f56033331ac3`
-- Sync contains 243 upstream commits after the previous imported commit.
-- Synced into the OKF Workspace monorepo: 2026-09-28
+## Pinned source
 
-The monorepo has one private `origin`. A fetch-only remote named `claudian-upstream` may be configured for deliberate upgrades. Do not use a Git submodule.
+| Field | Value |
+| --- | --- |
+| Upstream | `https://github.com/YishenTu/claudian` |
+| Imported release | `2.3.6` |
+| Imported commit | `14a6abcc2f1628ad99122dbe6ad5f56033331ac3` |
+| Previous import | `2.1.4` / `40880cabec40d61766c84f2da9f403ed36016f08` |
+| Import date | 2026-09-28; 243 upstream commits |
 
-Recommended update procedure:
+The monorepo owns installation, npm lockfiles, builds and CI. A fetch-only
+`claudian-upstream` remote supports deliberate updates. Upstream `bun.lock`, nested
+GitHub workflows and the separate Collab product are outside this fork.
 
-1. Fetch the selected upstream release and pin its full commit SHA here.
-2. Compare the selected commit with the previous imported commit.
-3. Update the vendored Claudian source and tests as one dedicated change.
-4. Reapply or adapt the items in `OKF-PATCHES.md` through the narrowest available extension point.
-5. Run Claudian checks, Dashboard checks, fixture-Vault integration checks and the root check script. Follow the [development acceptance rules](../docs/DEVELOPMENT.md#合成-vault-完整流程) for Obsidian verification and any temporary fixtures.
-6. Update this file, `OKF-PATCHES.md`, plugin identity/version metadata, and the root release manifest.
+## Ownership and bridge
 
-Upstream updates are manual and value-driven; they are not pulled automatically.
+Claudian owns chat UI, conversations, provider runtimes, native history, CLI
+resolution and authentication. Workspace rules come from the deployed Vault's
+`AGENTS.md`, `.agents/skills/` and `system/contracts/`.
 
-The synced source includes provider runtime and lifecycle changes, Codex/Claude/OpenCode/Pi
-features, chat UI improvements, security and cross-platform fixes, and upstream test
-reorganization. Consult `OKF-PATCHES.md` for the preserved OKF adapter. The fork uses
-`package-lock.json` and npm as its only dependency authority. Upstream `bun.lock` and nested
-GitHub workflows are intentionally not vendored; the monorepo root owns installation, tests,
-and releases. Collab's upstream extraction remains a separate upstream product boundary and
-does not restore the retired in-tree Collab implementation.
+OKF code is confined to `src/integrations/okf/`:
+
+- `OkfBridge.ts` publishes the frozen `okfBridge v1`, validates Vault-relative
+  attachments, composes Skill and prompt mentions, and targets Codex.
+- `OkfPromptPolicy.ts` defines `okf-native`, `claudian-full` and `custom-replace`
+  prompt modes. A mode change applies to new sessions.
+
+Generic handoff and attachment handling stay under `src/features/chat/`, without
+OKF imports. The public request, result, action modes and sending behavior are
+defined in [Workspace interfaces](../docs/INTERFACES.md#bridge).
+
+Only four production locations import the OKF adapter:
+
+1. `src/main.ts`: constructs and exposes the bridge.
+2. `src/app/settings/defaultSettings.ts`: selects the default prompt mode.
+3. `src/features/settings/ClaudianSettings.ts`: renders its setting.
+4. `src/providers/codex/execution/CodexExecutionSession.ts`: resolves the policy
+   at native `thread/start`.
+
+Architecture tests enforce this boundary. Dashboard uses the public bridge;
+core, chat and other providers do not contain Workspace business policies.
+
+## Local adaptations
+
+| Area | Preserved behavior |
+| --- | --- |
+| Handoff | Keep prompt, Vault context paths and read/write/plan mode until the next turn; validate existing attachments and display removable chips. Disabled Codex, missing model or target creation failures are explicit. |
+| Codex runtime | Use Codex-owned CLI paths, environment, login and `codex app-server`; keep authentication, sessions and transcripts separate from Claude. History hydration preserves transcript bytes. |
+| Prompt modes | Persist mode/version with native session state and map action mode to the Codex sandbox. Business instructions remain in Vault resources. |
+| Windows file safety | Restore directory links as junctions; resolve existing ancestors for containment checks on not-yet-created targets. |
+| Tests and packaging | Use npm authority, SDK history-path encoding, native Windows lifecycle fixtures and bounded cleanup retries. Preserve real hard-link/concurrent-write assertions; gate only unavailable symlink capabilities and use valid file URLs. |
+| Translations | Translate prompt-mode controls in the upstream locale structure. |
+
+Exact file changes and formatting differences remain traceable against the pinned
+upstream commit in Git. Repository-level environment and acceptance rules live in
+the [development guide](../docs/DEVELOPMENT.md).
+
+## Update procedure
+
+1. Pin the candidate release and full commit, then compare with the imported base.
+2. Update source and tests together, preserving the adapter boundary and generic
+   handoff behavior above.
+3. Run the checks required by `AGENTS.md`, including the bridge/prompt, Codex,
+   architecture and relevant platform tests. Complete Dashboard, cross-component
+   and root checks plus the affected real Obsidian scenarios.
+4. Update this record, plugin identity/version metadata and the release manifest.
+   Record tested and installed artifact hashes separately from source provenance.
+
+Updates are explicit and are never pulled automatically.

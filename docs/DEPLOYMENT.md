@@ -1,6 +1,6 @@
 # 部署与运维
 
-[文档索引](README.md) · [开发准备](DEVELOPMENT.md) · [日常使用](USER-GUIDE.md)
+[文档入口](../README.md#文档入口) · [开发准备](DEVELOPMENT.md) · [日常使用](USER-GUIDE.md)
 
 按需阅读：[正式启用与升级](#production-cutover) · [安装](#install) · [测试环境恢复](#test-environment) · [转换服务](#conversion) · [同步与备份](#sync-backup) · [插件更新](#plugin-deployment) · [环境退役](#environment-retirement) · [卸载](#uninstall)。
 
@@ -247,7 +247,7 @@ Templater、QuickAdd、Dataview 等推荐社区插件如果已被用户禁用，
 LiveSync 同步生产 Vault 中的 Markdown、必要 Obsidian 配置和完整原件附件。以下内容不进入同步：
 
 - `.git/`、`.trash/`；
-- `.obsidian/plugins/okf-workspace-dashboard/data.json`（只含本机路径，也无需同步）；
+- `.obsidian/plugins/okf-workspace-dashboard/data.json`（含本机路径、服务配置、界面偏好及快速记录草稿，按设备保留）；
 - 大型 `sources/assets/treehole-media/`；
 - 位于 Vault 外的旧 Original Store 回退副本、Runtime State、Feed cache、转换工作目录和索引；
 - API token、Setup URI、CouchDB 密码、Restic 密码和模型服务 token。

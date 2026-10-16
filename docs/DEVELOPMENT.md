@@ -1,6 +1,6 @@
 # 开发与验收
 
-[文档索引](README.md) · [架构边界](architecture/README.md) · [部署运维](DEPLOYMENT.md)
+[文档入口](../README.md#文档入口) · [架构与数据](architecture/README.md) · [部署运维](DEPLOYMENT.md)
 
 本文件维护开发命令、修改要求和验收方法。测试矩阵是要求，不代表本次或生产环境已经通过；已执行的验收证据保存在组件验收台账和发布记录。
 
@@ -102,6 +102,10 @@ CouchDB 可以同时保留正式和测试库；平时停用测试客户端即可
 Dashboard 正式构建入口是 `src/plugin/main.ts`。九个业务功能及今天、每日更新场景经 `features/workbench/okf-surface-sections.ts` 挂载共享视图；界面回归覆盖实际 `OkfDashboardView`、旧配置、就地操作、分页、声明式范围和独立页面的状态传递。分区行为以[使用指南](USER-GUIDE.md#分区与工作台)为准。
 
 Dashboard 产物是 `dist/main.js`、`dist/styles.css` 和根目录 `manifest.json`。Claudian 按其组件构建配置生成插件文件，安装时显式指定并验证目标。快速安装与部署回执见[部署运维](DEPLOYMENT.md#plugin-deployment)。
+
+内嵌 Tasks 源码和许可固定在 `dashboard/vendor/tasks/`，适配层位于 `tasks-integration/`。
+`npm run build:tasks` 生成忽略的 `tasks-generated/`，测试和生产构建复用该入口，生成文件不手工修改。
+任务跨语言边界样例位于 `tests/fixtures/tasks/task-cases.json`，由 Engine 投影、Dashboard 和根检查共同验证。
 
 ## 测试原则
 
@@ -262,7 +266,7 @@ uv run --project engine python scripts/smoke-mineru-cloud.py `
 
 | 内部值 | 展示名称 |
 |---|---|
-| Capture | 随手记录 |
+| Capture | 随手记录；“快速记录”为创建入口，记录保存到收集箱 |
 | Course / Lesson | 课程 / 课堂笔记 |
 | Study Guide | 学习笔记 |
 | study-material | 辅助学习材料 |
@@ -292,12 +296,13 @@ uv run --project engine python scripts/smoke-mineru-cloud.py `
 
 ## 文档维护
 
-主文档只有根 README 与本索引列出的七份指南。`docs/README.md` 只维护导航，不复制规范正文。一个事实只设一个维护位置，其他文档链接到对应章节。
+根 README 是唯一总入口，只维护使用、开发、部署、架构与数据、接口五份主指南。
+一个事实只设一个正文位置，其他文档链接到相应章节。
 
-- 模块、依赖与写入归属更新 `architecture/README.md`；字段与正文模型更新 `DATA-MODEL.md`，实际 Contract 始终优先。
+- 模块、依赖、数据归属及跨类型语义更新 `architecture/README.md`，精确格式由 Contracts 维护。
 - 日常操作更新 `USER-GUIDE.md`；安装、凭据、同步、迁移和恢复更新 `DEPLOYMENT.md`；协议更新 `INTERFACES.md`。
 - 组件源码、专用配置、上游版本和补丁说明留在组件旁边。不要修改 vendored 上游 README 来承担仓库级导航。
-- 当前计划只记录仍需推进或待确认的事项；完成记录写入验收台账、当前发布记录或 Git 历史。已结束的提案、访谈、旧路线图、升级过程和旧发布说明由 Git 历史保留，不在当前目录维护重复副本；移除文件时同步修正现行文档的引用。
+- 上游来源与适配策略放在组件 `UPSTREAM.md`，实际验证结果放在验收台账；已结束的计划、提案、过程和旧发布说明通过 Git 历史查阅。合并正文后删除旧文件，同步修正引用。
 - Vault Contracts、模板、Policies 和 Skills 是可部署资源，继续独立维护，不并入 README。
 - 移动或合并文件时同时更新相对链接、章节锚点和命令；不积累重复正文和兼容跳转文件。
 

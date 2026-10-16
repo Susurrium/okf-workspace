@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "reviewed_at": "2026-10-16",
-  "baseline_commit": "364d4570",
+  "baseline_commit": "122286ce",
   "scope": "核对快速记录、项目类别与工作台交互整合后的接口和数据归属；不代表生产部署状态。",
   "charts": [
     {
@@ -858,10 +858,10 @@
           "title": "Life / Self / Tasks",
           "lines": [
             "Daily / Reflection / Review / Profile",
-            "原笔记里的未完成 #task"
+            "普通来源笔记中的 Tasks 任务"
           ],
           "kind": "vault",
-          "detail": "日记、反思、回顾主要由人工书写。Tasks/Today 是原文投影。self 下 profile、preferences、constraints 等记录明确的用户上下文。",
+          "detail": "日记、反思、回顾主要由人工书写。Tasks/Today 按用户过滤和状态配置读取普通来源笔记，排除工作台及其备份；Apex 清单由所属工作台独立管理。self 下 profile、preferences、constraints 等记录明确的用户上下文。",
           "source": "engine/workspace/vault/system/contracts/daily.yaml",
           "w": 390,
           "h": 105

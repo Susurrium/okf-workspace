@@ -4,7 +4,7 @@
 
 - 继承[仓库规则](../AGENTS.md)；模块与依赖遵循[架构](../docs/architecture/README.md)。
 - Artifact 以 [Contracts](workspace/vault/system/contracts/README.md) 为准；
-  外部 OKF 兼容读取与 Workspace 严格写入的边界见[数据模型](../docs/DATA-MODEL.md)。
+  外部 OKF 兼容读取与 Workspace 严格写入的边界见[架构与数据模型](../docs/architecture/README.md#artifact-与公共字段)。
 - 笔记整理、检索和 Skill 路由维护在[Vault 使用规则](workspace/vault/AGENTS.md)。
   该文件是部署资源，处理源码开发任务时不自动触发个人笔记工作流。
 

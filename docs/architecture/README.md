@@ -1,172 +1,182 @@
-# OKF Workspace architecture
+# 架构与数据模型
 
-[Documentation index](../README.md) · [Data model](../DATA-MODEL.md)
+[文档入口](../../README.md#文档入口) · [接口](../INTERFACES.md) · [Contracts](../../engine/workspace/vault/system/contracts/README.md)
 
-[Open the interactive information-flow and architecture viewer](visualizations/index.html)
-(Chinese, offline). It opens on the complete branching information flow; six other tabs
-cover the system, dependencies, data ownership, imports, AI execution, and deployment.
-Nodes link to current repository evidence. The [static overview](visualizations/overview.svg)
-is suitable for previews and export. Open the downloaded HTML in a browser.
+本文件维护模块职责、数据归属与跨类型语义；字段、枚举、路径及正文区域的精确格式由
+`engine/workspace/vault/system/contracts/` 定义。模板、Skills 和所有写入器共用这些 Contracts。
 
-Module and ownership rules live here. Vault artifact formats are defined by the deployed Contracts, sourced from `engine/workspace/vault/system/contracts/`. Development plans and archived evidence do not override these boundaries.
+[交互式信息流与架构图](visualizations/index.html)可离线查看信息分支、模块与部署关系，
+[静态总览](visualizations/overview.svg)用于预览。图形来源与生成方法见[开发指南](../DEVELOPMENT.md#架构可视化)。
 
-The viewer is an explanatory projection, not another source of rules or proof of an online
-production deployment. Its reviewed baseline and reference fingerprint are displayed in
-the page. Updating and checking the generated files is documented in
-[development](../DEVELOPMENT.md#架构可视化).
+<a id="system-overview"></a>
 
-[System overview](#system-overview) · [Module boundaries](#module-boundaries) · [Data ownership](#data-ownership)
+## 系统概览
 
-## System overview
+OKF Workspace 由三个独立构建的应用组成：
 
-OKF Workspace is a modular monolith with three independently built applications:
+| 应用 | 职责 |
+| --- | --- |
+| Engine | 领域模型、确定性工作流、Intake、Feeds、检索、API、CLI、后台任务与可部署 Vault 规则 |
+| Dashboard | Obsidian 工作台、Vault 读取与简单人工等价编辑，通过 Engine API 请求领域操作 |
+| Claudian | 助手界面、会话、Provider runtime，通过公开 Bridge 接收任务与上下文 |
 
-1. Engine: Python domain, API, worker, CLI, retrieval, and deployable Vault resources.
-2. Dashboard: Obsidian workbench and direct Vault read model.
-3. Claudian: embedded Codex interaction and versioned Dashboard handoff.
+Vault 中的 Markdown/YAML 与原件保存长期内容。Runtime State、索引、缓存、会话与秘密位于源码仓库外。
+原件位于 `sources/originals/<sha256>/<filename>`，与笔记、申请和回执通过 LiveSync 全量同步；
+各设备使用 Obsidian 原生查看本地文件。旧 Originals 服务及外部存储只保留历史恢复用途。
 
-The production Vault is the semantic authority. Runtime State, Originals, indexes, caches, sessions, and secrets are operational data outside the source repository.
+Intake 和 Feeds 属于 Engine。文档转换默认使用 MinerU 云端，也支持明确选择 MarkItDown 或启用的自建 MinerU；
+Engine 负责方式固定、格式校验、QC 和发布，失败保留所选方式。配置与迁移见[部署指南](../DEPLOYMENT.md)。
 
-Original files are ordinary durable attachments in `sources/originals/<sha256>/<filename>`
-inside the production Vault. LiveSync replicates their complete bytes together with Markdown,
-requests and receipts. All devices keep the files locally and use Obsidian's native viewer for
-PDFs/images. No independent original transport, download cache or external-reader handoff is
-part of the active architecture. See [original file lifecycle](../DEPLOYMENT.md#original-migration).
+<a id="module-boundaries"></a>
 
-Feed and Intake are first-class Engine modules, not independent local services. Document conversion defaults to MinerU's token-authenticated cloud API and also supports an explicitly selected MarkItDown service or an enabled self-hosted MinerU endpoint. Engine owns method selection, format validation, conversion state, QC, and publication; Dashboard presents Engine's capability catalogue. Quality checks do not choose a converter, and failure never silently switches providers. See [conversion methods](../DEPLOYMENT.md#conversion).
+## 模块边界
 
-## Module boundaries
-
-### Dependency direction
-
-```text
-Dashboard -> Vault read model / Engine API / Claudian bridge
-Claudian -> Obsidian / Codex / deployed Workspace resources
-API and CLI -> application workflows
-application workflows -> Intake / Feeds / Sources / Workspace / Operations
-Intake -> Sources / Foundation
-Feeds -> Sources / Foundation
-Workspace -> Foundation
-Sources -> Foundation
-Retrieval -> Foundation
-Foundation -> no upper module
+```mermaid
+flowchart TD
+    Dashboard --> Vault[Vault read model]
+    Dashboard --> API[Engine API / CLI]
+    Dashboard --> Claudian
+    Claudian --> Obsidian
+    Claudian --> Codex
+    Claudian --> Resources[Deployed Workspace resources]
+    API --> Workflows[Application workflows]
+    Workflows --> Intake
+    Workflows --> Feeds
+    Workflows --> Sources
+    Workflows --> Workspace
+    Workflows --> Operations
+    Intake --> Sources
+    Feeds --> Sources
+    Intake --> Foundation
+    Feeds --> Foundation
+    Workspace --> Foundation
+    Sources --> Foundation
+    Retrieval --> Foundation
 ```
 
-### Hard rules
+- Foundation 只包含 Contracts、frontmatter、路径、关系、原子文件操作和基础类型。
+- Sources 独占 Source／Source Text 身份、查找与成对发布；Intake 和 Feeds 不互相调用实现。
+- 跨模块操作由应用工作流组合；Dashboard 不复制转换、发布或后台语义状态机。
+- Dashboard 请求 Engine 写入时携带当前 Vault fingerprint，Engine 拒绝身份不一致的写入。
+- Obsidian 打开 Digest 时，Engine 提供路径和 Markdown；Dashboard 仅创建缺失文件，已有笔记由 Engine 刷新。
+- Claudian 的业务规则来自部署到 Vault 的 AGENTS、Contracts 和 Skills，Provider 内不复制这些规则。
+- Apex 小组件由统一宿主管理生命周期，保留原生数据格式；插件身份接管须可重复执行，保留人工修改和唯一写入者。
 
-- Foundation contains only contracts, frontmatter, paths, relations, atomic file operations, and basic types.
-- Sources is the only owner of Source and Source Text publication, lookup, canonical identity, and pair transactions.
-- Intake and Feeds do not import one another's implementation.
-- Dashboard does not implement conversion, publication, or semantic-operation state machines.
-- For an Obsidian-initiated Feed Digest open, Engine supplies the path and rendered Markdown;
-  Dashboard creates a missing note through Obsidian's Vault API and never overwrites an existing note.
-  Engine retains Digest rendering, existing-note refresh, and non-Obsidian materialization.
-- Dashboard-originated Engine writes carry the current Vault fingerprint, which Engine checks before
-  accepting a mutation. Engine retains ownership of Source pairs, Capture routing, imports, and
-  background semantic publication; Dashboard reports disk/index divergence without recreating them.
-- Dashboard may host Apex-native widget services for habits, expenses, reading, focus, media, and other
-  workbench utilities. Those services retain their existing data models and do not become Engine or Vault
-  artifact authorities.
-- Claudian contains provider and UI behavior, not copies of Workspace business prompts.
-- Cross-module flows are composed in application workflows, not hidden in adapters or API routes.
+### 本地优先的文件导入
 
-### Synced mobile document intake
+Dashboard 通过 Vault API 先保存完整原件，再写入 `system/imports/<uuid>/request.md`。
+桌面与移动端使用同一申请格式，LiveSync 到达顺序不限。指定桌面 Engine 对私有快照核验长度和 SHA-256：
+`store` 只登记 Source；`convert` 进入转换队列，后续生成复用已发布正文。凭据、执行状态与索引留在 State。
+移动端只保存文件和申请，读取原件通过 `WorkspaceLeaf.openFile`，无需 HTTP 原件服务。
+旧设备上传恢复和 `okf-original://` 兼容处理见[迁移流程](../DEPLOYMENT.md#original-migration)。
 
-Dashboard writes original bytes directly into `sources/originals/<sha256>/<filename>` and then
-publishes a Document Import Request in `system/imports/<uuid>/request.md`, using only Vault APIs.
-LiveSync carries both files; arrival order is not assumed. The designated desktop Engine verifies
-length/hash of a private snapshot. Explicit `action: store` registers a Source without text or a
-conversion job; `action: convert` invokes the existing conversion queue, reusing published text
-for subsequent generation. Desktop workbench imports use the same local-first writer. It reuses the Vault
-original instead of making an external primary copy. Receipts and published notes sync normally.
-Execution state, credentials and indexes remain outside Vault. Mobile has no business state machine.
-Reading an original uses `WorkspaceLeaf.openFile` on its local `TFile`, without Engine or an HTTP service.
-Old device uploads have a one-way recovery reader; old `okf-original://` links resolve migrated files.
-Legacy external originals and remote service assets are retained only for rollback, not active transport.
-See [original file lifecycle](../DEPLOYMENT.md#original-migration).
+<a id="data-ownership"></a>
 
-## Data ownership
+## 数据归属
 
-| Data | Owner | Readers |
-| --- | --- | --- |
-| Capture | Intake | Dashboard, workflows |
-| Vault original attachment | User; Intake verifies and stores it, LiveSync replicates it | Obsidian native viewer, conversion pipeline |
-| Explicit Document Import Request | User, through Dashboard Vault APIs after the attachment is saved | desktop Intake receiver, mobile Dashboard |
-| Document Import Receipt display projection | Engine Intake | Dashboard; execution authority stays in external State |
-| Source identity, durable `uses[]`, and Source Text | Sources | all Workspace modules, retrieval, Dashboard |
-| Feed cache, Digest, and action receipt | Feeds | Dashboard, Sources, Operations |
-| Course, Lesson, Study Guide | Workspace Learning | Dashboard, Claudian, retrieval |
-| Wiki and Wiki Map | Workspace Knowledge | Dashboard, Claudian, retrieval |
-| Project, log, and Decision | Workspace Projects | Dashboard, Claudian, retrieval |
-| Daily, Reflection, Review | Workspace Life | Dashboard, Claudian, retrieval |
-| Semantic and conversion state | Operations | Dashboard, workers |
-| Contracts, templates, views, policies, Skills | Engine Workspace resources | Engine, deployed Vault, Dashboard, Claudian |
-| Apex habits, expenses, reading history, completed focus sessions, and widget state | Apex native services and their existing JSON/plugin data | Unified Dashboard widgets and their existing export/sync adapters |
-| Workbench Markdown layout, inline memos and checklists, and workbench safety copies | Dashboard/Apex workbench format | Dashboard and explicit AI attachments; Tasks and Engine task projections exclude workbenches |
+| 数据 | 所有者与存储 |
+| --- | --- |
+| Capture、文件导入申请／回执 | Intake；Vault 保存内容和显示投影，执行权威在 State |
+| 原件与正文引用附件 | 用户持久内容；Intake 核验，LiveSync 复制完整字节 |
+| Source 身份、用途和 Source Text | Sources |
+| Feed cache、Digest 与决定回执 | Feeds |
+| Course、Lesson、Study Guide | Workspace Learning |
+| Wiki、Wiki Map | Workspace Knowledge |
+| Project、log、Decision | Workspace Projects |
+| Daily、Reflection、Review | Workspace Life |
+| 语义与转换运行状态 | Operations／Vault 外 State |
+| Contracts、模板、Views、Policies、Skills | Engine 的可部署 Workspace 资源 |
+| Apex 习惯、记账、阅读、专注与小组件状态 | Apex 原生服务及 JSON／plugin data |
+| 工作台布局、便签、清单及安全副本 | Dashboard/Apex 工作台 Markdown |
 
-`Source.resource` and `kind` describe a context-neutral input identity. Optional `text` links a
-published Source Text; saving an original does not require or fabricate that text. Provenance such as
-`ingested_via` records how the input first entered the Workspace; neither identity nor provenance says
-what the user wants to do with it.
+### Artifact 与公共字段
 
-Document imports publish only the local assets referenced by the final converted body, after OCR
-and page reconstruction. Those assets live in `sources/assets/` and sync with the text and original;
-parser scratch images and unused exports are not Vault content. `Source Text.sources` points to the
-Source record, never to an inventory of extracted images. Body links carry attachment dependencies;
-document import publication does not enumerate them again in YAML `assets`.
+外部 OKF 兼容读取要求 YAML 可解析且 `type` 非空，容许未知类型、扩展字段与断链。
+Workspace 自产文件严格遵循 Profile v3 Contracts；每次更新保留未知字段与用户正文。
 
-The complete parser export, asset manifest and QC report remain in external State for retry and
-diagnostics. Scratch `working/` files are removed only after publication and the successful receipt
-are durable. Failed or interrupted conversions retain scratch files. Export recovery remains possible
-without calling the parser again. This policy does not garbage-collect existing Vault attachments.
+公共必填字段只有 `type`、`title`、`created_at`。路径负责稳定定位，`title` 用于结构化展示，H1 用于原生阅读；
+mtime 表达最近修改时间。`status` 只表示 `draft` 或 `deprecated`，缺失即稳定；兼容读取 `stable`，新写入省略。
+`tags` 用于浏览和搜索，空 `aliases`／`sources` 通常省略。`resource` 为 Source 必填，`description` 为 Wiki／Wiki Map 必填。
+不生成 `owner`、`updated_at` 或独立的学习／生成／路由状态字段；排队、进度、失败与重试归 State。
+只有确实随时间失效的内容设置 `stale_after`，当天日期达到该值时提示陈旧，不自动改写。
 
-Durable human decisions belong to `Source.uses[]`. Each use contains `purpose` plus optional `course`
-and `project` Vault references. The tuple is idempotent, so one Source can support several courses,
-projects, or independent uses without copying the identity or overwriting another context. A formal
-`study`, `wiki`, or `reference` decision removes only the `undecided` use covered by that same context.
-Other pending and confirmed uses remain intact.
+| 类型 | 默认位置与关键语义 |
+| --- | --- |
+| Capture | `inbox/captures/YYYY/MM/`；文件存在表示待处理，新写入包含 `ingested_via`，网页记录另含 `resource` |
+| Daily、Reflection、Review | `life/daily/`、`life/reflections/`、`life/reviews/`；日期和周期结构遵循各自 Contract |
+| Project、Decision | `projects/<project>/project.md` 与 `decisions/`；Project 状态为 active／paused／completed，Decision 含 `decided_at` |
+| Course、Lesson | `learning/courses/<course>/course.md` 与 `lessons/`；Course 状态为 active／paused／completed，Lesson 含 `lesson_at` |
+| Study Guide | `learning/guides/` 或课程 `guides/`；可关联课程、项目、来源与明确的学习完成时间 |
+| Wiki、Wiki Map | `knowledge/wiki/`、`knowledge/maps/`；Wiki Map 按导航需求或用户要求维护 |
+| Digest | `feeds/<feed>/YYYY/`；原生可读的 Feed 期次，包含 feed、digest_id、issued_at、items |
+| Source、Source Text | `sources/records/<kind>/` 与 `sources/text/<kind>/`；分别保存资料身份与实际正文 |
+| Profile、Agent Policy、System View | `self/`、`system/policies/`、`system/views/`；用户上下文、AI 边界与原生导航 |
 
-`study` produces a Study Guide owned by Workspace Learning, `wiki` produces a Wiki owned by Workspace
-Knowledge, and `reference` intentionally produces no semantic artifact. `undecided` remains visible to
-Inbox for Intake sources that the user explicitly routed there. Taking no action on a Feed item leaves it
-only in Feed cache and its Digest; it does not create a Source or `undecided` use. Queue, retry, progress,
-and failure are Operations runtime data rather than Source state.
+Capture 成功整理到一个长期目标后删除，明确丢弃进入本地回收站，不额外建立归档副本。
+Web Capture 先发布为 Source／Source Text。Project `log.md` 是不含 YAML 的连续时间日志。
+根 `index.md` 只作人工导航。普通编辑局部校验；部署、迁移和专项审计执行完整 Profile 校验。
 
-The Markdown model does not depend on a Vault Git repository. Local checkpoints are an optional recovery
-feature that becomes active only after the user explicitly opts in.
+### 人工内容与 AI 写入
 
-The unified Apex-based Dashboard does not turn Apex-native life-tool data into Workspace artifacts. The
-native services keep their existing formats, semantics, and export/sync behavior. A plugin-identity change
-may require a repeatable path takeover, but it must not create corresponding Markdown/YAML notes, merge two
-stores by guesswork, or leave two active writers. Physical storage below `.obsidian/plugins/` does not make
-these records part of the Workspace semantic model.
+人工监督下的讨论、格式整理和明确发起的可见生成按正常用户内容保存。
+只有无人值守后台生成、长期复用且尚未检查的 Wiki 写 `generated.by: process:codex-background` 与生成时间，保留来源。
+`verified` 记录实际核验人或流程及时间；打开笔记不算核验。
+`studied_at` 只在用户明确确认学完时写入，生成、阅读、讨论和答题均不自动设置它。
 
-Workbench Markdown is user-owned Dashboard data, not an OKF Artifact or disposable cache. A parsed
-top-level YAML boolean `dashboard: true` identifies it independently of its filename, directory, or
-plugin registry. An absent `workbench_schema` is compatible with legacy boards; any positive integer
-is an identity-compatible version, while Dashboard owns layout compatibility and preservation of
-unknown configuration/body. Empty legacy `type` fields are tolerated. A nonempty Artifact `type`
-together with `dashboard: true` is an identity conflict, never a validation exemption. String/numeric
-dashboard markers and invalid schema values are diagnosed without rewriting the file.
+后台仅原子替换目标允许的 AI 区域，保留 `human:notes` 和其他人工内容。
+Daily 使用 `linked-activity`／`organized-daily`，Lesson 使用 `organized-lesson`，Study Guide 使用 `study-material`，
+Project 使用 `project-current-state`，Wiki 使用 `wiki-content`。区域标记和完整字段见各自 Contract。
+交互式修改仍须有用户对目标范围的明确授权。
 
-Engine bundle/changed-file validation does not impose Artifact fields or headings on workbenches.
-Engine Artifact publishers still reject workbench candidates. Artifact migrations preserve board
-bytes, including conflicting/invalid board identities and malformed YAML, and never normalize their
-fields, move them as legacy notes, or rewrite their body. The bundle-root `index.md` remains reserved
-for human navigation and cannot be repurposed as a workbench.
+### Source 与用途
 
-Dashboard preserves Unicode letters in new workbench filenames. Display-name changes do not rename
-files, and unregistering a workbench does not delete its Markdown. On startup, a missing registry is
-recovered from valid workbench frontmatter on disk before a default board can be created; hidden
-directories (including safety copies) and root `index.md` are excluded. Recovery registers all discovered
-boards in path order and prefers `dashboard` as active when present, otherwise the first path. Explicit
-registry paths are preserved even if files have not synced yet. Storage failures abort recovery rather
-than being interpreted as an empty Vault.
+Source 必填 `resource`、`kind`、`uses`。前两者定义与上下文无关的资料身份；`ingested_via` 记录首次进入渠道，
+取值为 `web-clip`、`file-import`、`feed`、`direct-entry`。未知的历史渠道保持缺失，界面显示“未标注”。
+只有正文存在时才写 `text`，指向同 basename 的 Source Text；保存原件可以独立成立。
+新写入包含 `ingested_via`，跨 Web Clipper／Feed URL 去重复用身份并保留首次渠道。
 
-Default lexical/vector retrieval excludes workbenches and root `.dashboard-backup/` safety copies;
-index sync removes prior entries. Explicitly selected workbench attachments are read from current
-Markdown without entering the default index. Workbench checklists remain local to their cards;
-Tasks and Engine task projections exclude every workbench and its backup copies. Workbenches
-remain included in backup/restore, and moving a memo into Capture remains an explicit user action.
+人工决定保存在 `uses[]`，按 `purpose + course + project` 幂等合并。
+课程和项目均为可选的真实 Vault 路径，缺失时省略；同一 Source 可服务多个上下文。
 
-Original transport, migration and backup procedures: [deployment](../DEPLOYMENT.md#original-migration). Converter configuration: [deployment](../DEPLOYMENT.md#conversion). Public handoffs: [interfaces](../INTERFACES.md).
+| `purpose` | 后续行为 |
+| --- | --- |
+| `study` | 按明确请求生成 Learning 的 Study Guide |
+| `wiki` | 按明确请求生成 Knowledge 的 Wiki |
+| `reference` | 保留资料，不自动转换或生成成果 |
+| `undecided` | Intake 中明确要求暂存，进入收集箱等待判断 |
+
+正式的 study／wiki／reference 决定仅清理这次上下文覆盖的 undecided：无上下文待决定项，
+或其课程／项目与新决定相符的待决定项。其他待决定项和已确认用途保持不变。
+Feed 暂不操作时继续留在 cache 和 Digest，不创建 Source、决定回执或 undecided。
+“现在生成”额外创建后台 Operation，“稍后生成”只保存用途；不存在空白目标占位笔记。
+
+导入只发布最终正文引用的附件到 `sources/assets/`，附件依赖由正文链接表达；
+`Source Text.sources` 只指向 Source，不重复列图片清单或新增 YAML `assets`。
+完整转换 export、manifest 与 QC 留在 State。发布和成功回执持久化后才清理 `working/`；
+失败或中断保留临时文件，可从 export 恢复，不自动清理已有 Vault 附件。
+
+### 项目类别
+
+`project_category` 是可选单值主类别：首尾去空白后 1–80 个 Unicode 字符，不含控制字符，区分大小写，
+无固定枚举；缺失即未分类，清除时删除字段，多主题使用 tags。类别仅保存在项目主页，关联内容通过项目关系查询。
+修改保持路径、状态、正文、任务和未知字段；AI 不自行推断类别，旧项目无需补写。
+批量改名逐项检查原类别，合并时展示影响与成功／失败结果。
+看板分组、置顶和手动顺序属于视图状态；跨类别列修改 `project_category`，跨状态列修改 `project_status`。
+
+### 任务与工作台
+
+普通笔记任务由内嵌 Tasks 管理。Tasks 配置单向导出 `system/views/Tasks.md` 的 `task_statuses` 与
+`task_projection` 供 Engine 读取；存在全局查询时 Engine 明确报告无法解释该查询，完整查询由 Dashboard/Tasks 执行。
+工作台清单由所属工作台独立管理，两种任务投影均排除工作台、安全副本及来源示例等不适用内容。
+格式、状态、日期、循环、依赖与笔记交互沿用 Tasks；具体操作见[使用指南](../USER-GUIDE.md#tasks)。
+
+工作台通过顶层 YAML 布尔值 `dashboard: true` 识别，与路径和注册表无关。
+缺失 `workbench_schema` 兼容旧工作台，正整数属于身份兼容版本；Dashboard 负责布局兼容与未知内容保留。
+空 type 可容忍，非空 Artifact type 与工作台标记并存属于身份冲突；非布尔标记、无效 schema 和异常 YAML 报错并保留原文件。
+Engine 不向工作台强加 Artifact 字段或标题，Artifact 发布器拒绝工作台目标；迁移逐字节保留工作台及异常身份文件。
+
+新工作台文件名保留 Unicode。改展示名不重命名文件，取消注册不删除 Markdown。
+注册表缺失时，从有效 frontmatter 恢复，排除隐藏目录、安全副本和根 index；按路径排序，优先 dashboard，否则首项。
+显式注册路径即使尚未同步也保留；存储读取失败停止恢复。
+默认全文／向量检索排除工作台及根 `.dashboard-backup/`，索引同步清除旧条目；明确附加给 AI 时读取当前正文。
+工作台仍参与备份和恢复，便签转 Capture 由用户明确执行。Vault Git checkpoint 仅在用户主动启用后生效。

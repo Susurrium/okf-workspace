@@ -18,8 +18,8 @@ deleted by TTL. The calling workstation must retain the source document and down
   relationship/reference counts. Repeated copies of identical image bytes share one asset while
   retaining every Markdown reference.
 - SVG and unsupported embedded image formats are not published. The bundle records an omitted
-  image warning; the workstation accepts it only in quick quality mode and rejects it in strict
-  high-quality mode.
+  image warning; the workstation handles it under the selected QC policy and rejects missing
+  images when strict image checks apply.
 - `PDF` is deliberately text-only and always returns the
   `pdf_text_only_images_not_extracted` warning. PDF image extraction and OCR are not supplied
   by this parser; retain the original document for review.

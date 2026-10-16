@@ -126,27 +126,27 @@ root|OKF：信息入口 → 判断与处理 → 持久落点 → 展示、复用
         generate|Study Guide 的创建或更新
         generate|Wiki 的创建或更新
         view|自测 → 基于来源返回题目；不改变 studied_at、不自动保存成果
-  input|⑦ Apex 工作台便签 / 任务 / 生活工具记录
+  input|⑦ Apex 工作台便签 / 清单 / 生活工具记录
     choice|输入的是什么数据？
       artifact|便签 / 布局 / 配置 → 工作台 Markdown（dashboard: true）|用户工作台 Markdown
         view|留在工作台；是用户文件，不是缓存或 OKF Artifact
         step|用户明确便签转 Capture → 保存 Capture，继续①归档路径
         view|默认语义检索排除；明确附加给 AI 才读当前正文
-      artifact|工作台真实任务 → 原文件任务条目
-        view|符合正式任务规则 → Tasks / Today 投影；安全副本不贡献重复任务
+      artifact|工作台清单 → 所属工作台 Markdown 中的清单项
+        view|Apex 管理层级、勾选、折叠和进度；Tasks 与 Engine 任务投影排除工作台及其备份
       artifact|习惯 / 记账 / 阅读历史 / 专注 / 媒体 → Apex 原生 JSON / plugin data
         view|各原生 widget 展示；沿用自身 export / sync
         view|不自动生成 Source / Daily / Wiki
-  input|⑧ 文件落地后：共同的并行后续流向
+  input|⑧ 文件保存后：共同的并行后续流向
     parallel|以下去向可以同时发生，不是互斥选择
       parallel|展示给用户：直接读取真实文件类型和关系
         view|Capture / undecided → Inbox；study + 无成果 → Learning 待生成
         view|Course / Lesson / Guide → Learning；Wiki / Map → Knowledge
         view|Project / log / Decision → Projects；Daily / Reflection / Review → Life
-        view|待办 / 最近活动 / 最新 Feed 摘要 → Today；运行异常 → System
+        view|任务 / 最近活动 / 最新 Feed 摘要 → Today；运行异常 → System
         view|点击结果 → 原生打开真实文件，不建立第二份正文权威
-      step|原笔记里的未完成 - [ ] #task → 任务投影
-        step|排除来源示例、代码块、安全副本等 → Today / Tasks
+      step|普通来源笔记中的任务 → 按 Tasks 全局过滤与状态规则查询
+        step|排除工作台、来源示例、代码块、安全副本等 → Today / Tasks
           artifact|用户完成 / 改日期 → 修改原任务文件 → 投影更新
       step|可索引 Markdown → 增量同步 / 显式重建检索索引
         state|派生 brain.sqlite FTS5 + 可选 vectors.sqlite|Vault 外 Runtime State

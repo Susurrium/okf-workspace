@@ -1,6 +1,6 @@
 # 接口与集成
 
-[文档索引](README.md) · [架构边界](architecture/README.md) · [部署配置](DEPLOYMENT.md)
+[文档入口](../README.md#文档入口) · [架构与数据](architecture/README.md) · [部署配置](DEPLOYMENT.md)
 
 Engine API、CLI、Feed 协议与插件交接集中在这里。接口实现与当前测试用于核对精确参数，Vault Artifact 格式仍以 Contracts 为准。
 
@@ -100,7 +100,7 @@ Dashboard 向 Engine 发起写入时附带当前 Vault fingerprint；Engine 拒�
 600 秒、单次检索上限 12 秒，可通过部署配置中的 `semantic_timeout_seconds` 和
 `semantic_retrieval_timeout_seconds` 调整。Worker 日志位于 Runtime State 的 `logs/semantic-worker-YYYYMMDD.log`。
 
-`POST /projects` 可携带可选 `project_category`；详细语义见[数据模型](DATA-MODEL.md)。
+`POST /projects` 可携带可选 `project_category`；详细语义见[项目类别](architecture/README.md#项目类别)。
 CLI 创建使用 `okf note new project --slug <slug> --title <title> --category <类别>`；
 修改使用 `okf project category <slug> --category <类别>`，空字符串清除。
 
@@ -197,7 +197,7 @@ Dashboard 的 Today、Reading 和原生 Digest 复用同一种条目语义与判
 
 ### 决定与后台交接
 
-界面与 API 接受 `learn-now / learn-later / wiki-now / source-only / ignore` 五种动作。兴趣、学习和长期价值由用户判断；不操作不创建 Source 或待决定用途。`action: later` 只读兼容历史回执，API/CLI 不再接受。长期用途字段与上下文幂等规则见[数据模型](DATA-MODEL.md#7-source-流水线)。
+界面与 API 接受 `learn-now / learn-later / wiki-now / source-only / ignore` 五种动作。兴趣、学习和长期价值由用户判断；不操作不创建 Source 或待决定用途。`action: later` 只读兼容历史回执，API/CLI 不再接受。长期用途与上下文幂等规则见[Source 与用途](architecture/README.md#source-与用途)。
 
 - “现在生成”先原子保存 Source 和 Source Text，再创建 Semantic Operation，并立即给 Dashboard 返回任务编号。
 - “稍后生成”不创建空白 Study Guide 或 Wiki。Learning 从 `uses[].purpose: study` 且尚无目标成果的真实 Source 汇总“待生成”；Inbox 只汇总 Capture 和 Intake 中明确选择暂存的 `undecided` 用途。用户以后可在 Dashboard 启动生成，也可在可见 Codex 会话中调用对应 Skill。
@@ -281,19 +281,40 @@ $report.actionable
 
 ## Dashboard 与 Claudian Bridge
 
-Dashboard 只使用公开 `okfBridge v1`，不依赖 Claudian 内部类、DOM 或终端。完整请求/结果类型与稳定性约定见 [Claudian OKF patches](../claudian/OKF-PATCHES.md)；上游版本与更新流程见 [Claudian UPSTREAM](../claudian/UPSTREAM.md)。
+Dashboard 通过 Claudian 暴露的冻结对象 `okfBridge v1` 交接。请求／结果形状或语义变化需要新协议版本；
+保持公开协议的内部改动维持 version 1。上游来源、适配边界及更新流程见[Claudian 上游记录](../claudian/UPSTREAM.md)。
 
 ### OKF 的窄接缝
 
 OKF 专属代码只允许集中在：
 
-```text
-claudian/src/integrations/okf/
-├─ OkfBridge.ts
-└─ OkfPromptPolicy.ts
+- `claudian/src/integrations/okf/OkfBridge.ts`：公开交接协议。
+- `claudian/src/integrations/okf/OkfPromptPolicy.ts`：OKF 提示模式。
+
+公开类型如下：
+
+```ts
+interface OkfBridgeV1 {
+  version: 1;
+  open(): Promise<void>;
+  handoff(request: {
+    prompt?: string;
+    contextPaths?: readonly string[];
+    actionMode?: 'read' | 'write' | 'plan';
+    skill?: string;
+    autoSend?: boolean;
+    newSession?: boolean;
+  }): Promise<{
+    accepted: true;
+    sent: boolean;
+    contextCount: number;
+    actionMode: 'read' | 'write' | 'plan';
+    skill: string | null;
+  }>;
+}
 ```
 
-`okfBridge` 的公共协议固定为 version 1。Dashboard 只传递：
+调用示例：
 
 ```ts
 okfBridge.handoff({
@@ -360,23 +381,24 @@ Workspace Kit 位于 `engine/workspace/`，安装时同步到 Vault 的 `AGENTS.
 | `okf-workspace-dashboard:open-action-menu` | 打开统一 OKF 快捷动作菜单 |
 | `okf-workspace-dashboard:open-today-daily` | 打开/创建今日日记 |
 | `okf-workspace-dashboard:append-today-daily` | 打开今日日记的随手记录区 |
-| `okf-workspace-dashboard:quick-capture` | 保存到 Inbox |
+| `okf-workspace-dashboard:quick-capture` | 打开统一快速记录编辑，提交后保存到收集箱 |
+| `okf-workspace-dashboard:open-appearance-studio` | 打开外观工作室，编辑并保存自定义主题 |
 | `okf-workspace-dashboard:new-reflection` | 新建反思 |
 | `okf-workspace-dashboard:new-review` | 打开或新建当前周期 Review |
 | `okf-workspace-dashboard:new-course` | 新建课程 |
 | `okf-workspace-dashboard:new-lesson` | 选择已有课程后创建 Lesson |
 | `okf-workspace-dashboard:new-project` | 新建项目 |
 | `okf-workspace-dashboard:import-document` | 保存原件，或明确转换资料正文 |
-| `okf-workspace-dashboard:open-tasks` | 打开 Tasks 待办页面，提供日期视图、状态历史及查询 |
+| `okf-workspace-dashboard:open-tasks` | 打开任务页面，提供日期视图、状态历史及查询 |
 | `okf-workspace-dashboard:inspect-task-boundary` | 读取历史工作台任务与原 Tasks 配置差异，提供来源定位 |
-| `okf-workspace-dashboard:new-task` | 打开共用待办表单，明确保存位置、关联与日期 |
+| `okf-workspace-dashboard:new-task` | 打开共用任务表单，明确保存位置、关联与日期 |
 | `okf-workspace-dashboard:open-today` | 打开今天 |
 | `okf-workspace-dashboard:open-inbox` | 打开收集箱 |
-| `okf-workspace-dashboard:open-reading` | 打开订阅 |
+| `okf-workspace-dashboard:open-reading` | 打开订阅阅读 |
 | `okf-workspace-dashboard:open-sources` | 打开资料 |
 | `okf-workspace-dashboard:open-learning` | 打开学习 |
 | `okf-workspace-dashboard:open-projects` | 打开项目 |
-| `okf-workspace-dashboard:open-knowledge` | 打开知识 |
+| `okf-workspace-dashboard:open-knowledge` | 打开知识笔记 |
 | `okf-workspace-dashboard:open-life` | 打开日记与复盘 |
 | `okf-workspace-dashboard:open-system` | 打开后台处理与系统诊断 |
 

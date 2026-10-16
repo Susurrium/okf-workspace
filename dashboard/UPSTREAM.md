@@ -1,14 +1,16 @@
 # Apex upstream baseline
 
 The unified workbench imports PandoraReads/apex-dashboard as a source subtree at `dashboard/apex/`.
-The current accepted source baseline is Apex 3.6.5. Its upstream validation and the 2026-09-29 production
-cutover are recorded in the [acceptance ledger](ACCEPTANCE.md).
+The complete imported baseline is Apex 3.6.5. Selected changes through 3.8.5 and the local OKF
+adaptations are accepted under the policy below. Current verification and historical production
+evidence are recorded separately in the [acceptance ledger](ACCEPTANCE.md).
 
 | Field | Locked value |
 | --- | --- |
 | Upstream | `https://github.com/PandoraReads/apex-dashboard.git` |
 | Imported commit | `e8d99517c3e76a52a9bfe3ed75251a0d652d4a34` |
 | Upstream release | `3.6.5` |
+| Selected-update reference | `3.8.5` / `b90d1c54b9c694d192c09173fb5a7d105cbccef4` |
 | Import prefix | `dashboard/apex/` |
 | Unified plugin ID | `okf-workspace-dashboard` |
 | Upstream plugin ID | `apex-dashboard` (source validation only) |
@@ -22,17 +24,6 @@ The imported `main.js` bundle and nested GitHub release/build workflows are not
 retained in this monorepo. Build outputs are generated locally; CI and releases
 are owned by the root workflow. Upstream source, styles, license, package metadata,
 and validation scripts remain available for deliberate upgrades.
-
-## Accepted 3.6.5 validation
-
-The 3.6.5 subtree candidate passed Apex lint, TypeScript/esbuild production build, and all 44 Apex
-`test:*` scripts. The unified Dashboard checks and root `scripts/check.ps1` passed. P01–P08, including
-isolated Obsidian acceptance and upgrade/rollback comparison, are recorded in the acceptance ledger.
-This promotes the source baseline for integration/release review. Production cutover completed on
-2026-09-29; see the acceptance ledger for that installed-runtime evidence.
-
-The original 2.5.4 import and 3.6.0 rehearsal remain historical provenance. Their exercise reports are
-retained in Git history; the acceptance ledger records the accepted 3.6.5 outcome.
 
 ## Update procedure
 
@@ -51,8 +42,8 @@ Passing a Git merge or TypeScript compilation alone is not an accepted upstream 
 
 ## 上游采用策略
 
-用户于 2026-10-15 确定以下范围。完整导入基线仍为 3.6.5 / `e8d99517c3e76a52a9bfe3ed75251a0d652d4a34`；
-本轮选择性移植参考固定为 3.8.5 / `b90d1c54b9c694d192c09173fb5a7d105cbccef4`。这不表示完整接受 3.8.5。
+本节集中维护当前采用范围及后续审查边界。来源版本与提交见上表；3.8.5 用于选择性移植，
+完整导入基线保持 3.6.5。本轮范围处理和已采用功能开发已完成，没有待开发的暂缓项。
 
 ### 采用范围
 
@@ -60,23 +51,19 @@ Passing a Git merge or TypeScript compilation alone is not an accepted upstream 
 番茄钟正计时、提醒和统一设置；记账分类管理；分区导航轨；音乐减少逐曲失败提示；胶囊主题；
 移除备忘录改色按钮；没有保存偏好时默认固定侧栏。
 
-2026-10-16 补充采用闪念小组件的紧凑输入交互：OKF 内统一命名“快速记录”，通过宿主接入现有 Capture、
+闪念小组件的紧凑输入交互在 OKF 内统一命名“快速记录”，通过宿主接入现有 Capture、
 草稿和收集箱流程；展开编辑与命令共用同一提交控制。OKF 内不提供独立的闪念目标笔记、文件夹或模板配置。
 历史 Apex 笔记和旧配置保留，不自动转换或搬移；独立 Apex 宿主维持其原生捕获行为。
 
-用户于 2026-10-16 追加采用 OKF 项目类别、分组、看板、置顶和手动排列。
+采用 OKF 项目类别、分组、看板、置顶和手动排列。
 项目类别进入 Project Contract；界面复用现有 OKF 项目、任务与关联读写，
 不导入上游独立 PM 模型及其创建、归档、删除和任务编辑流程。
 
 记账分类按没有正式历史数据设计，不开发旧格式迁移、推断或双写；不主动删除磁盘文件。
 胶囊作为新增主题，保留丁香及现有选择。滚动条维持现有显示策略。
 
-### 暂不处理
-
-- 沉浸式工作台及自由布局。
-- 文件搜索小组件和操作条输入用途切换。
-
-以上仅在用户后续明确范围后开发，本轮不预埋入口、配置或实现。
+当前实现沿用既有工作台布局和搜索入口；上游沉浸式工作台、自由布局、文件搜索小组件及
+操作条输入用途切换未纳入本轮新增能力。采用清单之外的新增功能须另行明确需求。
 
 ### 明确排除
 
@@ -109,11 +96,6 @@ Passing a Git merge or TypeScript compilation alone is not an accepted upstream 
 拖动保护延续本地 pointer capture，实现取消和窗口失焦清理；上游独立构建仍支持默认宿主。
 当前验证结果及测试环境安装证据见[验收台账](ACCEPTANCE.md)。
 
-## Workspace registry integration behavior
-
-The local registry helper preserves Unicode letters in new filenames (`工作台 2` becomes
-`工作台-2.md`) and uses the first registered path when the active-path setting is absent.
-The OKF startup adapter additionally recovers a missing registry from existing workbench Markdown
-before opening a view. Existing filenames are not automatically renamed or deleted. Preserve these
-behaviors during subtree updates; regression coverage is in
+Workspace registry and recovery behavior follows the
+[workbench data rules](../docs/architecture/README.md#任务与工作台), with regression coverage in
 `dashboard/tests/workspace-recovery.test.ts`.
