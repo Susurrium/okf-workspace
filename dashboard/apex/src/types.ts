@@ -187,6 +187,8 @@ export interface DashboardSettings {
 	quickNotePresets: QuickNotePreset[];
 	/** Inline capture box shown in the Quick Notes region. */
 	quickCaptureEnabled: boolean;
+	/** 宿主提供统一快速记录时，控制侧栏输入框。 */
+	widgetQuickCaptureEnabled?: boolean;
 	/** Note path to append captures to. Empty = create a new fleeting note. */
 	quickCaptureTarget: string;
 	/** Folder for new fleeting notes when no capture target is set. */
@@ -501,6 +503,7 @@ export interface ImageFocalPoint {
 }
 
 export interface QuickAction {
+	defaultCapture?: boolean;
 	name: string;
 	icon: string;
 	type: 'file' | 'command';
@@ -1015,6 +1018,7 @@ export interface RenderCallbacks {
 	onCollapsedSectionsChange?(collapsed: Set<string>): void;
 	onQuickNoteCreate(preset: QuickNotePreset): void;
 	onQuickNoteCapture(text: string): void | Promise<void>;
+	managedCapture?: boolean;
 	onOpenPinnedNote(note: PinnedNote): void;
 	onQuickCommand(cmd: QuickCommand): void;
 	onQuickNoteDaily(): void;

@@ -42,6 +42,7 @@ export const ALL_TIERS: number[] = [6, 4, 3, 2];
  *  fixed (span 2); the packer handles those prefixes explicitly. */
 export const STACKED_FIXED_SPANS: Record<string, number> = {
 	quickActions: 6,
+	quickCapture: 3,
 	calendar: 6,
 	weather: 4,
 	pomodoro: 3,

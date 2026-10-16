@@ -70,7 +70,7 @@ export function workbenchPresetData(preset: WorkbenchPresetId = "daily", context
     workbenchSchema: 1,
     banner: { ...BANNER },
     quickActions: [
-      { name: "快速记录", icon: "pencil", type: "command", target: "okf-workspace-dashboard:quick-capture" },
+      { name: "快速记录", icon: "pencil", type: "command", target: "okf-workspace-dashboard:quick-capture", defaultCapture: true },
       { name: "新建任务", icon: "list-plus", type: "command", target: "okf-workspace-dashboard:new-task" },
       { name: "全局搜索", icon: "search", type: "command", target: "global-search:open" },
       { name: "快捷操作", icon: "plus", type: "command", target: "okf-workspace-dashboard:open-action-menu" },

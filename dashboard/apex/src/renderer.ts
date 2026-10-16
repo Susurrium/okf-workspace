@@ -347,6 +347,7 @@ export function sidebarWidgetSignature(
 		countdowns: settings.countdowns,
 		readingEnabled: settings.readingEnabled,
 		quickActionsEnabled: settings.widgetQuickActionsEnabled,
+		quickCaptureEnabled: settings.widgetQuickCaptureEnabled,
 		// Quick buttons live inside the widget area now; their content (actions,
 		// order, hidden presets) must break the reuse signature so add/remove/edit
 		// rebuilds the area instead of re-attaching a stale quick-actions DOM.
@@ -393,9 +394,10 @@ export function renderSidebarWidgets(
 	reuse?: HTMLElement | null,
 	onOpenNote?: (file: TFile, line?: number) => void,
 	renderQuickActions?: (container: HTMLElement) => void,
+	renderQuickCapture?: (container: HTMLElement) => void,
 ): HTMLElement | null {
 	const anyEnabled = settings.widgetWeatherEnabled || settings.pomodoroEnabled || settings.widgetLunarEnabled || settings.widgetYearProgressEnabled || settings.widgetCalendarEnabled || settings.widgetHabitEnabled || settings.widgetExpenseEnabled || (settings.albums?.length ?? 0) > 0 || (settings.anniversaryEnabled && (settings.anniversaries?.length ?? 0) > 0) || (settings.countdownEnabled && (settings.countdowns?.length ?? 0) > 0) || settings.readingEnabled || (settings.widgetQuickActionsEnabled && !!renderQuickActions) || (settings.widgetMusicEnabled && !Platform.isPhone);
-	if (!anyEnabled) return null;
+	if (!anyEnabled && !renderQuickCapture) return null;
 
 	const stacked = isStackedLayout(settings);
 	// Unchanged inputs: keep the previous DOM (and its live timers/listeners).
@@ -412,7 +414,7 @@ export function renderSidebarWidgets(
 	const widgetArea = container.createDiv({ cls: 'dashboard-sidebar-widgets' });
 	widgetArea.dataset.layout = stacked ? 'stacked' : 'side';
 
-	const DEFAULT_ORDER = ['quickActions', 'lunar', 'weather', 'pomodoro', 'reading', 'countdown', 'anniversary', 'yearProgress', 'calendar', 'habit', 'expense', 'album', 'music'];
+	const DEFAULT_ORDER = ['quickCapture', 'quickActions', 'lunar', 'weather', 'pomodoro', 'reading', 'countdown', 'anniversary', 'yearProgress', 'calendar', 'habit', 'expense', 'album', 'music'];
 	// Legacy: an order saved before quick buttons were a widget lacks the
 	// 'quickActions' key. Render it first there (its historical spot, above the
 	// other widgets) until the user drags it elsewhere.
@@ -420,6 +422,7 @@ export function renderSidebarWidgets(
 
 	type WidgetEntry = { key: string; render: (host: HTMLElement) => void };
 	const enabled: WidgetEntry[] = [];
+	if (renderQuickCapture) enabled.push({ key: 'quickCapture', render: renderQuickCapture });
 	if (settings.widgetQuickActionsEnabled && renderQuickActions) {
 		const renderQuick = renderQuickActions;
 		enabled.push({ key: 'quickActions', render: (host) => { renderQuick(host); } });
@@ -576,8 +579,8 @@ function sortByOrder(items: WidgetEntry[], order: string[]): WidgetEntry[] {
 	const sorted = [...items].sort((a, b) => {
 		// quickActions predates the widget system; a saved order without it
 		// keeps it first (its historical spot above the widgets).
-		const ai = orderMap.get(a.key) ?? (a.key === 'quickActions' ? -1 : order.length);
-		const bi = orderMap.get(b.key) ?? (b.key === 'quickActions' ? -1 : order.length);
+		const ai = orderMap.get(a.key) ?? (a.key === 'quickCapture' ? -2 : a.key === 'quickActions' ? -1 : order.length);
+		const bi = orderMap.get(b.key) ?? (b.key === 'quickCapture' ? -2 : b.key === 'quickActions' ? -1 : order.length);
 		return ai - bi;
 	});
 	return sorted;

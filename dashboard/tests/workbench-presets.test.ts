@@ -28,6 +28,7 @@ describe("OKF workbench presets", () => {
     expect(workbenchPresetData().quickActions.map((action) => action.name)).toEqual([
       "快速记录", "新建任务", "全局搜索", "快捷操作",
     ]);
+    expect(parse(generateWorkbenchPresetMarkdown('daily')).quickActions.find(action => action.target === 'okf-workspace-dashboard:quick-capture')?.defaultCapture).toBe(true);
   });
 
   it("serializes stable section IDs and declarative filters without object snapshots", () => {

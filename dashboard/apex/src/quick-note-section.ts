@@ -21,7 +21,7 @@ export function renderQuickNoteRegion(
 	const presets = settings.quickNotePresets ?? [];
 	const pinned = settings.pinnedNotes ?? [];
 	const commands = settings.quickCommands ?? [];
-	const captureOn = !!settings.quickCaptureEnabled;
+	const captureOn = !!settings.quickCaptureEnabled && !callbacks.managedCapture;
 	const dailyOn = !!settings.quickDailyEnabled;
 	const hasChips = presets.length > 0 || pinned.length > 0 || commands.length > 0 || dailyOn;
 

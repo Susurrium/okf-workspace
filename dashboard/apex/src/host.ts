@@ -71,6 +71,11 @@ export interface ApexHost {
 	canWriteTaskTarget?(file: TFile): boolean;
 	taskStatistics?(excludeFolders?: string[]): Promise<{ totalTasks: number; doneTasks: number; pendingTasks: number; taskCompletion: number }>;
 	recentDocumentExclusions?: readonly string[];
+	quickCapture?: {
+		enabled(): boolean;
+		mount(container: HTMLElement): () => void;
+		submit(text: string): Promise<void>;
+	};
 }
 
 export interface WorkspacePresetOption {

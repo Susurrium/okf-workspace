@@ -1,5 +1,6 @@
 import { App, Modal, Notice, Setting } from "obsidian";
 import { normalizeCaptureRelation, relationVaultPath, type CaptureContextOptions, type CaptureRelation } from "../domain/capture-context.js";
+import type { CaptureSession } from './capture-session.js';
 
 export class QuickCaptureModal extends Modal {
   private value: string;
@@ -7,10 +8,12 @@ export class QuickCaptureModal extends Modal {
   private submitting = false;
   private textarea: HTMLTextAreaElement | undefined;
   private readonly controls: Array<HTMLInputElement | HTMLSelectElement | HTMLButtonElement> = [];
+  private unsubscribe?: () => void;
 
   public constructor(app: App, private readonly contexts: CaptureContextOptions, initial: CaptureRelation,
     private readonly onSubmit: (value: string, relation: CaptureRelation) => Promise<void>,
-    private readonly draft?: { text: string; save(text: string): void; relation?: CaptureRelation; saveRelation?(relation: CaptureRelation): void }) {
+    private readonly draft?: { text: string; save(text: string): void; relation?: CaptureRelation; saveRelation?(relation: CaptureRelation): void },
+    private readonly session?: CaptureSession) {
     super(app);
     this.value = draft?.text ?? "";
     this.relation = normalizeCaptureRelation(draft?.relation ?? initial);
@@ -54,11 +57,30 @@ export class QuickCaptureModal extends Modal {
       if (event.key === "Enter" && event.ctrlKey && !event.isComposing) { event.preventDefault(); void this.submit(); }
     });
     this.textarea?.focus();
+    if (this.session) {
+      const feedback = this.contentEl.createDiv({ cls: 'okf-capture-feedback', attr: { role: 'status', 'aria-live': 'polite' } });
+      this.unsubscribe = this.session.subscribe(state => {
+        this.value = state.text;
+        delete this.relation.course; delete this.relation.project;
+        Object.assign(this.relation, state.relation);
+        if (this.textarea && this.textarea.value !== state.text) this.textarea.value = state.text;
+        if (this.textarea) { this.textarea.disabled = state.busy; this.textarea.readOnly = state.locked; }
+        for (const control of this.controls) {
+          const kind = control.getAttribute('aria-label') === '关联课程' ? 'course' : control.getAttribute('aria-label') === '关联项目' ? 'project' : undefined;
+          control.disabled = state.busy || (!!kind && state.locked);
+          if (kind) control.value = state.relation[kind] ?? '';
+        }
+        feedback.setText(state.error);
+      });
+    }
   }
 
   public onClose(): void {
-    this.draft?.save(this.value);
-    this.draft?.saveRelation?.(this.value.trim() ? { ...this.relation } : {});
+    this.unsubscribe?.();
+    if (!this.session) {
+      this.draft?.save(this.value);
+      this.draft?.saveRelation?.(this.value.trim() ? { ...this.relation } : {});
+    }
     this.contentEl.empty();
   }
 
@@ -76,8 +98,10 @@ export class QuickCaptureModal extends Modal {
     } catch (error) { new Notice(error instanceof Error ? error.message : "保存失败", 10000); }
     finally {
       this.submitting = false;
-      if (this.textarea) this.textarea.disabled = false;
-      this.controls.forEach(control => { control.disabled = false; });
+      if (!this.session) {
+        if (this.textarea) this.textarea.disabled = false;
+        this.controls.forEach(control => { control.disabled = false; });
+      }
     }
   }
 }

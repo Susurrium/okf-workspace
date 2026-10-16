@@ -1212,6 +1212,7 @@ export class OkfDashboardView {
     });
     daily.addEventListener("click", () => void this.openDaily(data));
     const jot = actions.createEl("button", { text: "快速记录", cls: "okf-dashboard__secondary-action" });
+    if (!this.config.course && !this.config.project) jot.addClass('okf-capture-global-entry');
     jot.addEventListener("click", () => this.plugin.promptCapture(this.config));
     actions.createEl("button", { text: "新建今日任务", cls: "okf-dashboard__secondary-action", attr: { type: "button" } })
       .addEventListener("click", () => this.plugin.promptNewTask({ ...this.rawConfig, taskView: "today" }));
@@ -3421,6 +3422,7 @@ export class OkfDashboardView {
       cls: "mod-cta okf-dashboard__primary-action",
     });
     capture.addEventListener("click", () => this.plugin.promptCapture(this.config));
+    if (!this.config.course && !this.config.project) capture.addClass('okf-capture-global-entry');
     this.renderDocumentDropZone(actions, this.importContext(), "inbox");
     const processing = actions.createEl("button", { text: "导入记录与后台处理", attr: { type: "button" } });
     processing.addEventListener("click", () => this.openSection("system"));

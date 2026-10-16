@@ -1,9 +1,11 @@
 import { TFile, type App } from "obsidian";
 import { prepareTaskLine } from '../../tasks-generated/core.js';
 import { readTaskSourceKind } from '../../apex/src/task-source.js';
+import type { PreparedCapture } from './capture-session.js';
 
 import {
   normalizeCaptureRelation,
+  CaptureRelationError,
   relationVaultPath,
   type CaptureContextOptions,
   type CaptureRelation,
@@ -125,12 +127,16 @@ export class VaultNoteService {
     content: string,
     relation: CaptureRelation = {},
   ): Promise<{ path: string }> {
+    return this.writePreparedCapture(await this.prepareCapture(title, content, relation));
+  }
+
+  public async prepareCapture(title: string, content: string, relation: CaptureRelation = {}): Promise<PreparedCapture> {
     const normalizedRelation = normalizeCaptureRelation(relation);
     this.assertCaptureRelationTargets(normalizedRelation);
     const now = new Date();
     const stamp = `${localDate(now)}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
     const base = `inbox/captures/${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}/${stamp}-${slugify(title).slice(0, 72)}`;
-    const path = this.availablePath(base);
+    const path = this.availablePath(`${base}-${crypto.randomUUID().slice(0, 8)}`);
     const normalizedContent = content.trim();
     const [firstLine = "", ...remainingLines] = normalizedContent.split(/\r?\n/u);
     const bodyContent = firstLine.trim() === title.trim()
@@ -146,8 +152,22 @@ export class VaultNoteService {
     };
     if (normalizedRelation.course) fields.course = normalizedRelation.course;
     if (normalizedRelation.project) fields.project = normalizedRelation.project;
-    await this.create(path, document("Capture", title, body, fields));
-    return { path };
+    return { path, markdown: document("Capture", title, body, fields), relation: normalizedRelation };
+  }
+
+  public async writePreparedCapture(prepared: PreparedCapture): Promise<{ path: string }> {
+    if (!/^inbox\/captures\/\d{4}\/\d{2}\/\d{4}-\d{2}-\d{2}-\d{6}-[^/\\]+\.md$/u.test(prepared.path)) {
+      throw new Error('快速记录写入目标无效');
+    }
+    const existing = this.app.vault.getAbstractFileByPath(prepared.path);
+    if (existing instanceof TFile) {
+      if (await this.app.vault.read(existing) !== prepared.markdown) throw new Error(`记录目标已存在且内容不同，请先检查：${prepared.path}`);
+      return { path: prepared.path };
+    }
+    if (await this.app.vault.adapter.stat(prepared.path)) throw new Error(`记录目标在磁盘中已存在，请重新加载后重试：${prepared.path}`);
+    this.assertCaptureRelationTargets(normalizeCaptureRelation(prepared.relation));
+    await this.create(prepared.path, prepared.markdown);
+    return { path: prepared.path };
   }
 
   /**
@@ -525,7 +545,7 @@ export class VaultNoteService {
       if (!target) continue;
       const path = relationVaultPath(target);
       if (!(this.app.vault.getAbstractFileByPath(path) instanceof TFile)) {
-        throw new Error(`${kind} 关联目标不存在：${path}`);
+        throw new CaptureRelationError(`${kind} 关联目标不存在：${path}`);
       }
     }
   }

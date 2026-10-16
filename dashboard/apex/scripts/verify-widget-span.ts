@@ -135,7 +135,7 @@ const run = (): void => {
 		assert.equal(isTieredWidgetKey('countdown-x'), false);
 		// The fixed table must mirror the CSS per-type rules.
 		assert.deepEqual(STACKED_FIXED_SPANS, {
-			quickActions: 6, calendar: 6, weather: 4,
+			quickActions: 6, quickCapture: 3, calendar: 6, weather: 4,
 			pomodoro: 3, expense: 3, music: 3,
 			lunar: 2, yearProgress: 2,
 		}, 'STACKED_FIXED_SPANS unchanged (update styles.css together)');

@@ -325,7 +325,8 @@ export class DashboardUiStateStore {
     const snapshot = this.snapshot();
     this.persistQueue = this.persistQueue
       .catch(() => undefined)
-      .then(() => this.persist(snapshot));
+      .then(() => this.persist(snapshot))
+      .catch(error => { this.dirty = true; throw error; });
     await this.persistQueue;
   }
 

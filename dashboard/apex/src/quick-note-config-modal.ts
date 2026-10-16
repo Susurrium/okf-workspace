@@ -19,6 +19,7 @@ export class QuickNoteConfigModal extends Modal {
 	private pinned: PinnedNote[];
 	private commands: QuickCommand[];
 	private captureEnabled: boolean;
+	private widgetCaptureEnabled: boolean;
 	private captureTarget: string;
 	private captureFolder: string;
 	private captureTemplate: string;
@@ -36,6 +37,7 @@ export class QuickNoteConfigModal extends Modal {
 		this.pinned = s.pinnedNotes.map(p => ({ ...p }));
 		this.commands = (s.quickCommands ?? []).map(c => ({ ...c }));
 		this.captureEnabled = s.quickCaptureEnabled;
+		this.widgetCaptureEnabled = s.widgetQuickCaptureEnabled !== false;
 		this.captureTarget = s.quickCaptureTarget;
 		this.captureFolder = s.quickCaptureFolder;
 		this.captureTemplate = s.quickCaptureTemplate;
@@ -204,6 +206,15 @@ export class QuickNoteConfigModal extends Modal {
 	// ── Capture ────────────────────────────────────────────────────────────
 
 	private renderCapture(form: HTMLElement): void {
+		if (this.plugin.quickCapture) {
+			const section = this.section(form, '快速记录', '保存到收集箱；课程和项目在展开编辑时选择。');
+			const row = section.createDiv({ cls: 'dashboard-quicknote-cfg-toggle' });
+			const toggle = row.createEl('input', { attr: { type: 'checkbox', id: 'qn-unified-capture' } });
+			toggle.checked = this.widgetCaptureEnabled;
+			toggle.addEventListener('change', () => { this.widgetCaptureEnabled = toggle.checked; });
+			row.createEl('label', { text: '显示侧栏快速记录', attr: { for: 'qn-unified-capture' } });
+			return;
+		}
 		const section = this.section(form, t('quickNote.capture'), t('quickNote.captureDesc'));
 		const toggleRow = section.createDiv({ cls: 'dashboard-quicknote-cfg-toggle' });
 		const cb = toggleRow.createEl('input', { attr: { type: 'checkbox', id: 'qn-capture' } });
@@ -268,11 +279,13 @@ export class QuickNoteConfigModal extends Modal {
 			quickNotePresets: this.presets.filter(p => p.label.trim()),
 			pinnedNotes: this.pinned.filter(p => p.label.trim() && p.path.trim()),
 			quickCommands: this.commands.filter(c => c.commandId.trim() && c.label.trim()),
-			quickCaptureEnabled: this.captureEnabled,
-			quickCaptureTarget: this.captureTarget.trim(),
-			quickCaptureFolder: this.captureFolder.trim(),
-			quickCaptureTemplate: this.captureTemplate.trim(),
-			quickCapturePosition: this.capturePosition,
+			...(this.plugin.quickCapture ? { widgetQuickCaptureEnabled: this.widgetCaptureEnabled } : {
+				quickCaptureEnabled: this.captureEnabled,
+				quickCaptureTarget: this.captureTarget.trim(),
+				quickCaptureFolder: this.captureFolder.trim(),
+				quickCaptureTemplate: this.captureTemplate.trim(),
+				quickCapturePosition: this.capturePosition,
+			}),
 			quickDailyEnabled: this.dailyEnabled,
 		};
 		await this.plugin.saveSettings();

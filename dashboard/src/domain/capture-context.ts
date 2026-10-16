@@ -3,6 +3,8 @@ export interface CaptureRelation {
   project?: string;
 }
 
+export class CaptureRelationError extends Error {}
+
 export interface CaptureContextOption {
   path: string;
   title: string;

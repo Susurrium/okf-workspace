@@ -69,6 +69,7 @@ export interface ApexHostAdapterOptions {
   canWriteTaskTarget?: ApexHost['canWriteTaskTarget'];
   taskStatistics?: ApexHost['taskStatistics'];
   recentDocumentExclusions?: ApexHost["recentDocumentExclusions"];
+  quickCapture?: ApexHost['quickCapture'];
 }
 
 /**
@@ -104,6 +105,7 @@ export class ApexHostAdapter implements ApexHost {
   public readonly canWriteTaskTarget: ApexHost['canWriteTaskTarget'];
   public readonly taskStatistics: ApexHost['taskStatistics'];
   public readonly recentDocumentExclusions: ApexHost["recentDocumentExclusions"];
+  public readonly quickCapture: ApexHost['quickCapture'];
   public readonly backupService: BackupService;
   private readonly mediaTagService: MediaTagService;
   private readonly habitService: HabitService;
@@ -144,6 +146,7 @@ export class ApexHostAdapter implements ApexHost {
     this.canWriteTaskTarget = options.canWriteTaskTarget;
     this.taskStatistics = options.taskStatistics;
     this.recentDocumentExclusions = options.recentDocumentExclusions;
+    this.quickCapture = options.quickCapture;
     this.backupService = new BackupService(this);
     this.mediaTagService = new MediaTagService(this);
     this.habitService = new HabitService(this);

@@ -227,6 +227,7 @@ export function serialize(data: DashboardData): string {
 			lines.push(`    icon: "${escapeYamlString(action.icon)}"`);
 			lines.push(`    type: ${action.type}`);
 			lines.push(`    target: "${escapeYamlString(action.target)}"`);
+			if (action.defaultCapture) lines.push('    defaultCapture: true');
 		}
 	}
 
@@ -1046,6 +1047,7 @@ function parseQuickActions(fm: Record<string, unknown>): QuickAction[] {
 			icon: item.icon ?? (item.type === 'command' ? 'terminal' : 'file-text'),
 			type: item.type === 'command' ? 'command' as const : 'file' as const,
 			target: item.target ?? '',
+			...((item as unknown as { defaultCapture?: boolean }).defaultCapture === true ? { defaultCapture: true } : {}),
 		})).filter(a => a.name && a.target);
 	}
 

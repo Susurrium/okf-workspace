@@ -187,6 +187,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	 *  widget signature (see sidebarWidgetSignature) is unchanged - so dashboard
 	 *  data mutations never rebuild the widgets. Null right after consumption. */
 	private sidebarWidgetsEl: HTMLElement | null = null;
+	private captureWidgetCleanup?: () => void;
 	private sidebarWidgetsSig: string | null = null;
 	private isOpening = false;
 	private isOpen = false;
@@ -1269,6 +1270,9 @@ export class DashboardView extends ItemView implements HoverParent {
 			reuseWidgets,
 			(file, line) => this.openNote(file, undefined, line),
 			renderQuickActionsWidget,
+			this.plugin.quickCapture?.enabled() ? host => {
+				this.captureWidgetCleanup = this.plugin.quickCapture!.mount(host);
+			} : undefined,
 		);
 
 		if (!isStackedLayout(this.plugin.settings)) {
@@ -1477,6 +1481,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	private createCallbacks() {
 		const collapseWorkspacePath = this.workspacePath;
 		return {
+			managedCapture: !!this.plugin.quickCapture,
 			sectionPage: this.sectionPage,
 			onCustomSectionCleanup: (sectionReference: string, cleanup: () => void) => {
 				this.runCustomSectionCleanup(sectionReference);
@@ -1560,7 +1565,7 @@ export class DashboardView extends ItemView implements HoverParent {
 				});
 			},
 			onQuickNoteCreate: (preset: QuickNotePreset) => void createNoteFromPreset(this.app, preset),
-			onQuickNoteCapture: (text: string) => captureThought(this.app, this.plugin.settings, text),
+			onQuickNoteCapture: (text: string) => this.plugin.quickCapture ? this.plugin.quickCapture.submit(text) : captureThought(this.app, this.plugin.settings, text),
 			onOpenPinnedNote: (note: PinnedNote) => openPinnedNote(this.app, note),
 			onQuickCommand: (cmd: QuickCommand) => {
 				const commands = (this.app as AppWithCommands).commands;
@@ -2840,6 +2845,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	 *  timers and the pomodoro/reading services' onTick wiring (which reference
 	 *  live DOM inside it) must survive; a fresh widgets render re-wires them. */
 	private runCleanup(preserveSidebarWidgets = false): void {
+		if (!preserveSidebarWidgets) { this.captureWidgetCleanup?.(); this.captureWidgetCleanup = undefined; }
 		destroyAllCharts(preserveSidebarWidgets ? this.sidebarWidgetsEl : null, this.contentEl);
 		destroyAlbumWidgets(preserveSidebarWidgets ? this.sidebarWidgetsEl : null);
 		destroyAnniversaryTimers(preserveSidebarWidgets ? this.sidebarWidgetsEl : null);

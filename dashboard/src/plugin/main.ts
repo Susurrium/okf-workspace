@@ -99,6 +99,9 @@ import { OriginalFiles } from "./original-files.js";
 import { SyncedImportsModal } from "./synced-imports-modal.js";
 import { ChoiceModal, FieldsPromptModal, ProjectLogModal, TextPromptModal } from "./prompts.js";
 import { QuickCaptureModal } from "./quick-capture-modal.js";
+import { CaptureSession, type PreparedCapture } from './capture-session.js';
+import { assertCaptureDraftPersisted } from './capture-persistence.js';
+import { mountQuickCapture } from './quick-capture-inline.js';
 import { DocumentConversionResultModal, DocumentImportModal, DocumentReconversionModal, type ImportOrigin,
   type DocumentImportDraft } from "./document-import-modal.js";
 import { hasPendingGeneration } from "../domain/inbox-work-queue.js";
@@ -166,6 +169,8 @@ export default class OkfBrainPlugin extends Plugin {
   private localService: LocalServiceManager | undefined;
   private claudianBridge: ClaudianBridgeAdapter | undefined;
   private vaultNotes: VaultNoteService | undefined;
+  private readonly captureSessions = new Map<string, CaptureSession>();
+  private readonly captureEditors = new Map<string, QuickCaptureModal>();
   private readonly semanticMonitor = new SemanticOperationMonitor();
   private semanticOperationsCache: SemanticOperationRecord[] = [];
   private semanticLastIdlePoll = 0;
@@ -250,6 +255,11 @@ export default class OkfBrainPlugin extends Plugin {
           taskCompletion: tasks.length ? Math.round(doneTasks / tasks.length * 100) : 0 };
       },
       recentDocumentExclusions: ["system/", "inbox/uploads/"],
+      quickCapture: {
+        enabled: () => this.apexHost?.settings.widgetQuickCaptureEnabled !== false,
+        mount: container => mountQuickCapture(container, this.captureSession(), () => this.openQuickCapture({})),
+        submit: async text => { const session = this.captureSession(); session.setText(text); await session.submit(); },
+      },
       mutateManagedArtifact: (mutation) =>
         new ArtifactEditPolicy(this.notes()).mutate(mutation),
       convertMemoToCapture: (workspacePath, card) => {
@@ -293,7 +303,10 @@ export default class OkfBrainPlugin extends Plugin {
         await this.saveSettings();
       },
       400,
-      (error) => console.error("[okf-workspace] could not save Dashboard UI state", error),
+      (error) => {
+        console.error("[okf-workspace] could not save Dashboard UI state", error);
+        for (const session of this.captureSessions.values()) session.reportDraftError(error);
+      },
     );
     this.registerDashboardRecentFiles();
     if (!this.isMobile) {
@@ -339,6 +352,8 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public onunload(): void {
+    for (const editor of this.captureEditors.values()) editor.close();
+    this.captureEditors.clear();
     if (this.indexSyncTimer !== undefined) window.clearTimeout(this.indexSyncTimer);
     if (this.dashboardRefreshTimer !== undefined) window.clearTimeout(this.dashboardRefreshTimer);
     this.watchedConversionIds.clear();
@@ -479,40 +494,71 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   private async openQuickCapture(initial: CaptureRelation): Promise<void> {
+    const key = JSON.stringify(normalizeCaptureRelation(initial));
+    const existing = this.captureEditors.get(key);
+    if (existing) { existing.contentEl.querySelector('textarea')?.focus(); return; }
     const contexts = await this.notes().captureContexts();
+    if (this.captureEditors.has(key)) { this.captureEditors.get(key)!.contentEl.querySelector('textarea')?.focus(); return; }
+    const session = this.captureSession(initial);
+    const state = session.snapshot();
+    const editor = new QuickCaptureModal(this.app, contexts, initial, () => session.submit(), {
+      text: state.text, relation: state.relation,
+      save: text => session.setText(text), saveRelation: relation => session.setRelation(relation),
+    }, session);
+    const close = editor.onClose.bind(editor);
+    editor.onClose = () => { close(); this.captureEditors.delete(key); };
+    this.captureEditors.set(key, editor);
+    editor.open();
+  }
+
+  private captureSession(initial: CaptureRelation = {}): CaptureSession {
     const draftKey = `captureDraft:${JSON.stringify(normalizeCaptureRelation(initial))}`;
+    const existing = this.captureSessions.get(draftKey);
+    if (existing) return existing;
     const relationKey = `${draftKey}:relation`;
-    const relationDraft = this.getDashboardUiState().pages.inbox.filters[relationKey];
-    new QuickCaptureModal(this.app, contexts, initial, async (value, relation) => {
-      const title = value.split(/\r?\n/u)[0]?.trim() || "随手记录";
-      const result = await this.notes().createCapture(title, value, relation);
-      const notice = new Notice("", 15_000);
-      notice.noticeEl.empty();
-      notice.noticeEl.createEl("strong", { text: "已保存到待处理" });
-      const labels = (["course", "project"] as const).flatMap(kind => {
-        const path = relation[kind];
-        if (!path) return [];
-        const title = (kind === "course" ? contexts.courses : contexts.projects)
-          .find(item => relationVaultPath(item.path) === relationVaultPath(path))?.title ?? path;
-        return [`${kind === "course" ? "课程" : "项目"}：${title}`];
-      });
-      if (labels.length) {
-        notice.noticeEl.createDiv({
-          text: `已关联${labels.join("、")}，可稍后整理`,
-        });
-      }
-      const open = notice.noticeEl.createEl("button", { text: "打开记录" });
-      open.addEventListener("click", () => {
-        notice.hide();
-        void this.openVaultPath(result.path);
-      });
-      this.refreshDashboardViews();
-    }, {
-      text: String(this.getDashboardUiState().pages.inbox.filters[draftKey] ?? ""),
-      relation: typeof relationDraft === "string" ? normalizeCaptureRelation(JSON.parse(relationDraft)) : initial,
-      save: text => { this.updateDashboardPageUiState("inbox", { filters: { [draftKey]: text || null } }); },
-      saveRelation: relation => { this.updateDashboardPageUiState("inbox", { filters: { [relationKey]: relation.course || relation.project ? JSON.stringify(relation) : null } }); },
-    }).open();
+    const filters = this.getDashboardUiState().pages.inbox.filters;
+    const relation = filters[relationKey];
+    const storedRequest = filters[`${draftKey}:prepared`];
+    const prepared = typeof storedRequest === 'string' ? JSON.parse(storedRequest) as PreparedCapture : undefined;
+    if (prepared && (typeof prepared.path !== 'string' || typeof prepared.markdown !== 'string' || !prepared.relation || typeof prepared.relation !== 'object')) throw new Error('快速记录重试信息损坏，请保留草稿并检查配置');
+    const session = new CaptureSession({
+      initialRelation: initial,
+      text: String(filters[draftKey] ?? ''), relation: typeof relation === 'string' ? normalizeCaptureRelation(JSON.parse(relation)) : initial, prepared,
+      persist: (text, nextRelation, request) => {
+        this.updateDashboardPageUiState('inbox', { filters: {
+          [draftKey]: text || null,
+          [relationKey]: nextRelation.course || nextRelation.project ? JSON.stringify(nextRelation) : null,
+          [`${draftKey}:prepared`]: request ? JSON.stringify(request) : null,
+        } });
+      },
+      flush: async () => {
+        if (this.dashboardUiStateStore) await this.dashboardUiStateStore.flush();
+        else await this.saveSettings();
+        // Obsidian 的设置写入可能吞掉磁盘异常；关键草稿必须回读确认。
+        const directory = this.manifest.dir;
+        if (!directory) throw new Error('快速记录缺少插件设置目录');
+        const stored = JSON.parse(await this.app.vault.adapter.read(`${directory}/data.json`));
+        assertCaptureDraftPersisted(stored, this.getDashboardUiState().pages.inbox.filters, draftKey);
+      },
+      prepare: (text, nextRelation) => this.notes().prepareCapture(text.split(/\r?\n/u)[0]!.trim(), text, nextRelation),
+      write: request => this.notes().writePreparedCapture(request),
+      refresh: async () => {
+        for (const type of [DASHBOARD_VIEW_TYPE, DASHBOARD_SECTION_VIEW_TYPE]) {
+          for (const leaf of this.app.workspace.getLeavesOfType(type)) {
+            if (leaf.view instanceof DashboardView) await leaf.view.refresh();
+          }
+        }
+        for (const leaf of this.app.workspace.getLeavesOfType(OKF_DASHBOARD_VIEW)) {
+          if (leaf.view instanceof OkfDashboardItemView) await leaf.view.refresh();
+        }
+      },
+      saved: path => {
+        const notice = new Notice('已保存到收集箱', 10000);
+        notice.noticeEl.createEl('button', { text: '打开记录' }).addEventListener('click', () => { notice.hide(); void this.openVaultPath(path); });
+      },
+    });
+    this.captureSessions.set(draftKey, session);
+    return session;
   }
 
   public promptDailyCapture(): void {

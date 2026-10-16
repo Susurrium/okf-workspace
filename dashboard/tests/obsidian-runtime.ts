@@ -59,6 +59,11 @@ export class TestElement {
   public selectionEnd: number | null = 0;
   public focusCount = 0;
   public rows = 0;
+  public scrollHeight = 36;
+  public offsetHeight = 0;
+  public clientHeight = 0;
+  public readOnly = false;
+  public readonly style: Record<string, string> = {};
   public disabled = false;
   public scrollTop = 0;
   public isConnected = true;
@@ -105,6 +110,7 @@ export class TestElement {
   }
   public setText(value: string): void { this.textContent = value; }
   public setAttribute(name: string, value: string): void { this.setAttr(name, value); }
+  public getAttribute(name: string): string | null { return this.attributes.get(name) ?? null; }
   public replaceChildren(): void { this.empty(); }
   public empty(): void { this.children.length = 0; this.textContent = ""; }
   public remove(): void {

@@ -163,3 +163,26 @@
   .okf-task-editor__dependencies { grid-template-columns: 1fr; }
   .okf-task-editor__dependencies .results-dependency { grid-column: 1; }
 }
+
+.okf-capture-inline { min-width: 0; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.okf-capture-heading { font-weight: 600; color: var(--db-text, var(--text-normal)); }
+.okf-capture-inline textarea { width: 100%; min-width: 0; min-height: 36px; max-height: 160px; flex-shrink: 0; resize: vertical; box-sizing: border-box; color: var(--db-text, var(--text-normal)); background: var(--db-bg-input, var(--background-primary)); border: 1px solid var(--db-border-input, var(--background-modifier-border)); }
+.okf-capture-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.okf-capture-actions button { min-height: 32px; }
+.okf-capture-hint { font-size: 11px; color: var(--db-text-muted, var(--text-muted)); }
+.okf-capture-feedback { font-size: 12px; overflow-wrap: anywhere; color: var(--text-error); }
+.okf-capture-feedback:empty { display: none; }
+@media (min-width: 769px) {
+  .apex-dashboard-root:has(.dashboard-sidebar--pinned .okf-capture-inline) .okf-capture-global-entry { display: none; }
+}
+[data-layout="stacked"] .dashboard-sidebar-widgets-row > [data-widget-key="quickCapture"] { grid-row: span 3; min-height: 0; overflow: auto; }
+[data-layout="stacked"] .okf-capture-inline { padding: 8px; gap: 4px; }
+[data-layout="stacked"] .okf-capture-inline textarea { max-height: 44px; }
+.okf-quick-capture-modal .setting-item { min-width: 0; }
+.okf-quick-capture-modal textarea { width: 100%; max-width: 100%; box-sizing: border-box; }
+@media (max-width: 600px) {
+  .okf-quick-capture-modal { width: calc(100vw - 24px); max-width: calc(100vw - 24px); }
+  .okf-quick-capture-modal .setting-item { flex-wrap: wrap; gap: 8px; }
+  .okf-quick-capture-modal .setting-item-control { min-width: 0; max-width: 100%; }
+  .okf-quick-capture-modal select { max-width: 100%; }
+}

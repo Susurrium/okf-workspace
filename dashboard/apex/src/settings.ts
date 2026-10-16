@@ -485,6 +485,14 @@ export class DashboardSettingTab extends PluginSettingTab {
 					new QuickNoteConfigModal(this.app, this.plugin).open();
 				}));
 
+		if (this.plugin.quickCapture) new Setting(containerEl)
+			.setName('侧栏快速记录')
+			.setDesc('直接保存到收集箱，可展开编辑内容并关联课程或项目。')
+			.addToggle(toggle => toggle.setValue(this.plugin.settings.widgetQuickCaptureEnabled !== false).onChange(async value => {
+				this.plugin.settings = { ...this.plugin.settings, widgetQuickCaptureEnabled: value };
+				await this.plugin.saveSettings(); this.plugin.refreshAllDashboards();
+			}));
+
 		const recentSetting = new Setting(containerEl)
 			.setName(t('settings.recentCount') + '  ' + this.plugin.settings.recentDocCount)
 			.setDesc(t('settings.recentCountDesc'))
