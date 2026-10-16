@@ -1,4 +1,5 @@
 import { TFile, type App } from "obsidian";
+import { projectCategory } from "../domain/project-organization.js";
 import { prepareTaskLine } from '../../tasks-generated/core.js';
 import { readTaskSourceKind } from '../../apex/src/task-source.js';
 
@@ -117,6 +118,7 @@ function document(
 export class VaultNoteService {
   private readonly pendingProjects = new Map<string, Map<string, string>>();
   private readonly projectCreates = new Map<string, Promise<{ path: string }>>();
+  private readonly projectRequests = new Map<string, string>();
   private readonly dailyCreates = new Map<string, Promise<{ path: string }>>();
   public constructor(private readonly app: App) {}
 
@@ -346,6 +348,35 @@ export class VaultNoteService {
     return { path: normalized };
   }
 
+  public async setProjectCategory(path: string, category: string | null, expected?: string | null): Promise<{ path: string }> {
+    const normalized = path.replace(/^\/+|\/+$/gu, "");
+    const next = projectCategory(category);
+    if (!/^projects\/[^/]+\/project\.md$/u.test(normalized) || normalized.split("/").some(part => part === "." || part === ".." || part.includes(":"))) throw new Error("请选择规范路径下的项目主页");
+    const file = this.app.vault.getAbstractFileByPath(normalized);
+    if (!(file instanceof TFile) || file.path !== normalized) throw new Error("请选择规范路径下的项目主页");
+    await this.app.fileManager.processFrontMatter(file, fields => {
+      if (fields.type !== "Project") throw new Error("目标笔记不是 Project");
+      const current = projectCategory(fields.project_category);
+      if (next !== null && fields.project_category === next || next === null && !("project_category" in fields)) return;
+      if (expected !== undefined && current !== projectCategory(expected)) throw new Error("项目类别已经变化，请重新读取后操作");
+      if (next === null) delete fields.project_category;
+      else fields.project_category = next;
+    });
+    return { path: normalized };
+  }
+
+  public async renameProjectCategory(paths: readonly string[], from: string, to: string | null): Promise<{ path: string; error?: string }[]> {
+    const previous = projectCategory(from);
+    const next = projectCategory(to);
+    if (!previous) throw new Error("请选择要重命名的类别");
+    const results: { path: string; error?: string }[] = [];
+    for (const path of new Set(paths)) {
+      try { await this.setProjectCategory(path, next, previous); results.push({ path }); }
+      catch (error) { results.push({ path, error: error instanceof Error ? error.message : String(error) }); }
+    }
+    return results;
+  }
+
   public async createReflection(title: string, content: string): Promise<{ path: string }> {
     const base = `life/reflections/${slugify(title)}`;
     const path = this.availablePath(base);
@@ -416,20 +447,25 @@ export class VaultNoteService {
     return { path };
   }
 
-  public async createProject(title: string, requestedSlug?: string): Promise<{ path: string }> {
+  public async createProject(title: string, requestedSlug?: string, category?: string | null): Promise<{ path: string }> {
+    const normalizedCategory = projectCategory(category);
     const slug = slugify(requestedSlug || title);
+    const identity = JSON.stringify([title, normalizedCategory]);
+    if (this.projectRequests.has(slug) && this.projectRequests.get(slug) !== identity) throw new Error("项目创建尚未完成，请使用原名称与类别重试");
+    this.projectRequests.set(slug, identity);
     const inFlight = this.projectCreates.get(slug);
     if (inFlight) return inFlight;
-    const request = this.publishProject(title, slug);
+    const request = this.publishProject(title, slug, normalizedCategory);
     this.projectCreates.set(slug, request);
     try {
       return await request;
     } finally {
       this.projectCreates.delete(slug);
+      if (!this.pendingProjects.has(`projects/${slug}`)) this.projectRequests.delete(slug);
     }
   }
 
-  private async publishProject(title: string, slug: string): Promise<{ path: string }> {
+  private async publishProject(title: string, slug: string, category: string | null): Promise<{ path: string }> {
     const root = `projects/${slug}`;
     const pending = this.pendingProjects.get(root);
     if (this.app.vault.getAbstractFileByPath(root) && !pending) throw new Error(`项目目录已存在：${root}`);
@@ -448,7 +484,7 @@ export class VaultNoteService {
     // this operation's payload for retry, but never overwrite user edits.
     const files = pending ?? new Map([
       [`${root}/log.md`, logBody],
-      [path, document("Project", title, body, { project_status: "active" })],
+      [path, document("Project", title, body, { project_status: "active", ...(category ? { project_category: category } : {}) })],
     ]);
     this.pendingProjects.set(root, files);
     for (const [target, content] of files) {

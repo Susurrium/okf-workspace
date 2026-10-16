@@ -1,4 +1,6 @@
 import { TASK_VIEW_LABELS } from "../tasks/task-presentation.js";
+import { renderProjectCatalog } from "../features/projects/project-catalog.js";
+import { projectCategory, projectOrganizationFilters, readProjectOrganization } from "../domain/project-organization.js";
 import {
   projectLifecycleStatus,
   projectStatusLabel,
@@ -352,6 +354,7 @@ export class OkfDashboardView {
   private inboxTab: "decision" | "progress" = "decision";
   private projectsTab: "active" | "paused" | "completed" | "all" = "active";
   private projectQuery = "";
+  private projectOrganization = readProjectOrganization();
   private knowledgeFilter: "all" | "pending" | "wiki" | "map" | "unverified" | "stale" | "deprecated" = "all";
   private knowledgeQuery = "";
   private sourceQuery = "";
@@ -519,6 +522,7 @@ export class OkfDashboardView {
       this.projectsTab = projectsTab;
     }
     this.projectQuery = String(state.pages.projects.filters.query ?? "");
+    this.projectOrganization = readProjectOrganization(state.pages.projects.filters, this.config.sort);
     const knowledgeFilter = state.pages.knowledge.filters.view;
     if (
       knowledgeFilter === "all" || knowledgeFilter === "pending" || knowledgeFilter === "wiki" || knowledgeFilter === "map" ||
@@ -586,7 +590,7 @@ export class OkfDashboardView {
     const current = this.section;
     if (sectionSupportsSort(current)) filters.sort = this.config.sort;
     if (current === "learning") Object.assign(filters, { query: this.learningQuery, context: this.learningContext, relation: this.learningRelationPath });
-    if (current === "projects") filters.query = this.projectQuery;
+    if (current === "projects") Object.assign(filters, { query: this.projectQuery, ...projectOrganizationFilters(this.projectOrganization) });
     if (current === "sources") Object.assign(filters, { query: this.sourceQuery, purpose: this.sourcePurpose });
     if (current === "knowledge") Object.assign(filters, { query: this.knowledgeQuery, view: this.knowledgeFilter,
       noteType: this.knowledgeType, contentStatus: this.knowledgeStatus, maintenance: this.knowledgeMaintenance });
@@ -907,7 +911,7 @@ export class OkfDashboardView {
         });
       }
     }
-    if (sectionSupportsSort(this.section)) {
+    if (sectionSupportsSort(this.section) && this.section !== "projects") {
       const field = controls.createEl("label", { cls: "okf-section-controls__sort" });
       field.createSpan({ text: "排序" });
       const select = field.createEl("select", { attr: { "aria-label": "目录排序" } });
@@ -956,8 +960,8 @@ export class OkfDashboardView {
   }
 
   private pageItems<T>(parent: HTMLElement, items: readonly T[], renderItem: (parent: HTMLElement, item: T) => void,
-    _expandSection: Section | false = this.section): void {
-    const key = `${this.section}:${this.paginationIndex++}`;
+    _expandSection: Section | false = this.section, identity?: string): void {
+    const key = identity ?? `${this.section}:${this.paginationIndex++}`;
     let shown = Math.max(this.config.limit, this.pagination.get(key) ?? 0);
     const renderRows = (from: number, to: number): void => {
       for (const item of items.slice(from, to)) renderItem(parent, item);
@@ -4256,6 +4260,7 @@ export class OkfDashboardView {
       cls: `okf-work-item__status is-${status}`,
       text: projectStatusLabel(status),
     });
+    identity.createSpan({ cls: "okf-project-category-label", text: projectCategory(project.project_category) ?? "未分类" });
     main.createDiv({
       cls: "okf-work-item__summary",
       text: [
@@ -4318,6 +4323,7 @@ export class OkfDashboardView {
     const projectDirectory = project.path.split("/").slice(0, -1).join("/");
     const logPath = project.log_path || `${projectDirectory}/log.md`;
     const actions: AnchoredActionPanelAction[] = [
+      { id: "category", title: "编辑项目类别", description: "设置或清除项目主类别", onSelect: () => this.plugin.promptProjectCategory(project.path) },
       { id: "new-task", title: "新建项目任务", description: "保存具体行动，继承当前关联", onSelect: () => this.plugin.promptNewTask({ ...this.rawConfig, project: project.path }) },
       { id: "tasks", title: "查看项目任务", description: "安排日期，切换状态与历史视图", onSelect: () => this.plugin.navigateToOkfSection("tasks", this.contentEl, this.workbenchPath, { course: this.config.course, project: project.path, taskView: "all" }) },
       {
@@ -4650,51 +4656,20 @@ export class OkfDashboardView {
       cls: "okf-dashboard__secondary-action",
     });
     create.addEventListener("click", () => this.plugin.promptProject());
-    const search = container.createEl("input", { attr: { type: "search", "aria-label": "搜索项目", placeholder: "搜索项目与下一步…" } });
-    search.value = this.projectQuery;
-
-    const tabs = container.createDiv({
-      cls: "okf-dashboard__segments okf-dashboard__stage-tabs",
-      attr: { role: "tablist", "aria-label": "项目状态" },
+    actions.createEl("button", { text: "管理类别", attr: { type: "button" } }).addEventListener("click", () => {
+      void this.plugin.promptProjectCategory().catch(error => new Notice(String(error)));
     });
-    const groups = {
-      all: data.projects,
-      active: data.projects.filter((project) => !project.project_status || project.project_status === "active"),
-      paused: data.projects.filter((project) => project.project_status === "paused"),
-      completed: data.projects.filter((project) => project.project_status === "completed"),
-    };
-    for (const option of [
-      { value: "all" as const, label: "全部" },
-      { value: "active" as const, label: "进行中" },
-      { value: "paused" as const, label: "已暂停" },
-      { value: "completed" as const, label: "已完成" },
-    ]) {
-      const selected = this.projectsTab === option.value;
-      const button = tabs.createEl("button", {
-        text: `${option.label} ${groups[option.value].length}`,
-        cls: selected ? "is-active" : "",
-        attr: { type: "button", role: "tab", "aria-selected": String(selected) },
-      });
-      button.addEventListener("click", () => {
-        this.projectsTab = option.value;
-        this.updatePageState("projects", { tab: option.value });
-        void this.render(true);
-      });
-    }
-
-    const list = container.createDiv({ cls: "okf-dashboard__compact-list okf-project-list" });
-    const renderList = () => {
-    list.empty();
-    const query = this.projectQuery.trim().toLocaleLowerCase();
-    const selected = groups[this.projectsTab].filter(project => !query || `${project.title} ${project.next_action ?? ""}`.toLocaleLowerCase().includes(query));
-    if (!selected.length) {
-      list.createDiv({
-        cls: "okf-dashboard__empty okf-dashboard__empty--panel",
-        text: this.projectsTab === "active" ? "当前没有进行中的项目。" : "这个状态下没有项目。",
-      });
-      return;
-    }
-    this.pageItems(list, selected, (parent, project) => {
+    renderProjectCatalog(container, {
+      projects: data.projects, tab: this.projectsTab, query: this.projectQuery, organization: this.projectOrganization,
+      remember: (tab, query, organization) => {
+        this.projectsTab = tab; this.projectQuery = query; this.projectOrganization = organization;
+        this.updatePageState("projects", { tab, filters: { query, ...projectOrganizationFilters(organization) } });
+      },
+      renderItems: (parent, items, render, group) => this.pageItems(parent, items, render, false, `projects:group:${this.projectOrganization.group}:${group}`),
+      editCategory: project => { void this.plugin.promptProjectCategory(project.path).catch(error => new Notice(String(error))); },
+      moveCategory: (project, category) => this.plugin.setProjectCategory(project.path, category, projectCategory(project.project_category)),
+      moveStatus: (project, status) => this.changeProjectStatus(project.path, status),
+      renderProject: (parent, project) => {
       const identities = new Set(project.open_tasks.map(task => `${task.path}:${task.line}`));
       const projectTasks = tasks.filter(task => {
         const inheritedProject = task.project ?? this.app.metadataCache?.getFileCache(task.file)?.frontmatter?.project
@@ -4707,10 +4682,8 @@ export class OkfDashboardView {
       });
       this.renderProjectWorkItem(parent, project, false, projectTasks);
       if (this.config.project) this.renderProjectDetails(parent, project);
+      },
     });
-    };
-    search.addEventListener("input", () => { this.projectQuery = search.value; this.updatePageState("projects", { filters: { query: search.value } }); renderList(); });
-    renderList();
   }
 
   private renderProjectDetails(parent: HTMLElement, project: ProjectSummary): void {

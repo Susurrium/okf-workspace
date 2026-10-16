@@ -2414,7 +2414,7 @@ describe("real Dashboard View source handoff", () => {
     expect(promptProjectProgress).toHaveBeenCalledWith("projects/workspace/project.md");
     expect(panels).toHaveLength(1);
     expect(panels[0]?.label).toBe("其他操作 · 个人知识库");
-    expect(panels[0]?.actions.map((action) => action.title)).toEqual(["新建项目任务", "查看项目任务", ...PROJECT_ACTION_PANEL_LABELS]);
+    expect(panels[0]?.actions.map((action) => action.title)).toEqual(["编辑项目类别", "新建项目任务", "查看项目任务", ...PROJECT_ACTION_PANEL_LABELS]);
     expect(row?.descendants("okf-work-item__metric").map((item) => item.textContent)).toEqual([
       "待整理 0",
       "学习笔记 0",

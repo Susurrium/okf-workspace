@@ -60,6 +60,10 @@ Passing a Git merge or TypeScript compilation alone is not an accepted upstream 
 番茄钟正计时、提醒和统一设置；记账分类管理；分区导航轨；音乐减少逐曲失败提示；胶囊主题；
 移除备忘录改色按钮；没有保存偏好时默认固定侧栏。
 
+用户于 2026-10-16 追加采用 OKF 项目类别、分组、看板、置顶和手动排列。
+项目类别进入 Project Contract；界面复用现有 OKF 项目、任务与关联读写，
+不导入上游独立 PM 模型及其创建、归档、删除和任务编辑流程。
+
 记账分类按没有正式历史数据设计，不开发旧格式迁移、推断或双写；不主动删除磁盘文件。
 胶囊作为新增主题，保留丁香及现有选择。滚动条维持现有显示策略。
 
@@ -67,7 +71,6 @@ Passing a Git merge or TypeScript compilation alone is not an accepted upstream 
 
 - 沉浸式工作台及自由布局。
 - 新闪念、文件搜索小组件和操作条输入用途切换。
-- 项目分组、看板、置顶及排序增强。
 
 以上仅在用户后续明确范围后开发，本轮不预埋入口、配置或实现。
 

@@ -5,6 +5,8 @@ description: 在用户明确要求记录或整理项目进展时，更新一个 
 
 # 记录项目进展
 
+保留用户设置的 `project_category`；只有用户明确要求更换类别时，按 Project Contract 修改。
+
 让 `log.md` 保留真实过程，让 `project.md` 给出可继续行动的当前快照。记录实际变化及其影响，不把对话逐句搬进项目。
 
 1. 从明确路径或当前项目确定一项 Project，完整读取 `project.md` 和 `log.md`；只有进展依赖相关 Decision、成果或资料时再读取它们。若多个项目同样可能且无法判断，再询问。

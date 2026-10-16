@@ -2,8 +2,10 @@ import type {
   ArtifactMutation,
   ArtifactMutationResult,
 } from "../../apex/src/host.js";
+import { projectCategory } from "../domain/project-organization.js";
 
 export interface ManagedArtifactActions {
+  setProjectCategory(path: string, category: string | null): Promise<unknown>;
   setProjectStatus(
     path: string,
     status: "active" | "paused" | "completed",
@@ -31,6 +33,10 @@ export class ArtifactEditPolicy {
   }
 
   private async project(mutation: ArtifactMutation): Promise<ArtifactMutationResult> {
+    if (mutation.kind === "frontmatter" && mutation.property === "project_category") {
+      await this.actions.setProjectCategory(mutation.path, projectCategory(mutation.value));
+      return { outcome: "handled", message: "项目类别已更新。" };
+    }
     if (
       mutation.kind === "frontmatter" &&
       mutation.property === "project_status" &&

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import cast
 
 from okf_workspace.okf.frontmatter import FrontmatterError, read_document
+from okf_workspace.okf.project_category import normalize_project_category
 from okf_workspace.okf.relations import inherited_context_fields
 
 _SKIP = {".agents", ".claudian", ".git", ".obsidian", ".trash"}
@@ -42,6 +43,7 @@ class NoteSummary:
     topics: tuple[str, ...]
     source_paths: tuple[str, ...]
     excerpt: str
+    project_category: str | None = None
 
 
 def _string(value: object) -> str | None:
@@ -189,6 +191,10 @@ def scan_notes(
                 material_ready=_material_ready(document.body),
                 ai_unverified=_ai_unverified(dict(document.frontmatter)),
                 project_status=_string(document.frontmatter.get("project_status")),
+                project_category=(
+                    normalize_project_category(document.frontmatter.get("project_category"))
+                    if document.type == "Project" else None
+                ),
                 course_status=_string(document.frontmatter.get("course_status")),
                 # Capture has no durable state machine. Its presence in Inbox means
                 # pending; this projection keeps the legacy response shape for UI

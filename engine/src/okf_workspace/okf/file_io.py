@@ -115,13 +115,21 @@ def atomic_write_bytes(
                 # Unlike exists()+replace(), it never overwrites a concurrent file.
                 os.link(temporary, path)
             else:
-                if expected_sha256 is not None:
+                for attempt in range(5):
+                    if expected_sha256 is not None:
+                        try:
+                            current = file_sha256(path)
+                        except FileNotFoundError as exc:
+                            raise FileWriteConflict(f"File disappeared: {path}") from exc
+                        if current != expected_sha256:
+                            raise FileWriteConflict(f"File changed: {path}")
                     try:
-                        current = file_sha256(path)
-                    except FileNotFoundError as exc:
-                        raise FileWriteConflict(f"File disappeared: {path}") from exc
-                    if current != expected_sha256:
-                        raise FileWriteConflict(f"File changed: {path}")
-                os.replace(temporary, path)
+                        os.replace(temporary, path)
+                        break
+                    except PermissionError as exc:
+                        if getattr(exc, "winerror", None) not in {5, 32, 33} or attempt == 4:
+                            raise
+                        # Windows 暂时占用文件时短暂等待；重试前重新核对版本。
+                        time.sleep(0.025 * (attempt + 1))
     finally:
         temporary.unlink(missing_ok=True)
