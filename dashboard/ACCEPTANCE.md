@@ -1,5 +1,27 @@
 # Apex × OKF acceptance ledger
 
+## 分区目录、公共操作和任务命名（2026-10-16）
+
+按用户要求，在 `work/fixtures/section-experience-ui` 新建隔离环境，使用合成 Vault、独立 State、
+Obsidian profile、API 8772 和 CDP 9372。测试未接入同步或外部账户。源码在独立工作副本中构建，
+合回时保留并行开发的修改；最终 501 个运行源码文件的原始字节与共享工作区一致。
+
+| 验证范围 | 结果与证据 |
+| --- | --- |
+| 自动化 | 合并源码的 Dashboard 416 项测试、两组类型检查和生产构建通过；Apex lint、构建及分区、日历、刷新范围、滚动、删除、笔记创建、并排布局和网页的相关专项检查通过 |
+| 添加目录 | 24 个类型按五个用途分组，选项只显示图标和名称；便利贴保留原名。实机检查旧名称搜索、自定义名称保留和实际添加；添加入口注入失败时保留草稿，真实写入后注入刷新失败并重试，仅创建一个分区 |
+| 页面与放大 | 实机检查六种内置独立页面、六种放大窗口以及功能页面；搜索和范围传递正确，页面排序与日历筛选不改写工作台正文。返回时工作台成为活动视图并保留原滚动位置；放大窗口关闭后解除订阅 |
+| 文件操作 | 在实际 Markdown 中保存任务和便利贴内的清单卡片；连续添加六个分区均保留。26 项实机检查记录于 `work/section-experience-evidence/final-run.json`，另有任务独立页面截图与窗口退出检查 |
+| 视觉 | 获取并逐张查看最终 34 张真实 Obsidian 截图，覆盖添加目录、菜单、独立页面、放大窗口、任务表单及明暗主题。窗口为 1440×1000 和 430×950；窄窗口收起原生文件侧栏。截图及哈希见 `work/section-experience-evidence/receipt.json` |
+| 安装与退出 | 构建、安装和固定候选的 main.js、styles.css、manifest.json SHA-256 一致；Vault 校验通过，检查 35 个 Markdown 文件。窗口、Engine、自动启动和 LiveSync 均关闭，8772/9372 无监听 |
+
+验收产物固定在 `work/section-experience-evidence/candidate/`，完整回执同时保存在该目录的上一级和
+隔离 State 的 `reports/section-experience-acceptance.json`。合成工作台与构建副本保留供用户查看，
+期限记录于 fixture.json；启动和退出入口为 `work/start-section-experience.ps1`、`work/stop-section-experience.ps1`。
+
+本轮未验证真实移动设备、微信读书与滴答清单在线调用、远端订阅同步、AI 生成和文档转换。
+当前交互说明见[使用指南](../docs/USER-GUIDE.md#分区与工作台)。
+
 ## Apex 更新真实视觉验收（2026-10-16）
 
 在固定 `OKF-Test` 中运行实际 Obsidian，获取并逐张查看最终 41 张截图；发现问题后修改、

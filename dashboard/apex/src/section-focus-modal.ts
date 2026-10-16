@@ -8,7 +8,7 @@ export class SectionFocusModal extends Modal {
 	private unsubscribe?: () => void;
 	private restoreSearch?: () => void;
 	constructor(app: App, private readonly renderSection: () => HTMLElement, private readonly subscribe: (update: () => void) => () => void,
-		private readonly eventTarget: () => HTMLElement | null, private search: SectionSearchState[] = []) { super(app); }
+		private readonly eventTarget: () => HTMLElement | null, private search: SectionSearchState[] = [], private readonly disposed?: () => void) { super(app); }
 	onOpen(): void {
 		this.modalEl.addClass('modal--dashboard', 'dashboard-section-focus-modal');
 		this.containerEl.querySelector('.modal-bg')?.addClass('modal-bg--dashboard');
@@ -32,5 +32,5 @@ export class SectionFocusModal extends Modal {
 		this.restoreSearch = restoreSectionSearch(this.contentEl, this.search);
 		restoreRootScrollState(this.contentEl, scroll);
 	}
-	onClose(): void { this.unsubscribe?.(); this.restoreSearch?.(); destroyMediaSection(this.contentEl); this.contentEl.empty(); }
+	onClose(): void { this.unsubscribe?.(); this.unsubscribe = undefined; this.restoreSearch?.(); destroyMediaSection(this.contentEl); this.contentEl.empty(); this.disposed?.(); }
 }

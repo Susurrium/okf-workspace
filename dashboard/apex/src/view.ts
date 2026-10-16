@@ -833,17 +833,20 @@ export class DashboardView extends ItemView implements HoverParent {
 			await leaf.setViewState({ type: DASHBOARD_VIEW_TYPE, state: { workspacePath: this.workspacePath }, active: true });
 		}
 		await this.app.workspace.revealLeaf(leaf);
+		this.app.workspace.setActiveLeaf(leaf, { focus: true });
 	}
 
 	private async openSection(reference: string, kind: 'tab' | 'enlarge'): Promise<void> {
 		const column = this.data?.columns.find(column => matchesSection(column, reference));
 		if (!column) throw new Error(t('section.missing'));
+		const source = this.containerEl.querySelector<HTMLElement>(`[data-column="${CSS.escape(reference)}"]`);
+		if (!source) throw new Error(t('section.missing'));
 		if (kind === 'tab') {
 			const current = this.focusedColumn(column);
 			const leaf = this.app.workspace.getLeaf('tab');
 			await leaf.setViewState({ type: DASHBOARD_SECTION_VIEW_TYPE, active: true, state: {
 				workspacePath: this.workspacePath, section: reference,
-				sectionSearch: captureSectionSearch(this.containerEl.querySelector<HTMLElement>(`[data-column="${CSS.escape(reference)}"]`) ?? this.contentEl),
+				sectionSearch: captureSectionSearch(source),
 				sectionConfig: structuredClone({ libraryConfig: current.libraryConfig, dataviewConfig: current.dataviewConfig, extensionConfig: current.extensionConfig }),
 			} });
 			await this.app.workspace.revealLeaf(leaf);
@@ -856,7 +859,7 @@ export class DashboardView extends ItemView implements HoverParent {
 			return renderSection({ ...latest, half: false, height: undefined }, { ...this.createCallbacks(), sectionPage: true,
 				getCollapsedSections: () => collapsed, onCollapsedSectionsChange: next => { collapsed = new Set(next); }, onSectionOpen: undefined }, this.app, this.data ?? undefined, this.plugin.settings);
 		}, update => this.sync.onDataUpdate(() => update()), () => this.containerEl.querySelector('.dashboard-kanban'),
-		captureSectionSearch(this.containerEl.querySelector<HTMLElement>(`[data-column="${CSS.escape(reference)}"]`) ?? this.contentEl));
+		captureSectionSearch(source), () => { this.sectionModals.delete(modal); });
 		this.sectionModals.add(modal);
 		modal.open();
 	}
