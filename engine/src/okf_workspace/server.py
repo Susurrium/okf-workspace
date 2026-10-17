@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import os
 import sys
 import threading
@@ -16,6 +15,7 @@ from fastapi import FastAPI
 
 from okf_workspace.api import create_app
 from okf_workspace.config import apply_deployment_config
+from okf_workspace.owner_pipe import wait_for_owner_pipe_eof
 
 
 def redirect_bounded_logs(directory: Path, *, keep: int = 12) -> TextIO:
@@ -37,8 +37,7 @@ def redirect_bounded_logs(directory: Path, *, keep: int = 12) -> TextIO:
 def stop_when_stdin_closes(server: uvicorn.Server, stream: BinaryIO) -> None:
     """Stop an Obsidian-owned service when its parent-side pipe disappears."""
 
-    with contextlib.suppress(OSError):
-        stream.read()
+    wait_for_owner_pipe_eof(stream)
     server.should_exit = True
 
 

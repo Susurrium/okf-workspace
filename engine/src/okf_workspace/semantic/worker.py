@@ -35,6 +35,7 @@ from okf_workspace.okf.frontmatter import (
 from okf_workspace.okf.paths import resolve_bundle_path
 from okf_workspace.okf.relations import inherited_context_fields, source_paths
 from okf_workspace.okf.validator import validate_document
+from okf_workspace.owner_pipe import wait_for_owner_pipe_eof
 from okf_workspace.retrieval.index import SearchIndex
 
 from .models import SemanticKind, SemanticRequest, SemanticStage, SemanticStatus
@@ -379,8 +380,7 @@ class SemanticWorker:
 def stop_when_stdin_closes(stop: threading.Event, stream: BinaryIO) -> None:
     """Stop a service-owned semantic worker when the API process disappears."""
 
-    with suppress(OSError):
-        stream.read()
+    wait_for_owner_pipe_eof(stream)
     stop.set()
 
 

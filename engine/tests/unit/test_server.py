@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import io
 import json
+import os
 import sys
 from pathlib import Path
 from typing import cast
@@ -102,9 +102,9 @@ def test_plugin_owned_server_stops_when_owner_pipe_closes() -> None:
         should_exit = False
 
     fake = FakeServer()
-    server.stop_when_stdin_closes(
-        cast(server.uvicorn.Server, fake),
-        io.BytesIO(),
-    )
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
+    with os.fdopen(read_fd, "rb") as stream:
+        server.stop_when_stdin_closes(cast(server.uvicorn.Server, fake), stream)
 
     assert fake.should_exit

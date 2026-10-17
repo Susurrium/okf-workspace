@@ -1,6 +1,6 @@
 release: 1.0.0
 workspace_schema: 3
 components:
-  engine: 1.12.0
+  engine: 1.12.1
   dashboard: 1.18.0
   claudian: 2.3.6-okf.5
