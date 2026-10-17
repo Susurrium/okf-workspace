@@ -308,7 +308,7 @@ export class DashboardSettingTab extends PluginSettingTab {
 	private renderLayoutPicker(containerEl: HTMLElement): void {
 		const picker = containerEl.createDiv({ cls: 'dashboard-layout-picker' });
 		picker.setAttribute('role', 'radiogroup');
-		const modes: DashboardLayoutMode[] = ['side', 'stacked'];
+		const modes: DashboardLayoutMode[] = ['side', 'stacked', 'immersive'];
 
 		const option = (mode: DashboardLayoutMode): HTMLElement => {
 			const current = this.plugin.settings.layoutMode;
@@ -316,7 +316,7 @@ export class DashboardSettingTab extends PluginSettingTab {
 				cls: 'dashboard-layout-option' + (current === mode ? ' dashboard-layout-option--active' : ''),
 			});
 			card.dataset.mode = mode;
-			const label = mode === 'side' ? t('settings.layoutSide') : t('settings.layoutStacked');
+			const label = t(mode === 'side' ? 'settings.layoutSide' : mode === 'stacked' ? 'settings.layoutStacked' : 'settings.layoutImmersive');
 			card.setAttribute('aria-label', label);
 
 			// Three-zone mock: banner bar, widget zone (left rail in side
@@ -331,6 +331,9 @@ export class DashboardSettingTab extends PluginSettingTab {
 				for (let i = 0; i < 3; i++) rail.createDiv({ cls: 'lp-widget' });
 				const board = main.createDiv({ cls: 'lp-board' });
 				for (let i = 0; i < 3; i++) board.createDiv({ cls: 'lp-section' });
+			} else if (mode === 'immersive') {
+				const grid = preview.createDiv({ cls: 'lp-grid' });
+				for (let i = 0; i < 6; i++) grid.createDiv({ cls: 'lp-cell' });
 			} else {
 				const strip = preview.createDiv({ cls: 'lp-strip' });
 				for (let i = 0; i < 4; i++) strip.createDiv({ cls: 'lp-widget' });

@@ -5,6 +5,8 @@
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
+		"test:immersive-grid": "esbuild scripts/verify-immersive-grid.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-immersive-grid.cjs --alias:obsidian=./scripts/obsidian-stub.ts --log-level=warning && node node_modules/.tmp/verify-immersive-grid.cjs",
+		"test:immersive-render": "esbuild scripts/verify-immersive-render.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-immersive-render.cjs --alias:obsidian=./scripts/obsidian-stub.ts --log-level=warning && node node_modules/.tmp/verify-immersive-render.cjs",
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"test:pomodoro-stopwatch": "esbuild scripts/verify-pomodoro-stopwatch.ts --bundle --platform=node --format=cjs --outfile=node_modules/.tmp/verify-pomodoro-stopwatch.cjs --alias:obsidian=./scripts/obsidian-stub.ts --log-level=warning && node node_modules/.tmp/verify-pomodoro-stopwatch.cjs",

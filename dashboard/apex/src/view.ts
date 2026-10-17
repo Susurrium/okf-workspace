@@ -74,6 +74,14 @@ import { mountSectionRail } from './section-rail';
 import { fileKind } from './file-types';
 import { SectionFocusModal } from './section-focus-modal';
 import { captureSectionSearch, restoreSectionSearch, type SectionSearchState } from './section-browse-state';
+import { renderImmersiveRoot, refitImmersiveGrid, setupImmersiveDnD, setupImmersiveTileMenu, attachImmersiveResizeHandle, attachImmersiveWidgetDelete, carryImmersivePlacement, openImmersiveAddMenu, hasSameImmersiveTiles } from './immersive';
+import { defaultWidgetSize } from './immersive-grid';
+import type { BoardLayoutState } from './board-layout';
+import type { DashboardSettings, DashboardLayoutMode, ImmersiveItem } from './types';
+import { AlbumSettingsModal } from './album-settings-modal';
+import { AnniversarySettingsModal } from './anniversary-settings-modal';
+import { CountdownSettingsModal } from './countdown-modal';
+import { saveSettingsPatch } from './settings-transaction';
 
 interface DailyNotesOptions {
 	folder?: string;
@@ -120,6 +128,12 @@ function matchesSection(column: DashboardColumn, reference: string): boolean {
 }
 
 export class DashboardView extends ItemView implements HoverParent {
+	private readonly layoutDrafts = new Map<string, { next: BoardLayoutState; previous: BoardLayoutState; error?: string }>();
+	private layoutSaving = false;
+	private immItems: ImmersiveItem[] = [];
+	private immWidgetEls = new Map<string, HTMLElement>();
+	private widgetCacheEl?: HTMLElement;
+	private readonly captureMounts = new Map<HTMLElement, () => void>();
 	private focusedSection?: string;
 	private focusedSearch: SectionSearchState[] = [];
 	private focusedConfig: Pick<DashboardColumn, 'libraryConfig' | 'dataviewConfig' | 'extensionConfig'> = {};
@@ -187,7 +201,6 @@ export class DashboardView extends ItemView implements HoverParent {
 	 *  widget signature (see sidebarWidgetSignature) is unchanged - so dashboard
 	 *  data mutations never rebuild the widgets. Null right after consumption. */
 	private sidebarWidgetsEl: HTMLElement | null = null;
-	private captureWidgetCleanup?: () => void;
 	private sidebarWidgetsSig: string | null = null;
 	private isOpening = false;
 	private isOpen = false;
@@ -415,6 +428,7 @@ export class DashboardView extends ItemView implements HoverParent {
 			this.suppressNextRender = false;
 			return;
 		}
+		if (previous && JSON.stringify([previous.columns, previous.banner, previous.quickActions, previous.quickActionOrder, previous.hiddenPresets]) === JSON.stringify([data.columns, data.banner, data.quickActions, data.quickActionOrder, data.hiddenPresets]) && this.applyImmersiveGeometry(data)) return;
 
 		const plan = planDashboardUpdate(previous, data, source);
 		if (plan.kind === 'none') return;
@@ -572,6 +586,10 @@ export class DashboardView extends ItemView implements HoverParent {
 		const prevRoot = this.containerEl.children[1] as HTMLElement | undefined;
 		if (this.sectionPage && prevRoot?.querySelector('.dashboard-section-row')) this.focusedSearch = captureSectionSearch(prevRoot);
 		const savedRootScroll = captureRootScrollState(prevRoot ?? createDiv());
+		const focused = prevRoot?.ownerDocument.activeElement as HTMLElement | null;
+		const immersive = !this.sectionPage && !Platform.isPhone && this.layoutSettings(data).layoutMode === 'immersive';
+		this.immWidgetEls = new Map(Array.from(prevRoot?.querySelectorAll<HTMLElement>('.dashboard-imm .dashboard-kanban > [data-widget-key]') ?? []).map(el => [el.dataset.widgetKey!, el]));
+		for (const el of this.immWidgetEls.values()) el.remove();
 		// Detach the sidebar widgets before tearing the rest down. If their
 		// inputs (signature below) are unchanged, this exact node is re-attached
 		// in renderSidebar instead of being rebuilt - dashboard data mutations
@@ -582,16 +600,26 @@ export class DashboardView extends ItemView implements HoverParent {
 			oldWidgets.remove();
 			this.sidebarWidgetsEl = oldWidgets;
 		}
+		this.widgetCacheEl = prevRoot?.createDiv({ cls: 'dashboard-widget-cache' });
+		if (this.widgetCacheEl) {
+			this.widgetCacheEl.addClass('dashboard-widget-cache--hidden');
+			if (this.sidebarWidgetsEl) this.widgetCacheEl.appendChild(this.sidebarWidgetsEl);
+			for (const el of this.immWidgetEls.values()) this.widgetCacheEl.appendChild(el);
+		}
 		const widgetSig = sidebarWidgetSignature(
-			this.plugin.settings,
+			this.layoutSettings(data),
 			!!this.pomodoroService,
 			!!this.readingService,
 			!!this.holidayData && Object.keys(this.holidayData).length > 0,
 			JSON.stringify([data.quickActions, data.quickActionOrder, data.hiddenPresets]),
 		);
-		const preserveWidgets = !!this.sidebarWidgetsEl && this.sidebarWidgetsSig === widgetSig;
+		const preserveWidgets = (!!this.sidebarWidgetsEl || this.immWidgetEls.size > 0) && this.sidebarWidgetsSig === widgetSig;
 
 		this.runCleanup(preserveWidgets);
+		this.sidebarWidgetsEl?.remove();
+		for (const el of this.immWidgetEls.values()) el.remove();
+		this.widgetCacheEl?.remove(); this.widgetCacheEl = undefined;
+		if (!preserveWidgets) { this.sidebarWidgetsEl = null; this.immWidgetEls.clear(); }
 		this.data = data;
 		this.firedReminders.clear();
 		this.sidebarWidgetsSig = widgetSig;
@@ -609,7 +637,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		// Layout mode rides on an attribute so CSS owns the switch. Phones
 		// always report 'side' (isStackedLayout excludes them) so their DOM and
 		// CSS stay byte-identical regardless of this desktop-only setting.
-		container.setAttribute('data-layout', isStackedLayout(this.plugin.settings) ? 'stacked' : 'side');
+		container.setAttribute('data-layout', Platform.isPhone ? 'side' : this.layoutSettings(data).layoutMode);
 
 		// Apply user appearance overrides (background image layer + custom colors).
 		// Must run after data-theme so inline `--db-*` overrides win by specificity,
@@ -623,6 +651,27 @@ export class DashboardView extends ItemView implements HoverParent {
 			});
 		}
 
+		let kanban: HTMLElement;
+		if (immersive) {
+			const state = this.currentBoardLayout(data);
+			const result = renderImmersiveRoot({
+				container, data: { ...data, ...state }, settings: this.layoutSettings(data), app: this.app, plugin: this.plugin,
+				workspace: this.workspacePath, onSwitch: path => this.switchWorkspace(path), onLayout: mode => this.setBoardLayout(mode),
+				services: { pomodoroService: this.pomodoroService ?? undefined, readingService: this.readingService ?? undefined,
+					holidayData: this.holidayData ?? undefined, onOpenNote: (file, line) => this.openNote(file, undefined, line),
+					renderQuickActions: host => this.renderQuickActionsWidget(host), renderQuickCapture: host => this.renderCaptureWidget(host, true) },
+				callbacks: this.createCallbacks(), hoverParent: this, reuseWidgets: preserveWidgets ? this.immWidgetEls : null,
+				getItems: () => this.immItems, onEditBanner: () => this.openBannerEditModal(data), registerCleanup: fn => this.cleanupFns.push(fn),
+			});
+			kanban = result.grid; this.immItems = result.items; this.immWidgetEls = result.widgetEls; this.bannerStatsEl = null;
+			setupImmersiveDnD(kanban, () => this.immItems, items => { void this.commitImmersiveItems(items); }, this.dndCleanupFns);
+			setupImmersiveTileMenu(kanban, id => { void this.removeImmersiveItem(id); }, this.dndCleanupFns);
+			for (const tile of Array.from(kanban.children) as HTMLElement[]) {
+				const id = tile.dataset.immId; if (!id) continue;
+				this.dndCleanupFns.push(attachImmersiveResizeHandle(tile, id, () => this.immItems, items => { void this.commitImmersiveItems(items); }));
+				if (tile.dataset.widgetKey) attachImmersiveWidgetDelete(tile, key => { void this.removeImmersiveItem(key); });
+			}
+		} else {
 		if (!this.sectionPage) {
 		const bannerEl = renderBanner(
 			container,
@@ -644,6 +693,7 @@ export class DashboardView extends ItemView implements HoverParent {
 			this.plugin,
 			this.workspacePath,
 			(path) => this.switchWorkspace(path),
+			{ layout: data.layout, onLayout: mode => this.setBoardLayout(mode) },
 		);
 
 		// Sidebar pin — desktop-only, bottom-left corner of the banner. Moved
@@ -674,7 +724,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		// board scroll TOGETHER inside one region below it (the user wheels
 		// through widgets and sections as one page). The side layout keeps the
 		// old split (rail scrolls alone, board scrolls alone).
-		const stacked = !this.sectionPage && isStackedLayout(this.plugin.settings);
+		const stacked = !this.sectionPage && isStackedLayout(this.layoutSettings(data));
 		if (stacked && this.plugin.settings.quickNotesEnabled) {
 			renderQuickNoteRegion(mainLayout, this.plugin.settings, this.createCallbacks());
 		}
@@ -703,7 +753,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		// .dashboard-kanban. (The switcher itself lives on the banner; the split
 		// stays because it gives the scroll layer a clean, non-scrolling host.)
 		const kanbanWrapper = contentHost.createDiv({ cls: 'dashboard-kanban-wrapper' });
-		const kanban = kanbanWrapper.createDiv({ cls: 'dashboard-kanban' });
+		kanban = kanbanWrapper.createDiv({ cls: 'dashboard-kanban' });
 		container.toggleClass('dashboard-section-focus', this.sectionPage);
 		if (this.sectionPage) {
 			const back = kanban.createEl('button', { text: t('section.return'), attr: { type: 'button' } });
@@ -712,10 +762,12 @@ export class DashboardView extends ItemView implements HoverParent {
 			if (column) kanban.appendChild(renderSection(this.focusedColumn(column), this.createCallbacks(), this.app, data, this.plugin.settings));
 			else kanban.createDiv({ text: t('section.missing'), cls: 'dashboard-library-empty' });
 		} else {
-			renderDashboard(kanban, data, this.createCallbacks(), this.app, this.plugin.settings, this, { skipQuickNotes: stacked });
+			renderDashboard(kanban, data, this.createCallbacks(), this.app, this.layoutSettings(data), this, { skipQuickNotes: stacked });
 			this.cleanupFns.push(mountSectionRail(container, data.columns.map(column => ({ id: sectionRef(column), name: column.name }))));
 		}
-		setupDragAndDrop(kanban, this.createCallbacks(), this.dndCleanupFns);
+		}
+		container.toggleClass('dashboard-section-focus', this.sectionPage);
+		setupDragAndDrop(kanban, this.createCallbacks(), this.dndCleanupFns, { skipSectionGrip: immersive });
 		// Library config event delegation
 		kanban.addEventListener('dashboard-library-config', ((e: CustomEvent) => {
 			const { columnName } = e.detail as { columnName: string };
@@ -779,7 +831,9 @@ export class DashboardView extends ItemView implements HoverParent {
 		// Replay the pre-render scroll snapshot onto the rebuilt tree. Keys that
 		// no longer resolve (a genuinely new structure) are skipped inside the
 		// restore; the pendingScroll blocks below may then re-scroll on purpose.
+		this.renderLayoutStatus(container);
 		restoreRootScrollState(container, savedRootScroll);
+		if (focused?.isConnected && container.contains(focused)) focused.focus({ preventScroll: true });
 		if (this.pendingPaneScroll) {
 			const { kanban, sidebar, sections } = this.pendingPaneScroll;
 			const kanbanEl = container.querySelector<HTMLElement>('.dashboard-kanban');
@@ -825,6 +879,98 @@ export class DashboardView extends ItemView implements HoverParent {
 
 	private focusedColumn(column: DashboardColumn): DashboardColumn {
 		return this.sectionPage ? { ...column, ...this.focusedConfig, half: false, height: undefined } : column;
+	}
+
+	private currentBoardLayout(data: DashboardData): BoardLayoutState {
+		return this.layoutDrafts.get(this.workspacePath)?.next ?? { layout: data.layout, immersive: data.immersive };
+	}
+
+	private applyImmersiveGeometry(data: DashboardData): boolean {
+		const grid = this.contentEl.querySelector<HTMLElement>('.dashboard-imm .dashboard-kanban');
+		if (!grid || this.layoutSettings(data).layoutMode !== 'immersive') return false;
+		const items = this.currentBoardLayout(data).immersive;
+		if (!items) return false;
+		const visible = items.filter(item => item.hidden !== true);
+		if (!hasSameImmersiveTiles(grid, visible)) return false;
+		this.immItems = visible;
+		refitImmersiveGrid(grid, visible, true);
+		return true;
+	}
+
+	private layoutSettings(data = this.data): DashboardSettings {
+		const mode = this.sectionPage ? 'side' : data ? this.currentBoardLayout(data).layout : undefined;
+		return mode ? { ...this.plugin.settings, layoutMode: mode } : this.plugin.settings;
+	}
+
+	async setBoardLayout(mode: DashboardLayoutMode | undefined): Promise<void> {
+		if (!this.data) throw new Error('工作台尚未读取');
+		await this.saveBoardLayout({ ...this.currentBoardLayout(this.data), layout: mode });
+	}
+
+	private async saveBoardLayout(next: BoardLayoutState): Promise<void> {
+		if (this.layoutSaving) throw new Error('布局正在保存，请稍候');
+		const path = this.workspacePath;
+		const previous = this.layoutDrafts.get(path);
+		this.layoutDrafts.set(path, { next: structuredClone(next), previous: previous ? previous.previous : structuredClone({ layout: this.data?.layout, immersive: this.data?.immersive }) });
+		this.layoutSaving = true;
+		this.renderLayoutStatus(this.contentEl);
+		try {
+			await this.sync.updateBoardLayout(next, this.layoutDrafts.get(path)!.previous);
+			this.layoutDrafts.delete(path);
+			if (this.workspacePath === path && this.data && !this.applyImmersiveGeometry(this.data)) this.render(this.data);
+		} catch (error) {
+			const draft = this.layoutDrafts.get(path);
+			if (draft) draft.error = error instanceof Error ? error.message : String(error);
+			new Notice(`工作台布局尚未保存：${draft?.error ?? String(error)}`, 10000);
+			throw error;
+		} finally {
+			this.layoutSaving = false; this.renderLayoutStatus(this.contentEl);
+		}
+	}
+
+	private renderLayoutStatus(root: HTMLElement): void {
+		root.querySelector(':scope > .dashboard-layout-statusbar')?.remove();
+		const draft = this.layoutDrafts.get(this.workspacePath);
+		if (!this.layoutSaving && !draft?.error) return;
+		const bar = root.createDiv({ cls: 'dashboard-layout-statusbar' }); bar.setAttribute('role', 'status');
+		bar.createSpan({ text: this.layoutSaving ? '布局保存中…' : `布局未保存：${draft?.error}` });
+		if (this.layoutSaving || !draft) return;
+		bar.createEl('button', { text: '重试保存' }).addEventListener('click', () => { void this.saveBoardLayout(draft.next).catch(error => console.error('[Apex] Layout retry failed', error)); });
+		bar.createEl('button', { text: '重新读取' }).addEventListener('click', () => {
+			void this.sync.reloadFromDisk().then(() => { this.layoutDrafts.delete(this.workspacePath); const data = this.sync.getData(); if (data) this.render(data); }, error => new Notice(`布局重新读取失败：${String(error)}`));
+		});
+	}
+
+	private async commitImmersiveItems(items: ImmersiveItem[]): Promise<void> {
+		if (!this.data) return;
+		if (this.layoutSaving) {
+			const currentGrid = this.contentEl.querySelector<HTMLElement>('.dashboard-imm .dashboard-kanban');
+			if (currentGrid) refitImmersiveGrid(currentGrid, this.immItems, true);
+			new Notice('布局正在保存，请稍候再调整');
+			return;
+		}
+		const state = this.currentBoardLayout(this.data);
+		const rendered = new Set(this.immItems.map(item => item.id));
+		const nextIds = new Set(items.map(item => item.id));
+		const retained = state.immersive?.filter(item => !rendered.has(item.id) && !nextIds.has(item.id)) ?? [];
+		this.immItems = items;
+		const grid = this.contentEl.querySelector<HTMLElement>('.dashboard-imm .dashboard-kanban');
+		if (grid) refitImmersiveGrid(grid, items, true);
+		try { await this.saveBoardLayout({ ...state, immersive: [...retained, ...items] }); }
+		catch (error) { console.error('[Apex] Immersive layout save failed', error); }
+	}
+
+	private removeImmersiveItem(id: string): Promise<void> {
+		return this.commitImmersiveItems(this.immItems.filter(item => item.id !== id));
+	}
+
+	private renderCaptureWidget(host: HTMLElement, compact = false): void {
+		if (!this.plugin.quickCapture) throw new Error('快速记录宿主未提供');
+		const before = host.children.length;
+		const cleanup = this.plugin.quickCapture.mount(host, { compact });
+		const element = host.children[before] as HTMLElement | undefined;
+		if (!element) { cleanup(); throw new Error('快速记录组件没有挂载'); }
+		this.captureMounts.set(element, cleanup);
 	}
 
 	private async returnToWorkbench(): Promise<void> {
@@ -1196,13 +1342,55 @@ export class DashboardView extends ItemView implements HoverParent {
 		// building them there: the recent-docs list costs a full markdown-file
 		// mtime sort per render, and the debounced refresh already no-ops when
 		// the .dashboard-recent block is absent.
-		if (!isStackedLayout(this.plugin.settings)) {
+		if (!isStackedLayout(this.layoutSettings())) {
 			renderSidebarWeekCalendar(scroll);
 		}
 
-		// Quick buttons participate in the widget drag/reorder system now; the
-		// renderer adds them to the widget area like any other sidebar widget.
-		const renderQuickActionsWidget = (container: HTMLElement): void => {
+		const renderQuickActionsWidget = (container: HTMLElement): void => this.renderQuickActionsWidget(container);
+
+		// Preserve: reuse the detached widgets DOM when the signature matched.
+		// Either way, track the live element for the next render's detach step.
+		this.sidebarWidgetsEl = renderSidebarWidgets(
+			scroll,
+			this.layoutSettings(),
+			this.app,
+			this.pomodoroService ?? undefined,
+			this.readingService ?? undefined,
+			this.holidayData,
+			(order) => {
+				void (async () => {
+					this.plugin.settings = {
+						...this.plugin.settings,
+						widgetOrder: order,
+					};
+					await this.plugin.saveSettings();
+					this.render(this.data!);
+				})();
+			},
+			reuseWidgets,
+			(file, line) => this.openNote(file, undefined, line),
+			renderQuickActionsWidget,
+			this.plugin.quickCapture?.enabled() ? host => {
+				this.renderCaptureWidget(host);
+			} : undefined,
+		);
+
+		if (!isStackedLayout(this.layoutSettings())) {
+			const docs = getRecentDocs(this.app, this.plugin.settings.recentDocCount, this.plugin.recentDocumentExclusions);
+			renderRecentDocs(
+				scroll,
+				docs,
+				(path) => { void this.navigateToPath(path); },
+			);
+		}
+	}
+
+	/** Desktop-only sidebar pin, anchored at the banner's bottom-left corner.
+	 *  Distinct from the banner-collapse bookmark button (top-right,
+	 *  .dashboard-banner-pin-btn): this one pins/unpins the sidebar. Works in
+	 *  both layouts — in stacked mode it pins the widget strip open instead of
+	 *  the left rail. */
+	private renderQuickActionsWidget(container: HTMLElement): void {
 			if (!this.data) return;
 			renderQuickActions(
 				container,
@@ -1246,50 +1434,8 @@ export class DashboardView extends ItemView implements HoverParent {
 				},
 				transfer => this.plugin.openDocumentImportFromDrop?.(transfer),
 			);
-		};
-
-		// Preserve: reuse the detached widgets DOM when the signature matched.
-		// Either way, track the live element for the next render's detach step.
-		this.sidebarWidgetsEl = renderSidebarWidgets(
-			scroll,
-			this.plugin.settings,
-			this.app,
-			this.pomodoroService ?? undefined,
-			this.readingService ?? undefined,
-			this.holidayData,
-			(order) => {
-				void (async () => {
-					this.plugin.settings = {
-						...this.plugin.settings,
-						widgetOrder: order,
-					};
-					await this.plugin.saveSettings();
-					this.render(this.data!);
-				})();
-			},
-			reuseWidgets,
-			(file, line) => this.openNote(file, undefined, line),
-			renderQuickActionsWidget,
-			this.plugin.quickCapture?.enabled() ? host => {
-				this.captureWidgetCleanup = this.plugin.quickCapture!.mount(host);
-			} : undefined,
-		);
-
-		if (!isStackedLayout(this.plugin.settings)) {
-			const docs = getRecentDocs(this.app, this.plugin.settings.recentDocCount, this.plugin.recentDocumentExclusions);
-			renderRecentDocs(
-				scroll,
-				docs,
-				(path) => { void this.navigateToPath(path); },
-			);
 		}
-	}
 
-	/** Desktop-only sidebar pin, anchored at the banner's bottom-left corner.
-	 *  Distinct from the banner-collapse bookmark button (top-right,
-	 *  .dashboard-banner-pin-btn): this one pins/unpins the sidebar. Works in
-	 *  both layouts — in stacked mode it pins the widget strip open instead of
-	 *  the left rail. */
 	private renderBannerPinButton(bannerEl: HTMLElement): void {
 		if (Platform.isMobile) return;
 		const pinBtn = bannerEl.createEl('button', {
@@ -1356,7 +1502,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		// The handles are direct sidebar children, so the collapsed state's
 		// `> *:not(.slim-indicator)` hiding rule keeps them unreachable there.
 		if (Platform.isMobile) return;
-		if (isStackedLayout(this.plugin.settings)) {
+		if (isStackedLayout(this.layoutSettings())) {
 			this.attachStripHeightHandle(sidebar);
 		} else {
 			this.attachSidebarWidthHandle(sidebar);
@@ -1371,7 +1517,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	 *  also covers the widgets-reuse path, where the inner strip is a
 	 *  re-attached node from a previous render. */
 	private applySidebarSizing(sidebar: HTMLElement): void {
-		const s = this.plugin.settings;
+		const s = this.layoutSettings();
 		if (isStackedLayout(s)) {
 			sidebar.setCssProps({ '--db-widget-unit-h': `${clampWidgetUnitHeight(s.widgetUnitHeight)}px` });
 		} else if (!Platform.isMobile) {
@@ -1482,6 +1628,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		const collapseWorkspacePath = this.workspacePath;
 		return {
 			managedCapture: !!this.plugin.quickCapture,
+			renderManagedCapture: (container: HTMLElement, compact?: boolean) => this.renderCaptureWidget(container, compact),
 			sectionPage: this.sectionPage,
 			onCustomSectionCleanup: (sectionReference: string, cleanup: () => void) => {
 				this.runCustomSectionCleanup(sectionReference);
@@ -1910,6 +2057,53 @@ export class DashboardView extends ItemView implements HoverParent {
 	}
 
 	private openAddSectionModal(): void {
+		const anchor = this.contentEl.querySelector<HTMLElement>('.dashboard-imm-add-btn');
+		if (anchor && this.data) {
+			openImmersiveAddMenu({ settings: this.plugin.settings,
+				services: { pomodoroService: this.pomodoroService ?? undefined, readingService: this.readingService ?? undefined,
+					holidayData: this.holidayData ?? undefined, renderQuickActions: host => this.renderQuickActionsWidget(host), renderQuickCapture: host => this.renderCaptureWidget(host, true) },
+				boardKeys: new Set(this.immItems.filter(item => item.id.startsWith('widget:')).map(item => item.id.slice(7))), anchor,
+				restorableSections: this.currentBoardLayout(this.data).immersive?.filter(item => item.hidden === true && item.id.startsWith('section:')).map(item => ({ id: item.id, label: this.data!.columns.find(column => `section:${sectionRef(column)}` === item.id)?.name ?? item.id.slice(8) })),
+				onRestoreSection: id => { const item = this.currentBoardLayout(this.data!).immersive?.find(entry => entry.id === id); if (item) void this.commitImmersiveItems([...this.immItems, { ...item, hidden: false }]); },
+				onAddSection: () => this.openAddSectionModalInner(), onAddWidget: key => { void this.addImmersiveWidget(key); },
+				onAddNoteCard: kind => { void this.addImmersiveNoteCard(kind).catch(error => new Notice(`卡片创建失败：${String(error)}`)); },
+				onCreateInstance: kind => this.createImmersiveInstance(kind),
+			});
+			return;
+		}
+		this.openAddSectionModalInner();
+	}
+
+	private async addImmersiveWidget(key: string): Promise<void> {
+		if (this.immItems.some(item => item.id === `widget:${key}`)) return;
+		const size = defaultWidgetSize(key, { habit: this.plugin.settings.habitHeightRatio, reading: this.plugin.settings.readingHeightRatio, albums: this.plugin.settings.albums });
+		await this.commitImmersiveItems([...this.immItems, { id: `widget:${key}`, ...size }]);
+	}
+
+	private async addImmersiveNoteCard(kind: 'memo' | 'todo'): Promise<void> {
+		let column = this.sync.getData()?.columns.find(column => column.sectionType === 'sticky');
+		if (!column) { const id = `section-${crypto.randomUUID()}`; await this.sync.addColumn('便利贴', 'sticky', undefined, id); column = this.sync.getData()?.columns.find(column => column.id === id); }
+		if (!column) throw new Error('便利贴分区尚未创建');
+		await this.sync.addCard(sectionRef(column), { type: kind === 'todo' ? 'task' : 'generic' });
+	}
+
+	private createImmersiveInstance(kind: 'album' | 'countdown' | 'anniversary'): void {
+		const persist = (patch: Partial<DashboardSettings>, key: string): void => {
+			void saveSettingsPatch(this.plugin, patch).then(() => this.addImmersiveWidget(key)).catch(error => new Notice(`小组件尚未保存：${String(error)}`));
+		};
+		if (kind === 'album') {
+			new AlbumSettingsModal(this.app, { id: Date.now(), folder: '', intervalSec: 8, recursive: true, ratio: '1:1', transition: 'fade', heightRatio: 'full' },
+				cfg => persist({ albums: [...(this.plugin.settings.albums ?? []), cfg] }, `album-${cfg.id}`)).open();
+		} else if (kind === 'countdown') {
+			new CountdownSettingsModal(this.app, { id: `cd-${crypto.randomUUID()}`, label: '', targetDate: '', displayMode: 'days', reminderDays: 0 },
+				cfg => persist({ countdowns: [...(this.plugin.settings.countdowns ?? []), cfg] }, `countdown-${cfg.id}`)).open();
+		} else {
+			new AnniversarySettingsModal(this.app, { id: `av-${crypto.randomUUID()}`, label: '', startDate: '', calendar: 'solar', precision: 'ymd', annualReminder: false },
+				cfg => persist({ anniversaries: [...(this.plugin.settings.anniversaries ?? []), cfg] }, `anniversary-${cfg.id}`)).open();
+		}
+	}
+
+	private openAddSectionModalInner(): void {
 		const creationId = `section-${crypto.randomUUID()}`;
 		let attempted: string | undefined;
 		const modal = new AddSectionModal(this.app, async (name, sectionType) => {
@@ -2803,6 +2997,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		if (key) mount.dataset.widgetKey = key;
 		const span = widget.style.getPropertyValue('--db-widget-span');
 		if (span) mount.style.setProperty('--db-widget-span', span);
+		carryImmersivePlacement(widget, mount);
 		parent.insertBefore(mount, widget);
 		widget.remove();
 		render(mount);
@@ -2845,10 +3040,14 @@ export class DashboardView extends ItemView implements HoverParent {
 	 *  timers and the pomodoro/reading services' onTick wiring (which reference
 	 *  live DOM inside it) must survive; a fresh widgets render re-wires them. */
 	private runCleanup(preserveSidebarWidgets = false): void {
-		if (!preserveSidebarWidgets) { this.captureWidgetCleanup?.(); this.captureWidgetCleanup = undefined; }
-		destroyAllCharts(preserveSidebarWidgets ? this.sidebarWidgetsEl : null, this.contentEl);
-		destroyAlbumWidgets(preserveSidebarWidgets ? this.sidebarWidgetsEl : null);
-		destroyAnniversaryTimers(preserveSidebarWidgets ? this.sidebarWidgetsEl : null);
+		for (const [el, cleanup] of this.captureMounts) {
+			const retained = preserveSidebarWidgets && (this.sidebarWidgetsEl?.contains(el) || [...this.immWidgetEls.values()].some(widget => widget === el || widget.contains(el)));
+			if (!retained) { cleanup(); this.captureMounts.delete(el); }
+		}
+		const retainedWidgets = preserveSidebarWidgets ? this.widgetCacheEl ?? this.sidebarWidgetsEl : null;
+		destroyAllCharts(retainedWidgets, this.contentEl);
+		destroyAlbumWidgets(retainedWidgets, this.contentEl);
+		destroyAnniversaryTimers(retainedWidgets, this.contentEl);
 		if (!preserveSidebarWidgets) {
 			if (this.pomodoroService) {
 				this.pomodoroService.setOnTick(null);

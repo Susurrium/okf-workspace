@@ -19,6 +19,7 @@
     "esbuild": "^0.28.2",
     "esbuild-svelte": "^0.9.5",
     "fake-indexeddb": "^6.2.5",
+    "jsdom": "26.1.0",
     "moment": "^2.31.0",
     "obsidian": "1.13.1",
     "sass": "^1.105.1",

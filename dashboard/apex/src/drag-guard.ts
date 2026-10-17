@@ -27,7 +27,7 @@ export interface GuardedDragHandlers {
 	cursor?: string;
 }
 
-export function startGuardedDrag(e: PointerEvent, handlers: GuardedDragHandlers): void {
+export function startGuardedDrag(e: PointerEvent, handlers: GuardedDragHandlers): () => void {
 	e.preventDefault();
 	e.stopPropagation();
 
@@ -84,4 +84,5 @@ export function startGuardedDrag(e: PointerEvent, handlers: GuardedDragHandlers)
 	} catch {
 		// Capture unavailable: the document listeners own the stream.
 	}
+	return cancel;
 }

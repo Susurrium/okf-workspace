@@ -51,6 +51,7 @@ export function renderQuickNoteRegion(
 	// ── Right zone: capture pill + config cog, grouped so the controls read
 	// as one cohesive unit instead of a box "floating" apart from the chips.
 	const actions = region.createDiv({ cls: 'dashboard-quicknote-actions' });
+	if (callbacks.managedCapture && settings.quickCaptureEnabled) callbacks.renderManagedCapture?.(actions, true);
 
 	if (captureOn) {
 		const capture = actions.createDiv({ cls: 'dashboard-quicknote-capture' });

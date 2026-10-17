@@ -1,6 +1,6 @@
 import type { App, TFile } from 'obsidian';
 
-import type { DashboardSettings } from './types';
+import type { DashboardSettings, DashboardLayoutMode } from './types';
 import type { TaskInsertTarget } from './daily-notes';
 import type { PomodoroService } from './pomodoro-service';
 import type { ReadingService } from './reading-service';
@@ -39,7 +39,7 @@ export interface ApexHost {
 	reloadAllDashboards(): Promise<void>;
 	switchWorkspace(path: string): Promise<void>;
 	workspacePresets?: readonly WorkspacePresetOption[];
-	createWorkspace(name: string, presetId?: string): Promise<string | void>;
+	createWorkspace(name: string, presetId?: string, layout?: DashboardLayoutMode): Promise<string | void>;
 	createDefaultWorkspaceMarkdown?(): string;
 	renameWorkspace(path: string, name: string): Promise<void>;
 	removeWorkspace(path: string): Promise<void>;
@@ -73,7 +73,7 @@ export interface ApexHost {
 	recentDocumentExclusions?: readonly string[];
 	quickCapture?: {
 		enabled(): boolean;
-		mount(container: HTMLElement): () => void;
+		mount(container: HTMLElement, options?: { compact?: boolean }): () => void;
 		submit(text: string): Promise<void>;
 	};
 }

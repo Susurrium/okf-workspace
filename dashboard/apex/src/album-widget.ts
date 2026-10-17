@@ -93,8 +93,9 @@ export function listAlbumImages(app: App, folder: string, recursive: boolean): s
  *  timers animating widgets inside it survive so the re-attached DOM keeps
  *  rotating. Stragglers of a discarded DOM unwind themselves via the per-tick
  *  isConnected check. */
-export function destroyAlbumWidgets(preserveWidgets?: HTMLElement | null): void {
+export function destroyAlbumWidgets(preserveWidgets?: HTMLElement | null, owner?: HTMLElement): void {
 	for (const [id, widget] of albumTimers) {
+		if (owner && !owner.contains(widget)) continue;
 		if (preserveWidgets && preserveWidgets.contains(widget)) continue;
 		window.clearInterval(id);
 		albumTimers.delete(id);

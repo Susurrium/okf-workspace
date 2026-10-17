@@ -188,9 +188,18 @@ const translations: Record<Language, Record<string, string>> = {
 
 		// Layout Mode
 		'settings.layoutMode': 'Layout',
-		'settings.layoutModeDesc': 'Widget arrangement: sidebar beside the board, or a horizontal strip under the banner (desktop and tablet only; phones are unaffected)',
-		'settings.layoutSide': 'Sidebar',
-		'settings.layoutStacked': 'Stacked',
+		'settings.layoutModeDesc': 'Default layout: widgets on the left, widgets on top, or an immersive free grid. Each workspace can choose its own layout; phones keep the mobile layout.',
+		'settings.layoutSide': 'Widgets on the left',
+		'settings.layoutStacked': 'Widgets on top',
+		'settings.layoutImmersive': 'Immersive free layout',
+		'workspace.layoutDefault': 'Follow default layout',
+		'workspace.newImmersiveTitle': 'New immersive workspace',
+		'immersive.addSectionItem': 'Add section',
+		'immersive.addMemoCard': 'Memo card',
+		'immersive.addTodoCard': 'Todo list card',
+		'immersive.removeCard': 'Remove card',
+		'immersive.createInstance': 'New…',
+		'captureWidget.title': 'Quick capture',
 		// Sidebar/strip resize handles (aria labels)
 		'view.sidebarResizeHint': 'Drag to resize the sidebar',
 		'view.stripResizeHint': 'Drag to resize the widget strip',
@@ -1879,9 +1888,18 @@ const translations: Record<Language, Record<string, string>> = {
 
 		// Layout Mode
 		'settings.layoutMode': '布局',
-		'settings.layoutModeDesc': '小组件排布方式：与看板左右分栏，或在横幅下方横向堆叠（仅桌面与平板，手机布局不受影响）',
-		'settings.layoutSide': '侧栏',
-		'settings.layoutStacked': '堆叠',
+		'settings.layoutModeDesc': '默认采用小组件在左、小组件在上或沉浸式自由布局。每个工作台可单独选择；手机继续使用移动端布局。',
+		'settings.layoutSide': '小组件在左',
+		'settings.layoutStacked': '小组件在上',
+		'settings.layoutImmersive': '沉浸式自由布局',
+		'workspace.layoutDefault': '跟随默认布局',
+		'workspace.newImmersiveTitle': '新建沉浸式工作台',
+		'immersive.addSectionItem': '添加分区',
+		'immersive.addMemoCard': '备忘录卡片',
+		'immersive.addTodoCard': '待办清单卡片',
+		'immersive.removeCard': '移除卡片',
+		'immersive.createInstance': '新建…',
+		'captureWidget.title': '快速记录',
 		// Sidebar/strip resize handles (aria labels)
 		'view.sidebarResizeHint': '拖动调整侧栏宽度',
 		'view.stripResizeHint': '拖动调整小组件条高度',

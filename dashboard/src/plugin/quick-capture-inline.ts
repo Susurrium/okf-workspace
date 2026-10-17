@@ -1,13 +1,15 @@
-import { Notice, Platform } from 'obsidian';
+import { Notice, Platform, setIcon } from 'obsidian';
 import type { CaptureSession } from './capture-session.js';
 
-export function mountQuickCapture(container: HTMLElement, session: CaptureSession, expand: () => Promise<void>): () => void {
+export function mountQuickCapture(container: HTMLElement, session: CaptureSession, expand: () => Promise<void>, options?: { compact?: boolean }): () => void {
   const widget = container.createDiv({ cls: 'dashboard-sidebar-widget okf-capture-inline' });
+  if (options?.compact) widget.addClass('okf-capture-inline--compact');
   widget.createDiv({ text: '快速记录', cls: 'okf-capture-heading' });
   const input = widget.createEl('textarea', { attr: { rows: '1', placeholder: '记下一个想法…', 'aria-label': '快速记录内容' } });
   const actions = widget.createDiv({ cls: 'okf-capture-actions' });
   const open = actions.createEl('button', { text: '展开', attr: { type: 'button', 'aria-label': '展开快速记录' } });
   const submit = actions.createEl('button', { text: '保存', attr: { type: 'button', 'aria-label': '保存到收集箱' } });
+  if (options?.compact) { open.setText(''); submit.setText(''); setIcon(open, 'maximize-2'); setIcon(submit, 'corner-down-left'); open.title = '展开快速记录'; submit.title = '保存到收集箱'; input.title = 'Enter 保存 · Shift+Enter 换行'; }
   const hint = widget.createDiv({ cls: 'okf-capture-hint', text: Platform.isMobile ? '保存到收集箱' : 'Enter 保存 · Shift+Enter 换行' });
   const feedback = widget.createDiv({ cls: 'okf-capture-feedback', attr: { role: 'status', 'aria-live': 'polite' } });
   const report = (error: unknown): void => { new Notice(error instanceof Error ? error.message : String(error), 10000); };

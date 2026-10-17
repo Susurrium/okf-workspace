@@ -26,6 +26,8 @@ import { t } from './i18n';
 import { parseFocalPoint, formatFocalPoint, isCenterFocal } from './focal-point-picker';
 import { normalizeColumnPairs } from './column-pairs';
 import { isRegisteredSection } from './section-registry';
+import { readWorkbenchLayout } from './workbench-layout';
+import { readBoardLayout, serializeImmersiveItems } from './board-layout';
 
 const KNOWN_METADATA_KEYS = new Set(['id', 'link', 'progress', 'due', 'streak', 'type', 'color', 'cover', 'coverPos', 'width', 'size', 'lat', 'lon', 'city', 'track', 'days', 'cols', 'rows', 'gcol', 'grow', 'noteStyle']);
 // 'notes' is the retired standalone no-cover section type: it parses (old
@@ -40,7 +42,7 @@ export function workbenchCompatibilityMessage(schema: number | undefined): strin
 	return `此工作台使用更高格式版本 ${schema}；当前版本只会修改已识别字段，并保留未知配置与正文。`;
 }
 const ROOT_MANAGED_KEYS = new Set([
-	'dashboard', 'workbench_schema', 'banner', 'quickActions', 'quickActionOrder', 'hiddenPresets', 'columns',
+	'dashboard', 'workbench_schema', 'banner', 'quickActions', 'quickActionOrder', 'hiddenPresets', 'columns', 'workbench_layout', 'layout', 'immersive',
 ]);
 const COLUMN_MANAGED_KEYS = new Set([
 	'id', 'name', 'color', 'type', 'showCover', 'library', 'weread', 'ticktick', 'dataview', 'web', 'config', 'height', 'half', 'width',
@@ -128,6 +130,8 @@ export function parse(markdown: string): DashboardData {
 	const columns = parseColumns(parsedBody.sections, columnDefs);
 
 	const data: DashboardData = {
+		...readBoardLayout(frontmatter, columns),
+		workbenchLayout: readWorkbenchLayout(frontmatter.workbench_layout),
 		workbenchSchema: typeof frontmatter.workbench_schema === 'number' ? frontmatter.workbench_schema : WORKBENCH_SCHEMA,
 		banner,
 		quickActions,
@@ -152,6 +156,9 @@ export function serialize(data: DashboardData): string {
 	lines.push('---');
 	lines.push('dashboard: true');
 	lines.push(`workbench_schema: ${data.workbenchSchema ?? WORKBENCH_SCHEMA}`);
+	if (data.layout) lines.push(`layout: ${data.layout}`);
+	if (data.immersive) lines.push(stringifyYaml({ immersive: serializeImmersiveItems(data.immersive) }, { lineWidth: 0, defaultStringType: 'QUOTE_DOUBLE', defaultKeyType: 'PLAIN' }).trimEnd());
+	if (data.workbenchLayout) lines.push(stringifyYaml({ workbench_layout: readWorkbenchLayout(data.workbenchLayout) }, { lineWidth: 0 }).trimEnd());
 
 	lines.push('banner:');
 	lines.push(`  quote: "${escapeYamlString(data.banner.quote)}"`);

@@ -1,4 +1,30 @@
 .okf-dashboard { position: relative; max-width: 1180px; margin: 0 auto; padding: 16px 18px 48px; }
+.dashboard-widget-cache--hidden { display: none; }
+.apex-dashboard-root[data-layout="immersive"] { contain: paint; --interactive-normal: rgba(255, 255, 255, .12); --interactive-hover: rgba(255, 255, 255, .22); }
+.apex-dashboard-root[data-layout="immersive"] .dashboard-kanban[data-imm-compact="true"] { display: flex; flex-direction: column; }
+.apex-dashboard-root[data-layout="immersive"] .dashboard-kanban[data-imm-compact="true"] > [data-imm-id] { width: 100%; flex: 0 0 auto; cursor: default; }
+.apex-dashboard-root[data-layout="immersive"] .dashboard-kanban[data-imm-compact="true"] :is(.dashboard-imm-resize-h, .dashboard-imm-resize-v, .dashboard-imm-resize-handle) { display: none; }
+.apex-dashboard-root[data-layout="immersive"] .dashboard-imm-top .dashboard-quicknote { flex: 0 0 auto; }
+.apex-dashboard-root[data-layout="immersive"] .okf-capture-actions button { color: rgba(255, 255, 255, .96); --icon-color: rgba(255, 255, 255, .96); }
+.apex-dashboard-root[data-layout="immersive"] .dashboard-section-add-btn { color: rgba(255, 255, 255, .86); }
+.apex-dashboard-root[data-layout="immersive"] .okf-workbench-surface .okf-dashboard__hero-actions { flex-wrap: wrap; overflow: visible; }
+.apex-dashboard-root[data-layout="immersive"] .dashboard-sidebar-widget.dashboard-sidebar-pomodoro { padding-block: 6px; }
+.apex-dashboard-root[data-layout="immersive"] :is(.dashboard-sidebar-pomodoro-ring-wrap, .dashboard-sidebar-pomodoro-ring) { width: 72px; height: 72px; }
+.apex-dashboard-root[data-layout="immersive"] .dashboard-section-row[data-section-type^="workspace-"] > .dashboard-custom-section { min-height: 0; overflow: auto; flex: 1 1 auto; }
+.apex-dashboard-root[data-layout="immersive"] .dashboard-kanban > .dashboard-card[data-imm-id] > .dashboard-card-resize-handle,
+.apex-dashboard-root[data-layout="immersive"] .dashboard-kanban .dashboard-pair-width-handle { display: none; }
+.dashboard-layout-statusbar { position: absolute; bottom: 10px; left: 14px; right: 14px; z-index: 40; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 12px; background: var(--background-primary); border: 1px solid var(--text-error); border-radius: 8px; color: var(--text-error); overflow-wrap: anywhere; }
+.okf-capture-inline.okf-capture-inline--compact { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; position: relative; padding: 5px 8px; width: 100%; min-width: 0; }
+.okf-capture-inline--compact .okf-capture-heading, .okf-capture-inline--compact .okf-capture-hint { display: none; }
+.okf-capture-inline.okf-capture-inline--compact textarea { margin: 0; min-height: 30px; max-height: 36px; resize: none; width: 100%; min-width: 0; }
+.okf-capture-inline--compact .okf-capture-actions { margin: 0; gap: 4px; flex-wrap: wrap; }
+.okf-capture-inline--compact .okf-capture-actions button { padding: 4px; width: 26px; height: 28px; min-width: 26px; }
+.okf-capture-inline--compact .okf-capture-actions svg { width: 14px; height: 14px; }
+.okf-capture-inline--compact .okf-capture-feedback:not(:empty) { grid-column: 1 / -1; padding: 8px; background: var(--background-primary); color: var(--text-error); max-height: 160px; overflow: auto; user-select: text; }
+[data-layout="immersive"] .dashboard-quicknote-actions > .okf-capture-inline--compact { width: min(520px, 100%); }
+[data-layout="immersive"] .dashboard-kanban > [data-widget-key="quickCapture"] { overflow: visible; background: transparent; border: none; }
+[data-layout="immersive"] .okf-capture-inline--compact { background: rgba(12, 16, 24, .68); border: 1px solid rgba(255, 255, 255, .24); color: var(--db-text); }
+[data-layout="immersive"] .okf-capture-inline--compact .okf-capture-feedback:not(:empty) { position: absolute; top: 100%; left: 0; right: 0; z-index: 20; }
 .okf-surface-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
 .okf-surface-controls > span { flex: 1; }
 .okf-catalog-facets { display: flex; flex-wrap: wrap; gap: 10px; margin: 10px 0; }
@@ -21,7 +47,7 @@
 
 /* Apex's 500px section cap is for its small widgets. An OKF section mounts a
    complete page, so that cap lets the page paint over the following rows. */
-.apex-dashboard-root .dashboard-section-row[data-section-type^="workspace-"] {
+.apex-dashboard-root:not([data-layout="immersive"]) .dashboard-section-row[data-section-type^="workspace-"] {
   height: auto !important;
   max-height: none !important;
   overflow: visible;
