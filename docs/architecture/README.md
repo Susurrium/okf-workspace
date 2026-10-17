@@ -66,6 +66,7 @@ Workspace Kit 安装到 Vault 的根 AGENTS、`.agents/skills/` 和 `system/`，
 | 转换、语义操作与索引 | Vault 外本机 State；长期结果发布到 Vault |
 | Contracts、模板、Views、Policies、Skills | Engine 可部署资源 |
 | Apex 习惯、记账、阅读、专注及实例配置 | 原生服务、JSON/plugin data |
+| 顶部常用操作、显示开关与 Capture 草稿 | Dashboard 本机插件配置；快捷项为全局偏好，草稿按默认/课程/项目上下文隔离 |
 | 工作台布局、便签、清单、安全副本 | Dashboard/Apex 工作台 Markdown |
 
 ### Artifact 与公共字段
@@ -122,6 +123,7 @@ Engine 发布器拒绝工作台目标，迁移逐字节保留工作台及异常�
 | `fixed`、`hidden` | 可选布尔值：保留指定高度、隐藏卡片 |
 
 沉浸式成员属于当前工作台，左右/上下布局使用全局开关；移出组件保留实例配置和共享服务。
+顶部常用操作与当前工作台的快捷按钮分别保存；顶部、侧栏、网格入口的显示状态各自控制，同一 Capture 上下文共享会话和固定重试目标。
 原生字段优先于旧 `workbench_layout`，旧字段仅在内存转换，明确保存后写原生字段并保留旧字段及扩展。
 旧上游粗网格高度读取时换算。不支持的布局、重复 ID、非法尺寸/坐标报错。
 布局经 frontmatter API 局部写入，检查身份及卡片旧值；不同卡片可并发合并，同卡片和顺序冲突拒绝覆盖。

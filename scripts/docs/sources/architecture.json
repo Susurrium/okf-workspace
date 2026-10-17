@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "reviewed_at": "2026-10-17",
-  "baseline_commit": "55ea2c85",
-  "scope": "核对沉浸式布局合并后的工作台布局持久化、共享业务视图与原生组件数据归属；不代表生产部署状态。",
+  "baseline_commit": "65884bdc",
+  "scope": "核对添加菜单、顶部快速记录显示配置、共享草稿和工作台数据归属；不代表生产部署状态。",
   "charts": [
     {
       "id": "overview",
