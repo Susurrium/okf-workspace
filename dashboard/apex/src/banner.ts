@@ -15,6 +15,46 @@ export function getActiveQuote(banner: BannerData): QuoteItem {
 	return { quote: banner.quote, author: banner.author };
 }
 
+/** Poster rotation cadence shared by the banner strip and the immersive
+ *  background layer (both surfaces stay in lockstep on the time seed). */
+export const BANNER_IMAGE_ROTATION_MS = 30 * 60 * 1000;
+
+/** Rotate `el`'s background through the banner's poster images on the shared
+ *  time-seed cadence (same index math the banner strip uses, so both surfaces
+ *  stay in lockstep). The initial paint + focal apply immediately; the timer
+ *  lands in the caller's cleanup list. No-op with fewer than two images.
+ *  Consumers: the banner element (side/stacked) and the immersive full-bleed
+ *  background layer. */
+export function startBannerImageRotation(
+	el: HTMLElement,
+	banner: BannerData,
+	app: App,
+	rotationMs: number,
+	registerCleanup: (fn: () => void) => void,
+): void {
+	const images = banner.images;
+	if (!images || images.length < 2) return;
+	let index = Math.floor(Date.now() / rotationMs) % images.length;
+
+	const resolved = resolveVaultImage(app, images[index]!);
+	if (resolved) el.style.backgroundImage = `url("${resolved}")`;
+	applyBannerFocal(el, banner, images[index]!);
+
+	const rotate = () => {
+		index = (index + 1) % images.length;
+		const nextPath = images[index]!;
+		const nextResolved = resolveVaultImage(app, nextPath);
+		el.addClass('dashboard-banner--fading');
+		window.setTimeout(() => {
+			if (nextResolved) el.style.backgroundImage = `url("${nextResolved}")`;
+			applyBannerFocal(el, banner, nextPath);
+			el.removeClass('dashboard-banner--fading');
+		}, 600);
+	};
+	const timer = window.setInterval(rotate, rotationMs);
+	registerCleanup(() => window.clearInterval(timer));
+}
+
 export function getActiveImage(banner: BannerData): string {
 	if (banner.images && banner.images.length > 0) {
 		return banner.images[0]!;
@@ -153,7 +193,7 @@ export function renderBanner(
 
 /** The wand button that opens the banner editor. Shared by both banner modes;
  *  positioned absolutely so it works whether it hangs off the banner or its overlay. */
-function createBannerEditButton(parent: HTMLElement, onEdit: () => void): HTMLButtonElement {
+export function createBannerEditButton(parent: HTMLElement, onEdit: () => void): HTMLButtonElement {
 	const btn = parent.createEl('button', {
 		cls: 'dashboard-banner-edit-btn',
 		attr: { 'aria-label': t('banner.editLabel') },

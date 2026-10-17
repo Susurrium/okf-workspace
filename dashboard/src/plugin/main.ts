@@ -188,6 +188,7 @@ export default class OkfBrainPlugin extends Plugin {
   private readonly importDraftVersions = new Map<string, number>();
   public originalFiles: OriginalFiles | undefined;
   private taskRuntime: TasksRuntime | undefined;
+  private tasksViewSignature: string | undefined;
   private taskReminders: TaskReminderService | undefined;
   private readonly workbenchPages = new Map<string, WorkspaceLeaf>();
   private readonly pageIds = new WeakMap<WorkspaceLeaf, string>();
@@ -259,7 +260,7 @@ export default class OkfBrainPlugin extends Plugin {
       recentDocumentExclusions: ["system/", "inbox/uploads/"],
       quickCapture: {
         enabled: () => this.apexHost?.settings.widgetQuickCaptureEnabled !== false,
-        mount: container => mountQuickCapture(container, this.captureSession(), () => this.openQuickCapture({})),
+        mount: (container, options) => mountQuickCapture(container, this.captureSession(), () => this.openQuickCapture({}), options),
         submit: async text => { const session = this.captureSession(); session.setText(text); await session.submit(); },
       },
       mutateManagedArtifact: (mutation) =>
@@ -2286,10 +2287,10 @@ export default class OkfBrainPlugin extends Plugin {
         if (
           file instanceof TFile &&
           file.extension === "md" &&
-          file.path !== "index.md"
+          file.path !== "index.md" && !file.path.startsWith(".")
         ) {
           schedule();
-          refreshDashboard();
+          if (this.app.metadataCache.getFileCache(file)?.frontmatter?.dashboard !== true) refreshDashboard();
         }
       }),
     );
@@ -2298,7 +2299,7 @@ export default class OkfBrainPlugin extends Plugin {
         if (
           file instanceof TFile &&
           file.extension === "md" &&
-          file.path !== "index.md"
+          file.path !== "index.md" && !file.path.startsWith(".")
         ) {
           schedule();
           refreshDashboard();
@@ -2310,7 +2311,7 @@ export default class OkfBrainPlugin extends Plugin {
         if (
           file instanceof TFile &&
           file.extension === "md" &&
-          file.path !== "index.md"
+          file.path !== "index.md" && !file.path.startsWith(".")
         ) {
           schedule();
           refreshDashboard();
@@ -2578,6 +2579,13 @@ export default class OkfBrainPlugin extends Plugin {
       },
       invalidate: path => {
         if (path) invalidatePath(path); else invalidateAllTasks();
+        // 工作台布局写入也会触发 Tasks 缓存通知；任务内容相同时保留当前业务视图。
+        const tasks = this.taskRuntime?.getTasks();
+        if (tasks) {
+          const signature = JSON.stringify(tasks.map(task => [task.path, task.lineNumber, task.toFileLineString(), task.status.type]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))));
+          if (signature === this.tasksViewSignature) return;
+          this.tasksViewSignature = signature;
+        }
         this.refreshDashboardViews();
       },
       writeTask: async (task, lines) => {

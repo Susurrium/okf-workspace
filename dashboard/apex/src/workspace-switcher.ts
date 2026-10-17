@@ -5,6 +5,12 @@ import { showPromptDialog } from './prompt-dialog';
 import { showConfirmDialog } from './confirm-dialog';
 import { showChoiceDialog } from './choice-dialog';
 import { normalizeWorkspacePath } from './workspace-registry';
+import type { DashboardLayoutMode } from './types';
+
+interface WorkspaceLayoutMenu {
+	layout?: DashboardLayoutMode;
+	onLayout?: (mode: DashboardLayoutMode | undefined) => Promise<void>;
+}
 
 /** Display label for a workspace: its name, else the file path. */
 function workspaceLabel(name: string, path: string): string {
@@ -12,7 +18,7 @@ function workspaceLabel(name: string, path: string): string {
 }
 
 /** Open the "new workspace" dialog and create the workspace on confirm. */
-async function promptNewWorkspace(plugin: ApexHost, onSwitch: (path: string) => Promise<void>): Promise<void> {
+async function promptNewWorkspace(plugin: ApexHost, onSwitch: (path: string) => Promise<void>, layout?: DashboardLayoutMode): Promise<void> {
 	const files = plugin.settings.workspaceFiles;
 	const fallback = t('workspace.defaultName', { n: files.length + 1 });
 	const name = await showPromptDialog(plugin.app, {
@@ -26,12 +32,12 @@ async function promptNewWorkspace(plugin: ApexHost, onSwitch: (path: string) => 
 		? await showChoiceDialog(presets, '选择工作台预设')
 		: undefined;
 	if (presetId === null) return;
-	const created = await plugin.createWorkspace(name === '' ? fallback : name, presetId);
+	const created = await plugin.createWorkspace(name === '' ? fallback : name, presetId, layout);
 	if (created) await onSwitch(created);
 }
 
 /** Long-press / right-click management menu for one workspace button. */
-function openWorkspaceMenu(plugin: ApexHost, file: string, name: string, ev: Event): void {
+function openWorkspaceMenu(plugin: ApexHost, file: string, name: string, ev: Event, layoutMenu?: WorkspaceLayoutMenu): void {
 	const menu = new Menu();
 	menu.addItem((item) => {
 		item.setTitle(t('workspace.renameTitle'))
@@ -59,6 +65,13 @@ function openWorkspaceMenu(plugin: ApexHost, file: string, name: string, ev: Eve
 			if (confirmed) await plugin.removeWorkspace(file);
 		});
 	});
+	if (layoutMenu?.onLayout) {
+		menu.addSeparator();
+		for (const mode of [undefined, 'side', 'stacked', 'immersive'] as const) menu.addItem(item => item
+			.setTitle(mode === undefined ? t('workspace.layoutDefault') : t(mode === 'side' ? 'settings.layoutSide' : mode === 'stacked' ? 'settings.layoutStacked' : 'settings.layoutImmersive'))
+			.setChecked(layoutMenu.layout === mode)
+			.onClick(() => { void layoutMenu.onLayout!(mode).catch(error => console.error('[Apex] Workspace layout save failed', error)); }));
+	}
 	menu.showAtMouseEvent(ev as MouseEvent);
 }
 
@@ -74,6 +87,7 @@ export function renderWorkspaceSwitcher(
 	plugin: ApexHost,
 	activeWorkspace: string = plugin.settings.dashboardFile,
 	onSwitch: (path: string) => Promise<void> = (path) => plugin.switchWorkspace(path),
+	layoutMenu?: WorkspaceLayoutMenu,
 ): void {
 	const { workspaceFiles, workspaceNames } = plugin.settings;
 	const active = normalizeWorkspacePath(activeWorkspace);
@@ -96,7 +110,7 @@ export function renderWorkspaceSwitcher(
 		btn.addEventListener('contextmenu', (ev) => {
 			ev.preventDefault();
 			ev.stopPropagation();
-			openWorkspaceMenu(plugin, file, name, ev);
+			openWorkspaceMenu(plugin, file, name, ev, isActive ? layoutMenu : undefined);
 		});
 	});
 
@@ -107,6 +121,9 @@ export function renderWorkspaceSwitcher(
 	setIcon(addBtn, 'plus');
 	addBtn.addEventListener('click', (e) => {
 		e.stopPropagation();
-		void promptNewWorkspace(plugin, onSwitch);
+		const menu = new Menu();
+		menu.addItem(item => item.setTitle(t('workspace.newTitle')).setIcon('plus').onClick(() => { void promptNewWorkspace(plugin, onSwitch); }));
+		menu.addItem(item => item.setTitle(t('workspace.newImmersiveTitle')).setIcon('gallery-vertical').onClick(() => { void promptNewWorkspace(plugin, onSwitch, 'immersive'); }));
+		menu.showAtMouseEvent(e);
 	});
 }

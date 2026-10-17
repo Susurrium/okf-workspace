@@ -35,6 +35,7 @@ import { moveToOwnRow, moveBeside, unpartnerAt } from './column-pairs';
 import { workspaceBackupName } from './workspace-registry';
 import { normalizeWorkspacePath } from './workspace-registry';
 import { mergeBoardData } from './board-merge';
+import { patchBoardLayout, readBoardLayout, writeBoardLayout, type BoardLayoutState } from './board-layout';
 
 import type { DashboardUpdateSource } from './render-update';
 
@@ -660,6 +661,35 @@ export class SyncEngine {
 			throw error;
 		}
 	}
+
+	async updateBoardLayout(next: BoardLayoutState, previous: BoardLayoutState): Promise<void> {
+		if (!this.data || !this.file) throw new Error('工作台尚未读取，无法保存布局');
+		const file = this.file;
+		this.writeQueuePending++;
+		const operation = this.writeQueue.then(async () => {
+			try {
+				const before = await this.app.vault.read(file);
+				this.assertWorkbenchSource(file, parse(before));
+				await this.createBackup(before);
+				await this.app.fileManager.processFrontMatter(file, (metadata: unknown) => {
+					if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) throw new Error('工作台 YAML 必须为对象');
+					const value = metadata as Record<string, unknown>;
+					if (value.dashboard !== true || (value.type !== undefined && (typeof value.type !== 'string' || value.type.trim()))) throw new Error('布局只能保存在身份有效的工作台中');
+					this.assertWorkbenchSource(file, { ...this.data!, sourceFrontmatter: value });
+					writeBoardLayout(value, patchBoardLayout(readBoardLayout(value, this.data!.columns), previous, next));
+				});
+				const persisted = parse(await this.app.vault.read(file));
+				const merged = this.baseData ? mergeBoardData(this.baseData, this.data!, persisted) : { data: persisted, conflicts: [] };
+				if (merged.conflicts.length) throw new Error(`布局已写入，其他内容存在冲突，请重新读取：${merged.conflicts.join('、')}`);
+				this.data = merged.data;
+				this.baseData = persisted;
+			} finally { this.writeQueuePending--; }
+		});
+		this.writeQueue = operation.catch(() => undefined);
+		await operation;
+		this.notifyCallbacks('local');
+	}
+
 
 	async updateWebConfig(columnName: string, config: import('./types').WebEmbedConfig): Promise<void> {
 		if (!this.data) return;

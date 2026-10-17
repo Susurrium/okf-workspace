@@ -2,12 +2,32 @@
 
 ## 当前结论
 
-更新：2026-10-16。Apex 选择性更新、统一快速记录、OKF 项目组织及分区交互已完成开发与约定验收，
-通过 PR #9 合并到 `main`，合并提交为 `122286ce`。当前采用范围及排除项只维护在
+更新：2026-10-17。Apex 选择性更新、统一快速记录、OKF 项目组织、分区交互及沉浸式工作台已完成开发与约定验收。
+前四项通过 PR #9 合并到 `main`，合并提交为 `122286ce`；沉浸式工作台的来源与验收证据见下节。当前采用范围及排除项只维护在
 [上游采用策略](UPSTREAM.md#上游采用策略)，使用方法见[使用指南](../docs/USER-GUIDE.md)。
 
 本轮更新没有部署正式环境。以下结果分别对应具名源码与候选产物，截图及历史部署记录保留各自的验证范围。
 后续发布遵循[部署指南](../docs/DEPLOYMENT.md#production-cutover)。
+沉浸式专项的独立分支与验收状态见下节。
+
+## 沉浸式工作台
+
+2026-10-17 在独立工作树 `work/immersive-workbench/` 完成上游 3.8.5 沉浸式布局移植和专项验收，基线 `6eb0fb7c`，
+分支 `codex/immersive-workbench`，验收回执对应该分支提交前的源码快照。未部署正式环境。
+以下证据位于主工作区 `work/immersive-workbench/work/upstream-port/`，构建安装文件与源码哈希见 `receipt.json`。
+
+| 范围 | 实际结果与证据 |
+| --- | --- |
+| 自动化 | Dashboard 类型检查、构建、64 个文件 / 460 项测试通过；`tests-final.log`、`typecheck-final.log`、`build-final.log`。Apex 全部 49 项 `test:*` 脚本通过，后续网格修正重跑两个沉浸式脚本；对应 `final-test-*.log`、`lint-final.log`、`apex-build-final.log` |
+| 布局与业务 | 原生鼠标拖动、右边／底边／角部缩放、落点预览和失焦取消通过；单纯调整布局保留业务分区与 Capture 输入节点。完整业务区域内部滚动、重复测量稳定、固定坐标防重叠、成员移除重加通过。实际新建和完成任务仍刷新业务显示；`drag.json`、`resize-*.json`、`flow-taskRefresh.json`、`flow-widget.json` |
+| 状态与数据 | 双窗格共享草稿、计时服务和显示；工作台布局隔离、冷启动恢复。真实表单保留七种本地预设，创建沉浸式工作台和三类小组件实例。旧格式打开不写入，明确保存写入原生字段，正文和未知扩展保留；`flow-multiPane.json`、`flow-cold.json`、`flow-create.json`、`flow-instances.json`、`flow-legacy.json` |
+| 故障与并发 | 真实只读文件触发 EPERM，保留输入并显示重试入口，解除只读后实际重试成功；同一卡片并发修改拒绝覆盖，不同卡片修改合并，重新读取恢复磁盘状态。`flow-fault.json`、`flow-retry.json`、`flow-conflict.json` |
+| Capture 与弹出窗口 | Enter 实际创建单篇 Capture；独立 Obsidian 弹出窗口使用独立 Document，缩放持久化、共享计时服务和遮罩释放通过。`flow-capture.json`、`popout.json` |
+| 视觉与上游比较 | 真实 Obsidian 明暗主题、完整业务分区、430×950 窗口、添加菜单、布局菜单、无背景与保存失败逐张检查。未修改的上游沉浸式核心与本地核心使用相同夹具、原生 Obsidian API 和共享宿主适配渲染，卡片几何完全一致；该比较没有安装完整上游插件。截图及范围见 `receipt.json`、`visual-review.md` |
+| 安装与退出 | 三个候选文件核对安装哈希，保存在 `candidate/`。使用本次新快照恢复受管运行文件，178 个原有文件恢复时逐字节核对；退出策略额外关闭 Engine 自动启动，其余设置与用户此前的人工测试修改保留。清理 14 个合成文件、索引 4 个条目，合成索引剩余 0。窗口、Engine、自动启动、LiveSync 关闭，8766/9366 无监听；`cleanup.json`、`index-cleanup.json`、`exit-status.json` |
+
+真实手机、远端同步和外部在线服务未纳入本次实机验证。上游完整导入基线仍为 3.6.5，
+本次移植范围与本地差异只维护在[上游采用策略](UPSTREAM.md#上游采用策略)。
 
 ## 整合候选验收
 

@@ -1,4 +1,5 @@
 import { sectionRef, type DashboardColumn, type DashboardData } from './types';
+import { patchBoardLayout } from './board-layout';
 
 export interface BoardMergeResult {
 	data: DashboardData;
@@ -36,6 +37,10 @@ export function mergeBoardData(
 	remote: DashboardData,
 ): BoardMergeResult {
 	const conflicts: string[] = [];
+	let boardLayout = { layout: remote.layout, immersive: remote.immersive };
+	try { const next = patchBoardLayout(remote, base, local); boardLayout = { layout: next.layout, immersive: next.immersive }; }
+	catch (error) { conflicts.push(String(error)); }
+	const workbenchLayout = mergeValue('workbench_layout', base.workbenchLayout, local.workbenchLayout, remote.workbenchLayout, conflicts);
 	const baseRefs = base.columns.map(sectionRef);
 	const localRefs = local.columns.map(sectionRef);
 	const remoteRefs = remote.columns.map(sectionRef);
@@ -94,6 +99,8 @@ export function mergeBoardData(
 	return {
 		data: {
 			...remote,
+			...boardLayout,
+			workbenchLayout,
 			workbenchSchema: mergeValue('workbenchSchema', base.workbenchSchema, local.workbenchSchema, remote.workbenchSchema, conflicts),
 			banner: mergeValue('banner', base.banner, local.banner, remote.banner, conflicts),
 			quickActions: mergeValue('quickActions', base.quickActions, local.quickActions, remote.quickActions, conflicts),

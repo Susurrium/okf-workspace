@@ -18,8 +18,9 @@ const anniversaryTimers = new Map<number, HTMLElement>();
 /** Clear every anniversary ticker ahead of a re-render. `preserveWidgets` is
  *  the detached-but-reused sidebar widgets element: tickers animating widgets
  *  inside it survive so the re-attached DOM keeps ticking. */
-export function destroyAnniversaryTimers(preserveWidgets?: HTMLElement | null): void {
+export function destroyAnniversaryTimers(preserveWidgets?: HTMLElement | null, owner?: HTMLElement): void {
 	for (const [id, el] of anniversaryTimers) {
+		if (owner && !owner.contains(el)) continue;
 		if (preserveWidgets && preserveWidgets.contains(el)) continue;
 		window.clearInterval(id);
 		anniversaryTimers.delete(id);

@@ -466,11 +466,11 @@ export default class DashboardPlugin extends Plugin {
 
 	/** Create a new workspace file with default board content, register it and
 	 *  switch to it. */
-	async createWorkspace(name: string, _presetId?: string): Promise<string | void> {
-		return this.runWorkspaceOp(() => this.doCreateWorkspace(name));
+	async createWorkspace(name: string, _presetId?: string, layout?: import('./types').DashboardLayoutMode): Promise<string | void> {
+		return this.runWorkspaceOp(() => this.doCreateWorkspace(name, layout));
 	}
 
-	private async doCreateWorkspace(name: string): Promise<string | undefined> {
+	private async doCreateWorkspace(name: string, layout?: import('./types').DashboardLayoutMode): Promise<string | undefined> {
 		const trimmed = name.trim();
 		const path = nextWorkspacePath(
 			this.settings.workspaceFiles,
@@ -479,7 +479,9 @@ export default class DashboardPlugin extends Plugin {
 		);
 		try {
 			const withExt = path.endsWith('.md') ? path : `${path}.md`;
-			await this.app.vault.create(withExt, generateDefaultMarkdown());
+			let markdown = generateDefaultMarkdown();
+			if (layout) { const { parse, serialize } = await import('./parser'); const data = parse(markdown); data.layout = layout; markdown = serialize(data); }
+			await this.app.vault.create(withExt, markdown);
 		} catch (err) {
 			console.error('Workspace file creation failed:', err);
 			new Notice(t('workspace.createFailed'));

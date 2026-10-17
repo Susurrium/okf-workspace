@@ -14,6 +14,7 @@ export const KANBAN_FILE_DRAG_TYPE = 'application/x-apex-libcard';
  *  effectAllowed='move' item drags carry, which made the browser forbid the
  *  drop and left empty cards (no item handlers to win the race) undroppable. */
 export const ITEM_DRAG_TYPE = 'application/x-apex-item';
+export const IMM_ITEM_DRAG_TYPE = 'application/x-apex-immersive';
 
 interface DnDState {
 	draggingCardId: string | null;
@@ -28,6 +29,7 @@ export function setupDragAndDrop(
 	container: HTMLElement,
 	callbacks: RenderCallbacks,
 	cleanupFns: Array<() => void>,
+	options: { skipSectionGrip?: boolean } = {},
 ): void {
 	const state: DnDState = {
 		draggingCardId: null,
@@ -45,7 +47,7 @@ export function setupDragAndDrop(
 		// Section reorder grip handle (desktop). Sets sectionDragSource so the row's
 		// dragover/drop handlers branch into section-reorder logic instead of card moves.
 		const grip = colEl.querySelector<HTMLElement>('.dashboard-section-grip');
-		if (grip) {
+		if (grip && !options.skipSectionGrip) {
 			const onGripDragStart = (e: DragEvent) => {
 				e.stopPropagation();
 				state.sectionDragSource = { index, row: colEl };

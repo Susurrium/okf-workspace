@@ -81,11 +81,14 @@ export function destroyAllCharts(preserveWidgets?: HTMLElement | null, owner?: H
 		dispose();
 		pomodoroSubscriptions.delete(widget);
 	}
-	for (const [, chart] of chartInstances) {
+	for (const [key, chart] of chartInstances) {
+		if (owner && !owner.contains(chart.canvas)) continue;
+		if (preserveWidgets?.contains(chart.canvas)) continue;
 		chart.destroy();
+		chartInstances.delete(key);
 	}
-	chartInstances.clear();
 	for (const [id, content] of countdownTimers) {
+		if (owner && !owner.contains(content)) continue;
 		if (preserveWidgets && preserveWidgets.contains(content)) continue;
 		window.clearInterval(id);
 		countdownTimers.delete(id);
@@ -303,6 +306,7 @@ export function sidebarWidgetSignature(
 	quickActionsSig: string,
 ): string {
 	return JSON.stringify({
+		layout: settings.layoutMode,
 		// The stacked widget area has a different internal structure (quick
 		// actions card pinned leftmost + column-major strip wrapper), so a
 		// layout switch must rebuild rather than re-attach the previous mode's
@@ -383,6 +387,7 @@ function saveSingletonBackground(
 	plugin.refreshAllDashboards();
 }
 
+/** 侧栏与沉浸式共用上游组件构建器，宿主注入统一 Capture。 */
 export function renderSidebarWidgets(
 	container: HTMLElement,
 	settings: import('./types').DashboardSettings,
@@ -396,59 +401,84 @@ export function renderSidebarWidgets(
 	renderQuickActions?: (container: HTMLElement) => void,
 	renderQuickCapture?: (container: HTMLElement) => void,
 ): HTMLElement | null {
-	const anyEnabled = settings.widgetWeatherEnabled || settings.pomodoroEnabled || settings.widgetLunarEnabled || settings.widgetYearProgressEnabled || settings.widgetCalendarEnabled || settings.widgetHabitEnabled || settings.widgetExpenseEnabled || (settings.albums?.length ?? 0) > 0 || (settings.anniversaryEnabled && (settings.anniversaries?.length ?? 0) > 0) || (settings.countdownEnabled && (settings.countdowns?.length ?? 0) > 0) || settings.readingEnabled || (settings.widgetQuickActionsEnabled && !!renderQuickActions) || (settings.widgetMusicEnabled && !Platform.isPhone);
-	if (!anyEnabled && !renderQuickCapture) return null;
-
 	const stacked = isStackedLayout(settings);
-	// Unchanged inputs: keep the previous DOM (and its live timers/listeners).
-	// The layout marker check is local defense-in-depth on top of the caller's
-	// signature gate: a side-built area (flat children) must never re-attach
-	// into a stacked render (strip wrapper expected) or vice versa, even if a
-	// future caller forgets to include the layout in its signature.
-	if (reuse && reuse.isConnected === false && reuse.childElementCount > 0
-		&& reuse.dataset.layout === (stacked ? 'stacked' : 'side')) {
+	if (reuse && !reuse.isConnected && reuse.childElementCount > 0 && reuse.dataset.layout === (stacked ? 'stacked' : 'side')) {
 		container.appendChild(reuse);
 		return reuse;
 	}
-
+	const ordered = sortWidgetEntries(buildWidgetEntries(settings, app, { pomodoroService, readingService, holidayData, onOpenNote, renderQuickActions, renderQuickCapture }), settings);
+	if (!ordered.length) return null;
 	const widgetArea = container.createDiv({ cls: 'dashboard-sidebar-widgets' });
 	widgetArea.dataset.layout = stacked ? 'stacked' : 'side';
+	const buildOrder = stacked ? [...ordered.filter(entry => entry.key === 'quickActions'), ...ordered.filter(entry => entry.key !== 'quickActions')] : ordered;
+	let stripRow: HTMLElement | null = null;
+	const spans = stacked ? resolveStackedSpans(buildStackedSpanSpecs(buildOrder.map(entry => entry.key), { habit: settings.habitHeightRatio, reading: settings.readingHeightRatio, albums: settings.albums })) : null;
+	for (let i = 0; i < buildOrder.length; i++) {
+		const entry = buildOrder[i]!;
+		const host = stacked ? (stripRow ??= widgetArea.createDiv({ cls: 'dashboard-sidebar-widgets-row' })) : widgetArea;
+		const el = mountWidgetCard(entry, host, app, settings);
+		if (el && spans && isTieredWidgetKey(entry.key)) el.setCssProps({ '--db-widget-span': String(spans[i] ?? RATIO_SPAN.full) });
+	}
+	if (onWidgetReorder) setupWidgetDnD(widgetArea, ordered.map(entry => entry.key), onWidgetReorder, stacked);
+	return widgetArea;
+}
 
-	const DEFAULT_ORDER = ['quickCapture', 'quickActions', 'lunar', 'weather', 'pomodoro', 'reading', 'countdown', 'anniversary', 'yearProgress', 'calendar', 'habit', 'expense', 'album', 'music'];
-	// Legacy: an order saved before quick buttons were a widget lacks the
-	// 'quickActions' key. Render it first there (its historical spot, above the
-	// other widgets) until the user drags it elsewhere.
-	const order = settings.widgetOrder?.length ? settings.widgetOrder : DEFAULT_ORDER;
+type WidgetEntry = { key: string; render: (host: HTMLElement) => void };
 
-	type WidgetEntry = { key: string; render: (host: HTMLElement) => void };
+/** Services/callbacks the widget card builders may need — injected so the
+ *  immersive grid can mount the same cards without a DashboardView. */
+export interface WidgetBuildDeps {
+	renderQuickCapture?: (container: HTMLElement) => void;
+	pomodoroService?: PomodoroService;
+	readingService?: ReadingService;
+	holidayData?: Record<string, HolidayInfo>;
+	onOpenNote?: (file: TFile, line?: number) => void;
+	renderQuickActions?: (container: HTMLElement) => void;
+}
+
+export const DEFAULT_WIDGET_ORDER: string[] = ['quickActions', 'quickCapture', 'lunar', 'weather', 'pomodoro', 'reading', 'countdown', 'anniversary', 'yearProgress', 'calendar', 'habit', 'expense', 'album', 'music'];
+
+/** Build one entry per ENABLED widget card (enable order, not display order).
+ *  Shared by the side/stacked rail (renderSidebarWidgets) and the immersive
+ *  grid, so both layouts mount byte-identical cards.
+ *
+ *  `memberKeys` switches the membership SOURCE: side/stacked boards follow the
+ *  global settings toggles (undefined); immersive boards pass the keys listed
+ *  in that workspace's arrangement — widget membership there is per-board,
+ *  managed in the UI, independent of the global switches. */
+export function buildWidgetEntries(settings: DashboardSettings, app: App, deps: WidgetBuildDeps, memberKeys?: Set<string>): WidgetEntry[] {
+	const { pomodoroService, readingService, holidayData, onOpenNote, renderQuickActions, renderQuickCapture } = deps;
+	// member?: undefined = global-toggle mode; boolean = membership mode.
+	const member = (key: string, globallyEnabled: boolean): boolean =>
+		memberKeys ? memberKeys.has(key) : globallyEnabled;
 	const enabled: WidgetEntry[] = [];
-	if (renderQuickCapture) enabled.push({ key: 'quickCapture', render: renderQuickCapture });
-	if (settings.widgetQuickActionsEnabled && renderQuickActions) {
+	if (member('quickActions', settings.widgetQuickActionsEnabled) && renderQuickActions) {
 		const renderQuick = renderQuickActions;
 		enabled.push({ key: 'quickActions', render: (host) => { renderQuick(host); } });
 	}
-	if (settings.widgetLunarEnabled) {
+	if (member('quickCapture', settings.widgetQuickCaptureEnabled !== false) && renderQuickCapture) enabled.push({ key: 'quickCapture', render: renderQuickCapture });
+	if (member('lunar', settings.widgetLunarEnabled)) {
 		enabled.push({ key: 'lunar', render: (host) => renderSidebarLunarWidget(host, holidayData ?? {}, app) });
 	}
-	if (settings.widgetYearProgressEnabled) {
+	if (member('yearProgress', settings.widgetYearProgressEnabled)) {
 		enabled.push({ key: 'yearProgress', render: (host) => renderSidebarYearProgress(host, settings.yearProgressBackground, app, bg => saveSingletonBackground(app, 'yearProgressBackground', bg)) });
 	}
-	if (settings.widgetCalendarEnabled) {
+	if (member('calendar', settings.widgetCalendarEnabled)) {
 		enabled.push({ key: 'calendar', render: (host) => renderSidebarCalendar(host, settings, app, onOpenNote) });
 	}
-	if (settings.widgetWeatherEnabled) {
+	if (member('weather', settings.widgetWeatherEnabled)) {
 		enabled.push({ key: 'weather', render: (host) => renderSidebarWeather(host, settings, app) });
 	}
-	if (settings.pomodoroEnabled && pomodoroService) {
+	if (member('pomodoro', settings.pomodoroEnabled) && pomodoroService) {
 		enabled.push({ key: 'pomodoro', render: (host) => renderSidebarPomodoro(host, pomodoroService, settings, app, bg => saveSingletonBackground(app, 'pomodoroBackground', bg)) });
 	}
-	if (settings.readingEnabled && readingService) {
+	if (member('reading', settings.readingEnabled) && readingService) {
 		enabled.push({ key: 'reading', render: (host) => renderSidebarReading(host, readingService) });
 	}
-	if (settings.widgetHabitEnabled) {
+	if (member('habit', settings.widgetHabitEnabled)) {
 		enabled.push({ key: 'habit', render: (host) => renderSidebarHabitWidget(host, app, settings.habitBackground, bg => saveSingletonBackground(app, 'habitBackground', bg)) });
 	}
-	if (settings.widgetExpenseEnabled) {
+	if (member('expense', settings.widgetExpenseEnabled)) {
 		enabled.push({ key: 'expense', render: (host) => renderSidebarExpenseWidget(host, app) });
 	}
 	// Multiple album widgets: one card per albums[] entry, keyed album-<id>.
@@ -456,6 +486,7 @@ export function renderSidebarWidgets(
 	// renders through a per-album settings shim (spread — never mutated).
 	for (const cfg of settings.albums ?? []) {
 		const ref = cfg;
+		if (memberKeys && !memberKeys.has(`album-${ref.id}`)) continue;
 		enabled.push({
 			key: `album-${ref.id}`,
 			render: (host) => renderSidebarAlbumWidget(host, {
@@ -469,10 +500,12 @@ export function renderSidebarWidgets(
 		});
 	}
 	// Anniversary widgets: one card per anniversaries[] entry, keyed
-	// anniversary-<id> (the countdown multi-instance pattern).
-	if (settings.anniversaryEnabled) {
+	// anniversary-<id> (the countdown multi-instance pattern). The master
+	// toggle only rules in global mode; membership mode decides per instance.
+	if (memberKeys || settings.anniversaryEnabled) {
 		for (const cfg of settings.anniversaries ?? []) {
 			const ref = cfg;
+			if (memberKeys && !memberKeys.has(`anniversary-${ref.id}`)) continue;
 			enabled.push({ key: `anniversary-${ref.id}`, render: (host) => renderSidebarAnniversaryWidget(host, ref, app, updated => {
 			const plugin = getWidgetPlugin(app);
 			if (!plugin) return;
@@ -485,94 +518,61 @@ export function renderSidebarWidgets(
 		}) });
 		}
 	}
-	if (settings.widgetMusicEnabled && !Platform.isPhone) {
+	if (member('music', settings.widgetMusicEnabled) && !Platform.isPhone) {
 		enabled.push({ key: 'music', render: (host) => renderSidebarMusicWidget(host, settings.musicBackground, app, bg => saveSingletonBackground(app, 'musicBackground', bg)) });
 	}
-	if (settings.countdownEnabled) {
+	// Countdown: same master-toggle vs per-instance-membership split.
+	if (memberKeys || settings.countdownEnabled) {
 		for (const cd of settings.countdowns ?? []) {
 			const cdRef = cd;
+			if (memberKeys && !memberKeys.has(`countdown-${cd.id}`)) continue;
 			enabled.push({ key: `countdown-${cd.id}`, render: (host) => renderSidebarCountdown(host, cdRef, app) });
 		}
 	}
-
-	const ordered = sortByOrder(enabled, order);
-
-	// Stacked mode: quick actions is a regular card in the strip grid, always
-	// FIRST in the build order = leftmost column (it also exits the reorder
-	// system there, so the pinned position is deterministic). The saved drag
-	// order is untouched and still rules the side layout. The strip wrapper is
-	// created lazily on the first widget, so an empty enable set never gets a
-	// stray container.
-	const buildOrder = stacked
-		? [...ordered.filter(e => e.key === 'quickActions'), ...ordered.filter(e => e.key !== 'quickActions')]
-		: ordered;
-	let stripRow: HTMLElement | null = null;
-	const hostFor = (_key: string): HTMLElement => {
-		if (!stacked) return widgetArea;
-		stripRow ??= widgetArea.createDiv({ cls: 'dashboard-sidebar-widgets-row' });
-		return stripRow;
-	};
-
-	// Stacked-mode height ratios: rows of the 6-row widget grid per fraction.
-	const albumById = new Map((settings.albums ?? []).map(a => [String(a.id), a]));
-	// Adaptive column packing ("首选档 + 放不下自动换挡"): simulate the sparse
-	// column-first grid over the DOM order and resolve each TIERED card's
-	// span (habit / reading / album-*). Fixed cards keep their hardcoded
-	// per-type CSS spans; tiered cards get the resolved span inline as
-	// --db-widget-span, which their CSS rule reads with a historical fallback.
-	const spans = stacked
-		? resolveStackedSpans(buildStackedSpanSpecs(buildOrder.map(e => e.key), {
-			// Explicit mapping: the settings field names (habitHeightRatio)
-			// differ from the StackedRatios shape, and a whole-settings pass
-			// would type-check (all-optional interface) while silently reading
-			// undefined -> default tiers.
-			habit: settings.habitHeightRatio,
-			reading: settings.readingHeightRatio,
-			albums: settings.albums,
-		}))
-		: null;
-
-	for (let i = 0; i < buildOrder.length; i++) {
-		const { key, render } = buildOrder[i]!;
-		const host = hostFor(key);
-		const childCount = host.children.length;
-		render(host);
-		const el = host.children[childCount] as HTMLElement | undefined;
-		if (el) {
-			el.dataset.widgetKey = key;
-			// The quick-actions section carries its own section classes; give it
-			// the widget class too so it joins the drag-to-reorder system.
-			if (key === 'quickActions') {
-				el.addClass('dashboard-sidebar-widget');
-				// Card background + config gear INSIDE the header's button group
-				// (left of palette/add) — a corner button would overlap them.
-				applyWidgetBackground(el, settings.quickActionsBackground, app, { skipFrame: true });
-				const btnGroup = el.querySelector<HTMLElement>('.dashboard-qa-btn-group');
-				if (btnGroup) {
-					const gear = appendInlineBackgroundButton(btnGroup, app, settings.quickActionsBackground,
-						bg => saveSingletonBackground(app, 'quickActionsBackground', bg));
-					btnGroup.insertBefore(gear, btnGroup.firstChild);
-				}
-			}
-			// Album cards carry their config id (the multi-instance refresh
-			// matches on it).
-			if (key.startsWith('album-')) {
-				const cfg = albumById.get(key.slice('album-'.length));
-				if (cfg) el.dataset.albumId = String(cfg.id);
-			}
-			if (spans && isTieredWidgetKey(key)) {
-				el.setCssProps({ '--db-widget-span': String(spans[i] ?? RATIO_SPAN.full) });
-			}
-		}
-	}
-
-	if (onWidgetReorder) {
-		setupWidgetDnD(widgetArea, ordered.map(e => e.key), onWidgetReorder, stacked);
-	}
-	return widgetArea;
+	return enabled;
 }
 
-type WidgetEntry = { key: string; render: (host: HTMLElement) => void };
+/** Sort entries into display order. Legacy: an order saved before quick
+ *  buttons were a widget lacks the 'quickActions' key — it keeps its
+ *  historical first spot until the user drags it elsewhere. */
+export function sortWidgetEntries(entries: WidgetEntry[], settings: DashboardSettings): WidgetEntry[] {
+	const order = settings.widgetOrder?.length ? settings.widgetOrder : DEFAULT_WIDGET_ORDER;
+	return sortByOrder(entries, order);
+}
+
+/** Mount one widget card into `host` and stamp it (data-widget-key, the
+ *  quick-actions widget classes/background gear, the album instance id).
+ *  Returns the card element, or null when the builder attached nothing
+ *  (defensive — every builder appends exactly one child). */
+export function mountWidgetCard(entry: WidgetEntry, host: HTMLElement, app: App, settings: DashboardSettings): HTMLElement | null {
+	const childCount = host.children.length;
+	entry.render(host);
+	const el = host.children[childCount] as HTMLElement | undefined;
+	if (!el) return null;
+	const key = entry.key;
+	el.dataset.widgetKey = key;
+	// The quick-actions section carries its own section classes; give it
+	// the widget class too so it joins the drag-to-reorder system.
+	if (key === 'quickActions') {
+		el.addClass('dashboard-sidebar-widget');
+		// Card background + config gear INSIDE the header's button group
+		// (left of palette/add) — a corner button would overlap them.
+		applyWidgetBackground(el, settings.quickActionsBackground, app, { skipFrame: true });
+		const btnGroup = el.querySelector<HTMLElement>('.dashboard-qa-btn-group');
+		if (btnGroup) {
+			const gear = appendInlineBackgroundButton(btnGroup, app, settings.quickActionsBackground,
+				bg => saveSingletonBackground(app, 'quickActionsBackground', bg));
+			btnGroup.insertBefore(gear, btnGroup.firstChild);
+		}
+	}
+	// Album cards carry their config id (the multi-instance refresh
+	// matches on it).
+	if (key.startsWith('album-')) {
+		const cfg = (settings.albums ?? []).find(a => String(a.id) === key.slice('album-'.length));
+		if (cfg) el.dataset.albumId = String(cfg.id);
+	}
+	return el;
+}
 
 function sortByOrder(items: WidgetEntry[], order: string[]): WidgetEntry[] {
 	const orderMap = new Map(order.map((k, i) => [k, i]));
@@ -2237,7 +2237,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 		applyPairWidth(el, column, data, callbacks);
 	}
 
-	attachSectionResizeHandle(el, column, callbacks);
+	if (settings?.layoutMode !== 'immersive') attachSectionResizeHandle(el, column, callbacks);
 
 	const header = el.createDiv({ cls: 'dashboard-section-header' });
 
@@ -2746,7 +2746,7 @@ export function renderSection(column: DashboardColumn, callbacks: RenderCallback
 	return el;
 }
 
-function renderCard(card: DashboardCard, columnName: string, sectionType: string, callbacks: RenderCallbacks, app: App, data?: DashboardData, settings?: DashboardSettings, sectionShowCover = true): HTMLElement {
+export function renderCard(card: DashboardCard, columnName: string, sectionType: string, callbacks: RenderCallbacks, app: App, data?: DashboardData, settings?: DashboardSettings, sectionShowCover = true): HTMLElement {
 	const el = createDiv();
 	el.addClass('dashboard-card', `dashboard-card--${card.type}`);
 	el.dataset.cardId = card.id;

@@ -1,6 +1,7 @@
 import type { Language } from './i18n';
 import type { CalendarTaskFilter } from './alltasks-scan';
 import type { TFile } from 'obsidian';
+import type { WorkbenchLayout } from './workbench-layout';
 import type {
 	WereadContentType,
 	WereadGroupBy,
@@ -9,7 +10,17 @@ import type {
 	WereadRecency,
 } from './weread-shelf-model';
 
-export type DashboardLayoutMode = 'side' | 'stacked';
+export type DashboardLayoutMode = 'side' | 'stacked' | 'immersive';
+
+export interface ImmersiveItem {
+	id: string;
+	w: number;
+	h: number;
+	fixed?: boolean;
+	x?: number;
+	y?: number;
+	[key: string]: unknown;
+}
 
 /** Fixed destination override for calendar-added tasks.
  *  - 'file': the task is inserted into one pinned note (created when missing);
@@ -927,6 +938,9 @@ export interface DashboardColumn {
 }
 
 export interface DashboardData {
+	layout?: DashboardLayoutMode;
+	immersive?: ImmersiveItem[];
+	workbenchLayout?: WorkbenchLayout;
 	/** Board format version, independent from the Workspace artifact schema. */
 	workbenchSchema?: number;
 	banner: BannerData;
@@ -1019,6 +1033,7 @@ export interface RenderCallbacks {
 	onQuickNoteCreate(preset: QuickNotePreset): void;
 	onQuickNoteCapture(text: string): void | Promise<void>;
 	managedCapture?: boolean;
+	renderManagedCapture?(container: HTMLElement, compact?: boolean): void;
 	onOpenPinnedNote(note: PinnedNote): void;
 	onQuickCommand(cmd: QuickCommand): void;
 	onQuickNoteDaily(): void;

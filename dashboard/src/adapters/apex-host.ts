@@ -26,7 +26,7 @@ import {
 } from "../../apex/src/reading-mini-timer.js";
 import { generateDefaultMarkdown } from "../../apex/src/parser.js";
 import { teardownBasenameIndex } from "../../apex/src/renderer.js";
-import { type DashboardSettings } from "../../apex/src/types.js";
+import { type DashboardSettings, type DashboardLayoutMode } from "../../apex/src/types.js";
 import type { TaskInsertTarget } from "../../apex/src/daily-notes.js";
 import { DashboardView, DASHBOARD_VIEW_TYPE, DASHBOARD_SECTION_VIEW_TYPE } from "../../apex/src/view.js";
 import {
@@ -312,7 +312,7 @@ export class ApexHostAdapter implements ApexHost {
     });
   }
 
-  public async createWorkspace(name: string, presetId?: string): Promise<string | void> {
+  public async createWorkspace(name: string, presetId?: string, layout?: DashboardLayoutMode): Promise<string | void> {
     return this.runWorkspaceOp(async () => {
       const trimmed = name.trim();
       const path = nextWorkspacePath(
@@ -330,7 +330,11 @@ export class ApexHostAdapter implements ApexHost {
         }
         const context = this.workspaceContextChooser ? await this.workspaceContextChooser(presetId) : {};
         if (context === undefined) return undefined;
-        const markdown = this.workspaceMarkdownFactory?.(presetId, context) ?? generateDefaultMarkdown();
+        let markdown = this.workspaceMarkdownFactory?.(presetId, context) ?? generateDefaultMarkdown();
+        if (layout) {
+          const { parse, serialize } = await import('../../apex/src/parser.js');
+          const data = parse(markdown); data.layout = layout; markdown = serialize(data);
+        }
         await this.app.vault.create(path.endsWith(".md") ? path : `${path}.md`, markdown);
       } catch (error) {
         console.error("Workspace file creation failed:", error);
