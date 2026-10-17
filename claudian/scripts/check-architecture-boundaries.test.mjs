@@ -606,7 +606,7 @@ test('documented and scheduled npm commands exist in the package manifest', () =
   const { scripts } = JSON.parse(fs.readFileSync('package.json', 'utf8'));
   const files = [
     'README.md',
-    'CONTRIBUTING.md',
+    'AGENTS.md',
     ...(fs.existsSync('.github/workflows')
       ? fs.readdirSync('.github/workflows')
         .filter(file => /\.ya?ml$/.test(file))

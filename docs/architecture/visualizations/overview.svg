@@ -13,7 +13,7 @@
 <g class="edge-group" data-a="human" data-b="dash"><path class="edge" d="M185.0,180 C185.0,227.5 185.0,227.5 185.0,275" marker-end="url(#arrow)"/><text class="edge-label" x="193.0" y="227.5" text-anchor="middle"></text></g>
 <g class="edge-group" data-a="dash" data-b="api"><path class="edge" d="M320,327.5 C367.5,327.5 367.5,327.5 415,327.5" marker-end="url(#arrow)"/><text class="edge-label" x="367.5" y="320.5" text-anchor="middle">HTTP 命令</text></g>
 <g class="edge-group" data-a="dash" data-b="vault"><path class="edge" d="M185.0,275 C185.0,243 945.0,243 945.0,295" marker-end="url(#arrow)"/><text class="edge-label" x="565.0" y="253" text-anchor="middle">直接读取 / 简单编辑</text></g>
-<g class="edge-group" data-a="dash" data-b="claudian"><path class="edge" d="M50,327.5 C22,327.5 22,832.5 50,832.5" marker-end="url(#arrow)"/><text class="edge-label" x="22" y="580.0" text-anchor="middle">okfBridge v1</text></g>
+<g class="edge-group" data-a="dash" data-b="claudian"><path class="edge" d="M320,327.5 C348,327.5 348,832.5 320,832.5" marker-end="url(#arrow)"/><text class="edge-label" x="348" y="580.0" text-anchor="middle">Bridge</text></g>
 <g class="edge-group" data-a="dash" data-b="widgets"><path class="edge" d="M185.0,380 C185.0,452.5 185.0,452.5 185.0,525" marker-end="url(#arrow)"/><text class="edge-label" x="193.0" y="452.5" text-anchor="middle"></text></g>
 <g class="edge-group" data-a="api" data-b="domain"><path class="edge" d="M550.0,380 C550.0,422.5 550.0,422.5 550.0,465" marker-end="url(#arrow)"/><text class="edge-label" x="558.0" y="422.5" text-anchor="middle"></text></g>
 <g class="edge-group" data-a="domain" data-b="workers"><path class="edge" d="M550.0,570 C550.0,617.5 550.0,617.5 550.0,665" marker-end="url(#arrow)"/><text class="edge-label" x="558.0" y="617.5" text-anchor="middle"></text></g>
@@ -30,11 +30,11 @@
 <text class="node-line" style="font-size:14.0px" x="67" y="132">阅读、编辑、明确选择用途</text>
 <text class="node-line" style="font-size:14.0px" x="67" y="153">Tasks / Dataview / 模板 / 日历</text>
 </g>
-<g class="node" data-node="dash" tabindex="0" role="button" aria-label="Dashboard · 统一 Apex 工作台"><title>一个工作台插件通过 okf-surface-sections 挂载共享 OkfDashboardView。直接读取 Vault；简单人类等价编辑使用 Vault API，转换、发布和语义状态机由 Engine 管理。</title><rect x="50" y="275" width="270" height="105" rx="12" fill="#e8f0ff" stroke="#4569bd" stroke-width="1.6"/><text class="node-title" style="font-size:15.6px" x="67" y="306" fill="#4569bd">Dashboard · 统一 Apex 工作台</text>
-<text class="node-line" style="font-size:14.0px" x="67" y="332">Apex 挂载八个共享业务视图</text>
+<g class="node" data-node="dash" tabindex="0" role="button" aria-label="Dashboard · 统一 Apex 工作台"><title>一个工作台插件通过 okf-surface-sections 挂载共享 OkfDashboardView。各工作台选择侧栏、上下或沉浸式布局，复用业务视图与原生组件服务。简单人类等价编辑使用 Vault API，转换、发布和语义状态机由 Engine 管理。</title><rect x="50" y="275" width="270" height="105" rx="12" fill="#e8f0ff" stroke="#4569bd" stroke-width="1.6"/><text class="node-title" style="font-size:15.6px" x="67" y="306" fill="#4569bd">Dashboard · 统一 Apex 工作台</text>
+<text class="node-line" style="font-size:14.0px" x="67" y="332">Apex 挂载共享业务视图</text>
 <text class="node-line" style="font-size:12.6px" x="67" y="353">简单编辑 / Engine 命令 / Codex 交接</text>
 </g>
-<g class="node" data-node="widgets" tabindex="0" role="button" aria-label="Apex 原生生活工具"><title>由 ApexHostAdapter 托管原生服务，维持各自 JSON/plugin 数据模型。工作台便签和布局保存在 dashboard: true 的 Markdown，属于用户数据。</title><rect x="50" y="525" width="270" height="105" rx="12" fill="#e8f0ff" stroke="#4569bd" stroke-width="1.6"/><text class="node-title" style="font-size:19.0px" x="67" y="556" fill="#4569bd">Apex 原生生活工具</text>
+<g class="node" data-node="widgets" tabindex="0" role="button" aria-label="Apex 原生生活工具"><title>由 ApexHostAdapter 托管原生服务，维持各自 JSON/plugin 数据模型。工作台便签、清单和布局保存在 dashboard: true 的 Markdown；沉浸式小组件成员属于各自工作台，实例配置和共享服务维持原有归属。</title><rect x="50" y="525" width="270" height="105" rx="12" fill="#e8f0ff" stroke="#4569bd" stroke-width="1.6"/><text class="node-title" style="font-size:19.0px" x="67" y="556" fill="#4569bd">Apex 原生生活工具</text>
 <text class="node-line" style="font-size:14.0px" x="67" y="582">习惯 / 记账 / 阅读 / 专注</text>
 <text class="node-line" style="font-size:14.0px" x="67" y="603">音乐、媒体与 widget state</text>
 </g>

@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "reviewed_at": "2026-10-16",
-  "baseline_commit": "122286ce",
-  "scope": "核对快速记录、项目类别与工作台交互整合后的接口和数据归属；不代表生产部署状态。",
+  "reviewed_at": "2026-10-17",
+  "baseline_commit": "55ea2c85",
+  "scope": "核对沉浸式布局合并后的工作台布局持久化、共享业务视图与原生组件数据归属；不代表生产部署状态。",
   "charts": [
     {
       "id": "overview",
@@ -66,11 +66,11 @@
           "y": 275,
           "title": "Dashboard · 统一 Apex 工作台",
           "lines": [
-            "Apex 挂载八个共享业务视图",
+            "Apex 挂载共享业务视图",
             "简单编辑 / Engine 命令 / Codex 交接"
           ],
           "kind": "ui",
-          "detail": "一个工作台插件通过 okf-surface-sections 挂载共享 OkfDashboardView。直接读取 Vault；简单人类等价编辑使用 Vault API，转换、发布和语义状态机由 Engine 管理。",
+          "detail": "一个工作台插件通过 okf-surface-sections 挂载共享 OkfDashboardView。各工作台选择侧栏、上下或沉浸式布局，复用业务视图与原生组件服务。简单人类等价编辑使用 Vault API，转换、发布和语义状态机由 Engine 管理。",
           "source": "dashboard/src/features/workbench/okf-surface-sections.ts",
           "w": 270,
           "h": 105
@@ -85,7 +85,7 @@
             "音乐、媒体与 widget state"
           ],
           "kind": "ui",
-          "detail": "由 ApexHostAdapter 托管原生服务，维持各自 JSON/plugin 数据模型。工作台便签和布局保存在 dashboard: true 的 Markdown，属于用户数据。",
+          "detail": "由 ApexHostAdapter 托管原生服务，维持各自 JSON/plugin 数据模型。工作台便签、清单和布局保存在 dashboard: true 的 Markdown；沉浸式小组件成员属于各自工作台，实例配置和共享服务维持原有归属。",
           "source": "dashboard/src/adapters/apex-host.ts",
           "w": 270,
           "h": 105
@@ -297,9 +297,9 @@
         {
           "a": "dash",
           "b": "claudian",
-          "label": "okfBridge v1",
+          "label": "Bridge",
           "dashed": false,
-          "side": "left"
+          "side": "right"
         },
         {
           "a": "dash",

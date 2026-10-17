@@ -2,36 +2,21 @@
 
 [文档入口](../README.md#文档入口) · [架构与数据](architecture/README.md) · [部署配置](DEPLOYMENT.md)
 
-Engine API、CLI、Feed 协议与插件交接集中在这里。接口实现与当前测试用于核对精确参数，Vault Artifact 格式仍以 Contracts 为准。
+本文维护公开协议与调用约定；模块职责见架构，Artifact 格式见 Contracts。
 
 按需阅读：[API](#领域-api) · [转换协议](#conversion) · [Feed](#feeds) · [CLI](#cli) · [Claudian Bridge](#bridge) · [插件命令](#commands) · [Web Clipper](#web-clipper)。
 
 ## 本地 API 生命周期
 
-Dashboard 插件在启用本地服务管理时随 Obsidian 加载启动 Engine，插件卸载或 Obsidian 退出时
-停止所持有的进程。常规测试环境的启动与退出见[开发指南](DEVELOPMENT.md#更新与启停)。
-需要单独诊断时先停止受管测试服务，再用已核对的测试部署配置手工启动；服务只允许绑定 loopback：
+Dashboard 持有本地 Engine，使用 `--exit-on-stdin-close` 随标准输入关闭退出。
+常规启停见[开发指南](DEVELOPMENT.md#更新与启停)；独立诊断先停止受管测试服务，再使用匹配测试配置：
 
 ```powershell
 uv run --project engine okf-server --config '<测试 State>\config\deployment.json'
 ```
 
-目标路径与端口按开发指南及部署配置核对。手动服务在调试结束后自行退出，再恢复受管启动，
-避免同一环境被重复启动。首次启动会在指定 State 的 `secrets/local-api-token` 生成随机 token。
-正式安装由版本包安装器配置插件。
-插件通过标准输入持有服务进程，服务器使用 `--exit-on-stdin-close` 感知宿主退出。
-
-## 读取与命令边界
-
-Dashboard 分为“读取面”和“命令面”：
-
-- Today、Inbox、Learning、Projects、Knowledge、Life 通过 Obsidian Vault API 直接读取 Markdown，不依赖 HTTP；
-- 普通日记、Capture、课程和项目可由插件直接写 Vault；AI 调用、API/CLI 文档导入及本机 Vault 导入申请的执行、Feed cache、索引写入、撤销和 System 状态需要访问 Vault 外的 Runtime State、Codex、MinerU/MarkItDown 或 Git，因此由本地 API 执行；
-- Dashboard 打开普通页面不会重复探测服务。用户点击明确的写入动作时检查一次；请求失败时再恢复服务并显示可重试错误。
-
-这种边界保证“笔记能不能看”不受后台服务影响，同时把浏览器插件不应直接持有的 token、外部进程和 Vault 外文件留在受控服务中。
-
-工作台在各设备本机通过 Vault API 保存原件和申请，不依赖 HTTP 上传；桌面 Engine 负责校验、登记和转换队列。
+调试结束退出手动进程后再恢复受管启动。首次 token 写入 State 的 `secrets/local-api-token`。
+Vault 读取、原生写入与 Engine 命令的归属见[模块边界](architecture/README.md#module-boundaries)。
 
 ## 鉴权与路径
 
@@ -93,7 +78,8 @@ Dashboard 向 Engine 发起写入时附带当前 Vault fingerprint；Engine 拒�
 
 ## 运行状态与超时
 
-不需要为每次普通读取做重复健康检查。增量索引是 single-flight：上一轮未完成时只合并为下一轮一次同步；根 `index.md` 是稳定人工目录，不写入最近活动或任务投影，也不是 AI 检索依赖。转换服务在 System 中只展示配置状态，实际连接在执行转换时检查；索引和备份显示各自运行状态。具体动作失败时保留失败记录并提供重试。转换参数与旧 `parser` 兼容规则见[转换协议](#conversion)。
+普通浏览不重复健康探测，明确写入动作检查一次，失败时恢复服务并提供可重试错误。
+增量索引为 single-flight，未完成期间只合并为下一轮同步。转换目录只读配置，执行时才连接服务。
 
 语义 Worker 不用心跳伪装进度：心跳只表示进程存活，Operation Record 的 `stage` 和
 `stage_detail` 才表示当前步骤。每次检索和 Codex 生成都在可终止的子进程中执行；默认整项上限
@@ -160,7 +146,7 @@ HTTP 限流、服务异常、网络中断和轮询超时进入延迟重试；认
 
 AI Daily 和 PkuHoleObserver 继续作为外部生产者。AI Daily 使用专用只读 forced-command SSH alias 和 `feed-export.v1` 游标，从上次成功位置增量补齐所有期次；只有一页中的文档全部校验并写入本机 cache 后才推进本机游标。任一 stream 暂时失败时保留其它 stream 与 last-good 内容，断网后由下次计划任务从原游标补拉。PkuHoleObserver 继续获取 JSON/ZIP 快照。原始 Feed cache 放在 Vault 外的 `Runtime State/feed-cache/`；同步不会确认、移动或删除远端文件。
 
-AI Daily 是内部生产器名称，不是一个单独的用户页面。它的四个导出 stream 在 Dashboard 中按真实用途分开：
+四个导出 stream 分别路由：
 
 - `hotspot` → Today 的“中国热点”；
 - `news` → Today 的“AI 资讯”；
@@ -169,7 +155,7 @@ AI Daily 是内部生产器名称，不是一个单独的用户页面。它的�
 
 远端 `ai_papers` collection 映射到 `feed-export.v1` 的 `papers` stream，但不进入可管理的 learning Registry。它在本地使用独立的 `Runtime State/feed-sync/ai-daily-papers-export-cursor.json`，因此首次回填历史周刊和后续增量同步都不会移动原有的 `ai-daily-export-cursor.json`。论文卡片保留最新一期的完整排名、标题、说明和原始链接，不提供启用、停用或移除等订阅操作。
 
-PkuHoleObserver 的 TreeHole 快照进入 Today 的“树洞热榜”。Today 只负责浏览三个最新的每日更新；Reading 使用同一套 Feed 期次、条目和判断界面浏览持续累积的订阅历史。Reading 不是第二个 Learning：只有用户明确选择“想学习”后，对应 Source 才会进入 Learning。
+PkuHoleObserver 的 TreeHole 快照进入 Today 的树洞热榜。界面操作见[订阅阅读](USER-GUIDE.md#订阅阅读)。
 
 Reading 的订阅管理通过另一把专用 forced-command SSH alias 调用 `source-admin.v1`，不允许本机拼接或发送远端 shell 命令。新增来源必须先预览再确认；预览短期保存在 Runtime State，并绑定规范 URL 和 registry revision。确认、启用、停用和移除都使用 CAS revision 与 idempotency key。移除表示停止后续抓取：有历史内容的来源卡继续保留并标为“已移除”，尚无历史的空卡从 Reading 消失。
 
@@ -193,7 +179,8 @@ Reading 的订阅管理通过另一把专用 forced-command SSH alias 调用 `so
 - `feeds/ai-daily/YYYY/<digest>.md`
 - `feeds/treehole/YYYY/<digest>.md`
 
-Dashboard 的 Today、Reading 和原生 Digest 复用同一种条目语义与判断结果，不各自维护一套动作。Today 中三个每日更新区域独立加载、独立显示各自最近一期，卡片内可滚动浏览该期条目，原始正文打开原生 Digest；Today 明确排除 `learning` 和 `papers`，某一路当天没有更新或同步失败时，也不会隐藏或阻塞其它来源。Reading 顶部先显示可滚动浏览完整一期的 AI Papers 系统卡片，再按稳定的 `source_id` 把普通订阅组织成来源卡片；订阅卡只摘要该来源最近一期，进入来源后才按期分页加载它的历史。旧缓存没有来源身份时统一归入“来源未标注”，不按文章链接域名误拆为多个订阅。完整正文、TreeHole 评论和人工判断仍在原生 Digest 中完成。
+Today、Reading 和 Digest 共享条目与决定身份。三个每日 stream 独立加载和保存 last-good，Today 排除 learning/papers。
+普通订阅按稳定 `source_id` 分组；旧缓存缺身份时归入“来源未标注”，不根据文章域名拆分来源。
 
 ### 决定与后台交接
 
@@ -284,13 +271,6 @@ $report.actionable
 Dashboard 通过 Claudian 暴露的冻结对象 `okfBridge v1` 交接。请求／结果形状或语义变化需要新协议版本；
 保持公开协议的内部改动维持 version 1。上游来源、适配边界及更新流程见[Claudian 上游记录](../claudian/UPSTREAM.md)。
 
-### OKF 的窄接缝
-
-OKF 专属代码只允许集中在：
-
-- `claudian/src/integrations/okf/OkfBridge.ts`：公开交接协议。
-- `claudian/src/integrations/okf/OkfPromptPolicy.ts`：OKF 提示模式。
-
 公开类型如下：
 
 ```ts
@@ -337,18 +317,6 @@ Claudian 校验 Vault 相对路径与模式，打开或创建并主动显示 Cod
 
 Bridge 始终选择 Codex。当前活动页若是 Claude，会新建 Codex 会话；Codex 未启用或没有可用模型时明确报错，不回退到 Claude，也不复用 Anthropic 登录状态。
 
-### 实际上下文组成
-
-每轮上下文分为五层：
-
-1. Codex 产品自身的系统层；
-2. Claudian 当前提示模式对应的短基础指令；
-3. Vault 目录作用域内的 `AGENTS.md`；
-4. 本轮任务匹配或 Dashboard 明确指定的单个 Skill；
-5. 用户消息、会话历史和已经明确附加或真实读取的文件。
-
-Workspace Kit 位于 `engine/workspace/`，安装时同步到 Vault 的 `AGENTS.md`、`.agents/skills/` 和 `system/`。Claudian 不复制 Contracts、模板或 Skills，也不会在每轮塞入全部 Obsidian 教程。
-
 ### 提示模式
 
 | 模式 | 用途 |
@@ -357,18 +325,9 @@ Workspace Kit 位于 `engine/workspace/`，安装时同步到 Vault 的 `AGENTS.
 | `claudian-full` | 上游完整提示；用于通用 Claudian 行为或兼容排查 |
 | `custom-replace` | 高级用户提供完整替代基础指令 |
 
-模式是替换，不是在长提示后追加“忽略前文”。切换只影响新会话，已开始会话不会在中途悄然改变基础规则。
+模式替换基础指令，切换仅影响新会话。上下文组成和后台任务归属见[Claudian 接入](architecture/README.md#claudian-接入)。
 
 `read` 用于问答和比较；`write` 用于用户明确要求的整理或修改；`plan` 只制定方案。最终写入仍受 Codex 审批、Workspace 边界和适用 Contract 约束。
-
-### 交互任务与后台任务
-
-两条执行路径共享同一个 Vault、Contracts 和 Skills，但体验不同：
-
-- Dashboard 的“在 Claudian 中生成/完善”创建可见 Codex 会话，用户可以补充要求后发送。
-- Engine 的“后台生成”创建可观察的语义任务，不要求打开 Claudian；Dashboard 展示 queued/running/completed/failed 等状态与结果入口。
-
-后台生成不是确定性转换。确定性的部分是任务入队、状态持久化、目标路径和原子发布；语义内容仍由 Codex 生成。Engine 按 source、用途和 course/project 上下文去重任务，避免同一目标被重复提交。
 
 <a id="commands"></a>
 
@@ -402,17 +361,19 @@ Workspace Kit 位于 `engine/workspace/`，安装时同步到 Vault 的 `AGENTS.
 | `okf-workspace-dashboard:open-life` | 打开日记与复盘 |
 | `okf-workspace-dashboard:open-system` | 打开后台处理与系统诊断 |
 
-QuickAdd 最推荐只绑定第一个命令；具体路径、YAML 和模板仍由 Workspace Contracts 维护。这样 QuickAdd
-配置损坏或未安装时，命令面板和 Dashboard 仍能完成同样操作。
+QuickAdd 可绑定第一个命令；路径、YAML 与模板由 Workspace 维护。
 
 <a id="web-clipper"></a>
 
 ## Web Clipper 发布
 
-Web Clipper 模板输出 `ingested_via: web-clip` 的 Capture，不调用 AI、不持有本地 API token。浏览器配置与用户流程见[使用指南](USER-GUIDE.md#5-网页剪藏)。
+Web Clipper 模板输出 `ingested_via: web-clip` 的 Capture，不调用 AI、不持有本地 API token。浏览器配置见[使用指南](USER-GUIDE.md#网页剪藏)。
 
 Capture 成功发布为 Source/Source Text 后删除；明确丢弃进入本地回收站。是否待处理由文件存在表达，不额外写 `capture_status`。归属和用途写在 `Source.uses[]`，不改写来源身份。
 
 同一 URL 忽略 fragment 和常见跟踪参数去重；重复全文更新 Source Text，选区和高亮合并。与 Feed 的相同来源双向复用，保留首次 `ingested_via`；后来渠道的独有正文、指标和评论写入幂等补充区，不覆盖先前正文。
 
 先保留网页远程图片链接，发布后后台将安全可访问的常规图片镜像到 `sources/assets/<source-slug>/` 并改写正文；失败保留远程链接且不阻塞发布。`OKF_WEB_MEDIA_MIRROR=false` 关闭镜像，也可手工调用 Obsidian “Download attachments for current file”。
+
+布局迁移仅将旧 `Clippings/` 中具有官方默认 `source/created/tags: clippings` 精确签名的笔记移入 Capture 路径，
+补齐 Workspace 元数据并保留正文/未知字段；个人结构与已有同名目标不覆盖。
