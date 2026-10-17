@@ -2,7 +2,7 @@
 
 更新：2026-10-17。当前功能提交为 `65884bdc`（添加菜单与顶部快速记录），基线 `77381edb`。
 已在固定 OKF-Test 安装验收候选，正式环境未部署。采用边界见 [UPSTREAM.md](UPSTREAM.md)，验收要求见[开发指南](../docs/DEVELOPMENT.md)。
-本地专项验收通过；提交 CI 存在失败项，尚未满足完整 CI 通过条件。
+本地专项验收通过；源码基线 `57e29c21` 的六项 CI 全部通过。1.0 发布验收见[版本记录](../docs/releases/1.0.0.md)。
 
 ## 最近验收
 
@@ -11,7 +11,7 @@
 
 | 范围 | 结果与证据 |
 | --- | --- |
-| 提交 CI | [workspace-ci](https://github.com/Susurrium/okf-workspace/actions/runs/39002561496) 五项通过，Claudian Windows 失败：`CodexConversationHistoryService.test.ts` 两项历史恢复测试在第 85 行断言父历史文件读取次数时失败，原因尚未定位。完整日志保存于 `work/docs-review-65884bdc/ci-failed.log` |
+| 提交 CI | `57e29c21` 的 [workspace-ci](https://github.com/Susurrium/okf-workspace/actions/runs/39005974068) 六项全部通过，包含 Claudian Windows |
 | 自动化 | Dashboard 类型、65 个文件/472 项测试及构建通过；Apex 六项专项、lint、独立构建通过；文档生成及 7 项回归通过。对应 `*-final.log`、`apex-*.log`、`docs-*.log` |
 | 添加菜单 | 顺序/分隔线、分区选择器及真实添加；无便利贴时创建分区，分别添加单张便签/清单；小组件添加与重复禁用。`menu.json`、`section.json` |
 | 显示与会话 | 四种顶部开关组合、空快捷行、配置读取/保存/渲染；各位置独立显示；刷新/布局切换保留节点、焦点、选区，双窗格/展开共享草稿，销毁取消订阅。`matrix.json`、`shared.json` |
@@ -28,6 +28,7 @@
 
 | 版本与主题 | 结果定位与证据 |
 | --- | --- |
+| `65884bdc` 历史 CI 失败 | [workspace-ci](https://github.com/Susurrium/okf-workspace/actions/runs/39002561496) 的 Claudian Windows 两项历史恢复测试失败，原始日志保存在 `work/docs-review-65884bdc/ci-failed.log`；当前 CI 状态见上表 |
 | `55ea2c85` 沉浸式移植 | PR #10，源码 `72736b81`；`work/immersive-workbench/work/upstream-port/receipt.json`。布局、拖动/缩放、Capture、并发与实机视觉；上游/本地核心在共享夹具中的卡片几何一致，未安装完整上游插件；未部署正式环境 |
 | `122286ce` 项目与快速记录整合 | PR #9；`work/branch-integration/` 含根检查、实机、候选和清理回执；Apex 日志 `work/integration-apex-checks/`；未部署正式环境 |
 | Apex 选择性更新 | `work/apex-runtime-results.json`、`work/apex-visual-20261016/receipt.json`、`work/apex-prepush-checks/`；网易云只验证搜索，未验证微信读书在线调用 |
