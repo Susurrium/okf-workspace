@@ -134,6 +134,7 @@ export class DashboardView extends ItemView implements HoverParent {
 	private immWidgetEls = new Map<string, HTMLElement>();
 	private widgetCacheEl?: HTMLElement;
 	private readonly captureMounts = new Map<HTMLElement, () => void>();
+	private topCaptureEl?: HTMLElement;
 	private focusedSection?: string;
 	private focusedSearch: SectionSearchState[] = [];
 	private focusedConfig: Pick<DashboardColumn, 'libraryConfig' | 'dataviewConfig' | 'extensionConfig'> = {};
@@ -389,6 +390,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		this.popoverModal?.close();
 		this.popoverModal = null;
 		this.runCleanup();
+		this.topCaptureEl = undefined;
 		this.unregisterVaultListeners();
 		this.stopReminderChecker();
 		this.stopWeatherRefresh();
@@ -605,6 +607,7 @@ export class DashboardView extends ItemView implements HoverParent {
 			this.widgetCacheEl.addClass('dashboard-widget-cache--hidden');
 			if (this.sidebarWidgetsEl) this.widgetCacheEl.appendChild(this.sidebarWidgetsEl);
 			for (const el of this.immWidgetEls.values()) this.widgetCacheEl.appendChild(el);
+			if (this.topCaptureEl) this.widgetCacheEl.appendChild(this.topCaptureEl);
 		}
 		const widgetSig = sidebarWidgetSignature(
 			this.layoutSettings(data),
@@ -615,7 +618,10 @@ export class DashboardView extends ItemView implements HoverParent {
 		);
 		const preserveWidgets = (!!this.sidebarWidgetsEl || this.immWidgetEls.size > 0) && this.sidebarWidgetsSig === widgetSig;
 
-		this.runCleanup(preserveWidgets);
+		const preserveTopCapture = !this.sectionPage && !!this.plugin.quickCapture && this.plugin.settings.quickNotesEnabled && this.plugin.settings.quickCaptureEnabled;
+		this.runCleanup(preserveWidgets, preserveTopCapture);
+		this.topCaptureEl?.remove();
+		if (!preserveTopCapture) this.topCaptureEl = undefined;
 		this.sidebarWidgetsEl?.remove();
 		for (const el of this.immWidgetEls.values()) el.remove();
 		this.widgetCacheEl?.remove(); this.widgetCacheEl = undefined;
@@ -1628,7 +1634,13 @@ export class DashboardView extends ItemView implements HoverParent {
 		const collapseWorkspacePath = this.workspacePath;
 		return {
 			managedCapture: !!this.plugin.quickCapture,
-			renderManagedCapture: (container: HTMLElement, compact?: boolean) => this.renderCaptureWidget(container, compact),
+			renderManagedCapture: (container: HTMLElement, compact?: boolean) => {
+				if (this.topCaptureEl) container.appendChild(this.topCaptureEl);
+				else {
+					this.renderCaptureWidget(container, compact);
+					this.topCaptureEl = container.lastElementChild as HTMLElement;
+				}
+			},
 			sectionPage: this.sectionPage,
 			onCustomSectionCleanup: (sectionReference: string, cleanup: () => void) => {
 				this.runCustomSectionCleanup(sectionReference);
@@ -3039,9 +3051,9 @@ export class DashboardView extends ItemView implements HoverParent {
 	 *  widgets DOM is being re-attached (signature unchanged): its countdown
 	 *  timers and the pomodoro/reading services' onTick wiring (which reference
 	 *  live DOM inside it) must survive; a fresh widgets render re-wires them. */
-	private runCleanup(preserveSidebarWidgets = false): void {
+	private runCleanup(preserveSidebarWidgets = false, preserveTopCapture = false): void {
 		for (const [el, cleanup] of this.captureMounts) {
-			const retained = preserveSidebarWidgets && (this.sidebarWidgetsEl?.contains(el) || [...this.immWidgetEls.values()].some(widget => widget === el || widget.contains(el)));
+			const retained = (preserveTopCapture && el === this.topCaptureEl) || (preserveSidebarWidgets && (this.sidebarWidgetsEl?.contains(el) || [...this.immWidgetEls.values()].some(widget => widget === el || widget.contains(el))));
 			if (!retained) { cleanup(); this.captureMounts.delete(el); }
 		}
 		const retainedWidgets = preserveSidebarWidgets ? this.widgetCacheEl ?? this.sidebarWidgetsEl : null;

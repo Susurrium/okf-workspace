@@ -440,17 +440,24 @@ const run = (): void => {
 
 		const created: string[] = [];
 		const added: string[] = [];
+		const noteKinds: string[] = [];
 		openImmersiveAddMenu({
 			settings,
 			services: deps,
-			boardKeys: new Set(),
+			boardKeys: new Set(['lunar']),
 			anchor: new El('div') as unknown as HTMLElement,
 			onAddSection: () => {},
-			onAddNoteCard: () => {},
+			onAddNoteCard: kind => noteKinds.push(kind),
 			onAddWidget: key => added.push(key),
 			onCreateInstance: kind => created.push(kind),
 		});
 		const menu = (Menu as unknown as { last: Menu | null }).last as unknown as { items: Array<{ title: string; click(): void }> };
+		assert.deepEqual((menu as unknown as { separators: number[] }).separators, [1]);
+		assert.deepEqual(menu.items.slice(0, 3).map(item => item.title), ['添加分区', '备忘录卡片', '待办清单卡片']);
+		menu.items[1]!.click(); menu.items[2]!.click();
+		assert.deepEqual(noteKinds, ['memo', 'todo']);
+		assert.equal((menu.items[3] as unknown as { disabled: boolean }).disabled, false);
+		assert.equal((menu.items.find(item => item.title === '农历万年历') as unknown as { disabled: boolean }).disabled, true);
 		const createItem = menu.items.find(i => i.title.includes('新建'));
 		assert.ok(createItem, '7: create entry visible in the menu');
 		createItem!.click();

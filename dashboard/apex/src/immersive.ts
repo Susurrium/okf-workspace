@@ -406,12 +406,10 @@ export function renderImmersiveRoot(opts: {
 
 	// The "+ 添加卡片" affordance rides the chips row at the PAGE RIGHT —
 	// same height as the function buttons, pinned to the row's right edge
-	// (the top region never scrolls, so it stays visible). Mounting it in
-	// the row also keeps it OUT of the board area: as a mid-page fixed FAB
-	// it shadowed tiles near the right edge and ate their resize-strip
-	// presses. The ghost tile never renders on immersive boards.
+	// 顶部区域随页面滚动；按钮放在网格外，避免遮挡卡片的缩放手柄。
 	{
-		const addHost = top.querySelector<HTMLElement>('.dashboard-quicknote-nav') ?? top;
+		const nav = top.querySelector<HTMLElement>('.dashboard-quicknote-nav');
+		const addHost = nav && !nav.hidden ? nav : top;
 		const btn = addHost.createEl('button', {
 			cls: 'dashboard-imm-add-btn',
 			attr: { 'aria-label': t('renderer.addCard'), type: 'button', title: t('renderer.addCard') },
@@ -1108,6 +1106,7 @@ export function openImmersiveAddMenu(opts: {
 		.setTitle(t('immersive.addSectionItem'))
 		.setIcon('plus')
 		.onClick(opts.onAddSection));
+	menu.addSeparator();
 	menu.addItem(item => item
 		.setTitle(t('immersive.addMemoCard'))
 		.setIcon('sticky-note')
@@ -1116,7 +1115,6 @@ export function openImmersiveAddMenu(opts: {
 		.setTitle(t('immersive.addTodoCard'))
 		.setIcon('list-checks')
 		.onClick(() => opts.onAddNoteCard('todo')));
-	menu.addSeparator();
 	for (const section of opts.restorableSections ?? []) {
 		menu.addItem(item => item.setTitle(`显示分区 · ${section.label}`).setIcon('eye').onClick(() => opts.onRestoreSection?.(section.id)));
 	}

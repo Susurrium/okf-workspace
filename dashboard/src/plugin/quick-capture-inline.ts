@@ -22,8 +22,11 @@ export function mountQuickCapture(container: HTMLElement, session: CaptureSessio
   input.addEventListener('input', () => {
     try { session.setText(input.value); resize(); } catch (error) { report(error); input.value = session.snapshot().text; }
   });
+  let composing = false;
+  input.addEventListener('compositionstart', () => { composing = true; });
+  input.addEventListener('compositionend', () => { composing = false; });
   input.addEventListener('keydown', event => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !Platform.isMobile) {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !composing && event.keyCode !== 229 && !Platform.isMobile) {
       event.preventDefault(); void session.submit().catch(report);
     }
   });

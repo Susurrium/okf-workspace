@@ -16,7 +16,7 @@
 .dashboard-layout-statusbar { position: absolute; bottom: 10px; left: 14px; right: 14px; z-index: 40; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 12px; background: var(--background-primary); border: 1px solid var(--text-error); border-radius: 8px; color: var(--text-error); overflow-wrap: anywhere; }
 .okf-capture-inline.okf-capture-inline--compact { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; position: relative; padding: 5px 8px; width: 100%; min-width: 0; }
 .okf-capture-inline--compact .okf-capture-heading, .okf-capture-inline--compact .okf-capture-hint { display: none; }
-.okf-capture-inline.okf-capture-inline--compact textarea { margin: 0; min-height: 30px; max-height: 36px; resize: none; width: 100%; min-width: 0; }
+.okf-capture-inline.okf-capture-inline--compact textarea { margin: 0; min-height: 30px; max-height: 160px; resize: none; width: 100%; min-width: 0; }
 .okf-capture-inline--compact .okf-capture-actions { margin: 0; gap: 4px; flex-wrap: wrap; }
 .okf-capture-inline--compact .okf-capture-actions button { padding: 4px; width: 26px; height: 28px; min-width: 26px; }
 .okf-capture-inline--compact .okf-capture-actions svg { width: 14px; height: 14px; }

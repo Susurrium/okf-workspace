@@ -1,4 +1,4 @@
-import { App, Modal, setIcon } from 'obsidian';
+import { App, Modal, Notice, setIcon } from 'obsidian';
 import type { ApexHost } from './host';
 import type { PinnedNote, QuickCommand, QuickNotePreset } from './types';
 import { IconPickerModal } from './icon-picker-modal';
@@ -6,6 +6,7 @@ import type { AppWithCommands } from './obsidian-internal';
 import { t } from './i18n';
 import { applyModalTheme } from './modal-theme';
 import { attachPathPicker, type PathPickerMode } from './path-picker-modal';
+import { saveSettingsPatch } from './settings-transaction';
 
 /**
  * Configuration modal for the Quick Notes region: CRUD for create-presets,
@@ -19,6 +20,7 @@ export class QuickNoteConfigModal extends Modal {
 	private pinned: PinnedNote[];
 	private commands: QuickCommand[];
 	private captureEnabled: boolean;
+	private quickNotesEnabled: boolean;
 	private widgetCaptureEnabled: boolean;
 	private captureTarget: string;
 	private captureFolder: string;
@@ -37,6 +39,7 @@ export class QuickNoteConfigModal extends Modal {
 		this.pinned = s.pinnedNotes.map(p => ({ ...p }));
 		this.commands = (s.quickCommands ?? []).map(c => ({ ...c }));
 		this.captureEnabled = s.quickCaptureEnabled;
+		this.quickNotesEnabled = s.quickNotesEnabled;
 		this.widgetCaptureEnabled = s.widgetQuickCaptureEnabled !== false;
 		this.captureTarget = s.quickCaptureTarget;
 		this.captureFolder = s.quickCaptureFolder;
@@ -191,12 +194,10 @@ export class QuickNoteConfigModal extends Modal {
 	/** Persist the quick-command list right away (add/delete/reorder are
 	 *  immediate actions; only label/icon edits still ride on Save). */
 	private async commitCommands(): Promise<void> {
-		this.plugin.settings = {
-			...this.plugin.settings,
-			quickCommands: this.commands.filter(c => c.commandId.trim() && c.label.trim()),
-		};
-		await this.plugin.saveSettings();
-		this.plugin.refreshAllDashboards();
+		try {
+			await saveSettingsPatch(this.plugin, { quickCommands: this.commands.filter(c => c.commandId.trim() && c.label.trim()) });
+			this.plugin.refreshAllDashboards();
+		} catch (error) { new Notice(`常用操作尚未保存：${String(error)}`, 10000); }
 	}
 
 	private updateCommand(i: number, patch: Partial<QuickCommand>): void {
@@ -208,6 +209,16 @@ export class QuickNoteConfigModal extends Modal {
 	private renderCapture(form: HTMLElement): void {
 		if (this.plugin.quickCapture) {
 			const section = this.section(form, '快速记录', '保存到收集箱；课程和项目在展开编辑时选择。');
+			const barRow = section.createDiv({ cls: 'dashboard-quicknote-cfg-toggle' });
+			const barToggle = barRow.createEl('input', { attr: { type: 'checkbox', id: 'qn-bar' } });
+			barToggle.checked = this.quickNotesEnabled;
+			barToggle.addEventListener('change', () => { this.quickNotesEnabled = barToggle.checked; });
+			barRow.createEl('label', { text: '显示常用操作条', attr: { for: 'qn-bar' } });
+			const topRow = section.createDiv({ cls: 'dashboard-quicknote-cfg-toggle' });
+			const topToggle = topRow.createEl('input', { attr: { type: 'checkbox', id: 'qn-capture' } });
+			topToggle.checked = this.captureEnabled;
+			topToggle.addEventListener('change', () => { this.captureEnabled = topToggle.checked; });
+			topRow.createEl('label', { text: '显示顶部快速记录', attr: { for: 'qn-capture' } });
 			const row = section.createDiv({ cls: 'dashboard-quicknote-cfg-toggle' });
 			const toggle = row.createEl('input', { attr: { type: 'checkbox', id: 'qn-unified-capture' } });
 			toggle.checked = this.widgetCaptureEnabled;
@@ -270,16 +281,23 @@ export class QuickNoteConfigModal extends Modal {
 		footer.createEl('button', {
 			cls: 'dashboard-modal-btn dashboard-modal-btn--confirm',
 			text: t('common.save'),
-		}).addEventListener('click', () => { void this.save(); });
+		}).addEventListener('click', event => {
+			const button = event.currentTarget as HTMLButtonElement;
+			button.disabled = true;
+			void this.save().catch(error => { new Notice(`常用操作尚未保存：${String(error)}`, 10000); }).finally(() => { button.disabled = false; });
+		});
 	}
 
 	private async save(): Promise<void> {
-		this.plugin.settings = {
-			...this.plugin.settings,
+		await saveSettingsPatch(this.plugin, {
 			quickNotePresets: this.presets.filter(p => p.label.trim()),
 			pinnedNotes: this.pinned.filter(p => p.label.trim() && p.path.trim()),
 			quickCommands: this.commands.filter(c => c.commandId.trim() && c.label.trim()),
-			...(this.plugin.quickCapture ? { widgetQuickCaptureEnabled: this.widgetCaptureEnabled } : {
+			...(this.plugin.quickCapture ? {
+				quickNotesEnabled: this.quickNotesEnabled,
+				quickCaptureEnabled: this.captureEnabled,
+				widgetQuickCaptureEnabled: this.widgetCaptureEnabled,
+			} : {
 				quickCaptureEnabled: this.captureEnabled,
 				quickCaptureTarget: this.captureTarget.trim(),
 				quickCaptureFolder: this.captureFolder.trim(),
@@ -287,8 +305,7 @@ export class QuickNoteConfigModal extends Modal {
 				quickCapturePosition: this.capturePosition,
 			}),
 			quickDailyEnabled: this.dailyEnabled,
-		};
-		await this.plugin.saveSettings();
+		});
 		this.plugin.refreshAllDashboards();
 		this.close();
 	}

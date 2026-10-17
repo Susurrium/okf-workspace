@@ -1,6 +1,7 @@
 import { StateField } from "@codemirror/state";
 import { parse as parseYamlDocument } from "yaml";
 export const Platform = { isMobile: false, isDesktop: true, isPhone: false };
+export function setIcon(_element: HTMLElement, _icon: string): void {}
 export const getLanguage = (): string => 'zh';
 export const getAllTags = (metadata: { tags?: Array<{ tag: string }>; frontmatter?: { tags?: string | string[] } }): string[] => {
   const raw = metadata.frontmatter?.tags;
@@ -109,6 +110,7 @@ export class TestElement {
     if (name.startsWith("data-")) delete this.dataset[dataAttributeKey(name)];
   }
   public setText(value: string): void { this.textContent = value; }
+  public appendText(value: string): void { this.textContent += value; }
   public setAttribute(name: string, value: string): void { this.setAttr(name, value); }
   public getAttribute(name: string): string | null { return this.attributes.get(name) ?? null; }
   public replaceChildren(): void { this.empty(); }

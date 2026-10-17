@@ -4,7 +4,25 @@
 合入 `main`，合并提交 `55ea2c85`。此前项目、快速记录与分区整合经 PR #9 合并，提交 `122286ce`。
 这两轮更新未部署正式环境。采用边界见 [UPSTREAM.md](UPSTREAM.md)，验收要求见[开发指南](../docs/DEVELOPMENT.md)。
 
-## 最近验收
+## 顶部快速记录与添加菜单（2026-10-17）
+
+基线 `77381edb`，本次源码为未提交修改；源码快照、完整 SHA-256 和具名结果见
+`work/top-capture/receipt.json`。安装目标为固定 OKF-Test，正式环境未部署。
+
+| 范围 | 结果与证据 |
+| --- | --- |
+| 自动化 | Dashboard 类型检查、65 个文件/472 项测试、构建通过；Apex immersive-render、immersive-grid、layout-stacked、refresh-scope、widget-span、scroll-root 六项专项、lint、独立构建通过；文档生成校验及 7 项回归通过；日志为 `work/top-capture/*-final.log`、`apex-*.log`、`docs-*.log` |
+| 菜单实机 | 顺序、分隔线、分区选择器和实际添加；缺少便利贴时创建分区，分别添加单张备忘录/清单卡片，添加小组件及重复禁用；`menu.json`、`section.json`、`menu-final.png` |
+| 显示与生命周期 | 四种顶部开关组合、空快捷操作、配置窗口读取/保存/渲染，顶部/侧栏/网格独立显示；刷新及布局切换保留节点、焦点、选区，双窗格/展开编辑共享草稿、销毁取消订阅；`matrix.json`、`shared.json` |
+| 保存与恢复 | 真实只读设置文件引发保存前失败、记录写入后的草稿清理失败和配置保存失败；提示、草稿保留、原目标重试及重复提交保护通过；冷启动后重新打开工作台恢复布局、默认及课程/项目草稿；`faults.json`、`cold.json` |
+| 键盘与视觉 | CDP 原生 Enter 保存、Shift+Enter 换行；输入法确认使用合成事件验证。明暗主题、1200px/430px、空快捷行、配置快捷操作、菜单和真实失败提示完成视觉检查；`native-input.json`、`scroll.json`、`light-*.png`、`dark-*.png`、`failure-narrow.png` |
+| 产物 | `main.js` SHA-256 为 `ba1da22b4f071c4cb2b5409912554c454d8dbc4508c60c60c04a1751674572b6`；CSS/manifest 完整哈希与安装核验见 `installed.json`，部署回执为 `deployment-receipt.json` |
+| 清理与退出 | 恢复原有插件配置、用户草稿及窗口配置，核验 178 个原有文件字节一致；删除 14 个合成文件及备份、清理索引。保留候选插件和自动生成的原生接管回执；测试窗口、API、自动启动和 LiveSync 关闭，8766/9366 无监听；`cleanup.json`、`index-cleanup.json`、`exit-status.json` |
+
+证据均位于 `work/top-capture/`。未验证真实手机、系统输入法候选选择、远端同步和外部在线服务。
+首次安装/旧配置兼容由自动化验证；实机使用已有 OKF-Test 配置。
+
+## 沉浸式工作台既有验收
 
 实机证据根目录：`work/immersive-workbench/work/upstream-port/`。
 `receipt.json` 记录基线 `6eb0fb7c` 上提交前源码快照、候选/安装文件哈希及场景结果；最终提交 CI 单独记录。

@@ -67,11 +67,13 @@ export class Notice {
 // exposes the most recently created menu to the test.
 export interface StubMenuItem {
 	title: string;
+	disabled?: boolean;
 	click(): void;
 }
 export class Menu {
 	static last: Menu | null = null;
 	items: StubMenuItem[] = [];
+	separators: number[] = [];
 	private hideCb: (() => void) | null = null;
 
 	constructor() {
@@ -82,10 +84,11 @@ export class Menu {
 		let clickFn: (() => void) | null = null;
 		const item = {
 			title: '',
+			disabled: false,
 			setTitle(t: string) { this.title = t; return this; },
 			setIcon(_icon: string) { return this; },
 			setChecked(_checked: boolean) { return this; },
-			setDisabled(_disabled: boolean) { return this; },
+			setDisabled(disabled: boolean) { this.disabled = disabled; return this; },
 			setWarning(_warning: boolean) { return this; },
 			onClick(fn: () => void) { clickFn = fn; return this; },
 			click: () => { clickFn?.(); },
@@ -95,7 +98,7 @@ export class Menu {
 		return this;
 	}
 
-	addSeparator(): this { return this; }
+	addSeparator(): this { this.separators.push(this.items.length); return this; }
 
 	showAtMouseEvent(_e: unknown): this { return this; }
 	showAtPosition(_pos: unknown): this { return this; }

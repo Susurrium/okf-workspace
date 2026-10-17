@@ -21,12 +21,13 @@ export function renderQuickNoteRegion(
 	const presets = settings.quickNotePresets ?? [];
 	const pinned = settings.pinnedNotes ?? [];
 	const commands = settings.quickCommands ?? [];
-	const captureOn = !!settings.quickCaptureEnabled && !callbacks.managedCapture;
+	const captureOn = !!settings.quickCaptureEnabled;
 	const dailyOn = !!settings.quickDailyEnabled;
 	const hasChips = presets.length > 0 || pinned.length > 0 || commands.length > 0 || dailyOn;
 
 	// Scrollable nav of chips — sits on the left.
 	const nav = region.createDiv({ cls: 'dashboard-quicknote-nav' });
+	if (!hasChips && captureOn) nav.hidden = true;
 	if (!hasChips && !captureOn) {
 		const empty = nav.createDiv({ cls: 'dashboard-quicknote-empty' });
 		empty.createSpan({ cls: 'dashboard-quicknote-empty-text', text: t('quickNote.empty') });
@@ -53,7 +54,7 @@ export function renderQuickNoteRegion(
 	const actions = region.createDiv({ cls: 'dashboard-quicknote-actions' });
 	if (callbacks.managedCapture && settings.quickCaptureEnabled) callbacks.renderManagedCapture?.(actions, true);
 
-	if (captureOn) {
+	if (captureOn && !callbacks.managedCapture) {
 		const capture = actions.createDiv({ cls: 'dashboard-quicknote-capture' });
 		setIcon(capture.createSpan({ cls: 'dashboard-quicknote-capture-icon' }), 'pencil');
 		// Auto-growing capture field: empty it looks exactly like the old

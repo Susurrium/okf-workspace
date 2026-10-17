@@ -128,7 +128,7 @@ import {
   renderOkfServiceSettings,
   type OkfBrainSettings,
 } from "./settings.js";
-import { normalizeApexSettings } from "./apex-settings.js";
+import { assertApexSettingsPersisted, normalizeApexSettings, resolveApexStartupSettings } from "./apex-settings.js";
 import { recoverWorkspaceRegistry } from "./workspace-recovery.js";
 import {
   buildClaudianFallbackText,
@@ -226,8 +226,17 @@ export default class OkfBrainPlugin extends Plugin {
       owner: this,
       settings: this.settings.apex,
       persist: async (settings) => {
+        const previous = this.settings.apex;
+        const expected = JSON.stringify(settings);
         this.settings.apex = settings;
-        await this.saveSettings();
+        try {
+          await this.saveSettings();
+          if (!this.manifest.dir) throw new Error('工作台设置缺少插件目录');
+          assertApexSettingsPersisted(JSON.parse(await this.app.vault.adapter.read(`${this.manifest.dir}/data.json`)), expected);
+        } catch (error) {
+          if (this.settings.apex === settings) this.settings.apex = previous;
+          throw error;
+        }
       },
       insertCalendarTask: (date, taskLine, position) =>
         this.notes().appendDailyTask(date, taskLine, position),
@@ -2501,19 +2510,8 @@ export default class OkfBrainPlugin extends Plugin {
       : {};
     this.persistedSettings = { ...loaded };
     delete this.persistedSettings.token;
-    let apexSettings = loaded.apex;
-    let importedLegacyApexSettings = false;
-    if (!apexSettings || typeof apexSettings !== "object") {
-      try {
-        const legacy = await readLegacyApexSettings(this.app);
-        if (legacy && typeof legacy === "object") {
-          apexSettings = legacy as OkfBrainSettings["apex"];
-          importedLegacyApexSettings = true;
-        }
-      } catch (error) {
-        console.warn("[okf-workspace] could not read legacy Apex settings", error);
-      }
-    }
+    const { settings: apexSettings, firstInstall, importedLegacy: importedLegacyApexSettings } =
+      await resolveApexStartupSettings(raw, () => readLegacyApexSettings(this.app));
     const recoveredWorkspace = await recoverWorkspaceRegistry(apexSettings, this.app.vault.adapter);
     this.settings = {
       ...DEFAULT_SETTINGS,
@@ -2523,11 +2521,15 @@ export default class OkfBrainPlugin extends Plugin {
         loaded?.feedReadingPositions,
       ),
       feedReadingPositions: { ...DEFAULT_SETTINGS.feedReadingPositions, ...loaded?.feedReadingPositions },
-      apex: normalizeApexSettings(recoveredWorkspace.settings),
+      apex: normalizeApexSettings(recoveredWorkspace.settings, firstInstall),
       tasks: loaded.tasks && typeof loaded.tasks === 'object' ? loaded.tasks : {},
     };
     await this.reloadLocalToken();
-    if (importedLegacyApexSettings || recoveredWorkspace.recovered) await this.saveSettings();
+    if (firstInstall || importedLegacyApexSettings || recoveredWorkspace.recovered) {
+      const expected = JSON.stringify(this.settings.apex);
+      await this.saveSettings();
+      assertApexSettingsPersisted(await this.loadData(), expected);
+    }
   }
 
   private async initializeTasks(): Promise<void> {

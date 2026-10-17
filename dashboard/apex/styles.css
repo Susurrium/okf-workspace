@@ -20147,6 +20147,8 @@ body.is-mobile .dashboard-media-item .dashboard-media-tagbtn { opacity: 1; }
 /* Left zone: chip group — fills remaining width and scrolls when crowded.
    basis 0 + a 104px floor: the chips never fully vanish, and when the bar is
    squeezed it is the capture field that yields first (see the chain below). */
+.dashboard-quicknote-nav[hidden] { display: none !important; }
+
 .dashboard-quicknote-nav {
 	flex: 1 1 0;
 	min-width: 104px;

@@ -478,9 +478,10 @@ export class DashboardSettingTab extends PluginSettingTab {
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.quickNotesEnabled)
 				.onChange(async (value) => {
-					this.plugin.settings = { ...this.plugin.settings, quickNotesEnabled: value };
-					await this.plugin.saveSettings();
-					this.plugin.refreshAllDashboards();
+					try {
+						await saveSettingsPatch(this.plugin, { quickNotesEnabled: value });
+						this.plugin.refreshAllDashboards();
+					} catch (error) { toggle.setValue(this.plugin.settings.quickNotesEnabled); new Notice(`常用操作尚未保存：${String(error)}`, 10000); }
 				}))
 			.addButton(btn => btn
 				.setButtonText(t('quickNote.config'))
@@ -489,11 +490,23 @@ export class DashboardSettingTab extends PluginSettingTab {
 				}));
 
 		if (this.plugin.quickCapture) new Setting(containerEl)
+			.setName('顶部快速记录')
+			.setDesc('在常用操作条中显示输入框；关闭操作条会保留此选择。')
+			.addToggle(toggle => toggle.setValue(this.plugin.settings.quickCaptureEnabled).onChange(async value => {
+				try {
+					await saveSettingsPatch(this.plugin, { quickCaptureEnabled: value });
+					this.plugin.refreshAllDashboards();
+				} catch (error) { toggle.setValue(this.plugin.settings.quickCaptureEnabled); new Notice(`顶部快速记录设置尚未保存：${String(error)}`, 10000); }
+			}));
+
+		if (this.plugin.quickCapture) new Setting(containerEl)
 			.setName('侧栏快速记录')
 			.setDesc('直接保存到收集箱，可展开编辑内容并关联课程或项目。')
 			.addToggle(toggle => toggle.setValue(this.plugin.settings.widgetQuickCaptureEnabled !== false).onChange(async value => {
-				this.plugin.settings = { ...this.plugin.settings, widgetQuickCaptureEnabled: value };
-				await this.plugin.saveSettings(); this.plugin.refreshAllDashboards();
+				try {
+					await saveSettingsPatch(this.plugin, { widgetQuickCaptureEnabled: value });
+					this.plugin.refreshAllDashboards();
+				} catch (error) { toggle.setValue(this.plugin.settings.widgetQuickCaptureEnabled !== false); new Notice(`侧栏快速记录设置尚未保存：${String(error)}`, 10000); }
 			}));
 
 		const recentSetting = new Setting(containerEl)

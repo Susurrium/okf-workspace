@@ -127,10 +127,30 @@ describe('unified Capture sessions', () => {
     const input = root.descendants().find(el => el.tagName === 'textarea')!;
     input.value = '中文输入'; input.dispatch('input');
     input.dispatch('keydown', { key: 'Enter', isComposing: true, preventDefault: vi.fn() } as unknown as Event);
+    input.dispatch('compositionstart');
+    input.dispatch('keydown', { key: 'Enter', preventDefault: vi.fn() } as unknown as Event);
+    input.dispatch('compositionend');
+    input.dispatch('keydown', { key: 'Enter', keyCode: 229, preventDefault: vi.fn() } as unknown as Event);
+    input.dispatch('keydown', { key: 'Enter', shiftKey: true, preventDefault: vi.fn() } as unknown as Event);
     Platform.isMobile = true;
     try { input.dispatch('keydown', { key: 'Enter', preventDefault: vi.fn() } as unknown as Event); expect(f.create).not.toHaveBeenCalled(); }
     finally { Platform.isMobile = false; }
     root.descendants().find(el => el.attributes.get('aria-label') === '保存到收集箱')!.click();
     await vi.waitFor(() => expect(f.create).toHaveBeenCalledTimes(1)); unsubscribe();
+  });
+
+  it('shares draft, busy state and successful clearing across compact and widget entries; unsubscribes on destruction', async () => {
+    const f = fixture(); const session = f.session();
+    const compact = new TestElement(); const widget = new TestElement();
+    const stopCompact = mountQuickCapture(compact as unknown as HTMLElement, session, async () => undefined, { compact: true });
+    const stopWidget = mountQuickCapture(widget as unknown as HTMLElement, session, async () => undefined);
+    const topInput = compact.descendants().find(el => el.tagName === 'textarea')!;
+    const widgetInput = widget.descendants().find(el => el.tagName === 'textarea')!;
+    topInput.value = '共享草稿'; topInput.dispatch('input'); expect(widgetInput.value).toBe('共享草稿');
+    const saving = session.submit(); expect(topInput.disabled).toBe(true); expect(widgetInput.disabled).toBe(true);
+    expect(session.submit()).toBe(saving); await saving;
+    expect(topInput.value).toBe(''); expect(widgetInput.value).toBe(''); expect(f.create).toHaveBeenCalledOnce();
+    stopCompact(); session.setText('下一条'); expect(topInput.value).toBe(''); expect(widgetInput.value).toBe('下一条');
+    stopWidget();
   });
 });
