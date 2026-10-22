@@ -12,16 +12,22 @@ function ConvertTo-OkfHashtable {
 
     if ($null -eq $InputObject) { return $null }
 
-    if ($InputObject -is [System.Collections.IDictionary]) {
-        $converted = @{}
-        foreach ($key in $InputObject.Keys) {
+    if ($InputObject -is [System.Collections.IDictionary] -or
+        $InputObject -is [System.Collections.Generic.IDictionary[string, object]]) {
+        if ($InputObject -isnot [System.Collections.IDictionary]) {
+            $InputObject = [System.Collections.Generic.Dictionary[string, object]]::new(
+                $InputObject, [StringComparer]::Ordinal
+            )
+        }
+        $converted = [hashtable]::new([StringComparer]::Ordinal)
+        foreach ($key in $InputObject.PSBase.Keys) {
             $converted[[string]$key] = ConvertTo-OkfHashtable -InputObject $InputObject[$key]
         }
         return $converted
     }
 
     if ($InputObject -is [System.Management.Automation.PSCustomObject]) {
-        $converted = @{}
+        $converted = [hashtable]::new([StringComparer]::Ordinal)
         foreach ($property in $InputObject.PSObject.Properties) {
             $converted[$property.Name] = ConvertTo-OkfHashtable -InputObject $property.Value
         }
@@ -52,8 +58,25 @@ function Read-OkfJsonHashtable {
         throw "$Description not found: $resolvedPath"
     }
     $rawJson = [System.IO.File]::ReadAllText($resolvedPath)
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        Add-Type -AssemblyName Newtonsoft.Json
+    } else {
+        Add-Type -AssemblyName System.Web.Extensions
+    }
     try {
-        $parsed = ConvertFrom-Json -InputObject $rawJson
+        if ($PSVersionTable.PSVersion.Major -ge 6) {
+            $jsonSettings = [Newtonsoft.Json.JsonSerializerSettings]::new()
+            $jsonSettings.DateParseHandling = [Newtonsoft.Json.DateParseHandling]::None
+            $jsonSettings.Converters.Add([Newtonsoft.Json.Converters.ExpandoObjectConverter]::new())
+            $parsed = [Newtonsoft.Json.JsonConvert]::DeserializeObject(
+                $rawJson, [System.Dynamic.ExpandoObject], $jsonSettings
+            )
+        } else {
+            $serializer = [System.Web.Script.Serialization.JavaScriptSerializer]::new()
+            $serializer.MaxJsonLength = [int]::MaxValue
+            $serializer.RecursionLimit = 1024
+            $parsed = $serializer.DeserializeObject($rawJson)
+        }
     } catch {
         throw "$Description is invalid JSON: $resolvedPath. $($_.Exception.Message)"
     }

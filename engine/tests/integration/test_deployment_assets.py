@@ -201,10 +201,15 @@ def test_json_hashtable_reader_is_recursive_and_cross_version(
     root = Path(__file__).parents[3]
     common = root / "deploy" / "windows" / "common.ps1"
     payload = tmp_path / "nested.json"
+    roundtrip = tmp_path / "roundtrip.json"
     payload.write_text(
         json.dumps(
             {
+                "": {"Name": "first", "name": "second"},
+                "Keys": "user value",
+                "timestamp": "2026-10-22T08:00:00.123Z",
                 "nested": {
+                    "": ["kept"],
                     "items": [
                         {"name": "中文"},
                         [],
@@ -226,7 +231,8 @@ def test_json_hashtable_reader_is_recursive_and_cross_version(
         "throw 'array object is not a hashtable'}; "
         "if($data['nested']['items'][0]['name'] -cne '中文'){throw 'unicode changed'}; "
         "if($data['nested']['items'][1].Count -ne 0){throw 'empty array changed'}; "
-        "if($null -ne $data['nested']['items'][2]){throw 'null changed'}"
+        "if($null -ne $data['nested']['items'][2]){throw 'null changed'}; "
+        f"Write-OkfJson -Path {_powershell_quote(roundtrip)} -Value $data"
     )
     completed = subprocess.run(
         [executable, "-NoProfile", "-Command", command],
@@ -237,6 +243,9 @@ def test_json_hashtable_reader_is_recursive_and_cross_version(
         errors="replace",
     )
     assert completed.returncode == 0, completed.stderr or completed.stdout
+    assert json.loads(roundtrip.read_text(encoding="utf-8-sig")) == json.loads(
+        payload.read_text(encoding="utf-8")
+    )
 
     scripts = list((root / "deploy" / "windows").glob("*.ps1")) + list(
         (root / "scripts").glob("*.ps1")
