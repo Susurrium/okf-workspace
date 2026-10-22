@@ -82,7 +82,7 @@ class NoteService:
             frontmatter["status"] = status
         if fields:
             frontmatter.update(fields)
-        path = self.vault / relative
+        path = resolve_bundle_path(self.vault, relative.as_posix())
         write_document(
             path,
             OkfDocument(frontmatter=frontmatter, body=body),
@@ -122,7 +122,7 @@ class NoteService:
     def create_daily(self, target_date: date | None = None, *, content: str = "") -> Path:
         value = target_date or self.clock().date()
         relative = Path("life") / "daily" / f"{value:%Y}" / f"{value:%m}" / f"{value}.md"
-        path = self.vault / relative
+        path = resolve_bundle_path(self.vault, relative.as_posix())
         with document_lock(path):
             if path.exists():
                 return path
@@ -280,7 +280,7 @@ class NoteService:
     def create_project(self, slug: str, title: str, *, category: str | None = None) -> Path:
         category = normalize_project_category(category)
         project_slug = slugify(slug)
-        root = self.vault / "projects" / project_slug
+        root = resolve_bundle_path(self.vault, f"projects/{project_slug}")
         if root.exists():
             raise FileExistsError(root)
         root.mkdir(parents=True)
@@ -329,7 +329,7 @@ class NoteService:
 
     def append_project_log(self, project_slug: str, content: str) -> Path:
         slug = slugify(project_slug)
-        log = self.vault / "projects" / slug / "log.md"
+        log = resolve_bundle_path(self.vault, f"projects/{slug}/log.md")
         if not log.is_file():
             raise FileNotFoundError(log)
         heading = f"## {self.clock().date()}"

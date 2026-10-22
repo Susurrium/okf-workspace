@@ -20,6 +20,7 @@ from okf_workspace.config import BrainPaths
 from okf_workspace.notes import NoteService
 from okf_workspace.okf.file_io import FileWriteConflict
 from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
+from okf_workspace.okf.paths import UnsafeBundlePath
 
 
 def test_field_update_rejects_an_editor_change_before_publication(
@@ -135,26 +136,62 @@ def test_ai_writer_rejects_case_aliases_before_changing_bytes(vault: Path, relat
     assert target.read_bytes() == before
 
 
-def test_ai_writer_checks_resolved_in_vault_alias(vault: Path) -> None:
-    target = vault / "sources/text/protected.md"
-    write_document(target, OkfDocument({"type": "Source Text", "title": "保护内容"},
-                                     "# 保护内容\n\n## 正文\n\n原文。\n"))
-    alias = vault / "knowledge/alias/protected.md"
+def _directory_alias(alias: Path, target: Path) -> None:
     alias.parent.mkdir(parents=True, exist_ok=True)
-    alias.parent.rmdir()
+    if alias.exists():
+        alias.rmdir()
     if os.name == "nt":
         subprocess.run(
             ["pwsh", "-NoProfile", "-NonInteractive", "-Command",
              "New-Item -ItemType Junction -Path $env:OKF_TEST_ALIAS "
              "-Target $env:OKF_TEST_TARGET -ErrorAction Stop | Out-Null"],
-            env={**os.environ, "OKF_TEST_ALIAS": str(alias.parent),
-                 "OKF_TEST_TARGET": str(target.parent)},
+            env={**os.environ, "OKF_TEST_ALIAS": str(alias),
+                 "OKF_TEST_TARGET": str(target)},
             check=True, capture_output=True, timeout=20,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
     else:
-        alias.parent.symlink_to(target.parent, target_is_directory=True)
+        alias.symlink_to(target, target_is_directory=True)
+
+
+def test_ai_writer_checks_resolved_in_vault_alias(vault: Path) -> None:
+    target = vault / "sources/text/protected.md"
+    write_document(target, OkfDocument({"type": "Source Text", "title": "保护内容"},
+                                     "# 保护内容\n\n## 正文\n\n原文。\n"))
+    _directory_alias(vault / "knowledge/alias", target.parent)
     before = target.read_bytes()
     with pytest.raises(WritePolicyError):
         AIWriter(vault).replace_section("knowledge/alias/protected.md", "## 正文", "替换内容。")
     assert target.read_bytes() == before
+
+
+@pytest.mark.parametrize("operation", ["wiki", "daily", "project", "project-log"])
+def test_note_service_rejects_outside_aliases_before_writing(
+    vault: Path, tmp_path: Path, operation: str,
+) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    service = NoteService(vault)
+    if operation == "wiki":
+        _directory_alias(vault / "knowledge/wiki", outside)
+    elif operation == "daily":
+        _directory_alias(vault / "life/daily" / str(service.clock().year), outside)
+    else:
+        _directory_alias(vault / "projects", outside)
+    if operation == "project-log":
+        (outside / "example").mkdir()
+        (outside / "example/log.md").write_text("# 外部日志\n", encoding="utf-8")
+    before = {path.relative_to(outside): path.read_bytes()
+              for path in outside.rglob("*") if path.is_file()}
+    with pytest.raises(UnsafeBundlePath):
+        if operation == "wiki":
+            service.create_wiki("边界", "合成正文")
+        elif operation == "daily":
+            service.create_daily()
+        elif operation == "project":
+            service.create_project("example", "合成项目")
+        else:
+            service.append_project_log("example", "合成记录")
+    after = {path.relative_to(outside): path.read_bytes()
+             for path in outside.rglob("*") if path.is_file()}
+    assert after == before
