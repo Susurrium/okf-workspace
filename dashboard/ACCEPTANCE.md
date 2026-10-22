@@ -1,10 +1,28 @@
 # Dashboard 验收台账
 
-更新：2026-10-17。当前功能提交为 `65884bdc`（添加菜单与顶部快速记录），基线 `77381edb`。
-已在固定 OKF-Test 安装验收候选，正式环境未部署。采用边界见 [UPSTREAM.md](UPSTREAM.md)，验收要求见[开发指南](../docs/DEVELOPMENT.md)。
-本地专项验收通过；源码基线 `57e29c21` 的六项 CI 全部通过。1.0 发布验收见[版本记录](../docs/releases/1.0.0.md)。
+更新：2026-10-22。本轮修复候选位于 `codex/audit-fixes-20261022`，业务源码为 `a080a147`，
+另含测试退出控制修复。固定 OKF-Test 实机验收完成后恢复原工作区程序；正式环境未部署。
+采用边界见 [UPSTREAM.md](UPSTREAM.md)，验收要求见[开发指南](../docs/DEVELOPMENT.md)。
+1.0 发布验收见[版本记录](../docs/releases/1.0.0.md)。
 
 ## 最近验收
+
+本轮证据位于修复工作树的 `work/live-acceptance/RESULT.md` 及同目录具名 JSON，
+绝对位置为 `E:\code\okf-workspace\work\audit-fixes-20261022\work\live-acceptance\`。
+后台运行日志归档在 `E:\ObsidianData\OKF-Test-State\reports\audit-fixes-live-20261022\operations\`。
+
+| 范围 | 结果 |
+| --- | --- |
+| 实际宿主与元数据 | Obsidian 原生 frontmatter 完成/取消、未知嵌套字段与正文保留；身份变化拒绝写入；12 组核验事件、原生日期、跨读取器诊断与冷启动通过，两端结果一致 |
+| 界面与文件 | 学习卡片菜单完成学习及打开原生笔记；真实 HTTP 并发修改保留人工正文；4 进程追加 12 条记录；Windows 大小写、ADS/设备名及目录联接保护通过 |
+| Markdown | 80 万字节合成文件通过真实任务日期编辑执行解析与写入，约 2.1 秒；极端文件另出现宿主索引等待，删除并重启后恢复，详情见实机记录 |
+| Codex | 真实后台生成发布、排队与运行中取消且无输出；可见 Claudian 通过公开 Bridge 使用 Codex 返回回答，附件显示与移除通过 |
+| 退出与恢复 | 修复退出时旧设置写回造成自动启动复启的问题；14 项 Windows 控制测试、Ruff/Pyright 和真实启动/关闭通过；合成笔记、聊天及索引清理，恢复原程序与模型选择，测试窗口/API/自动启动/同步关闭 |
+
+本次按用户要求未新增环境备份或执行产物哈希核对。实机界面通过 DOM 操作及实际文件/API 状态验证；
+MinerU、Feed 在线同步、真实手机及多设备同步不在本轮变更范围。
+
+## 2026-10-17 验收
 
 证据根目录：`work/top-capture/`。`receipt.json` 记录提交前快照及全部 19 个变更文件哈希，已与
 `65884bdc` 核对一致；`installed.json` 和 `deployment-receipt.json` 记录三个候选/安装文件的完整哈希与身份。
@@ -36,4 +54,4 @@
 | 较早验收 | `work/surface-visual-final/`、`work/tasks-boundary-accepted/`、`work/fixed-test-*-result.json`；旧环境归档 `E:\ObsidianData\Archives\20261015-test-consolidation`；原项目类别独立目录已不存在，复查使用整合证据 |
 | 历史正式切换 | 2026-09-29 `v0.8.0`/`7a9ea715`；切换前备份 `E:\ObsidianData\Backups\okf-pre-cutover-20260928T234914`，仅证明当次部署 |
 
-最近一轮的原始详细台账见 `git show 65884bdc:dashboard/ACCEPTANCE.md`；实际运行状态依据目标环境的部署回执和文件核对。
+2026-10-17 的原始详细台账见 `git show 65884bdc:dashboard/ACCEPTANCE.md`；实际运行状态依据目标环境的部署回执和文件核对。

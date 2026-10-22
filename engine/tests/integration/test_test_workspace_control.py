@@ -21,7 +21,7 @@ def _write(path: Path, value: object) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
-def _quote(path: Path) -> str:
+def _quote(path: Path | str) -> str:
     return "'" + str(path).replace("'", "''") + "'"
 
 
@@ -100,6 +100,68 @@ def test_closed_test_stop_disables_autostart_and_sync_preserving_preferences(
     assert parsed["livesync_enabled"] is False
     assert parsed["vault_open"] is False
     assert settings.read_bytes() == before
+
+
+@pytest.mark.parametrize("change_identity", [False, True])
+def test_stop_persists_disabled_state_after_host_flushes_settings(
+    tmp_path: Path, change_identity: bool,
+) -> None:
+    config, settings = _fixture(tmp_path)
+    fake_cdp = tmp_path / "fake-cdp.ps1"
+    fake_cdp.write_text(
+        f"$settingsPath = {_quote(settings)}\n"
+        "$settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json\n"
+        "$settings.manageLocalService = $true\n"
+        "$settings.user_preference = 'changed-during-shutdown'\n"
+        + ("$settings.baseUrl = 'http://127.0.0.1:8765'\n" if change_identity else "")
+        +
+        "$settings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $settingsPath\n"
+        "$pluginsPath = Join-Path (Split-Path -Parent (Split-Path -Parent "
+        "(Split-Path -Parent $settingsPath))) 'community-plugins.json'\n"
+        "@('okf-workspace-dashboard', 'obsidian-livesync', 'unrelated-plugin', "
+        "'new-user-plugin') | ConvertTo-Json | Set-Content -LiteralPath $pluginsPath\n"
+        "$global:LASTEXITCODE = 0\n"
+        "Write-Output 'true'\n",
+        encoding="utf-8",
+    )
+    commands = tmp_path / "host-commands.ps1"
+    profile = tmp_path / "state/obsidian-profile"
+    # 仅隔离 Obsidian/CDP 和进程查询边界，实际控制脚本负责读写测试配置。
+    commands.write_text(
+        "function Get-CimInstance { param($Filter)\n"
+        "[pscustomobject]@{ProcessId=12345; CommandLine="
+        + _quote(f'Obsidian.exe --user-data-dir="{profile}"') + "}\n}\n"
+        "function Get-NetTCPConnection { param($LocalPort, $State, $ErrorAction) }\n"
+        "function Get-Process { param($Id, $ErrorAction) }\n"
+        "function Get-Command { param($Name, $ErrorAction)\n"
+        f"if ($Name -eq 'node') {{ [pscustomobject]@{{Source={_quote(fake_cdp)}}} }}\n"
+        "else { Microsoft.PowerShell.Core\\Get-Command $Name -ErrorAction $ErrorAction }\n}\n",
+        encoding="utf-8",
+    )
+    command = (
+        f"$env:APPDATA={_quote(tmp_path / 'appdata')};"
+        f". {_quote(commands)};"
+        f"& {_quote(ROOT / 'scripts/test-workspace.ps1')} -Config {_quote(config)} -Action Stop"
+    )
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", command], capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=20, check=False,
+    )
+    saved = json.loads(settings.read_text(encoding="utf-8-sig"))
+    if change_identity:
+        assert result.returncode != 0
+        assert "identity changed during shutdown" in result.stderr
+        assert saved["baseUrl"] == "http://127.0.0.1:8765"
+        assert saved["manageLocalService"] is True
+        assert saved["user_preference"] == "changed-during-shutdown"
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert saved["manageLocalService"] is False
+    assert saved["user_preference"] == "changed-during-shutdown"
+    plugins = json.loads((settings.parents[2] / "community-plugins.json").read_text(
+        encoding="utf-8-sig",
+    ))
+    assert plugins == ["okf-workspace-dashboard", "unrelated-plugin", "new-user-plugin"]
 
 
 @pytest.mark.parametrize("registry_kind", ["test-profile", "default-profile"])

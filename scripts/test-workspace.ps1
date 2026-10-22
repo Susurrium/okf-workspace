@@ -142,5 +142,16 @@ if ($Action -eq 'Start') {
         }
         Write-OkfJson -Path $registryPath -Value $stoppedRegistry
     }
+    # 插件退出时可能保存内存中的旧设置；进程退出后读取最新值并持久化停机状态。
+    $stoppedSettings = Read-OkfJsonHashtable -Path $settingsPath
+    if (-not (Test-OkfSamePath -Left ([string]$stoppedSettings['deploymentConfig']) -Right $Config) -or
+        -not (Test-OkfSamePath -Left ([string]$stoppedSettings['tokenFile']) -Right (Join-Path $state 'secrets\local-api-token')) -or
+        $stoppedSettings['baseUrl'] -ne "http://127.0.0.1:$($deployment['api_port'])") {
+        throw 'Test Dashboard identity changed during shutdown; refusing to update its settings.'
+    }
+    $stoppedPlugins = @(Get-Content -LiteralPath $pluginsPath -Raw | ConvertFrom-Json)
+    $stoppedSettings['manageLocalService'] = $false
+    Write-OkfJson -Path $settingsPath -Value $stoppedSettings
+    Write-OkfJson -Path $pluginsPath -Value @($stoppedPlugins | Where-Object { $_ -ne 'obsidian-livesync' })
     Write-Host 'Test Vault stopped; Engine autostart and LiveSync are disabled.'
 }
