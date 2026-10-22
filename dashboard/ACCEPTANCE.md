@@ -1,9 +1,31 @@
 # Dashboard 验收台账
 
 更新：2026-10-22。整合候选位于 `codex/integrate-performance-and-fixes`，
-包含性能优化 `f2336aab` 与修复 `ecf34f4d`。两轮原始验收记录保留在下文，整合验收进行中；正式环境未部署。
+源码整合提交为 `78c8ab9e`，包含性能优化 `f2336aab` 与修复 `ecf34f4d`。
+本地自动化及固定 OKF-Test 整合验收完成；两轮原始记录保留在下文，正式环境未部署。
 采用边界见 [UPSTREAM.md](UPSTREAM.md)，验收要求见[开发指南](../docs/DEVELOPMENT.md)。
 1.0 发布验收见[版本记录](../docs/releases/1.0.0.md)。
+
+## 整合验收（2026-10-22）
+
+完整清单为 `work/integration-20261022/acceptance.json`，同名清单与日志归档在
+`E:\ObsidianData\OKF-Test-State\reports\integration-20261022`。
+回执对应源码 `78c8ab9e`；后续台账提交没有改变运行代码。
+
+| 范围 | 结果与证据 |
+| --- | --- |
+| 自动化 | 根检查通过：Engine 673 项、跨组件 13 项、架构生成器 8 项、Dashboard 516 项、Claudian 6320 项与 72 项脚本检查；Claudian 保留 3 项既有跳过。MarkItDown 36 项及 Ruff、Apex 八项相关专项/lint/构建通过。`root-check.log`、`markitdown.log`、`apex.log` |
+| 性能预算 | 5000 篇文件、20 次采样：无变化扫描、单路径更新、含刷新和实际读取的检索、空闲队列 P95 分别为 329、63、515、7 ms，首次队列核对为 2.55 s；无变化扫描不解析 YAML，空闲队列不读取终态 JSON。10 万文本块全文/合成向量检索 P95 为 249/913 ms，全部预算通过。`filesystem-measurements.json`、`vector-measurements.json` |
+| 缓存与元数据 | 真实 Vault 并发扫描每文件最多读取一次，热扫描不重复读取；等长修改、重命名、删除使投影更新；业务刷新保留 Capture 节点、输入、焦点和选区，关闭全部业务视图后缓存清零。12 组核验事件、原生日期、跨读取器诊断与重启后两端投影一致。`cache-*.json`、`audit-metadata-*.json`、`audit-cold-*.json` |
+| 写入与路径 | 原生完成/取消、身份变化拒绝、未知字段和人工正文保留；真实 HTTP 等待锁期间保留原生编辑，4 进程追加 12 条记录完整；Windows 大小写、ADS/设备名及目录联接保护通过。`audit-writes-*.json`、`engine-writes.log`、`engine-junctions.log` |
+| 导航与重启 | 文件重复打开、多窗格、弹窗转标签页、功能页面与历史复用通过；真实 Tasks 快速搜索、查询结果普通/Ctrl/中键/连续新建及来源关闭通过。进程重启后复用恢复的功能页。`navigation-*.json` |
+| 真实 Codex | 后台生成发布并记录 actual_reads；排队及生成阶段取消后无文件发布。可见 Claudian 通过公开 Bridge 使用 Codex 回答，附件显示/移除及合成聊天删除通过。`engine-terminal-status.log`、`engine-running-cancel-retry.log`、`audit-bridge-*.json` |
+| Claudian 渲染 | 240 条消息、120 个代码块全文完整，队列完成后保持底部，原生滚轮操作后保留阅读位置；原会话内容恢复。冷模块求值中位数 129.1 ms，仍有超过 50 ms 指示线的警告。`history-*.json`、`history-native-wheel-targeted.log`、`root-check.log` |
+| 安装与退出 | 两套插件六个候选/安装文件哈希一致；50 个原文件内容不变，3 份布局/设置逐字节恢复；合成笔记、会话和索引清理，运行记录归档。测试窗口、API、自动启动、LiveSync 关闭，8766/9366 无监听，测试写入进程为零。`installed-hashes.json`、`restoration.json`、`cleanup-result.json`、`environment-exit.json` |
+
+实机依据真实 Obsidian DOM、文件、API 和原生滚轮事件；后台窗口使用 CDP 焦点模拟。
+原始失败与后续通过回执均保留。在线转换、实际向量模型推理及十分钟闲置释放沿用下文性能优化证据；
+本轮没有执行正式部署、服务端容器部署、真实手机或多设备同步验收。
 
 ## 性能优化（2026-10-22）
 
@@ -54,8 +76,8 @@
 
 修复提交为 `ecf34f4d`，业务源码为 `a080a147`；固定 OKF-Test 验收后恢复原工作区程序。
 
-本轮证据位于修复工作树的 `work/live-acceptance/RESULT.md` 及同目录具名 JSON，
-绝对位置为 `E:\code\okf-workspace\work\audit-fixes-20261022\work\live-acceptance\`。
+本轮完整证据归档在 `E:\ObsidianData\OKF-Test-State\reports\audit-fixes-20261022-evidence\evidence.zip`，
+包含 `live-acceptance/RESULT.md`、具名 JSON、自动化日志与原始失败记录；同目录 `manifest.json` 记录逐文件哈希。
 后台运行日志归档在 `E:\ObsidianData\OKF-Test-State\reports\audit-fixes-live-20261022\operations\`。
 
 | 范围 | 结果 |
