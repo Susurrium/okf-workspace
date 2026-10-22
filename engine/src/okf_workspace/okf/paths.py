@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
 class UnsafeBundlePath(ValueError):
@@ -12,14 +12,19 @@ class UnsafeBundlePath(ValueError):
 
 
 def normalize_bundle_path(value: str) -> PurePosixPath:
-    candidate = value.replace("\\", "/").strip()
-    if not candidate or candidate.startswith("/"):
+    candidate = value.replace("\\", "/")
+    if not candidate or candidate != candidate.strip() or candidate.startswith("/"):
         raise UnsafeBundlePath(f"bundle path must be non-empty and relative: {value!r}")
     path = PurePosixPath(candidate)
-    if any(part in {"", ".", ".."} for part in path.parts):
+    if path.as_posix() != candidate or any(part in {"", ".", ".."} for part in path.parts):
         raise UnsafeBundlePath(f"bundle path cannot contain traversal: {value!r}")
-    if ":" in path.parts[0]:
-        raise UnsafeBundlePath(f"bundle path cannot contain a drive: {value!r}")
+    for part in path.parts:
+        if (
+            PureWindowsPath(part).is_reserved()
+            or part.endswith((".", " "))
+            or any(char in '<>:"|?*' or ord(char) < 32 or ord(char) == 127 for char in part)
+        ):
+            raise UnsafeBundlePath(f"bundle path contains an unsafe filename: {value!r}")
     return path
 
 

@@ -75,7 +75,7 @@
 	"dependencies": {
 		"chart.js": "^4.5.1",
 		"lunar-typescript": "^1.8.6",
-		"markdown-it": "^15.0.2",
+		"markdown-it": "^15.0.3",
 		"obsidian": "^1.13.1",
 		"yaml": "^2.9.0"
 	}

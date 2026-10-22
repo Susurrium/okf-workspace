@@ -346,6 +346,11 @@ export class VaultNoteService {
       throw new Error(`学习材料不存在：${normalized}`);
     }
     await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+      const type = typeof frontmatter.type === 'string' ? frontmatter.type.trim() : '';
+      if (!['Study Guide', 'Wiki'].includes(type) || frontmatter.dashboard === true ||
+          'dashboard' in frontmatter && typeof frontmatter.dashboard !== 'boolean') {
+        throw new Error('学习完成操作仅适用于有效的学习笔记或知识笔记');
+      }
       if (completed) frontmatter.studied_at = localTimestamp();
       else delete frontmatter.studied_at;
     });

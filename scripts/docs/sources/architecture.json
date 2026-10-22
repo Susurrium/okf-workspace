@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "reviewed_at": "2026-10-17",
-  "baseline_commit": "65884bdc",
-  "scope": "核对添加菜单、顶部快速记录显示配置、共享草稿和工作台数据归属；不代表生产部署状态。",
+  "reviewed_at": "2026-10-22",
+  "baseline_commit": "6eef8135",
+  "scope": "核对路径与写入保护、时间核验投影、语义取消和文档检查入口；不代表正式部署状态。",
   "charts": [
     {
       "id": "overview",

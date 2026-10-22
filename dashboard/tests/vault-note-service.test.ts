@@ -5,6 +5,20 @@ import { VaultDashboardReader } from "../src/plugin/vault-dashboard.js";
 import { VaultNoteService } from "../src/plugin/vault-note-service.js";
 
 describe("VaultNoteService", () => {
+  it.each([
+    { type: 'Capture' }, { type: 'Project' }, { dashboard: true },
+    { type: 'Study Guide', dashboard: true }, { type: 'Wiki', dashboard: 'true' },
+  ])('protects non-learning identities at the write boundary: %j', async (fields) => {
+    const file = new (TFile as unknown as new (value: string) => TFile)('learning/guides/changed.md');
+    const current: Record<string, unknown> = { ...fields, custom: '保留' };
+    const app = {
+      vault: { getAbstractFileByPath: () => file },
+      fileManager: { processFrontMatter: async (_file: TFile, update: (value: Record<string, unknown>) => void) => update(current) },
+    } as unknown as App;
+    await expect(new VaultNoteService(app).setStudyCompleted(file.path, true)).rejects.toThrow();
+    expect(current).toEqual({ ...fields, custom: '保留' });
+  });
+
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 7, 17, 12));

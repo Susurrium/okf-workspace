@@ -1,9 +1,37 @@
 import { TFile, type App } from "obsidian";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { VaultDashboardReader } from "../src/plugin/vault-dashboard.js";
 
+const metadataCases = JSON.parse(readFileSync(
+  new URL('../../tests/fixtures/metadata/temporal-cases.json', import.meta.url), 'utf8',
+)) as { name: string; yaml: string; unverified: boolean }[];
+
 describe("VaultDashboardReader", () => {
+  it.each(metadataCases)('uses Contract verification events: $name', async (testCase) => {
+    const path = 'knowledge/wiki/verification.md';
+    const file = new (TFile as unknown as new (path: string) => TFile)(path);
+    const markdown = note('Wiki', '核验', testCase.yaml, '正文。');
+    let reads = 0;
+    const app = { vault: {
+      getMarkdownFiles: () => [file],
+      getAbstractFileByPath: (value: string) => value === path ? file : null,
+      cachedRead: async () => { reads++; return markdown; },
+    } } as unknown as App;
+    const reader = new VaultDashboardReader(app);
+    expect((await reader.knowledge()).notes[0]?.ai_unverified).toBe(testCase.unverified);
+    if (['empty-verification', 'mixed-timezones', 'missing-actor', 'invalid-calendar-date'].includes(testCase.name)) {
+      expect(reader.getReadWarnings()).toEqual([expect.objectContaining({ path })]);
+    }
+    const anotherReader = new VaultDashboardReader(app);
+    await anotherReader.knowledge();
+    expect(anotherReader.getReadWarnings()).toEqual(reader.getReadWarnings());
+    expect(reads).toBe(1);
+    reader.dispose();
+    anotherReader.dispose();
+  });
+
   it("projects courses, projects, tasks, and captures directly from Markdown", async () => {
     const markdown = new Map<string, string>([
       [

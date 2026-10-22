@@ -10,6 +10,7 @@ import type {
   TaskItem,
 } from "../api/types.js";
 import { projectCategory } from "../domain/project-organization.js";
+import { generationVerification, temporalText } from "../domain/note-metadata.js";
 import {
   compareNotesByRecency,
   dashboardLearningScopeEntryCounts,
@@ -29,6 +30,7 @@ interface ScannedNote {
 interface CachedScan {
   fingerprint: string;
   note: ScannedNote | undefined;
+  warnings?: readonly string[];
 }
 
 interface CachedRead {
@@ -172,21 +174,6 @@ function materialReady(body: string): boolean {
   const content = /<!-- ai:auto:start name="study-material" -->([\s\S]*?)<!-- ai:auto:end name="study-material" -->/u
     .exec(body)?.[1]?.trim() ?? "";
   return Boolean(content) && !content.includes("等待 Codex") && !content.includes("等待生成");
-}
-
-function aiUnverified(frontmatter: Record<string, unknown>): boolean {
-  const generated = frontmatter.generated;
-  if (!generated || typeof generated !== "object" || Array.isArray(generated)) return false;
-  const generatedAt = Date.parse(String((generated as Record<string, unknown>).at ?? ""));
-  const verified = Array.isArray(frontmatter.verified)
-    ? frontmatter.verified
-    : frontmatter.verified ? [frontmatter.verified] : [];
-  return !verified.some((event) => {
-    if (!event || typeof event !== "object" || Array.isArray(event)) return false;
-    const record = event as Record<string, unknown>;
-    const at = Date.parse(String(record.at ?? ""));
-    return !Number.isFinite(generatedAt) || !Number.isFinite(at) || at >= generatedAt;
-  });
 }
 
 function splitMarkdown(markdown: string): { frontmatter: Record<string, unknown>; body: string } {
@@ -542,6 +529,8 @@ export class VaultDashboardReader {
         const fingerprint = this.fingerprint(file);
         const cached = cache.scans.get(file.path);
         if (cached?.fingerprint === fingerprint) {
+          if (cached.warnings?.length) this.readWarnings.set(file.path, cached.warnings.join('；'));
+          else this.readWarnings.delete(file.path);
           const note = cached.note;
           const staleAfter = note?.summary.stale_after;
           if (note) note.summary.stale = staleAfter ? !/^\d{4}-\d{2}-\d{2}$/u.test(staleAfter) || staleAfter <= current : false;
@@ -561,19 +550,21 @@ export class VaultDashboardReader {
           cache.scans.set(file.path, { fingerprint, note: undefined });
           return undefined;
         }
-        const staleAfter = textValue(frontmatter.stale_after);
+        const verification = generationVerification(frontmatter);
+        if (verification.warnings.length) this.readWarnings.set(file.path, verification.warnings.join('；'));
+        const staleAfter = temporalText(frontmatter.stale_after) ?? textValue(frontmatter.stale_after);
         const stale = staleAfter ? !/^\d{4}-\d{2}-\d{2}$/u.test(staleAfter) || staleAfter <= current : false;
         const stat = (file as TFile & { stat?: { mtime?: number } }).stat;
-        const createdAt = textValue(frontmatter.created_at);
+        const createdAt = temporalText(frontmatter.created_at);
         const fallbackTime = createdAt ? Date.parse(createdAt) : 0;
         const summary: NoteSummary = {
           path: file.path,
           title: textValue(frontmatter.title) ?? file.basename,
           note_type: noteType,
           status: textValue(frontmatter.status) ?? "stable",
-          studied_at: textValue(frontmatter.studied_at),
+          studied_at: temporalText(frontmatter.studied_at),
           material_ready: materialReady(body),
-          ai_unverified: aiUnverified(frontmatter),
+          ai_unverified: verification.unverified,
           project_status: textValue(frontmatter.project_status),
           project_category: noteType === "Project" ? projectCategory(frontmatter.project_category) : null,
           course_status: textValue(frontmatter.course_status),
@@ -598,7 +589,7 @@ export class VaultDashboardReader {
           excerpt: markdownExcerpt(body),
         };
         const note = { file, summary };
-        cache.scans.set(file.path, { fingerprint, note });
+        cache.scans.set(file.path, { fingerprint, note, warnings: verification.warnings });
         return note;
       } catch (error) {
         if (cache.tokens.get(file.path) !== token) return undefined;

@@ -28,6 +28,11 @@ Vault 读取、原生写入与 Engine 命令的归属见[模块边界](architect
 - 完整异常和转换工作目录只进入本地日志；
 - token 放在 Vault 外，不经 LiveSync。
 
+Vault 相对路径须为规范路径。除绝对路径和目录穿越外，拒绝 Windows drive、UNC、ADS、设备名称、
+非法文件名字符及尾部空格/句点；路径解析后再次核对 Vault 归属。AI 写入策略检查解析后的目标，
+受保护名称空间按大小写不敏感规则匹配，展示与持久化路径保留原有大小写。
+笔记字段写入使用同一读取快照的版本校验，期间发生编辑时返回 HTTP 409，保留当前文件。
+
 Dashboard 向 Engine 发起写入时附带当前 Vault fingerprint；Engine 拒绝身份不一致的写入，防止落入另一个 Vault。
 
 ## 领域 API

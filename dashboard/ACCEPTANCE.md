@@ -1,7 +1,8 @@
 # Dashboard 验收台账
 
-更新：2026-10-22。当前文件导航与性能优化候选基于 `6eef8135` 及未提交修改，已安装到固定 OKF-Test。
-正式环境未部署。采用边界见 [UPSTREAM.md](UPSTREAM.md)，验收要求见[开发指南](../docs/DEVELOPMENT.md)。
+更新：2026-10-22。整合候选位于 `codex/integrate-performance-and-fixes`，
+包含性能优化 `f2336aab` 与修复 `ecf34f4d`。两轮原始验收记录保留在下文，整合验收进行中；正式环境未部署。
+采用边界见 [UPSTREAM.md](UPSTREAM.md)，验收要求见[开发指南](../docs/DEVELOPMENT.md)。
 1.0 发布验收见[版本记录](../docs/releases/1.0.0.md)。
 
 ## 性能优化（2026-10-22）
@@ -49,6 +50,25 @@
 上述记录对应具名回执中的开发候选。原始失败回执和后续通过回执均保留。
 移动端完成自动化及加载检查，未使用真实手机；本次没有远端同步、外部在线服务或正式发布验收。
 
+## Bug 修复（2026-10-22）
+
+修复提交为 `ecf34f4d`，业务源码为 `a080a147`；固定 OKF-Test 验收后恢复原工作区程序。
+
+本轮证据位于修复工作树的 `work/live-acceptance/RESULT.md` 及同目录具名 JSON，
+绝对位置为 `E:\code\okf-workspace\work\audit-fixes-20261022\work\live-acceptance\`。
+后台运行日志归档在 `E:\ObsidianData\OKF-Test-State\reports\audit-fixes-live-20261022\operations\`。
+
+| 范围 | 结果 |
+| --- | --- |
+| 实际宿主与元数据 | Obsidian 原生 frontmatter 完成/取消、未知嵌套字段与正文保留；身份变化拒绝写入；12 组核验事件、原生日期、跨读取器诊断与冷启动通过，两端结果一致 |
+| 界面与文件 | 学习卡片菜单完成学习及打开原生笔记；真实 HTTP 并发修改保留人工正文；4 进程追加 12 条记录；Windows 大小写、ADS/设备名及目录联接保护通过 |
+| Markdown | 80 万字节合成文件通过真实任务日期编辑执行解析与写入，约 2.1 秒；极端文件另出现宿主索引等待，删除并重启后恢复，详情见实机记录 |
+| Codex | 真实后台生成发布、排队与运行中取消且无输出；可见 Claudian 通过公开 Bridge 使用 Codex 返回回答，附件显示与移除通过 |
+| 退出与恢复 | 修复退出时旧设置写回造成自动启动复启的问题；14 项 Windows 控制测试、Ruff/Pyright 和真实启动/关闭通过；合成笔记、聊天及索引清理，恢复原程序与模型选择，测试窗口/API/自动启动/同步关闭 |
+
+本次按用户要求未新增环境备份或执行产物哈希核对。实机界面通过 DOM 操作及实际文件/API 状态验证；
+MinerU、Feed 在线同步、真实手机及多设备同步不在本轮变更范围。
+
 ## 添加菜单与顶部快速记录（2026-10-17）
 
 该项功能提交为 `65884bdc`，基线 `77381edb`；源码基线 `57e29c21` 的六项 CI 全部通过。
@@ -83,4 +103,4 @@
 | 较早验收 | `work/surface-visual-final/`、`work/tasks-boundary-accepted/`、`work/fixed-test-*-result.json`；旧环境归档 `E:\ObsidianData\Archives\20261015-test-consolidation`；原项目类别独立目录已不存在，复查使用整合证据 |
 | 历史正式切换 | 2026-09-29 `v0.8.0`/`7a9ea715`；切换前备份 `E:\ObsidianData\Backups\okf-pre-cutover-20260928T234914`，仅证明当次部署 |
 
-最近一轮的原始详细台账见 `git show 65884bdc:dashboard/ACCEPTANCE.md`；实际运行状态依据目标环境的部署回执和文件核对。
+2026-10-17 的原始详细台账见 `git show 65884bdc:dashboard/ACCEPTANCE.md`；实际运行状态依据目标环境的部署回执和文件核对。

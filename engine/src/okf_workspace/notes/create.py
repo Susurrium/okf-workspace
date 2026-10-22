@@ -12,7 +12,7 @@ from typing import Any, Literal
 from okf_workspace.ingestion import DIRECT_ENTRY
 from okf_workspace.okf.artifacts import render_artifact_body
 from okf_workspace.okf.file_io import atomic_write_bytes, document_lock
-from okf_workspace.okf.frontmatter import OkfDocument, read_document, write_document
+from okf_workspace.okf.frontmatter import OkfDocument, parse_document, read_document, write_document
 from okf_workspace.okf.paths import resolve_bundle_path, slugify
 from okf_workspace.okf.project_category import normalize_project_category
 from okf_workspace.okf.relations import explicit_context_fields, inherited_context_fields
@@ -82,7 +82,7 @@ class NoteService:
             frontmatter["status"] = status
         if fields:
             frontmatter.update(fields)
-        path = self.vault / relative
+        path = resolve_bundle_path(self.vault, relative.as_posix())
         write_document(
             path,
             OkfDocument(frontmatter=frontmatter, body=body),
@@ -122,18 +122,19 @@ class NoteService:
     def create_daily(self, target_date: date | None = None, *, content: str = "") -> Path:
         value = target_date or self.clock().date()
         relative = Path("life") / "daily" / f"{value:%Y}" / f"{value:%m}" / f"{value}.md"
-        path = self.vault / relative
-        if path.exists():
-            return path
-        user_content = content.strip()
-        body = render_artifact_body(self.vault, "daily", date=str(value), content=user_content)
-        return self._create(
-            relative,
-            note_type="Daily",
-            title=str(value),
-            body=body,
-            fields={"date": str(value)},
-        )
+        path = resolve_bundle_path(self.vault, relative.as_posix())
+        with document_lock(path):
+            if path.exists():
+                return path
+            user_content = content.strip()
+            body = render_artifact_body(self.vault, "daily", date=str(value), content=user_content)
+            return self._create(
+                relative,
+                note_type="Daily",
+                title=str(value),
+                body=body,
+                fields={"date": str(value)},
+            )
 
     def append_daily_capture(
         self,
@@ -146,19 +147,21 @@ class NoteService:
         if not entry:
             raise ValueError("daily capture cannot be empty")
         path = self.create_daily(target_date)
-        document = read_document(path)
-        heading = "## 随手记录"
-        position = document.body.find(heading)
-        if position < 0:
-            raise ValueError(f"Daily is missing the scratch section: {path}")
-        content_start = position + len(heading)
-        next_heading = document.body.find("\n## ", content_start)
-        insertion = next_heading if next_heading >= 0 else len(document.body)
-        stamp = self.clock().strftime("%H:%M")
-        prefix = document.body[:insertion].rstrip()
-        suffix = document.body[insertion:].lstrip("\n")
-        document.body = f"{prefix}\n\n- **{stamp}** {entry}\n\n{suffix}"
-        write_document(path, document)
+        with document_lock(path):
+            original = path.read_bytes()
+            document = parse_document(original.decode("utf-8"), source=str(path))
+            heading = "## 随手记录"
+            position = document.body.find(heading)
+            if position < 0:
+                raise ValueError(f"Daily is missing the scratch section: {path}")
+            content_start = position + len(heading)
+            next_heading = document.body.find("\n## ", content_start)
+            insertion = next_heading if next_heading >= 0 else len(document.body)
+            stamp = self.clock().strftime("%H:%M")
+            prefix = document.body[:insertion].rstrip()
+            suffix = document.body[insertion:].lstrip("\n")
+            document.body = f"{prefix}\n\n- **{stamp}** {entry}\n\n{suffix}"
+            write_document(path, document, expected_sha256=hashlib.sha256(original).hexdigest())
         return path
 
     def create_reflection(self, title: str, content: str) -> Path:
@@ -277,7 +280,7 @@ class NoteService:
     def create_project(self, slug: str, title: str, *, category: str | None = None) -> Path:
         category = normalize_project_category(category)
         project_slug = slugify(slug)
-        root = self.vault / "projects" / project_slug
+        root = resolve_bundle_path(self.vault, f"projects/{project_slug}")
         if root.exists():
             raise FileExistsError(root)
         root.mkdir(parents=True)
@@ -326,7 +329,7 @@ class NoteService:
 
     def append_project_log(self, project_slug: str, content: str) -> Path:
         slug = slugify(project_slug)
-        log = self.vault / "projects" / slug / "log.md"
+        log = resolve_bundle_path(self.vault, f"projects/{slug}/log.md")
         if not log.is_file():
             raise FileNotFoundError(log)
         heading = f"## {self.clock().date()}"

@@ -153,7 +153,7 @@ describe("workbench interaction contracts", () => {
     } as never);
     const root = new TestElement();
     const detail = new TestElement();
-    vi.spyOn(view as never, "showObjectDetails").mockImplementation((...args: unknown[]) => { void (args[1] as (container: HTMLElement) => Promise<void>)(detail as unknown as HTMLElement); });
+    vi.spyOn(view as unknown as { showObjectDetails(...args: unknown[]): void }, "showObjectDetails").mockImplementation((...args: unknown[]) => { void (args[1] as (container: HTMLElement) => Promise<void>)(detail as unknown as HTMLElement); });
     await (view as unknown as { renderSources(parent: HTMLElement): Promise<void> }).renderSources(root as unknown as HTMLElement);
     expect(root.descendants("okf-source-card")).toHaveLength(1);
     expect(root.descendants("okf-source-use")).toHaveLength(0);
@@ -193,7 +193,7 @@ describe("workbench interaction contracts", () => {
     } as never, { container: root as unknown as HTMLElement, headerActions: header as unknown as HTMLElement,
       embedded: true, initialSection: "projects",
       workbenchPath: "我的项目", instanceKey: "project-instance", config: { project, mode: "summary", limit: 1 } });
-    vi.spyOn(view as never, "attachActionPanel").mockImplementation(() => undefined);
+    vi.spyOn(view as unknown as { attachActionPanel(...args: unknown[]): void }, "attachActionPanel").mockImplementation(() => undefined);
     await view.onOpen();
     expect(root.descendants("okf-project-row")).toHaveLength(1);
     expect(root.descendants("okf-surface-controls")).toHaveLength(1);
@@ -259,7 +259,7 @@ describe("workbench interaction contracts", () => {
     const view = new OkfDashboardView(new (WorkspaceLeaf as unknown as new (app: App) => WorkspaceLeaf)(app), {
       getDashboardUiState: () => createDefaultDashboardUiState(), navigateToOkfSection: navigate,
     } as never, { container: root as unknown as HTMLElement, embedded: true, initialSection: "projects", workbenchPath: "我的项目" });
-    vi.spyOn(view as never, "attachActionPanel").mockImplementation(() => undefined);
+    vi.spyOn(view as unknown as { attachActionPanel(...args: unknown[]): void }, "attachActionPanel").mockImplementation(() => undefined);
     await (view as unknown as { renderProjects(parent: HTMLElement): Promise<void> }).renderProjects(root as unknown as HTMLElement);
     expect(root.descendants("okf-formal-task-row")).toHaveLength(3);
     expect(root.descendants().some(item => item.textContent === "未完成任务 · 4")).toBe(true);
