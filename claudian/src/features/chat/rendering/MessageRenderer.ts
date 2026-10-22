@@ -39,6 +39,7 @@ import {
   prepareDisplayOnlyCodeFences,
   restoreDisplayOnlyCodeFences,
 } from './DisplayOnlyCodeFences';
+import { HistoryRenderQueue } from './HistoryRenderQueue';
 import { renderMermaidDiagrams } from './MermaidRenderer';
 import { getResponseSegments } from './NotificationBoundaries';
 import { createResponseTextBlock, getResponseElementKind, getResponseLayout, markResponseElement } from './ResponseLayout';
@@ -86,6 +87,11 @@ export class MessageRenderer {
   private readonly imagePreviewModal = new ImagePreviewModal();
   private isDisposed = false;
   private readonly contentRenders = new WeakMap<HTMLElement, object>();
+  private readonly historyQueue = new HistoryRenderQueue(() => this.messagesEl.ownerDocument?.defaultView ?? window);
+  private historyRendering = false;
+  private historyGeneration = 0;
+  private historyBottomAnchor: number | null = null;
+  private readonly removeHistoryScrollHandlers: () => void;
 
   updateQuestionTool(tool: ToolCallInfo): void {
     for (const element of this.messagesEl.querySelectorAll<HTMLElement>('[data-tool-id]')) {
@@ -127,11 +133,33 @@ export class MessageRenderer {
 
     // Register delegated click handler for file links
     this.removeFileLinkHandler = registerFileLinkHandler(this.app, this.messagesEl);
+    const stopFollowing = () => { this.historyBottomAnchor = null; };
+    const onScroll = () => {
+      if (this.historyBottomAnchor !== null && this.messagesEl.scrollTop < this.historyBottomAnchor - 1) {
+        stopFollowing();
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) stopFollowing();
+    };
+    const intentHost = this.messagesEl.parentElement ?? this.messagesEl;
+    this.messagesEl.addEventListener('scroll', onScroll, { passive: true });
+    for (const event of ['wheel', 'touchstart', 'pointerdown']) intentHost.addEventListener(event, stopFollowing, { passive: true });
+    intentHost.addEventListener('keydown', onKeyDown);
+    this.removeHistoryScrollHandlers = () => {
+      this.messagesEl.removeEventListener('scroll', onScroll);
+      for (const event of ['wheel', 'touchstart', 'pointerdown']) intentHost.removeEventListener(event, stopFollowing);
+      intentHost.removeEventListener('keydown', onKeyDown);
+    };
   }
 
   dispose(): void {
     if (this.isDisposed) return;
     this.isDisposed = true;
+    this.historyGeneration++;
+    this.historyQueue.clear();
+    this.historyBottomAnchor = null;
+    this.removeHistoryScrollHandlers();
     this.imagePreviewModal.close();
     this.removeFileLinkHandler();
     this.removeFileLinkHandler = () => {};
@@ -272,17 +300,26 @@ export class MessageRenderer {
     messages: ChatMessage[],
     getGreeting: () => string
   ): HTMLElement {
+    this.historyGeneration++;
+    this.historyQueue.clear();
+    this.historyBottomAnchor = null;
     this.messagesEl.empty();
     this.liveMessageEls.clear();
 
     // Recreate welcome element after clearing
     const newWelcomeEl = createWelcomeElement(this.messagesEl, getGreeting());
 
-    for (let i = 0; i < messages.length; i++) {
-      this.renderStoredMessage(messages[i], messages, i);
+    this.historyRendering = messages.length > 64;
+    try {
+      for (let i = 0; i < messages.length; i++) {
+        this.renderStoredMessage(messages[i], messages, i);
+      }
+    } finally {
+      this.historyRendering = false;
     }
 
     this.scrollToBottom();
+    if (messages.length > 64) this.historyBottomAnchor = this.messagesEl.scrollTop;
     return newWelcomeEl;
   }
 
@@ -333,6 +370,7 @@ export class MessageRenderer {
     });
 
     const contentEl = msgEl.createDiv({ cls: 'claudian-message-content', attr: { dir: 'auto' } });
+    if (this.historyRendering) msgEl.classList.add('claudian-message-history');
 
     if (msg.role === 'user') {
       const textToShow = this.#getUserMessageTextToShow(msg);
@@ -844,7 +882,24 @@ export class MessageRenderer {
   ): Promise<void> {
     const renderToken = {};
     this.contentRenders.set(el, renderToken);
-    const isCurrent = () => !this.isDisposed && this.contentRenders.get(el) === renderToken;
+    const generation = this.historyRendering ? this.historyGeneration : undefined;
+    const isCurrent = () => !this.isDisposed && this.contentRenders.get(el) === renderToken
+      && (generation === undefined || generation === this.historyGeneration);
+    if (this.historyRendering) {
+      el.textContent = markdown;
+      return this.historyQueue.enqueue(async () => {
+        await this.renderContentNow(el, markdown, options, isCurrent);
+        if (isCurrent() && this.historyBottomAnchor !== null) this.scrollToBottom();
+      });
+    }
+    return this.renderContentNow(el, markdown, options, isCurrent);
+  }
+
+  private async renderContentNow(
+    el: HTMLElement, markdown: string, options: RenderContentOptions | undefined,
+    isCurrent: () => boolean,
+  ): Promise<void> {
+    if (!isCurrent()) return;
     el.empty();
 
     try {
@@ -1139,6 +1194,7 @@ export class MessageRenderer {
   /** Scrolls messages container to bottom. */
   scrollToBottom(): void {
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    if (this.historyBottomAnchor !== null) this.historyBottomAnchor = this.messagesEl.scrollTop;
   }
 
   /** Scrolls to bottom if already near bottom (within threshold). */

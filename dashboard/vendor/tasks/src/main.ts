@@ -22,8 +22,10 @@ import { QueryFileDefaults } from './Query/QueryFileDefaults';
 import { LinkResolver } from './Task/LinkResolver';
 import { ObsidianLocalStorageProvider } from './Config/ObsidianLocalStorageProvider';
 import { EnableJsInTasksQueries } from './Config/EnableJsInTasksQueries';
+import { prepareTaskSourceNavigation, type PrepareTaskSourceNavigation } from './Obsidian/TaskSourceNavigation';
 
 export default class TasksPlugin extends Plugin {
+    public prepareTaskSourceNavigation: PrepareTaskSourceNavigation = newLeaf => prepareTaskSourceNavigation(this.app, newLeaf);
     private cache: Cache | undefined;
     public inlineRenderer: InlineRenderer | undefined;
     public queryRenderer: QueryRenderer | undefined;

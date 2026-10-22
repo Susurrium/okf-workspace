@@ -23,6 +23,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Cross-component contract tests failed' }
     & uv run --project engine ruff check tests/e2e
     if ($LASTEXITCODE -ne 0) { throw 'Cross-component Ruff check failed' }
+    & uv run --project engine pytest scripts/docs/test_build_architecture.py
+    if ($LASTEXITCODE -ne 0) { throw 'Architecture generator tests failed' }
+    & uv run --project engine python scripts/docs/build_architecture.py --check
+    if ($LASTEXITCODE -ne 0) { throw 'Architecture generated outputs are stale' }
 }
 finally { Pop-Location }
 
@@ -47,6 +51,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Claudian tests failed' }
     & npm.cmd run build
     if ($LASTEXITCODE -ne 0) { throw 'Claudian build failed' }
+    & npm.cmd run check:performance
+    if ($LASTEXITCODE -ne 0) { throw 'Claudian performance check failed' }
 }
 finally { Pop-Location }
 

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -12,7 +10,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
-from okf_workspace.okf.file_io import document_lock
+from okf_workspace.okf.file_io import atomic_write_bytes, document_lock
+from okf_workspace.state_index import StateRecordIndex
 
 from .models import SemanticKind, SemanticRequest, SemanticStage, SemanticStatus
 
@@ -43,6 +42,12 @@ class SemanticOperationStore:
     def __init__(self, state: Path) -> None:
         self.root = state.resolve() / "operations"
         self.lock_path = self.root / ".store.lock"
+        self.catalog = StateRecordIndex(
+            self.root,
+            "op-*.json",
+            "operation_id",
+            lambda record: record.get("status") in {"queued", "running"},
+        )
 
     def path(self, operation_id: str) -> Path:
         if not operation_id.startswith("op-") or not operation_id[3:].isalnum():
@@ -85,13 +90,8 @@ class SemanticOperationStore:
         return payload
 
     def find_by_idempotency_key(self, key: str) -> dict[str, object] | None:
-        for record in self.list():
-            handoff_keys = record.get("handoff_keys")
-            if record.get("idempotency_key") == key or (
-                isinstance(handoff_keys, list) and key in handoff_keys
-            ):
-                return record
-        return None
+        records = self.catalog.records(key=key, limit=1)
+        return records[0] if records else None
 
     def bind_handoff(self, record: dict[str, object], key: str | None) -> dict[str, object]:
         if key is None:
@@ -101,11 +101,7 @@ class SemanticOperationStore:
             existing = current.get("handoff_keys")
             keys: list[str] = []
             if isinstance(existing, list):
-                keys = [
-                    value
-                    for value in cast(list[object], existing)
-                    if isinstance(value, str)
-                ]
+                keys = [value for value in cast(list[object], existing) if isinstance(value, str)]
             if key not in keys:
                 keys.append(key)
             current["handoff_keys"] = keys
@@ -123,7 +119,7 @@ class SemanticOperationStore:
         return next(
             (
                 record
-                for record in self.list()
+                for record in self.catalog.records(statuses=tuple(active), fingerprint=fingerprint)
                 if record.get("fingerprint") == fingerprint and record.get("status") in active
             ),
             None,
@@ -133,7 +129,10 @@ class SemanticOperationStore:
         return next(
             (
                 record
-                for record in self.list()
+                for record in self.catalog.records(
+                    statuses=(SemanticStatus.COMPLETED.value,),
+                    fingerprint=fingerprint,
+                )
                 if record.get("fingerprint") == fingerprint
                 and record.get("status") == SemanticStatus.COMPLETED.value
             ),
@@ -143,7 +142,7 @@ class SemanticOperationStore:
     def supersede_target(self, kind: SemanticKind, target: str) -> int:
         changed = 0
         with self._lock():
-            for record in self._list_unlocked():
+            for record in self.catalog.records(statuses=("queued", "orphaned")):
                 if (
                     record.get("kind") == kind.value
                     and record.get("target") == target
@@ -161,14 +160,13 @@ class SemanticOperationStore:
 
     def claim_next(self, worker_id: str) -> SemanticRequest | None:
         with self._lock():
-            queued = [
-                record
-                for record in self._list_unlocked()
-                if record.get("status") == SemanticStatus.QUEUED.value
-            ]
+            queued = self.catalog.records(statuses=("queued",), oldest_first=True, limit=1)
             if not queued:
                 return None
             record = min(queued, key=lambda item: str(item.get("created_at", "")))
+            if record.get("status") != SemanticStatus.QUEUED.value:
+                self.catalog.reconcile()
+                return None
             now = _now()
             record.update(
                 {
@@ -216,6 +214,10 @@ class SemanticOperationStore:
             if (
                 payload.get("status") != SemanticStatus.RUNNING.value
                 or payload.get("worker_id") != worker_id
+                or (
+                    stage is SemanticStage.PUBLISHING
+                    and bool(payload.get("cancel_requested"))
+                )
             ):
                 return False
             now = _now()
@@ -323,7 +325,9 @@ class SemanticOperationStore:
         changed = 0
         cutoff = datetime.now(UTC) - timedelta(minutes=stale_minutes)
         with self._lock():
+            self.catalog.reconcile()
             records = self._list_unlocked()
+            original_records = {str(record["operation_id"]): record.copy() for record in records}
             active_groups: dict[tuple[str, str], list[dict[str, object]]] = {}
             for record in records:
                 status = str(record.get("status", ""))
@@ -395,7 +399,9 @@ class SemanticOperationStore:
                         )
                         changed += 1
             for record in records:
-                self._write(self.path(str(record["operation_id"])), record)
+                identifier = str(record["operation_id"])
+                if record != original_records[identifier]:
+                    self._write(self.path(identifier), record)
         return changed
 
     def load(self, operation_id: str) -> dict[str, object]:
@@ -409,10 +415,9 @@ class SemanticOperationStore:
         return self._request_from(self.load(operation_id))
 
     def list(self, *, status: SemanticStatus | None = None) -> list[dict[str, object]]:
-        records = self._list_unlocked()
-        if status is not None:
-            records = [record for record in records if record.get("status") == status.value]
-        return sorted(records, key=lambda item: str(item.get("updated_at", "")), reverse=True)
+        if not self.root.is_dir():
+            return []
+        return self.catalog.records(statuses=(status.value,) if status is not None else ())
 
     def _list_unlocked(self) -> list[dict[str, object]]:
         records: list[dict[str, object]] = []
@@ -499,17 +504,8 @@ class SemanticOperationStore:
         with self.transaction():
             yield
 
-    @staticmethod
-    def _write(path: Path, payload: Mapping[str, object]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-        temporary = Path(name)
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-                json.dump(payload, handle, ensure_ascii=False, indent=2)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
-        finally:
-            temporary.unlink(missing_ok=True)
+    def _write(self, path: Path, payload: Mapping[str, object]) -> None:
+        with self.catalog.writing(path, payload):
+            atomic_write_bytes(
+                path, (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            )

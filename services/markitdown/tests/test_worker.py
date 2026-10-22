@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import cProfile
 import hashlib
+import pstats
+import threading
 import zipfile
 from dataclasses import replace
 
@@ -8,6 +11,24 @@ from pypdf import PdfWriter
 
 from markitdown_service.config import Settings
 from markitdown_service.worker import Worker
+
+
+def test_idle_polling_does_not_repeat_cleanup_or_spool_scans(settings: Settings) -> None:
+    class StopAfterPolls(threading.Event):
+        polls = 0
+
+        def wait(self, timeout: float | None = None) -> bool:
+            self.polls += 1
+            if self.polls >= 10:
+                self.set()
+            return self.is_set()
+
+    worker = Worker(settings, stop_event=StopAfterPolls())
+    profiler = cProfile.Profile()
+    profiler.runcall(worker.run_forever)
+    functions = pstats.Stats(profiler).get_stats_profile().func_profiles
+    assert functions["_cleanup"].ncalls == "1"
+    assert "storage_status" not in functions
 
 
 def test_worker_runs_real_markitdown_child_and_commits_only_verified_result(

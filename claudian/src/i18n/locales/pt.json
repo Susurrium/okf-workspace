@@ -23,6 +23,7 @@
     "rewind": "Retroceder"
   },
   "chat": {
+    "warmCleanupFailed": "Não foi possível liberar uma sessão inativa: {error}",
     "selectAvailableModel": "Selecione um modelo disponível antes de enviar.",
     "selectAvailableTitleModel": "Selecione um modelo de título disponível nas configurações do Claudian.",
     "rewind": {

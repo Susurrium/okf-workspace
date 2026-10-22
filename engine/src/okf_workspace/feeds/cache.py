@@ -1402,7 +1402,14 @@ class FeedCache:
         raise AssertionError("unreachable Feed source page retry")
 
     def find_item(self, feed: FeedKind, item_id: str) -> FeedItem:
-        for edition in self.list_editions(feed):
+        directory = self.root / feed.value
+        indexes = [self._load_or_repair_index(feed, path) for path in directory.glob("*.json")]
+        candidates = sorted(
+            (index for index in indexes if any(item.item_id == item_id for item in index.items)),
+            key=lambda index: (index.edition_at, index.edition_id), reverse=True,
+        )
+        for index in candidates:
+            edition = self.get(feed, index.edition_id)
             for item in edition.items:
                 if item.item_id == item_id:
                     return item

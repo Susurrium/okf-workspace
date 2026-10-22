@@ -1,4 +1,5 @@
-import { Modal, TFile, type App } from 'obsidian';
+import { Modal, Notice, TFile, type App } from 'obsidian';
+import { openFileInWorkspace } from '../../apex/src/file-navigation.js';
 import { scanFileTasks } from '../../apex/src/alltasks-scan.js';
 
 export interface TaskBoundaryReport {
@@ -36,7 +37,7 @@ export class TaskBoundaryReportModal extends Modal {
       const button = this.contentEl.createEl('button', { text: `${task.path}:${task.line + 1} · ${task.markdown}`, attr: { type: 'button' } });
       button.addEventListener('click', () => {
         const file = this.app.vault.getAbstractFileByPath(task.path);
-        if (file instanceof TFile) void this.app.workspace.getLeaf('tab').openFile(file, { eState: { line: task.line } });
+        if (file instanceof TFile) void openFileInWorkspace(this.app, file, { line: task.line }).catch(error => new Notice(String(error)));
       });
     }
     this.contentEl.createEl('p', { text: `与原独立 Tasks 配置存在差异的字段：${this.report.settingDifferences.length} 项。` });

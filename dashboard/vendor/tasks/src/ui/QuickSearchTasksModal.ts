@@ -5,6 +5,7 @@
 
 import { type App, Component, MarkdownRenderer, Notice, SuggestModal, setIcon } from 'obsidian';
 import type { Task } from '../Task/Task';
+import { prepareTaskSourceNavigation, type PrepareTaskSourceNavigation } from '../Obsidian/TaskSourceNavigation';
 import { TASK_FORMATS, getSettings, updateSettings } from '../Config/Settings';
 import { TaskLayoutComponent } from '../Layout/TaskLayoutOptions';
 import { findTasksByDescription } from '../lib/QuickSearchTasks';
@@ -40,7 +41,9 @@ export function taskSearchMetadataText(task: Task): string[] {
         .filter((text) => text !== '');
 }
 
-export async function openTaskAtSourceLocation(task: Task, app: App): Promise<void> {
+export async function openTaskAtSourceLocation(task: Task, app: App,
+    prepareNavigation: PrepareTaskSourceNavigation = newLeaf => prepareTaskSourceNavigation(app, newLeaf)): Promise<void> {
+    const open = prepareNavigation();
     const result = await getTaskLineAndFile(task, app.vault);
     if (result === undefined) {
         // The source file or task can change after the task cache was last refreshed.
@@ -52,7 +55,7 @@ export async function openTaskAtSourceLocation(task: Task, app: App): Promise<vo
 
     const [line, file] = result;
     try {
-        await app.workspace.getLeaf(false).openFile(file, { eState: { line } });
+        await open(file, line);
     } catch (error) {
         console.error('Tasks: Could not open task source.', error);
         new Notice('Tasks: Could not open task source.');
@@ -76,6 +79,7 @@ export class QuickSearchTasksModal extends SuggestModal<Task> {
         app: App,
         private readonly getTasks: () => Task[],
         private readonly onSaveSettings: () => Promise<void>,
+        private readonly prepareNavigation: PrepareTaskSourceNavigation = newLeaf => prepareTaskSourceNavigation(app, newLeaf),
     ) {
         super(app);
         this.setPlaceholder('Search incomplete tasks');
@@ -147,7 +151,7 @@ export class QuickSearchTasksModal extends SuggestModal<Task> {
     }
 
     public onChooseSuggestion(task: Task, _evt: MouseEvent | KeyboardEvent): void {
-        void openTaskAtSourceLocation(task, this.app);
+        void openTaskAtSourceLocation(task, this.app, this.prepareNavigation);
     }
 
     public onClose(): void {

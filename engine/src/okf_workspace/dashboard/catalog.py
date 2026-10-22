@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -12,6 +13,9 @@ from typing import cast
 from okf_workspace.okf.frontmatter import FrontmatterError, read_document
 from okf_workspace.okf.project_category import normalize_project_category
 from okf_workspace.okf.relations import inherited_context_fields
+from okf_workspace.okf.temporal import generation_verification, temporal_text
+
+LOGGER = logging.getLogger(__name__)
 
 _SKIP = {".agents", ".claudian", ".git", ".obsidian", ".trash"}
 _SKIPPED_SYSTEM_SECTIONS = {"contracts", "reports", "templates", "views"}
@@ -98,40 +102,6 @@ def _material_ready(body: str) -> bool:
     return bool(content) and "等待 Codex" not in content and "等待生成" not in content
 
 
-def _moment(value: object) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-def _ai_unverified(frontmatter: Mapping[str, object]) -> bool:
-    generated = frontmatter.get("generated")
-    if not isinstance(generated, Mapping):
-        return False
-    generated_event = cast(Mapping[object, object], generated)
-    generated_at = _moment(generated_event.get("at"))
-    verified = frontmatter.get("verified")
-    events: list[object] = (
-        cast(list[object], verified) if isinstance(verified, list) else [verified]
-    )
-    for event in events:
-        if not isinstance(event, Mapping):
-            continue
-        verification = cast(Mapping[object, object], event)
-        actor = verification.get("by")
-        verified_at = _moment(verification.get("at"))
-        if (
-            isinstance(actor, str)
-            and actor.startswith("human:")
-            and (generated_at is None or verified_at is None or verified_at >= generated_at)
-        ):
-            return False
-    return True
-
-
 def scan_notes(
     vault: Path,
     *,
@@ -176,7 +146,12 @@ def scan_notes(
                 linked_sources,
                 current=document.frontmatter,
             )
-        stale_after = _string(document.frontmatter.get("stale_after"))
+        ai_unverified, metadata_warnings = generation_verification(document.frontmatter)
+        for warning in metadata_warnings:
+            LOGGER.warning("%s: %s", relative_path.as_posix(), warning)
+        stale_after = temporal_text(document.frontmatter.get("stale_after")) or _string(
+            document.frontmatter.get("stale_after")
+        )
         try:
             stale = stale_after is not None and date.fromisoformat(stale_after) <= current
         except ValueError:
@@ -187,9 +162,9 @@ def scan_notes(
                 title=_string(document.frontmatter.get("title")) or path.stem,
                 note_type=document.type,
                 status=_string(document.frontmatter.get("status")) or "stable",
-                studied_at=_string(document.frontmatter.get("studied_at")),
+                studied_at=temporal_text(document.frontmatter.get("studied_at")),
                 material_ready=_material_ready(document.body),
-                ai_unverified=_ai_unverified(dict(document.frontmatter)),
+                ai_unverified=ai_unverified,
                 project_status=_string(document.frontmatter.get("project_status")),
                 project_category=(
                     normalize_project_category(document.frontmatter.get("project_category"))
@@ -214,7 +189,7 @@ def scan_notes(
                 kind=_string(document.frontmatter.get("kind")),
                 course=_string(context.get("course")),
                 project=_string(context.get("project")),
-                created_at=_string(document.frontmatter.get("created_at")),
+                created_at=temporal_text(document.frontmatter.get("created_at")),
                 modified_at=datetime.fromtimestamp(path.stat().st_mtime)
                 .astimezone()
                 .isoformat(timespec="seconds"),

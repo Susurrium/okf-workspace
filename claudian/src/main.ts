@@ -66,9 +66,10 @@ import {
 } from './features/chat/execution/WarmExecutionPool';
 import { registerFileMenu } from './features/chat/fileMenu';
 import { InlineEditSessionOwner } from './features/inline-edit/InlineEditSessionOwner';
-import { type InlineEditContext, InlineEditModal } from './features/inline-edit/ui/InlineEditModal';
+import type { InlineEditContext } from './features/inline-edit/ui/InlineEditModal';
+import type * as InlineEditModule from './features/inline-edit/ui/InlineEditModal';
 import { ClaudianSettingTab } from './features/settings/ClaudianSettings';
-import { setLocale } from './i18n/i18n';
+import { setLocale, t } from './i18n/i18n';
 import type { Locale } from './i18n/types';
 import { createOkfBridge } from './integrations/okf/OkfBridge';
 import { deleteLegacyMCPConfig } from './providers/claude/storage/LegacyMCPConfigCleanup';
@@ -123,6 +124,8 @@ export default class ClaudianPlugin extends Plugin {
   private modelMetadataMigration: Promise<void> | null = null;
   private sessionInputCleanup: Promise<void> | null = null;
   private sessionInputCleanupTimer: number | null = null;
+  private warmExecutionMaintenance: Promise<void> | null = null;
+  private warmExecutionTimer: number | null = null;
 
   async onload() {
     StartupProfiler.startOnload();
@@ -172,6 +175,8 @@ export default class ClaudianPlugin extends Plugin {
         id: 'inline-edit',
         name: 'Inline edit',
         editorCallback: async (editor: Editor, ctx) => {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports -- Initialize editor widgets when the inline edit command is invoked.
+          const { InlineEditModal } = require('./features/inline-edit/ui/InlineEditModal') as typeof InlineEditModule;
           const view = ctx instanceof MarkdownView
             ? ctx
             : this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -283,6 +288,18 @@ export default class ClaudianPlugin extends Plugin {
       this.settingsTab = new ClaudianSettingTab(this.app, this);
       this.addSettingTab(this.settingsTab);
       this.sessionMetadata.scheduleRemainingLoad();
+      this.warmExecutionTimer = window.setInterval(() => {
+        if (this.isUnloading || this.warmExecutionMaintenance) return;
+        const maintenance = this.warmExecutionPool.coolIdle().then(() => undefined).catch((error: unknown) => {
+          if (!this.isUnloading) new Notice(t('chat.warmCleanupFailed', {
+            error: error instanceof Error ? error.message : String(error),
+          }));
+        }).finally(() => {
+          if (this.warmExecutionMaintenance === maintenance) this.warmExecutionMaintenance = null;
+        });
+        this.warmExecutionMaintenance = maintenance;
+      }, 60_000);
+      this.registerInterval(this.warmExecutionTimer);
       this.app.workspace.onLayoutReady(() => {
         if (this.isUnloading || this.sessionInputCleanup || this.sessionInputCleanupTimer !== null) return;
         this.sessionInputCleanupTimer = window.setTimeout(() => {
@@ -305,6 +322,10 @@ export default class ClaudianPlugin extends Plugin {
   onunload(): void {
     this.isUnloading = true;
     this.startupMaintenanceAbort.abort();
+    if (this.warmExecutionTimer !== null) {
+      window.clearInterval(this.warmExecutionTimer);
+      this.warmExecutionTimer = null;
+    }
     if (this.sessionInputCleanupTimer !== null) {
       window.clearTimeout(this.sessionInputCleanupTimer);
       this.sessionInputCleanupTimer = null;
@@ -317,6 +338,7 @@ export default class ClaudianPlugin extends Plugin {
 
   private async shutdownApplication(): Promise<void> {
     await Promise.allSettled([
+      this.warmExecutionMaintenance,
       this.sessionMetadata?.dispose(),
       this.sessionInputCleanup,
       ...this.getAllViews().map(view => view.prepareForPluginUnload()),

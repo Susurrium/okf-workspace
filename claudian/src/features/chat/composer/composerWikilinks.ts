@@ -1,4 +1,4 @@
-import { parser } from '@lezer/markdown';
+import type * as MarkdownParser from '@lezer/markdown';
 
 import { parseWikilinks } from '@/utils/fileLink';
 
@@ -9,6 +9,8 @@ export function formatComposerWikilink(path: string): string {
 
 export function findComposerWikilinks(text: string): ReturnType<typeof parseWikilinks> {
   if (!text.includes('[[')) return [];
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Parse Markdown only when the composer contains a wikilink.
+  const { parser } = require('@lezer/markdown') as typeof MarkdownParser;
   const codeRanges: Array<{ from: number; to: number }> = [];
   parser.parse(text).iterate({
     enter(node) {

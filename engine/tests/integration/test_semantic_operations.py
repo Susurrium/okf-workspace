@@ -542,6 +542,53 @@ def test_running_operation_cancellation_reaches_the_runner_and_stops_work(
     assert record["stage"] == "cancelled"
 
 
+def test_cancel_wins_between_generation_check_and_publishing(
+    vault: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = _learning_note(vault)
+    original = target.read_bytes()
+    state = tmp_path / "state"
+    service = SemanticOperationService(vault, state)
+    queued = service.enqueue(SemanticKind.GENERATE_STUDY_GUIDE, "learning/guides/vpn.md")
+    worker = SemanticWorker(vault, state, FixedRunner())
+    real_cancelled = worker.store.cancelled
+    accepted: list[dict[str, object]] = []
+
+    def cancel_after_check(operation_id: str) -> bool:
+        result = real_cancelled(operation_id)
+        if not accepted:
+            accepted.append(service.cancel(operation_id))
+        return result
+
+    monkeypatch.setattr(worker.store, "cancelled", cancel_after_check)
+    assert worker.run_once()
+    assert accepted[0]["cancel_requested"] is True
+    assert target.read_bytes() == original
+    assert service.store.load(str(queued["operation_id"]))["status"] == "cancelled"
+
+
+def test_publishing_wins_before_a_late_cancellation(
+    vault: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = _learning_note(vault)
+    state = tmp_path / "state"
+    service = SemanticOperationService(vault, state)
+    queued = service.enqueue(SemanticKind.GENERATE_STUDY_GUIDE, "learning/guides/vpn.md")
+    worker = SemanticWorker(vault, state, FixedRunner())
+    real_publish = worker._publish
+
+    def cancel_before_file_write(request: SemanticRequest, content: str) -> None:
+        with pytest.raises(ValueError, match="already being published"):
+            service.cancel(request.operation_id)
+        assert service.store.load(request.operation_id)["cancel_requested"] is False
+        real_publish(request, content)
+
+    monkeypatch.setattr(worker, "_publish", cancel_before_file_write)
+    assert worker.run_once()
+    assert service.store.load(str(queued["operation_id"]))["status"] == "completed"
+    assert "这是根据真实来源生成的内容。" in read_document(target).body
+
+
 def test_health_stays_responsive_while_semantic_worker_is_blocked(tmp_path: Path) -> None:
     vault = initialize_vault(tmp_path / "vault")
     _learning_note(vault)

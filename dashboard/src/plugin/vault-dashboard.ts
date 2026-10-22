@@ -10,10 +10,12 @@ import type {
   TaskItem,
 } from "../api/types.js";
 import { projectCategory } from "../domain/project-organization.js";
+import { generationVerification, temporalText } from "../domain/note-metadata.js";
 import {
   compareNotesByRecency,
   dashboardLearningScopeEntryCounts,
-  filterDashboardLearningScope,
+  courseRelationPath,
+  explicitRelationPath,
 } from "../domain/dashboard-experience.js";
 import { isIngestedVia } from "../domain/inbox-work-queue.js";
 import { collectVaultTasks, indexTasksByDay, type VaultTask } from "../../apex/src/alltasks-scan.js";
@@ -22,14 +24,13 @@ const USER_ROOTS = new Set(["inbox", "learning", "projects", "knowledge", "life"
 
 interface ScannedNote {
   file: TFile;
-  markdown: string;
-  body: string;
   summary: NoteSummary;
 }
 
 interface CachedScan {
   fingerprint: string;
   note: ScannedNote | undefined;
+  warnings?: readonly string[];
 }
 
 interface CachedRead {
@@ -40,9 +41,33 @@ interface CachedRead {
 interface DashboardCache {
   scans: Map<string, CachedScan>;
   reads: Map<string, CachedRead>;
+  pending: Map<string, { fingerprint: string; promise: Promise<string> }>;
+  tokens: Map<string, object>;
+  warnings: Map<string, string>;
+  scanning?: Promise<ScannedNote[]>;
+  bytes: number;
+  limit: number;
+  users: number;
 }
 
 const DASHBOARD_CACHE = new WeakMap<App, DashboardCache>();
+
+function forgetRead(cache: DashboardCache, path: string): void {
+  const existing = cache.reads.get(path);
+  if (existing) cache.bytes -= existing.markdown.length * 2;
+  cache.reads.delete(path);
+}
+
+function storeRead(cache: DashboardCache, path: string, value: CachedRead): void {
+  forgetRead(cache, path);
+  cache.reads.set(path, value);
+  cache.bytes += value.markdown.length * 2;
+  while (cache.bytes > cache.limit) {
+    const oldest = cache.reads.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    forgetRead(cache, oldest);
+  }
+}
 
 export interface InboxProjection {
   captures: NoteSummary[];
@@ -95,6 +120,24 @@ function sameVaultPath(left: string | null | undefined, right: string): boolean 
   return normalize(left) === normalize(right);
 }
 
+function groupValues<T>(values: readonly T[], keys: (value: T) => readonly (string | undefined)[]): Map<string, T[]> {
+  const groups = new Map<string, T[]>();
+  for (const value of values) {
+    for (const key of new Set(keys(value))) {
+      if (key === undefined) continue;
+      let group = groups.get(key);
+      if (!group) { group = []; groups.set(key, group); }
+      group.push(value);
+    }
+  }
+  return groups;
+}
+
+function sourceRelations(source: NoteSummary, kind: 'course' | 'project'): (string | undefined)[] {
+  return (source.uses?.length ? source.uses.map(use => use[kind]) : [source[kind]])
+    .map(path => explicitRelationPath(path));
+}
+
 function isPendingCapture(note: NoteSummary): boolean {
   return note.note_type === "Capture" &&
     note.path.startsWith("inbox/captures/") &&
@@ -131,21 +174,6 @@ function materialReady(body: string): boolean {
   const content = /<!-- ai:auto:start name="study-material" -->([\s\S]*?)<!-- ai:auto:end name="study-material" -->/u
     .exec(body)?.[1]?.trim() ?? "";
   return Boolean(content) && !content.includes("等待 Codex") && !content.includes("等待生成");
-}
-
-function aiUnverified(frontmatter: Record<string, unknown>): boolean {
-  const generated = frontmatter.generated;
-  if (!generated || typeof generated !== "object" || Array.isArray(generated)) return false;
-  const generatedAt = Date.parse(String((generated as Record<string, unknown>).at ?? ""));
-  const verified = Array.isArray(frontmatter.verified)
-    ? frontmatter.verified
-    : frontmatter.verified ? [frontmatter.verified] : [];
-  return !verified.some((event) => {
-    if (!event || typeof event !== "object" || Array.isArray(event)) return false;
-    const record = event as Record<string, unknown>;
-    const at = Date.parse(String(record.at ?? ""));
-    return !Number.isFinite(generatedAt) || !Number.isFinite(at) || at >= generatedAt;
-  });
 }
 
 function splitMarkdown(markdown: string): { frontmatter: Record<string, unknown>; body: string } {
@@ -260,24 +288,55 @@ function sameOptionalVaultPath(
   return sameVaultPath(left, right);
 }
 
-function sourceUsesProject(source: NoteSummary, projectPath: string): boolean {
-  if (source.uses?.length) {
-    return source.uses.some((use) => sameVaultPath(use.project, projectPath));
-  }
-  return sameVaultPath(source.project, projectPath);
-}
-
-function sourceUsesCourse(source: NoteSummary, coursePath: string): boolean {
-  if (source.uses?.length) {
-    return source.uses.some((use) => sameVaultPath(use.course, coursePath));
-  }
-  return sameVaultPath(source.course, coursePath);
-}
-
 export class VaultDashboardReader {
-  private readonly readWarnings = new Map<string, string>();
+  private readonly readWarnings: Map<string, string>;
+  private disposed = false;
 
-  public constructor(private readonly app: App) {}
+  public constructor(private readonly app: App, options: { cacheLimitBytes?: number } = {}) {
+    const cache = this.cache();
+    if (options.cacheLimitBytes !== undefined) {
+      if (!Number.isFinite(options.cacheLimitBytes) || options.cacheLimitBytes < 0) throw new Error('正文缓存预算无效');
+      cache.limit = options.cacheLimitBytes;
+    }
+    cache.users++;
+    this.readWarnings = cache.warnings;
+  }
+
+  public static cacheUsage(app: App): { reads: number; scans: number; bytes: number; limit: number } {
+    const cache = DASHBOARD_CACHE.get(app);
+    return { reads: cache?.reads.size ?? 0, scans: cache?.scans.size ?? 0,
+      bytes: cache?.bytes ?? 0, limit: cache?.limit ?? 0 };
+  }
+
+  public static invalidate(app: App, paths: readonly string[]): void {
+    const cache = DASHBOARD_CACHE.get(app);
+    if (!cache) return;
+    const known = new Set([...cache.scans.keys(), ...cache.reads.keys(), ...cache.pending.keys(), ...cache.tokens.keys()]);
+    for (const path of known) {
+      if (!paths.some(prefix => path === prefix || path.startsWith(`${prefix}/`))) continue;
+      cache.scans.delete(path);
+      forgetRead(cache, path);
+      cache.pending.delete(path);
+      cache.tokens.delete(path);
+      cache.warnings.delete(path);
+    }
+    cache.scanning = undefined;
+  }
+
+  public dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    const cache = this.cache();
+    cache.users--;
+    if (cache.users > 0) return;
+    cache.scans.clear();
+    cache.reads.clear();
+    cache.pending.clear();
+    cache.tokens.clear();
+    cache.warnings.clear();
+    cache.bytes = 0;
+    DASHBOARD_CACHE.delete(this.app);
+  }
 
   public getReadWarnings(): readonly { path: string; message: string }[] {
     return [...this.readWarnings].map(([path, message]) => ({ path, message }));
@@ -286,7 +345,8 @@ export class VaultDashboardReader {
   private cache(): DashboardCache {
     const existing = DASHBOARD_CACHE.get(this.app);
     if (existing) return existing;
-    const created = { scans: new Map<string, CachedScan>(), reads: new Map<string, CachedRead>() };
+    const created: DashboardCache = { scans: new Map(), reads: new Map(), pending: new Map(),
+      tokens: new Map(), warnings: new Map(), bytes: 0, limit: 64 * 1024 * 1024, users: 0 };
     DASHBOARD_CACHE.set(this.app, created);
     return created;
   }
@@ -411,27 +471,39 @@ export class VaultDashboardReader {
     const sources = summaries.filter((note) => note.note_type === "Source");
     const sourceByPath = new Map(sources.map((note) => [note.path, note]));
     const studyGuides = summaries.filter((note) => note.note_type === "Study Guide");
+    const generatedBySource = groupValues(studyGuides, note => (note.source_paths ?? []).map(explicitRelationPath));
     return [
       ...studyGuides
         .filter((note) => !note.studied_at && !note.material_ready)
         .map((note) => inheritSourceMetadata(note, sourceByPath)),
       ...sources.flatMap((source) => sourceUseProjections(source, "study")
-        .filter((use) => !useAlreadyMaterialized(source, use, studyGuides))),
+        .filter((use) => !useAlreadyMaterialized(source, use, generatedBySource.get(explicitRelationPath(source.path)!) ?? []))),
     ].sort(compareNotesByRecency);
   }
 
   private pendingWikiFrom(summaries: readonly NoteSummary[]): NoteSummary[] {
     const wikis = summaries.filter((note) => note.note_type === "Wiki");
+    const generatedBySource = groupValues(wikis, note => (note.source_paths ?? []).map(explicitRelationPath));
     return summaries
       .filter((note) => note.note_type === "Source")
       .flatMap((source) => sourceUseProjections(source, "wiki")
-        .filter((use) => !useAlreadyMaterialized(source, use, wikis)))
+        .filter((use) => !useAlreadyMaterialized(source, use, generatedBySource.get(explicitRelationPath(source.path)!) ?? [])))
       .sort(compareNotesByRecency);
   }
 
   private async scan(): Promise<ScannedNote[]> {
-    const current = localDate();
+    if (this.disposed) throw new Error('工作台读取器已关闭');
     const cache = this.cache();
+    if (cache.scanning) return cache.scanning;
+    const scanning = this.performScan(cache).finally(() => {
+      if (cache.scanning === scanning) cache.scanning = undefined;
+    });
+    cache.scanning = scanning;
+    return scanning;
+  }
+
+  private async performScan(cache: DashboardCache): Promise<ScannedNote[]> {
+    const current = localDate();
     const files = this.app.vault.getMarkdownFiles().filter((file) => {
       if (file.path.startsWith("inbox/uploads/") || file.path.startsWith("system/imports/")) return false;
       const root = file.path.split("/")[0] ?? "";
@@ -441,17 +513,35 @@ export class VaultDashboardReader {
     for (const path of cache.scans.keys()) {
       if (!currentPaths.has(path)) cache.scans.delete(path);
     }
+    for (const path of new Set([...cache.reads.keys(), ...cache.tokens.keys()])) {
+      if (!(this.app.vault.getAbstractFileByPath(path) instanceof TFile)) {
+        forgetRead(cache, path);
+        cache.tokens.delete(path);
+        cache.pending.delete(path);
+      }
+    }
     for (const path of this.readWarnings.keys()) {
       if (!this.app.vault.getAbstractFileByPath(path)) this.readWarnings.delete(path);
     }
     const results = await mapWithConcurrency(files, 8, async (file): Promise<ScannedNote | undefined> => {
+      let token: object | undefined;
       try {
-        const fingerprint = `${this.fingerprint(file)}:${current}`;
+        const fingerprint = this.fingerprint(file);
         const cached = cache.scans.get(file.path);
-        if (cached?.fingerprint === fingerprint) return cached.note;
-        const markdown = await this.app.vault.cachedRead(file);
+        if (cached?.fingerprint === fingerprint) {
+          if (cached.warnings?.length) this.readWarnings.set(file.path, cached.warnings.join('；'));
+          else this.readWarnings.delete(file.path);
+          const note = cached.note;
+          const staleAfter = note?.summary.stale_after;
+          if (note) note.summary.stale = staleAfter ? !/^\d{4}-\d{2}-\d{2}$/u.test(staleAfter) || staleAfter <= current : false;
+          return note;
+        }
+        token = cache.tokens.get(file.path) ?? {};
+        cache.tokens.set(file.path, token);
+        const markdown = await this.readFile(file, cache);
+        if (cache.tokens.get(file.path) !== token || this.fingerprint(file) !== fingerprint
+          || this.app.vault.getAbstractFileByPath(file.path) !== file) throw new Error('文件在读取期间发生变化，请刷新');
         this.readWarnings.delete(file.path);
-        cache.reads.set(file.path, { fingerprint: this.fingerprint(file), markdown });
         const parsed = splitMarkdown(markdown);
         const frontmatter = parsed.frontmatter;
         const body = parsed.body;
@@ -460,19 +550,21 @@ export class VaultDashboardReader {
           cache.scans.set(file.path, { fingerprint, note: undefined });
           return undefined;
         }
-        const staleAfter = textValue(frontmatter.stale_after);
+        const verification = generationVerification(frontmatter);
+        if (verification.warnings.length) this.readWarnings.set(file.path, verification.warnings.join('；'));
+        const staleAfter = temporalText(frontmatter.stale_after) ?? textValue(frontmatter.stale_after);
         const stale = staleAfter ? !/^\d{4}-\d{2}-\d{2}$/u.test(staleAfter) || staleAfter <= current : false;
         const stat = (file as TFile & { stat?: { mtime?: number } }).stat;
-        const createdAt = textValue(frontmatter.created_at);
+        const createdAt = temporalText(frontmatter.created_at);
         const fallbackTime = createdAt ? Date.parse(createdAt) : 0;
         const summary: NoteSummary = {
           path: file.path,
           title: textValue(frontmatter.title) ?? file.basename,
           note_type: noteType,
           status: textValue(frontmatter.status) ?? "stable",
-          studied_at: textValue(frontmatter.studied_at),
+          studied_at: temporalText(frontmatter.studied_at),
           material_ready: materialReady(body),
-          ai_unverified: aiUnverified(frontmatter),
+          ai_unverified: verification.unverified,
           project_status: textValue(frontmatter.project_status),
           project_category: noteType === "Project" ? projectCategory(frontmatter.project_category) : null,
           course_status: textValue(frontmatter.course_status),
@@ -496,13 +588,16 @@ export class VaultDashboardReader {
           source_paths: sourcePaths(frontmatter.sources),
           excerpt: markdownExcerpt(body),
         };
-        const note = { file, markdown, body, summary };
-        cache.scans.set(file.path, { fingerprint, note });
+        const note = { file, summary };
+        cache.scans.set(file.path, { fingerprint, note, warnings: verification.warnings });
         return note;
       } catch (error) {
+        if (cache.tokens.get(file.path) !== token) return undefined;
         cache.scans.delete(file.path);
-        cache.reads.delete(file.path);
-        this.readWarnings.set(file.path, error instanceof Error ? error.message : "文件读取失败");
+        forgetRead(cache, file.path);
+        if (this.app.vault.getAbstractFileByPath(file.path)) {
+          this.readWarnings.set(file.path, error instanceof Error ? error.message : "文件读取失败");
+        }
         return undefined;
       }
     });
@@ -513,21 +608,19 @@ export class VaultDashboardReader {
     notes: readonly NoteSummary[],
     activeOnly = true,
   ): Promise<CourseSummary[]> {
+    const byType = groupValues(notes, note => [note.note_type]);
+    const lessonsByCourse = groupValues(byType.get('Lesson') ?? [], note => [courseRelationPath(note)]);
+    const guidesByCourse = groupValues(byType.get('Study Guide') ?? [], note => [courseRelationPath(note)]);
+    const sourcesByCourse = groupValues(byType.get('Source') ?? [], note => sourceRelations(note, 'course'));
+    const capturesByCourse = groupValues((byType.get('Capture') ?? []).filter(isPendingCapture), note => [explicitRelationPath(note.course)]);
     const courses = notes.filter(
       (note) => note.note_type === "Course" &&
         (!activeOnly || !note.course_status || note.course_status === "active"),
     );
     const values = await mapWithConcurrency(courses, 8, async (course): Promise<CourseSummary> => {
-      const lessons = filterDashboardLearningScope(
-        notes.filter((note) => note.note_type === "Lesson"),
-        "course",
-        course.path,
-      ).sort(compareNotesByRecency);
-      const guides = filterDashboardLearningScope(
-        notes.filter((note) => note.note_type === "Study Guide"),
-        "course",
-        course.path,
-      );
+      const key = explicitRelationPath(course.path)!;
+      const lessons = [...(lessonsByCourse.get(key) ?? [])].sort(compareNotesByRecency);
+      const guides = guidesByCourse.get(key) ?? [];
       const body = splitMarkdown(await this.readPath(course.path)).body;
       return {
         ...course,
@@ -537,12 +630,8 @@ export class VaultDashboardReader {
         related_learning: guides,
         lessons,
         ...(lessons[0] ? { latest_lesson: lessons[0] } : {}),
-        related_sources: notes.filter(
-          (note) => note.note_type === "Source" && sourceUsesCourse(note, course.path),
-        ),
-        pending_captures: notes.filter(
-          (note) => isPendingCapture(note) && sameVaultPath(note.course, course.path),
-        ),
+        related_sources: sourcesByCourse.get(key) ?? [],
+        pending_captures: capturesByCourse.get(key) ?? [],
       };
     });
     const order: Record<string, number> = { active: 0, paused: 1, completed: 2 };
@@ -559,6 +648,18 @@ export class VaultDashboardReader {
   ): Promise<ProjectSummary[]> {
     const files = this.app.vault.getFiles();
     const formalTasks = taskSummaries((await collectVaultTasks(this.app)).filter((task) => task.formal && !task.checked), notes);
+    const byType = groupValues(notes, note => [note.note_type]);
+    const guidesByProject = groupValues(byType.get('Study Guide') ?? [], note => [explicitRelationPath(note.project)]);
+    const sourcesByProject = groupValues(byType.get('Source') ?? [], note => sourceRelations(note, 'project'));
+    const capturesByProject = groupValues((byType.get('Capture') ?? []).filter(isPendingCapture), note => [explicitRelationPath(note.project)]);
+    const tasksByProject = groupValues(formalTasks, task => [explicitRelationPath(task.project)]);
+    const filesByPath = new Map(files.map(file => [file.path, file]));
+    const tree = (kind: string) => groupValues(files.filter(file => file.name !== 'index.md'), file => {
+      const marker = file.path.indexOf(`/${kind}/`);
+      return marker >= 0 ? [file.path.slice(0, marker)] : [];
+    });
+    const decisionsByRoot = tree('decisions');
+    const outputsByRoot = tree('outputs');
     const projects = notes.filter(
       (note) => note.note_type === "Project" && (!activeOnly || note.project_status === "active"),
     );
@@ -566,7 +667,8 @@ export class VaultDashboardReader {
       const root = project.path.split("/").slice(0, -1).join("/");
       const body = splitMarkdown(await this.readPath(project.path)).body;
       const logPath = `${root}/log.md`;
-      const logFile = files.find((file) => file.path === logPath);
+      const logFile = filesByPath.get(logPath);
+      const key = explicitRelationPath(project.path)!;
       const activityTime = Math.max(
         Date.parse(project.modified_at ?? "") || 0,
         logFile?.stat?.mtime ?? 0,
@@ -578,22 +680,12 @@ export class VaultDashboardReader {
         next_action: section(body, "下一步"),
         recent_log: markdownExcerpt(latestProjectLogEntry(await this.readPath(logPath)), 500),
         log_path: logPath,
-        decisions: files.filter(
-          (file) => file.path.startsWith(`${root}/decisions/`) && file.name !== "index.md",
-        ).map((file) => file.path).sort(),
-        outputs: files.filter(
-          (file) => file.path.startsWith(`${root}/outputs/`) && file.name !== "index.md",
-        ).map((file) => file.path).sort(),
-        related_learning: notes.filter(
-          (note) => note.note_type === "Study Guide" && sameVaultPath(note.project, project.path),
-        ),
-        related_materials: notes.filter(
-          (note) => note.note_type === "Source" && sourceUsesProject(note, project.path),
-        ),
-        pending_captures: notes.filter(
-          (note) => isPendingCapture(note) && sameVaultPath(note.project, project.path),
-        ),
-        open_tasks: formalTasks.filter((task) => sameVaultPath(task.project, project.path)),
+        decisions: (decisionsByRoot.get(root) ?? []).map(file => file.path).sort(),
+        outputs: (outputsByRoot.get(root) ?? []).map(file => file.path).sort(),
+        related_learning: guidesByProject.get(key) ?? [],
+        related_materials: sourcesByProject.get(key) ?? [],
+        pending_captures: capturesByProject.get(key) ?? [],
+        open_tasks: tasksByProject.get(key) ?? [],
       };
     });
     const order: Record<string, number> = { active: 0, paused: 1, completed: 2 };
@@ -607,18 +699,39 @@ export class VaultDashboardReader {
   private async readPath(path: string): Promise<string> {
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) return "";
-    const fingerprint = this.fingerprint(file);
-    const cached = this.cache().reads.get(path);
-    if (cached?.fingerprint === fingerprint) return cached.markdown;
     try {
-      const markdown = await this.app.vault.cachedRead(file);
+      const markdown = await this.readFile(file, this.cache());
       this.readWarnings.delete(path);
-      this.cache().reads.set(path, { fingerprint, markdown });
       return markdown;
     } catch (error) {
       this.readWarnings.set(path, error instanceof Error ? error.message : "文件读取失败");
       return "";
     }
+  }
+
+  private readFile(file: TFile, cache: DashboardCache): Promise<string> {
+    const path = file.path;
+    const fingerprint = this.fingerprint(file);
+    const cached = cache.reads.get(path);
+    if (cached?.fingerprint === fingerprint) {
+      cache.reads.delete(path);
+      cache.reads.set(path, cached);
+      return Promise.resolve(cached.markdown);
+    }
+    const pending = cache.pending.get(path);
+    if (pending?.fingerprint === fingerprint) return pending.promise;
+    const token = cache.tokens.get(path) ?? {};
+    cache.tokens.set(path, token);
+    const promise = this.app.vault.cachedRead(file).then(markdown => {
+      if (cache.tokens.get(path) !== token || this.fingerprint(file) !== fingerprint
+        || this.app.vault.getAbstractFileByPath(path) !== file) throw new Error('文件在读取期间发生变化，请刷新');
+      storeRead(cache, path, { fingerprint, markdown });
+      return markdown;
+    }).finally(() => {
+      if (cache.pending.get(path)?.promise === promise) cache.pending.delete(path);
+    });
+    cache.pending.set(path, { fingerprint, promise });
+    return promise;
   }
 
   private fingerprint(file: TFile): string {

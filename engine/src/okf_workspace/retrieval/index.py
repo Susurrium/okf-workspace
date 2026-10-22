@@ -2,20 +2,26 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 import sqlite3
 from collections.abc import Generator, Iterable, Mapping, Sequence
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, cast
 
+from okf_workspace.okf.document_role import DocumentRole, document_role
+from okf_workspace.okf.file_io import FileWriteConflict, document_lock
 from okf_workspace.okf.frontmatter import FrontmatterError, parse_document
+from okf_workspace.okf.paths import resolve_bundle_path
 
 from .chunks import chunk_markdown
 from .links import extract_links
 from .models import IndexUpdate, MarkdownChunk, SearchHit
-from .scanner import file_hash, is_retrievable_markdown, iter_markdown
+from .scanner import is_candidate_path, iter_candidate_entries
+from .schema import INDEX_SCHEMA, INDEX_SCHEMA_VERSION
 
 _CJK_RUN = re.compile(r"[\u3400-\u9fff]+")
 _WORD = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.+-]*")
@@ -98,145 +104,136 @@ class SearchIndex:
             connection.close()
 
     def _initialize(self) -> None:
-        with self.connect() as connection:
-            connection.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS metadata (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS documents (
-                    path TEXT PRIMARY KEY,
-                    file_hash TEXT NOT NULL,
-                    modified_ns INTEGER NOT NULL,
-                    size INTEGER NOT NULL,
-                    title TEXT NOT NULL,
-                    note_type TEXT NOT NULL,
-                    frontmatter_json TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS chunks (
-                    chunk_id TEXT PRIMARY KEY,
-                    path TEXT NOT NULL REFERENCES documents(path) ON DELETE CASCADE,
-                    heading TEXT NOT NULL,
-                    start_line INTEGER NOT NULL,
-                    end_line INTEGER NOT NULL,
-                    text TEXT NOT NULL,
-                    text_hash TEXT NOT NULL
-                );
-                CREATE VIRTUAL TABLE IF NOT EXISTS fts_chunks USING fts5(
-                    chunk_id UNINDEXED,
-                    path UNINDEXED,
-                    heading,
-                    body,
-                    search_text,
-                    tokenize = 'unicode61 remove_diacritics 2'
-                );
-                CREATE TABLE IF NOT EXISTS links (
-                    source_path TEXT NOT NULL,
-                    target_path TEXT NOT NULL,
-                    relation TEXT NOT NULL,
-                    PRIMARY KEY (source_path, target_path, relation)
-                );
-                CREATE INDEX IF NOT EXISTS chunks_path ON chunks(path);
-                CREATE INDEX IF NOT EXISTS links_target ON links(target_path);
-                """
+        with document_lock(self.database), self.connect() as connection:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
             )
             row = connection.execute(
                 "SELECT value FROM metadata WHERE key = 'schema_version'"
             ).fetchone()
-            if row is None or str(row["value"]) != "3":
-                connection.execute("DELETE FROM fts_chunks")
-                connection.execute("DELETE FROM links")
-                connection.execute("DELETE FROM chunks")
-                connection.execute("DELETE FROM documents")
+            version = int(row["value"]) if row is not None else 0
+            if version > INDEX_SCHEMA_VERSION:
+                raise ValueError(f"unsupported search index schema: {version}")
+            if version != INDEX_SCHEMA_VERSION:
+                connection.executescript(
+                    "DROP TRIGGER IF EXISTS chunks_insert;"
+                    "DROP TRIGGER IF EXISTS chunks_delete;"
+                    "DROP TRIGGER IF EXISTS chunks_update;"
+                    "DROP TABLE IF EXISTS fts_chunks;"
+                    "DROP VIEW IF EXISTS fts_content;"
+                    "DROP TABLE IF EXISTS links;"
+                    "DROP TABLE IF EXISTS chunks;"
+                    "DROP TABLE IF EXISTS documents;"
+                    "DROP TABLE IF EXISTS file_states;"
+                )
+            connection.executescript(INDEX_SCHEMA)
             connection.execute(
-                "INSERT OR REPLACE INTO metadata(key, value) VALUES('schema_version', '3')"
+                "INSERT OR REPLACE INTO metadata(key, value) VALUES('schema_version', ?)",
+                (str(INDEX_SCHEMA_VERSION),),
             )
-
-    def _metadata(self, markdown: str, fallback: str) -> tuple[str, str, Mapping[str, Any], str]:
-        try:
-            document = parse_document(markdown)
-        except FrontmatterError:
-            return fallback, "", {}, markdown
-        title_value = document.frontmatter.get("title")
-        title = title_value.strip() if isinstance(title_value, str) else fallback
-        type_value = document.frontmatter.get("type")
-        note_type = type_value.strip() if isinstance(type_value, str) else ""
-        return title, note_type, document.frontmatter, document.body
 
     def _delete_document(self, connection: sqlite3.Connection, relative: str) -> None:
-        chunk_ids = [
-            row["chunk_id"]
-            for row in connection.execute(
-                "SELECT chunk_id FROM chunks WHERE path = ?",
-                (relative,),
-            )
-        ]
-        for chunk_id in chunk_ids:
-            connection.execute("DELETE FROM fts_chunks WHERE chunk_id = ?", (chunk_id,))
         connection.execute("DELETE FROM links WHERE source_path = ?", (relative,))
         connection.execute("DELETE FROM documents WHERE path = ?", (relative,))
 
     def index_path(self, path: Path, *, force: bool = False) -> tuple[bool, int]:
         absolute = path.resolve()
         relative = absolute.relative_to(self.vault).as_posix()
-        if not is_retrievable_markdown(absolute, self.vault):
-            with self.connect() as connection:
-                self._delete_document(connection, relative)
+        with document_lock(self.database), self.connect() as connection:
+            return self._index_path(connection, absolute, relative, force=force)
+
+    @staticmethod
+    def _file_version(stat: os.stat_result) -> tuple[int, int, int, str]:
+        return stat.st_mtime_ns, stat.st_size, stat.st_ctime_ns, str(stat.st_ino)
+
+    def _index_path(
+        self,
+        connection: sqlite3.Connection,
+        absolute: Path,
+        relative: str,
+        *,
+        force: bool,
+    ) -> tuple[bool, int]:
+        if (
+            absolute.suffix.casefold() != ".md"
+            or not is_candidate_path(Path(relative))
+            or not absolute.is_file()
+        ):
+            self._delete_document(connection, relative)
+            connection.execute("DELETE FROM file_states WHERE path = ?", (relative,))
             return False, 0
         stat = absolute.stat()
-        with self.connect() as connection:
-            existing = connection.execute(
-                "SELECT file_hash, modified_ns, size FROM documents WHERE path = ?",
-                (relative,),
-            ).fetchone()
-        if (
-            not force
-            and existing is not None
-            and int(existing["modified_ns"]) == stat.st_mtime_ns
-            and int(existing["size"]) == stat.st_size
-        ):
+        payload = absolute.read_bytes()
+        if self._file_version(stat) != self._file_version(absolute.stat()):
+            raise FileWriteConflict(f"文件在建立索引期间发生变化：{relative}")
+        digest = hashlib.sha256(payload).hexdigest()
+        existing = connection.execute(
+            "SELECT file_hash FROM documents WHERE path = ?",
+            (relative,),
+        ).fetchone()
+        connection.execute(
+            "INSERT OR REPLACE INTO file_states VALUES (?, ?, ?, ?, ?)",
+            (relative, *self._file_version(stat)),
+        )
+        if not force and existing is not None and existing["file_hash"] == digest:
+            connection.execute(
+                "UPDATE documents SET modified_ns = ?, size = ? WHERE path = ?",
+                (stat.st_mtime_ns, stat.st_size, relative),
+            )
             return False, 0
-        digest = file_hash(absolute)
-        markdown = absolute.read_text(encoding="utf-8")
+        try:
+            markdown = payload.decode("utf-8")
+        except UnicodeError:
+            self._delete_document(connection, relative)
+            return False, 0
         fallback = absolute.stem
-        title, note_type, frontmatter, body = self._metadata(markdown, fallback)
+        frontmatter: Mapping[str, Any]
+        try:
+            document = parse_document(markdown, source=relative)
+        except FrontmatterError:
+            if markdown.splitlines() and markdown.splitlines()[0].strip() == "---":
+                self._delete_document(connection, relative)
+                return False, 0
+            title, note_type, body = fallback, "", markdown
+            frontmatter = cast(Mapping[str, Any], {})
+        else:
+            if document_role(document) is not DocumentRole.ARTIFACT:
+                self._delete_document(connection, relative)
+                return False, 0
+            frontmatter, body = document.frontmatter, document.body
+            title_value = frontmatter.get("title")
+            title = title_value.strip() if isinstance(title_value, str) else fallback
+            type_value = frontmatter.get("type")
+            note_type = type_value.strip() if isinstance(type_value, str) else ""
         chunks = chunk_markdown(relative, markdown, fallback_title=title)
         metadata_text = _retrieval_metadata(frontmatter)
-        with self.connect() as connection:
-            if not force and existing is not None and existing["file_hash"] == digest:
-                return False, 0
-            self._delete_document(connection, relative)
-            connection.execute(
-                """
+        self._delete_document(connection, relative)
+        connection.execute(
+            """
                 INSERT INTO documents(
                     path, file_hash, modified_ns, size, title, note_type, frontmatter_json
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (
-                    relative,
-                    digest,
-                    stat.st_mtime_ns,
-                    stat.st_size,
-                    title,
-                    note_type,
-                    json.dumps(_jsonable(frontmatter), ensure_ascii=False, sort_keys=True),
-                ),
-            )
-            for chunk in chunks:
-                self._insert_chunk(connection, chunk, metadata_text=metadata_text)
-            for target, relation in extract_links(
-                body,
-                source_path=relative,
-                frontmatter=frontmatter,
-            ):
-                connection.execute(
-                    """
+            (
+                relative,
+                digest,
+                stat.st_mtime_ns,
+                stat.st_size,
+                title,
+                note_type,
+                json.dumps(_jsonable(frontmatter), ensure_ascii=False, sort_keys=True),
+            ),
+        )
+        for chunk in chunks:
+            self._insert_chunk(connection, chunk, metadata_text=metadata_text)
+        for target, relation in extract_links(body, source_path=relative, frontmatter=frontmatter):
+            connection.execute(
+                """
                     INSERT OR IGNORE INTO links(source_path, target_path, relation)
                     VALUES (?, ?, ?)
                     """,
-                    (relative, target, relation),
-                )
+                (relative, target, relation),
+            )
         return True, len(chunks)
 
     def _insert_chunk(
@@ -249,8 +246,8 @@ class SearchIndex:
         connection.execute(
             """
             INSERT INTO chunks(
-                chunk_id, path, heading, start_line, end_line, text, text_hash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    chunk_id, path, heading, start_line, end_line, text, text_hash, search_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 chunk.chunk_id,
@@ -260,44 +257,97 @@ class SearchIndex:
                 chunk.end_line,
                 chunk.text,
                 chunk.text_hash,
-            ),
-        )
-        connection.execute(
-            """
-            INSERT INTO fts_chunks(chunk_id, path, heading, body, search_text)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                chunk.chunk_id,
-                chunk.path,
-                chunk.heading,
-                chunk.text,
                 lexical_text(f"{metadata_text}\n{chunk.heading}\n{chunk.text}"),
             ),
         )
 
-    def sync(self, *, force: bool = False) -> IndexUpdate:
+    def sync(self, *, force: bool = False, paths: Sequence[str] | None = None) -> IndexUpdate:
+        requested = None if paths is None else [self._requested_path(path) for path in paths]
+        with document_lock(self.database), self.connect() as connection:
+            return self._sync(connection, force=force, requested=requested)
+
+    def _requested_path(self, value: str) -> Path:
+        windows = PureWindowsPath(value)
+        if (
+            not windows.parts
+            or windows.drive
+            or windows.root
+            or any(":" in part or PureWindowsPath(part).is_reserved() for part in windows.parts)
+        ):
+            raise ValueError(f"增量索引路径必须为 Vault 内的普通相对路径：{value!r}")
+        return resolve_bundle_path(self.vault, value)
+
+    def _sync(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        force: bool,
+        requested: list[Path] | None,
+    ) -> IndexUpdate:
+        states = {
+            str(row["path"]): (
+                int(row["modified_ns"]),
+                int(row["size"]),
+                int(row["changed_ns"]),
+                str(row["file_id"]),
+            )
+            for row in connection.execute("SELECT * FROM file_states")
+        }
+        before_documents = {
+            str(row["path"]) for row in connection.execute("SELECT path FROM documents")
+        }
+        candidates: list[tuple[str, Path]]
+        if requested is None:
+            candidates = list(iter_candidate_entries(self.vault))
+            affected = set(states)
+        else:
+            candidates = []
+            prefixes = [path.relative_to(self.vault).as_posix() for path in requested]
+            affected = {
+                path
+                for path in states
+                if any(path == prefix or path.startswith(prefix + "/") for prefix in prefixes)
+            }
+            for path in requested:
+                prefix = path.relative_to(self.vault).as_posix()
+                if path.is_dir():
+                    candidates.extend(
+                        (f"{prefix}/{relative}", entry)
+                        for relative, entry in iter_candidate_entries(path)
+                    )
+                elif path.is_file():
+                    candidates.append((prefix, path))
         known: set[str] = set()
         indexed = 0
         unchanged = 0
         chunk_count = 0
-        for path in iter_markdown(self.vault):
-            relative = path.relative_to(self.vault).as_posix()
+        for relative, path in dict.fromkeys(candidates):
             known.add(relative)
-            changed, chunks = self.index_path(path, force=force)
+            if (
+                requested is None
+                and not force
+                and states.get(relative) == self._file_version(path.stat())
+            ):
+                if relative in before_documents:
+                    unchanged += 1
+                continue
+            changed, chunks = self._index_path(connection, path, relative, force=force)
             if changed:
                 indexed += 1
                 chunk_count += chunks
-            else:
+            elif connection.execute(
+                "SELECT 1 FROM documents WHERE path = ?", (relative,)
+            ).fetchone():
                 unchanged += 1
-        with self.connect() as connection:
-            existing = {
-                str(row["path"]) for row in connection.execute("SELECT path FROM documents")
-            }
-            removed_paths = existing - known
-            for relative in removed_paths:
-                self._delete_document(connection, relative)
-        return IndexUpdate(indexed, unchanged, len(removed_paths), chunk_count)
+        existing = {str(row["path"]) for row in connection.execute("SELECT path FROM documents")}
+        removed_paths = (affected | existing if requested is None else affected) - known
+        for relative in removed_paths:
+            self._delete_document(connection, relative)
+            connection.execute("DELETE FROM file_states WHERE path = ?", (relative,))
+        after_documents = {
+            str(row["path"]) for row in connection.execute("SELECT path FROM documents")
+        }
+        return IndexUpdate(indexed, unchanged, len(before_documents - after_documents), chunk_count)
 
     def get_file_hash(self, relative: str) -> str | None:
         with self.connect() as connection:
@@ -399,7 +449,7 @@ class SearchIndex:
             """
             SELECT c.*, bm25(fts_chunks, 5.0, 2.0, 1.0) AS rank
             FROM fts_chunks
-            JOIN chunks c ON c.chunk_id = fts_chunks.chunk_id
+            JOIN chunks c ON c.row_id = fts_chunks.rowid
             WHERE fts_chunks MATCH ?
             """
             + scope
@@ -484,6 +534,38 @@ class SearchIndex:
     def all_chunks(self) -> list[MarkdownChunk]:
         with self.connect() as connection:
             rows = connection.execute("SELECT * FROM chunks ORDER BY path, start_line").fetchall()
+        return [
+            MarkdownChunk(
+                chunk_id=str(row["chunk_id"]),
+                path=str(row["path"]),
+                heading=str(row["heading"]),
+                start_line=int(row["start_line"]),
+                end_line=int(row["end_line"]),
+                text=str(row["text"]),
+                text_hash=str(row["text_hash"]),
+            )
+            for row in rows
+        ]
+
+    def chunk_fingerprints(self) -> dict[str, str]:
+        with self.connect() as connection:
+            return {
+                str(row["chunk_id"]): str(row["text_hash"])
+                for row in connection.execute(
+                    "SELECT chunk_id, text_hash FROM chunks ORDER BY path, start_line"
+                )
+            }
+
+    def chunks_for_ids(self, chunk_ids: Sequence[str]) -> list[MarkdownChunk]:
+        if not chunk_ids:
+            return []
+        placeholders = ",".join("?" for _ in chunk_ids)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM chunks WHERE chunk_id IN ({placeholders}) "
+                "ORDER BY path, start_line",
+                list(chunk_ids),
+            ).fetchall()
         return [
             MarkdownChunk(
                 chunk_id=str(row["chunk_id"]),

@@ -1,6 +1,8 @@
-import { defaultKeymap, history, historyKeymap, insertNewline } from '@codemirror/commands';
-import { Annotation, Compartment, EditorSelection, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state';
-import { Decoration, type DecorationSet, EditorView, keymap, placeholder, WidgetType } from '@codemirror/view';
+import type * as ComposerCommands from '@codemirror/commands';
+import type * as CodeMirrorState from '@codemirror/state';
+import type { AnnotationType, EditorState, StateEffectType, Transaction } from '@codemirror/state';
+import type * as CodeMirrorView from '@codemirror/view';
+import type { DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { type App, type Component, MarkdownRenderer } from 'obsidian';
 
 import type { ComposerInputElement } from '@/shared/composer-dropdown/types';
@@ -8,33 +10,52 @@ import { registerFileLinkHandler } from '@/utils/fileLink';
 
 import { findComposerWikilinks } from './composerWikilinks';
 
-const refreshLinks = StateEffect.define<null>();
-const programmatic = Annotation.define<boolean>();
+interface EditorRuntime {
+  state: typeof CodeMirrorState;
+  view: typeof CodeMirrorView;
+  refreshLinks: StateEffectType<null>;
+  programmatic: AnnotationType<boolean>;
+  WikilinkWidget: new (markdown: string, app: App, component: Component, revision: number) => WidgetType;
+}
 
-class WikilinkWidget extends WidgetType {
-  constructor(
-    private readonly markdown: string,
-    private readonly app: App,
-    private readonly component: Component,
-    private readonly revision: number,
-  ) {
-    super();
+let runtime: EditorRuntime | undefined;
+
+function editorRuntime(): EditorRuntime {
+  if (runtime) return runtime;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Preserve Obsidian's shared editor modules while deferring first-use initialization.
+  const state = require('@codemirror/state') as typeof CodeMirrorState;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Preserve Obsidian's shared editor modules while deferring first-use initialization.
+  const view = require('@codemirror/view') as typeof CodeMirrorView;
+
+  class WikilinkWidget extends view.WidgetType {
+    constructor(
+      private readonly markdown: string,
+      private readonly app: App,
+      private readonly component: Component,
+      private readonly revision: number,
+    ) {
+      super();
+    }
+
+    eq(other: WikilinkWidget): boolean {
+      return this.markdown === other.markdown && this.revision === other.revision;
+    }
+
+    toDOM(view: EditorView): HTMLElement {
+      const ownerWindow = view.dom.ownerDocument.win as Window & { createSpan: typeof createSpan };
+      const el = ownerWindow.createSpan();
+      el.className = 'claudian-composer-wikilink markdown-rendered';
+      el.contentEditable = 'false';
+      void MarkdownRenderer.render(this.app, this.markdown, el, '', this.component).then(() => {
+        if (el.isConnected) view.requestMeasure();
+      }).catch(() => { el.textContent = this.markdown; });
+      return el;
+    }
   }
 
-  eq(other: WikilinkWidget): boolean {
-    return this.markdown === other.markdown && this.revision === other.revision;
-  }
-
-  toDOM(view: EditorView): HTMLElement {
-    const ownerWindow = view.dom.ownerDocument.win as Window & { createSpan: typeof createSpan };
-    const el = ownerWindow.createSpan();
-    el.className = 'claudian-composer-wikilink markdown-rendered';
-    el.contentEditable = 'false';
-    void MarkdownRenderer.render(this.app, this.markdown, el, '', this.component).then(() => {
-      if (el.isConnected) view.requestMeasure();
-    }).catch(() => { el.textContent = this.markdown; });
-    return el;
-  }
+  runtime = { state, view, WikilinkWidget,
+    refreshLinks: state.StateEffect.define<null>(), programmatic: state.Annotation.define<boolean>() };
+  return runtime;
 }
 
 /** Owns the editable Markdown document; wikilink presentation is derived from its text. */
@@ -42,8 +63,8 @@ export class ComposerEditor {
   readonly element: ComposerInputElement;
   private state: EditorState;
   private view: EditorView | null = null;
-  private readonly historyConfig = new Compartment();
-  private readonly placeholderConfig = new Compartment();
+  private readonly historyConfig = new (editorRuntime().state.Compartment)();
+  private readonly placeholderConfig = new (editorRuntime().state.Compartment)();
   private placeholderText = 'Ask to make changes, @mention files, run /commands';
   private destroyed = false;
   private ariaObserver: MutationObserver | null = null;
@@ -52,6 +73,12 @@ export class ComposerEditor {
   private readonly removeFileLinkHandler: () => void;
 
   constructor(parent: HTMLElement, private readonly app: App, private readonly component: Component) {
+    const { state, view, programmatic } = editorRuntime();
+    const { EditorState, StateField, Transaction } = state;
+    const { EditorView, keymap, placeholder } = view;
+    // Obsidian provides this module; creating the first composer owns command initialization.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- Keep host command initialization outside plugin startup.
+    const { defaultKeymap, history, historyKeymap, insertNewline } = require('@codemirror/commands') as typeof ComposerCommands;
     const host = parent.createDiv({
       cls: 'claudian-input claudian-composer-editor',
       attr: { role: 'textbox', 'aria-label': 'Message', 'aria-multiline': 'true', tabindex: '0', dir: 'auto' },
@@ -145,7 +172,7 @@ export class ComposerEditor {
   refreshLinks(): void {
     if (this.destroyed) return;
     this.linkRevision++;
-    this.apply(this.state.update({ effects: refreshLinks.of(null) }));
+    this.apply(this.state.update({ effects: editorRuntime().refreshLinks.of(null) }));
   }
 
   destroy(): void {
@@ -163,6 +190,7 @@ export class ComposerEditor {
     if (this.destroyed) return;
     if (event.target !== this.element) return;
     if (!this.view) {
+      const { EditorView } = editorRuntime().view;
       this.element.replaceChildren();
       this.element.removeAttribute('role');
       this.element.setAttribute('tabindex', '-1');
@@ -183,6 +211,7 @@ export class ComposerEditor {
   };
 
   private decorate(state: EditorState): DecorationSet {
+    const { view: { Decoration }, WikilinkWidget } = editorRuntime();
     const links = findComposerWikilinks(state.doc.toString()).filter(link => {
       const end = link.index + link.fullMatch.length;
       return !state.selection.ranges.some(range =>
@@ -195,7 +224,7 @@ export class ComposerEditor {
 
   private setSelection(from: number, to: number): void {
     const clamp = (position: number) => Math.max(0, Math.min(position, this.state.doc.length));
-    this.apply(this.state.update({ selection: EditorSelection.single(clamp(from), clamp(to)) }));
+    this.apply(this.state.update({ selection: editorRuntime().state.EditorSelection.single(clamp(from), clamp(to)) }));
   }
 
   private apply(transaction: Transaction): void {

@@ -12,7 +12,12 @@ from okf_workspace.okf.paths import (
 )
 
 
-@pytest.mark.parametrize("value", ["../secret.md", "/absolute.md", "C:/secret.md", ""])
+@pytest.mark.parametrize("value", [
+    "../secret.md", "/absolute.md", "C:/secret.md", "", "knowledge/note.md:secret",
+    "knowledge/NUL.md", "knowledge/CON.md", "knowledge/COM1.txt", "knowledge/LPT¹.md",
+    "knowledge/file. /note.md", "knowledge/file /note.md", "knowledge/./note.md",
+    "knowledge//note.md", "knowledge/note\x00.md", "knowledge/note?.md",
+])
 def test_rejects_unsafe_bundle_paths(value: str) -> None:
     with pytest.raises(UnsafeBundlePath):
         normalize_bundle_path(value)

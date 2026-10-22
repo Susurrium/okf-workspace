@@ -26,6 +26,8 @@ class Worker:
         self.settings = settings
         self.store = JobStore(settings.database_path)
         self.stop_event = stop_event or threading.Event()
+        self._next_heartbeat = 0.0
+        self._next_cleanup = 0.0
 
     def initialize(self) -> None:
         self.settings.prepare_directories()
@@ -34,14 +36,33 @@ class Worker:
             max_attempts=self.settings.max_attempts,
             failure_ttl_seconds=self.settings.failure_ttl_seconds,
         )
-        self._cleanup()
-        self.store.set_worker_heartbeat()
+        self._maintenance(force=True)
+
+    def _heartbeat(self, *, force: bool = False) -> None:
+        now = time.monotonic()
+        if force or now >= self._next_heartbeat:
+            self.store.set_worker_heartbeat()
+            self._next_heartbeat = now + min(5.0, self.settings.worker_stale_seconds / 3)
+
+    def _maintenance(self, *, force: bool = False) -> None:
+        self._heartbeat(force=force)
+        now = time.monotonic()
+        if force or now >= self._next_cleanup:
+            self._cleanup()
+            self._next_cleanup = now + min(
+                60.0,
+                self.settings.orphan_ttl_seconds / 4,
+                self.settings.success_ttl_seconds / 4,
+                self.settings.failure_ttl_seconds / 4,
+            )
 
     def run_forever(self) -> None:
         self.initialize()
         while not self.stop_event.is_set():
-            self.store.set_worker_heartbeat()
-            self._cleanup()
+            self._maintenance()
+            if not self.store.has_pending():
+                self.stop_event.wait(self.settings.poll_seconds)
+                continue
             if not self.settings.storage_status().can_fit(self.settings.max_result_bytes):
                 self.stop_event.wait(self.settings.poll_seconds)
                 continue
@@ -119,7 +140,7 @@ class Worker:
         deadline = time.monotonic() + self.settings.conversion_timeout_seconds
         outcome = "finished"
         while process.poll() is None:
-            self.store.set_worker_heartbeat()
+            self._heartbeat()
             if self.stop_event.is_set():
                 outcome = "interrupted"
                 self._terminate(process)

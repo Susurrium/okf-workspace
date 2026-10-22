@@ -1,4 +1,5 @@
 import { App, Menu, Notice, Platform, TFile, setIcon } from 'obsidian';
+import { openFileInWorkspace } from './file-navigation';
 import { getRegisteredApexHost, type ArtifactMutation, type ArtifactMutationResult } from './host';
 
 type ArtifactMutationInput = ArtifactMutation extends infer Mutation
@@ -1356,7 +1357,7 @@ function openFile(app: App, file: TFile): void {
 	if (!Platform.isMobile && libOpener) {
 		libOpener(file);
 	} else {
-		void app.workspace.getLeaf(false).openFile(file);
+		void openFileInWorkspace(app, file).catch(error => new Notice(String(error)));
 	}
 }
 

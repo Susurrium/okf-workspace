@@ -7,7 +7,7 @@
     "build:tasks": "node build-tasks.mjs",
     "pretest": "npm run build:tasks",
     "check": "tsc --noEmit && tsc --project tasks-integration/tsconfig.json",
-    "test": "vitest run",
+    "test": "node --test tests/build-tasks.node-test.mjs && vitest run",
     "build": "npm run build:tasks && tsc --noEmit && node esbuild.mjs && node build-assets.mjs"
   },
   "devDependencies": {
@@ -20,12 +20,12 @@
     "esbuild-svelte": "^0.9.5",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "26.1.0",
-    "moment": "^2.31.0",
     "obsidian": "1.13.1",
+    "proper-lockfile": "^4.1.2",
     "sass": "^1.105.1",
     "source-map-js": "^1.2.2",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "vitest": "^5.0.5"
   },
   "dependencies": {
     "@floating-ui/dom": "^1.7.6",
@@ -37,7 +37,8 @@
     "flatpickr": "^4.6.13",
     "i18next": "^24.2.1",
     "lunar-typescript": "^1.8.6",
-    "markdown-it": "^15.0.2",
+    "markdown-it": "^15.0.3",
+    "moment": "^2.31.0",
     "mustache": "^4.2.0",
     "mustache-validator": "^0.2.0",
     "rrule": "^2.8.1",

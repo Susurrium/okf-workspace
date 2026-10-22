@@ -18,6 +18,11 @@ export interface WorkspaceHttpClientOptions {
 export class WorkspaceHttpClient {
   public constructor(private readonly options: WorkspaceHttpClientOptions) {}
 
+  public matchesConnection(baseUrl: string, token: string, fingerprint?: string): boolean {
+    return this.options.baseUrl === baseUrl && this.options.token === token
+      && this.options.expectedVaultFingerprint === fingerprint;
+  }
+
   public async request<T>(path: string, init?: RequestInit, timeout?: number): Promise<T> {
     const method = (init?.method ?? "GET").toUpperCase();
     const mutating = !["GET", "HEAD"].includes(method);

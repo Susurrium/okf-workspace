@@ -20,6 +20,11 @@ jobs:
       - run: uv run --project engine pytest engine/tests
       - run: uv run --project engine ruff check engine/src engine/tests
       - run: uv run --project engine pyright --project engine/pyproject.toml
+      - run: uv run --project engine python scripts/benchmark-performance.py --documents 1000 --samples 5 --output work/performance.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-filesystem-performance
+          path: work/performance.json
       - run: uv build --project engine
       - uses: actions/setup-node@v4
         with:
@@ -29,6 +34,8 @@ jobs:
       - run: npm ci --prefix dashboard
       - run: uv run --project engine pytest tests/e2e
       - run: uv run --project engine ruff check tests/e2e
+      - run: uv run --project engine pytest scripts/docs/test_build_architecture.py
+      - run: uv run --project engine python scripts/docs/build_architecture.py --check
 
   markitdown:
     runs-on: ubuntu-latest
@@ -89,6 +96,7 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npm run check:performance
 
   assistant-windows:
     runs-on: windows-latest
@@ -107,3 +115,4 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - run: npm run check:performance

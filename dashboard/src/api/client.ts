@@ -10,9 +10,12 @@ import type {
 } from "./types.js";
 import type { FeedSyncResult } from "../feeds/types.js";
 import { WorkspaceHttpClient } from "./http-client.js";
+import { RecordDeltaCache, type RecordPage } from "./record-cache.js";
 
 export class LocalApi {
   private readonly http: WorkspaceHttpClient;
+  private readonly conversionCache = new Map<string, RecordDeltaCache<ConversionRecord>>();
+  private readonly semanticCache = new Map<string, RecordDeltaCache<SemanticOperationRecord>>();
 
   public constructor(
     public readonly baseUrl: string,
@@ -28,6 +31,10 @@ export class LocalApi {
       onHttpError: (status, detail) => this.httpError(status, detail),
       onTransportError: (error, timedOut) => this.transportError(error, timedOut),
     });
+  }
+
+  public matchesConnection(baseUrl: string, token: string, fingerprint?: string): boolean {
+    return this.http.matchesConnection(baseUrl, token, fingerprint);
   }
 
   public today(date?: string): Promise<TodayView> {
@@ -233,8 +240,9 @@ export class LocalApi {
     return this.request("/index/rebuild", { method: "POST" }, 60_000);
   }
 
-  public syncIndex(): Promise<unknown> {
-    return this.request("/index/sync", { method: "POST" }, 60_000);
+  public syncIndex(paths?: readonly string[]): Promise<unknown> {
+    return this.request("/index/sync", { method: "POST",
+      ...(paths ? { body: JSON.stringify({ paths }) } : {}) }, 60_000);
   }
 
   public undo(): Promise<{ checkpoint: string }> {
@@ -259,8 +267,14 @@ export class LocalApi {
   }
 
   public conversions(status?: string): Promise<ConversionRecord[]> {
-    const query = status ? `?status=${encodeURIComponent(status)}` : "";
-    return this.request(`/documents/conversions${query}`);
+    let cache = this.conversionCache.get('');
+    if (!cache) {
+      cache = new RecordDeltaCache(record => record.conversion_id);
+      this.conversionCache.set('', cache);
+    }
+    return cache.load(query => {
+      return this.request<RecordPage<ConversionRecord>>(`/documents/conversions/page?${query}`);
+    }).then(records => status ? records.filter(record => record.status === status) : records);
   }
 
   public conversion(conversionId: string): Promise<ConversionRecord> {
@@ -324,8 +338,14 @@ export class LocalApi {
   }
 
   public semanticOperations(status?: SemanticOperationRecord["status"]): Promise<SemanticOperationRecord[]> {
-    const query = status ? `?status=${encodeURIComponent(status)}` : "";
-    return this.request(`/semantic/operations${query}`);
+    let cache = this.semanticCache.get('');
+    if (!cache) {
+      cache = new RecordDeltaCache(record => record.operation_id);
+      this.semanticCache.set('', cache);
+    }
+    return cache.load(query => {
+      return this.request<RecordPage<SemanticOperationRecord>>(`/semantic/operations/page?${query}`);
+    }).then(records => status ? records.filter(record => record.status === status) : records);
   }
 
   public semanticOperation(operationId: string): Promise<SemanticOperationRecord> {

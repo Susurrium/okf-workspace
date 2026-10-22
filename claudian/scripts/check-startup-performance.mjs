@@ -95,6 +95,8 @@ const mainPath = process.argv[1];
 let childProcessStarts = 0;
 let networkListens = 0;
 let wasmInitializations = 0;
+let codeMirrorCommandLoads = 0;
+let codeMirrorViewLoads = 0;
 for (const method of ['exec', 'execFile', 'fork', 'spawn', 'spawnSync']) {
   childProcess[method] = function () {
     childProcessStarts += 1;
@@ -134,6 +136,8 @@ const obsidian = new Proxy({}, {
 });
 const originalLoad = Module._load;
 Module._load = function (request, parent, isMain) {
+  if (request === '@codemirror/commands') codeMirrorCommandLoads += 1;
+  if (request === '@codemirror/view') codeMirrorViewLoads += 1;
   if (request === 'obsidian') return obsidian;
   if (request === 'electron') return { shell: universal };
   return originalLoad.call(this, request, parent, isMain);
@@ -151,6 +155,8 @@ process.stdout.write(JSON.stringify({
   durationMs: performance.now() - startedAt,
   networkListens,
   wasmInitializations,
+  codeMirrorCommandLoads,
+  codeMirrorViewLoads,
 }));
 `;
 
@@ -181,6 +187,8 @@ process.stdout.write(JSON.stringify({
       || sample.childProcessStarts !== 0
       || sample.networkListens !== 0
       || sample.wasmInitializations !== 0
+      || sample.codeMirrorCommandLoads !== 0
+      || sample.codeMirrorViewLoads !== 0
     ) {
       throw new Error(
         `Module evaluation eagerly initialized a deferred runtime: ${JSON.stringify(sample)}`,

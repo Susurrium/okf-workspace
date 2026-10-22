@@ -28,6 +28,11 @@ Vault 读取、原生写入与 Engine 命令的归属见[模块边界](architect
 - 完整异常和转换工作目录只进入本地日志；
 - token 放在 Vault 外，不经 LiveSync。
 
+Vault 相对路径须为规范路径。除绝对路径和目录穿越外，拒绝 Windows drive、UNC、ADS、设备名称、
+非法文件名字符及尾部空格/句点；路径解析后再次核对 Vault 归属。AI 写入策略检查解析后的目标，
+受保护名称空间按大小写不敏感规则匹配，展示与持久化路径保留原有大小写。
+笔记字段写入使用同一读取快照的版本校验，期间发生编辑时返回 HTTP 409，保留当前文件。
+
 Dashboard 向 Engine 发起写入时附带当前 Vault fingerprint；Engine 拒绝身份不一致的写入，防止落入另一个 Vault。
 
 ## 领域 API
@@ -62,6 +67,7 @@ Dashboard 向 Engine 发起写入时附带当前 Vault fingerprint；Engine 拒�
 | `GET /documents/conversions/{id}/result` | 只读返回本次 Markdown、QC、具体方式与附件路径 |
 | `POST /semantic/operations` | 快速持久化一个后台学习材料或 Wiki 生成任务 |
 | `GET /semantic/operations` | 列出后台语义任务 |
+| `GET /semantic/operations/page`、`GET /documents/conversions/page` | 分页读取运行记录及其增量变化 |
 | `GET /semantic/operations/{id}` | 读取真实阶段：`queued/retrieving/generating/publishing/indexing` |
 | `POST /semantic/operations/{id}/cancel` | 停止检索或 Codex 子进程；进入发布阶段后不再接受取消 |
 | `POST /semantic/operations/{id}/retry` | 从保留的来源和任务参数重新排队；目标尚未生成也可重试 |
@@ -80,6 +86,17 @@ Dashboard 向 Engine 发起写入时附带当前 Vault fingerprint；Engine 拒�
 
 普通浏览不重复健康探测，明确写入动作检查一次，失败时恢复服务并提供可重试错误。
 增量索引为 single-flight，未完成期间只合并为下一轮同步。转换目录只读配置，执行时才连接服务。
+
+`POST /index/sync` 的可选 JSON body 为 `{"paths":["knowledge/wiki/example.md"]}`，最多 1000 个 Vault 相对文件或目录路径。
+重命名同时提交旧、新路径；删除可提交已不存在的路径。空列表不更新文件，省略 body 或 `paths` 时核对整个 Vault。
+路径在修改索引前统一校验，拒绝越界、绝对路径、Windows 设备名和 ADS。同步只更新有变化的内容，显式提交的文件会重新核验，
+以覆盖时间、大小未变化的修改；完整重建继续使用 `/index/rebuild`。每轮问答统一刷新一次索引，最终上下文仍重新读取真实文件。
+
+运行记录分页入口返回 `items`、`total`、`next_offset`、`version`、`index_id` 和 `requires_reset`。
+`limit` 为 1–1000、默认 200，`offset` 默认 0；后续页携带首次返回的 `snapshot_version` 和 `snapshot_index_id`，
+快照变化返回 409，调用方丢弃未完成的拼接结果后重新读取。`after_version` 与 `after_index_id` 可查询上次版本之后的记录；
+索引恢复、记录删除或身份变化通过 `requires_reset: true` 返回完整替换快照。带 `status` 的增量请求也返回替换快照，
+确保移出该状态的记录从结果中消失。既有数组列表入口及其状态筛选保持原有完整语义。
 
 语义 Worker 不用心跳伪装进度：心跳只表示进程存活，Operation Record 的 `stage` 和
 `stage_detail` 才表示当前步骤。每次检索和 Codex 生成都在可终止的子进程中执行；默认整项上限

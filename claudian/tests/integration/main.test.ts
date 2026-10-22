@@ -1,3 +1,4 @@
+import { testDate } from '@test/helpers/testClock';
 import { Notice, TFile, TFolder } from 'obsidian';
 
 import { DEFAULT_CLAUDIAN_SETTINGS as DEFAULT_SETTINGS } from '@/app/settings/defaultSettings';
@@ -263,6 +264,22 @@ describe('ClaudianPlugin', () => {
   });
 
   describe('onload', () => {
+    it('runs idle maintenance and stops its timer before unloading', async () => {
+      jest.useFakeTimers({ now: testDate().getTime() });
+      try {
+        await plugin.onload();
+        const cool = jest.spyOn(plugin.warmExecutionPool, 'coolIdle');
+        await jest.advanceTimersByTimeAsync(60_000);
+        expect(cool).toHaveBeenCalledTimes(1);
+        plugin.onunload();
+        await jest.advanceTimersByTimeAsync(120_000);
+        expect(cool).toHaveBeenCalledTimes(1);
+      } finally {
+        plugin.onunload();
+        jest.useRealTimers();
+      }
+    });
+
     it.each([true, false])('migrates missing selected effort metadata after layout when enabled: %s', async enabled => {
       const initialize = jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized').mockResolvedValue(undefined);
       const refresh = jest.fn().mockResolvedValue({ changed: true });

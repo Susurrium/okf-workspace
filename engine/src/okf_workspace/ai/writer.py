@@ -28,7 +28,9 @@ class AIWriter:
     ) -> Path:
         create_checkpoint(self.vault, "checkpoint before explicit AI write")
         predicted = f"knowledge/wiki/{slugify(title)}.md"
-        authorize_write(predicted, actor="explicit-ai", operation="create")
+        resolved = resolve_bundle_path(self.vault, predicted)
+        authorize_write(resolved.relative_to(self.vault).as_posix(),
+                        actor="explicit-ai", operation="create")
         path = NoteService(self.vault).create_wiki(
             title,
             content,
@@ -47,13 +49,13 @@ class AIWriter:
         actor: Actor,
         expected_sha256: str | None = None,
     ) -> Path:
+        path = resolve_bundle_path(self.vault, relative)
         authorize_write(
-            relative,
+            path.relative_to(self.vault).as_posix(),
             actor=actor,
             operation="replace-managed-region",
             managed_region=region,
         )
-        path = resolve_bundle_path(self.vault, relative)
         create_checkpoint(self.vault, f"checkpoint before {actor} region update")
         with document_lock(path):
             current_bytes = path.read_bytes()
@@ -75,8 +77,9 @@ class AIWriter:
     ) -> Path:
         """Apply one explicit user-requested heading edit without rewriting the note."""
 
-        authorize_write(relative, actor="explicit-ai", operation="edit-section")
         path = resolve_bundle_path(self.vault, relative)
+        authorize_write(path.relative_to(self.vault).as_posix(),
+                        actor="explicit-ai", operation="edit-section")
         create_checkpoint(self.vault, "checkpoint before explicit AI section edit")
         with document_lock(path):
             current_bytes = path.read_bytes()

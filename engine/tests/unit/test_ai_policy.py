@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 
-from okf_workspace.ai.policy import WritePolicyError, authorize_write
+from okf_workspace.ai.policy import Actor, WritePolicyError, authorize_write
 
 
 def test_explicit_ai_can_create_draft_wiki_but_not_modify_self() -> None:
@@ -45,3 +47,14 @@ def test_automatic_ai_is_limited_to_named_managed_regions() -> None:
             operation="replace-managed-region",
             managed_region="summary",
         )
+
+
+@pytest.mark.parametrize("path,actor", [
+    ("SELF/profile.md", "explicit-ai"),
+    ("Sources/Text/protected.md", "explicit-ai"),
+    ("Life/Reflections/private.md", "automatic-ai"),
+])
+def test_protected_namespaces_reject_case_variants(path: str, actor: str) -> None:
+    with pytest.raises(WritePolicyError):
+        authorize_write(path, actor=cast(Actor, actor), operation="replace-managed-region",
+                        managed_region="summary")

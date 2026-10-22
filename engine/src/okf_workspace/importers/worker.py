@@ -45,7 +45,7 @@ class DocumentImportWorker:
         return self.store.reconcile_interrupted()
 
     def run_once(self) -> bool:
-        record = next((item for item in reversed(self.store.list()) if self._eligible(item)), None)
+        record = next((item for item in self.store.work_candidates() if self._eligible(item)), None)
         if record is None:
             return False
         conversion_id = str(record["conversion_id"])
@@ -75,8 +75,11 @@ class DocumentImportWorker:
             message = str(exc)
             if isinstance(exc, RetryableConversionError):
                 method = (
-                    ConversionMethod(str(record["method"])) if record.get("method") else
-                    ConversionMethod.from_parser(ParserName(str(record.get("parser", "mineru"))))
+                    ConversionMethod(str(record["method"]))
+                    if record.get("method")
+                    else ConversionMethod.from_parser(
+                        ParserName(str(record.get("parser", "mineru")))
+                    )
                 )
                 self.store.transition(
                     conversion_id,
@@ -102,8 +105,8 @@ class DocumentImportWorker:
 
     def _eligible(self, record: dict[str, object]) -> bool:
         status = record.get("status")
-        pending_handoff = (
-            status == ConversionStatus.IMPORTED.value and self._needs_generation(record)
+        pending_handoff = status == ConversionStatus.IMPORTED.value and self._needs_generation(
+            record
         )
         if status not in _ACTIVE and not pending_handoff:
             return False
@@ -120,13 +123,13 @@ class DocumentImportWorker:
     @staticmethod
     def _needs_generation(record: dict[str, object]) -> bool:
         outputs = record.get("outputs")
-        if (
-            isinstance(outputs, dict)
-            and cast(dict[str, object], outputs).get("semantic_operation_id")
+        if isinstance(outputs, dict) and cast(dict[str, object], outputs).get(
+            "semantic_operation_id"
         ):
             return False
         return requires_semantic_generation(
-            ImportIntent(str(record.get("intent"))), bool(record.get("generate")),
+            ImportIntent(str(record.get("intent"))),
+            bool(record.get("generate")),
         )
 
     def enqueue_semantic(self, conversion_id: str) -> dict[str, object] | None:
@@ -138,8 +141,11 @@ class DocumentImportWorker:
             return self._enqueue_semantic(record)
         except Exception as exc:
             self.store.transition(
-                conversion_id, ConversionStatus.IMPORTED, error=str(exc)[:2000],
-                retry_after_seconds=self.retry_seconds, stages={"semantic": "failed"},
+                conversion_id,
+                ConversionStatus.IMPORTED,
+                error=str(exc)[:2000],
+                retry_after_seconds=self.retry_seconds,
+                stages={"semantic": "failed"},
             )
             return None
 
@@ -169,9 +175,7 @@ class DocumentImportWorker:
             target_relative,
             sources=tuple(source_paths),
             course=(str(record["course"]) if isinstance(record.get("course"), str) else None),
-            project=(
-                str(record["project"]) if isinstance(record.get("project"), str) else None
-            ),
+            project=(str(record["project"]) if isinstance(record.get("project"), str) else None),
             idempotency_key=(
                 f"document:{conversion_id}:{record.get('generation_revision', 'initial')}"
             ),

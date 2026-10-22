@@ -1,3 +1,5 @@
+import { testClock } from '@test/helpers/testClock';
+
 import {
   WarmExecutionCapacityError,
   type WarmExecutionOwner,
@@ -16,6 +18,39 @@ function createOwner(id: string, canCool = true): WarmExecutionOwner & {
 }
 
 describe('WarmExecutionPool', () => {
+  it('retains an expired owner that gains an interaction while cooling', async () => {
+    const clock = testClock();
+    const pool = new WarmExecutionPool(() => 5, () => clock().getTime());
+    const owner = createOwner('protected-during-cooling');
+    await pool.acquire(owner);
+    clock.advance({ minutes: 11 });
+    owner.cool.mockImplementation(async () => {
+      owner.canCool.mockReturnValue(false);
+      throw new Error('session became busy');
+    });
+    expect(await pool.coolIdle()).toBe(0);
+    expect(pool.has(owner.id)).toBe(true);
+  });
+  it('cools expired idle owners while preserving active and recently used owners', async () => {
+    const clock = testClock();
+    const pool = new WarmExecutionPool(() => 5, () => clock().getTime());
+    const idle = createOwner('idle');
+    const active = createOwner('active', false);
+    const recent = createOwner('recent');
+    await pool.acquire(idle);
+    await pool.acquire(active);
+    await pool.acquire(recent);
+    clock.advance({ minutes: 9 });
+    await pool.touch('recent');
+    clock.advance({ minutes: 2 });
+    expect(await pool.coolIdle()).toBe(1);
+    expect(idle.cool).toHaveBeenCalledTimes(1);
+    expect(active.cool).not.toHaveBeenCalled();
+    expect(recent.cool).not.toHaveBeenCalled();
+    expect(pool.has('idle')).toBe(false);
+    expect(pool.has('active')).toBe(true);
+    expect(pool.has('recent')).toBe(true);
+  });
   it('enforces five as the minimum concurrent running session limit', async () => {
     const pool = new WarmExecutionPool(() => 3);
     const protectedOwners = Array.from(

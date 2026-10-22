@@ -5,6 +5,7 @@ import { originalDirectory } from "../imports/synced-intake.js";
 import { isSupportedDocument } from "../imports/drop.js";
 import { originalsForNote, type OriginalReference } from "../imports/original-references.js";
 import { ChoiceModal } from "./prompts.js";
+import { beginFileNavigation, type FileNavigationRequest } from '../../apex/src/file-navigation.js';
 
 /** Originals are normal local Vault attachments; Obsidian owns their viewer. */
 export class OriginalFiles {
@@ -27,17 +28,18 @@ export class OriginalFiles {
   }
 
   public async openNote(path: string): Promise<void> {
+    const navigation = beginFileNavigation(this.app);
     try {
       const references = await originalsForNote(this.app, path);
       if (!references.length) { new Notice("当前笔记没有关联可打开的文件原件"); return; }
-      if (references.length === 1) { await this.open(references[0]!); return; }
+      if (references.length === 1) { await this.open(references[0]!, navigation); return; }
       new ChoiceModal(this.app, references.map((item) => ({
         value: item.digest, label: item.filename, description: "在 Obsidian 中打开",
       })), "选择原件", async (digest) => { await this.open(references.find((item) => item.digest === digest)!); }).open();
     } catch (error) { new Notice(error instanceof Error ? error.message : "无法读取原件关联"); }
   }
 
-  public async open(reference: OriginalReference): Promise<void> {
+  public async open(reference: OriginalReference, navigation: FileNavigationRequest = beginFileNavigation(this.app)): Promise<void> {
     try {
       const directory = originalDirectory(reference.digest);
       const direct = reference.path ? this.app.vault.getAbstractFileByPath(reference.path) : null;
@@ -47,7 +49,7 @@ export class OriginalFiles {
         new Notice("原件尚未同步到本机，请等待 LiveSync 同步完成后再打开", 10_000);
         return;
       }
-      await this.app.workspace.getLeaf(false).openFile(file);
+      await navigation.open(file);
     } catch (error) { new Notice(error instanceof Error ? error.message : "原件打开失败", 10_000); }
   }
 

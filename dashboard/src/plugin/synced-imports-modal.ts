@@ -1,4 +1,5 @@
 import { Modal, Notice, TFile, type App } from "obsidian";
+import { openFileInWorkspace } from '../../apex/src/file-navigation.js';
 
 import { listSyncedImports, saveSyncedDocument, type SyncedImportEntry } from "../imports/synced-intake.js";
 import { DocumentImportModal } from "./document-import-modal.js";
@@ -55,7 +56,7 @@ export async function renderSyncedImports(app: App, container: HTMLElement, orig
       button.addEventListener("click", () => {
         const file = app.vault.getAbstractFileByPath(path);
         if (!(file instanceof TFile)) { new Notice("文件尚未同步到本机，请等待同步完成"); return; }
-        void app.workspace.getLeaf(false).openFile(file);
+        void openFileInWorkspace(app, file).catch(error => new Notice(String(error)));
       });
     }
   }

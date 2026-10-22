@@ -674,6 +674,7 @@ export class OkfDashboardView {
 
   public async onClose(): Promise<void> {
     this.closed = true;
+    this.vaultReader.dispose();
     this.renderVersion += 1;
     this.objectDetails?.close();
     this.objectDetails = undefined;
@@ -3371,7 +3372,8 @@ export class OkfDashboardView {
       card.setAttr("aria-disabled", "true");
       void this.plugin
         .openFeedItem(kind, edition.digest_id, item.block_id)
-        .then(async () => {
+        .then(async (opened) => {
+          if (opened === false) return;
           for (const previous of this.contentEl.querySelectorAll<HTMLElement>(
             `.okf-feed-digest__item[data-feed-kind="${kind}"].is-last-read`,
           )) {

@@ -4,6 +4,7 @@ import { MomentLike, nowMoment } from './datetime';
 import { ensureFolder, getOrCreateDailyNote, substituteTemplateVars } from './daily-notes';
 import { showPromptDialog } from './prompt-dialog';
 import { t } from './i18n';
+import { beginFileNavigation, openFileInWorkspace } from './file-navigation';
 
 /**
  * Render the Quick Notes region — a non-reorderable, non-deletable strip pinned
@@ -202,11 +203,11 @@ export async function captureThought(app: App, settings: DashboardSettings, text
 	new Notice(t('quickNote.captured'));
 }
 
-/** Open a pinned note in a new tab. */
+/** 打开固定笔记时复用已有标签页。 */
 export function openPinnedNote(app: App, note: PinnedNote): void {
 	const file = resolveFile(app, note.path);
 	if (file) {
-		void app.workspace.getLeaf('tab').openFile(file);
+		void openFileInWorkspace(app, file).catch(error => new Notice(String(error)));
 	} else {
 		new Notice(t('quickNote.notFound'));
 	}
@@ -217,13 +218,14 @@ export function openPinnedNote(app: App, note: PinnedNote): void {
  *  stale blank note (e.g. from earlier, before the template was wired up) is
  *  auto-seeded with the template. Shows a hint when the core plugin is disabled. */
 export async function openTodayNote(app: App): Promise<void> {
+	const navigation = beginFileNavigation(app);
 	const iso = nowMoment().format('YYYY-MM-DD');
 	const file = await getOrCreateDailyNote(app, iso);
 	if (!file) {
 		new Notice(t('quickNote.dailyDisabled'));
 		return;
 	}
-	await app.workspace.getLeaf('tab').openFile(file);
+	await navigation.open(file);
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

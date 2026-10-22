@@ -97,8 +97,8 @@ it("keeps a failed generation handoff actionable in the real Inbox card", async 
       ensureLocalServiceAvailable: async () => undefined, watchDocumentConversion, openVaultPath } as never,
   );
   const retryConversion = vi.fn(async () => record);
-  vi.spyOn(view as never, "api").mockReturnValue({ retryConversion });
-  vi.spyOn(view as never, "render").mockResolvedValue(undefined);
+  vi.spyOn(view as unknown as { api(): unknown }, "api").mockReturnValue({ retryConversion });
+  vi.spyOn(view as unknown as { render(): Promise<void> }, "render").mockResolvedValue(undefined);
   const container = new TestElement();
   (view as unknown as { renderInboxConversionCard(parent: HTMLElement, record: ConversionRecord): void })
     .renderInboxConversionCard(container as unknown as HTMLElement, record);
@@ -164,8 +164,8 @@ it("walks mixed active, publishing, failed, cancelled, and conversion fallback s
     taskCenterOpen: boolean;
     renderBackgroundTasks(parent: HTMLElement): void;
   };
-  vi.spyOn(view as never, "render").mockResolvedValue(undefined);
-  vi.spyOn(view as never, "api").mockReturnValue({
+  vi.spyOn(view as unknown as { render(): Promise<void> }, "render").mockResolvedValue(undefined);
+  vi.spyOn(view as unknown as { api(): unknown }, "api").mockReturnValue({
     cancelSemanticOperation: cancelOperation,
     retrySemanticOperation: retryOperation,
     retryConversion,
@@ -392,7 +392,7 @@ describe("real Dashboard View source handoff", () => {
       initialSection: "system",
       embedded: true,
     });
-    vi.spyOn(view as never, "renderSystem").mockResolvedValue(undefined);
+    vi.spyOn(view as unknown as { renderSystem(parent: HTMLElement): Promise<void> }, "renderSystem").mockResolvedValue(undefined);
 
     await view.onOpen();
 
@@ -425,7 +425,7 @@ describe("real Dashboard View source handoff", () => {
       focused: true,
       workbenchPath: "workbenches/daily",
     });
-    vi.spyOn(view as never, "renderSystem").mockResolvedValue(undefined);
+    vi.spyOn(view as unknown as { renderSystem(parent: HTMLElement): Promise<void> }, "renderSystem").mockResolvedValue(undefined);
 
     await view.onOpen();
     expect(container.descendants().some((item) => item.textContent === "返回工作台")).toBe(true);
@@ -2450,7 +2450,7 @@ describe("real Dashboard View source handoff", () => {
     };
     runtime.attachActionPanel = () => undefined;
     runtime.changeProjectStatus = changeProjectStatus;
-    const showDetails = vi.spyOn(view as never, "openProjectDetails").mockImplementation(() => undefined);
+    const showDetails = vi.spyOn(view as unknown as { openProjectDetails(project: ProjectSummary): void }, "openProjectDetails").mockImplementation(() => undefined);
     const container = new TestElement();
 
     runtime.renderProjectWorkItem(container as unknown as HTMLElement, project(status));
@@ -2493,7 +2493,7 @@ describe("real Dashboard View source handoff", () => {
     const runtime = view as unknown as { renderProjectWorkItem: (container: HTMLElement, value: ProjectSummary) => void; attachActionPanel: () => void };
     runtime.attachActionPanel = () => undefined;
     const preview = new TestElement();
-    vi.spyOn(view as never, "showObjectDetails").mockImplementation((...args: unknown[]) => (args[1] as (el: HTMLElement, close: () => void) => void)(preview as unknown as HTMLElement, () => undefined));
+    vi.spyOn(view as unknown as { showObjectDetails(...args: unknown[]): void }, "showObjectDetails").mockImplementation((...args: unknown[]) => (args[1] as (el: HTMLElement, close: () => void) => void)(preview as unknown as HTMLElement, () => undefined));
     const value = project();
     value.pending_captures = [note({ path: "inbox/captures/exact.md", title: "待整理想法" })];
     value.related_materials = [note({ path: "sources/a.md", title: "资料 A" }), note({ path: "sources/b.md", title: "资料 B" })];

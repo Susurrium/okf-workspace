@@ -183,7 +183,6 @@ def _seed_scale_index(
         )
         for offset in range(0, chunk_count, 1000):
             chunk_rows: list[tuple[object, ...]] = []
-            fts_rows: list[tuple[str, str, str, str, str]] = []
             for number in range(offset, min(offset + 1000, chunk_count)):
                 wiki = number % wiki_count
                 path = f"knowledge/wiki/scale-{wiki:05d}.md"
@@ -194,22 +193,16 @@ def _seed_scale_index(
                     f"wiki-{wiki} chunk-{number} reusable knowledge"
                 )
                 digest = f"{number:064x}"[-64:]
-                chunk_rows.append((chunk_id, path, heading, number + 1, number + 2, body, digest))
-                fts_rows.append((chunk_id, path, heading, body, body))
+                chunk_rows.append(
+                    (chunk_id, path, heading, number + 1, number + 2, body, digest, body)
+                )
             database.executemany(
                 """
                 INSERT INTO chunks(
-                    chunk_id, path, heading, start_line, end_line, text, text_hash
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    chunk_id, path, heading, start_line, end_line, text, text_hash, search_text
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 chunk_rows,
-            )
-            database.executemany(
-                """
-                INSERT INTO fts_chunks(chunk_id, path, heading, body, search_text)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                fts_rows,
             )
         database.commit()
     finally:

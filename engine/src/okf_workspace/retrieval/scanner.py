@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -12,15 +13,7 @@ from okf_workspace.okf.frontmatter import FrontmatterError, parse_document
 SKIPPED_DIRECTORIES = {".agents", ".claudian", ".git", ".obsidian", ".trash"}
 
 
-def iter_markdown(vault: Path) -> Iterator[Path]:
-    root = vault.resolve()
-    for path in sorted(root.rglob("*.md")):
-        if is_retrievable_markdown(path, root):
-            yield path
-
-
-def is_retrievable_markdown(path: Path, vault: Path) -> bool:
-    relative = path.resolve().relative_to(vault.resolve())
+def is_candidate_path(relative: Path) -> bool:
     if relative.parts[:2] in {("inbox", "uploads"), ("sources", "originals")}:
         return False
     if any(part in SKIPPED_DIRECTORIES for part in relative.parts):
@@ -29,13 +22,55 @@ def is_retrievable_markdown(path: Path, vault: Path) -> bool:
         return False
     if relative.as_posix() == "AGENTS.md" or is_workbench_backup(relative.as_posix()):
         return False
-    if (
-        len(relative.parts) >= 2
-        and relative.parts[0] == "system"
-        and relative.parts[1] in {"contracts", "reports", "templates", "views", "imports"}
-    ):
+    if relative.parts[:2] in {
+        ("system", section) for section in ("contracts", "reports", "templates", "views", "imports")
+    }:
         return False
-    if path.name == "index.md" or not path.is_file():
+    return relative.name != "index.md"
+
+
+def iter_markdown_candidates(vault: Path) -> Iterator[Path]:
+    for _relative, path in iter_candidate_entries(vault):
+        yield path
+
+
+def iter_candidate_entries(vault: Path) -> Iterator[tuple[str, Path]]:
+    root = vault.resolve()
+
+    def fail(error: OSError) -> None:
+        raise error
+
+    for directory, folders, filenames in os.walk(root, onerror=fail, followlinks=False):
+        base = Path(directory)
+        relative_directory = Path(os.path.relpath(directory, root))
+        folders[:] = [
+            name
+            for name in folders
+            if is_candidate_path(relative_directory / name)
+            and not (base / name).is_symlink()
+            and not (base / name).is_junction()
+        ]
+        for name in sorted(filenames):
+            path = base / name
+            relative = relative_directory / name
+            if (
+                path.suffix.casefold() == ".md"
+                and is_candidate_path(relative)
+                and not path.is_symlink()
+            ):
+                yield relative.as_posix(), path
+
+
+def iter_markdown(vault: Path) -> Iterator[Path]:
+    root = vault.resolve()
+    for path in sorted(iter_markdown_candidates(root)):
+        if is_retrievable_markdown(path, root):
+            yield path
+
+
+def is_retrievable_markdown(path: Path, vault: Path) -> bool:
+    relative = path.resolve().relative_to(vault.resolve())
+    if not is_candidate_path(relative) or not path.is_file():
         return False
     try:
         text = path.read_text(encoding="utf-8")

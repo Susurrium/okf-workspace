@@ -23,6 +23,7 @@
     "rewind": "巻き戻し"
   },
   "chat": {
+    "warmCleanupFailed": "アイドル状態のセッションを解放できませんでした: {error}",
     "selectAvailableModel": "送信する前に利用可能なモデルを選択してください。",
     "selectAvailableTitleModel": "Claudianの設定で利用可能なタイトル生成モデルを選択してください。",
     "rewind": {
