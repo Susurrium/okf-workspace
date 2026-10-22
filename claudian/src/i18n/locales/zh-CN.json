@@ -23,6 +23,7 @@
     "rewind": "回退"
   },
   "chat": {
+    "warmCleanupFailed": "无法释放闲置会话：{error}",
     "selectAvailableModel": "请先选择可用的模型再发送。",
     "selectAvailableTitleModel": "请在 Claudian 设置中选择可用的标题生成模型。",
     "rewind": {

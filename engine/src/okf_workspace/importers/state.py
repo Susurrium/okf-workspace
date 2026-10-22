@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import uuid
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import contextmanager
@@ -12,9 +10,18 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
-from okf_workspace.okf.file_io import document_lock
+from okf_workspace.okf.file_io import atomic_write_bytes, document_lock
+from okf_workspace.state_index import StateRecordIndex
 
-from .models import ConversionMethod, ConversionStatus, ImportRequest, OriginalRecord, ParserName
+from .models import (
+    ConversionMethod,
+    ConversionStatus,
+    ImportIntent,
+    ImportRequest,
+    OriginalRecord,
+    ParserName,
+    requires_semantic_generation,
+)
 
 
 class ConversionBusyError(RuntimeError):
@@ -24,6 +31,37 @@ class ConversionBusyError(RuntimeError):
 class ConversionStore:
     def __init__(self, root: Path) -> None:
         self.root = root.resolve() / "conversions"
+        self.catalog = StateRecordIndex(
+            self.root,
+            "*/status.json",
+            "conversion_id",
+            self._active,
+            identifier_from_path=lambda path: path.parent.name,
+        )
+
+    @staticmethod
+    def _active(record: Mapping[str, object]) -> bool:
+        if record.get("status") in {
+            "queued",
+            "converting",
+            "ready",
+            "waiting-for-mineru",
+            "waiting-for-parser",
+        }:
+            return True
+        outputs = record.get("outputs")
+        if record.get("status") != "imported" or (
+            isinstance(outputs, Mapping)
+            and cast(Mapping[str, object], outputs).get("semantic_operation_id")
+        ):
+            return False
+        return requires_semantic_generation(
+            ImportIntent(str(record.get("intent"))),
+            bool(record.get("generate")),
+        )
+
+    def work_candidates(self) -> list[dict[str, object]]:
+        return self.catalog.records(active_only=True, oldest_first=True)
 
     def directory(self, conversion_id: str) -> Path:
         return self.root / conversion_id
@@ -77,9 +115,7 @@ class ConversionStore:
                 "quality": request.quality.value,
                 "parser": parser.value,
                 "requested_parser": request.parser.value if request.parser is not None else "auto",
-                "method": (
-                    request.method or ConversionMethod.from_parser(parser)
-                ).value,
+                "method": (request.method or ConversionMethod.from_parser(parser)).value,
                 "course": request.course,
                 "project": request.project,
                 "generate": request.generate,
@@ -96,8 +132,11 @@ class ConversionStore:
                     list(warnings) if warnings is not None else existing.get("warnings", [])
                 ),
                 "outputs": {
-                    **(cast(dict[str, object], existing["outputs"])
-                       if isinstance(existing.get("outputs"), dict) else {}),
+                    **(
+                        cast(dict[str, object], existing["outputs"])
+                        if isinstance(existing.get("outputs"), dict)
+                        else {}
+                    ),
                     **(outputs or {}),
                 },
                 "created_at": existing.get("created_at", now),
@@ -186,20 +225,24 @@ class ConversionStore:
 
     def reconcile_interrupted(self) -> int:
         changed = 0
+        self.catalog.reconcile()
         for record in self.list():
             if record.get("status") not in {
-                ConversionStatus.CONVERTING.value, ConversionStatus.READY.value,
+                ConversionStatus.CONVERTING.value,
+                ConversionStatus.READY.value,
             }:
                 continue
             identifier = str(record["conversion_id"])
             try:
                 with self.execution(identifier):
                     if self.load(identifier).get("status") not in {
-                        ConversionStatus.CONVERTING.value, ConversionStatus.READY.value,
+                        ConversionStatus.CONVERTING.value,
+                        ConversionStatus.READY.value,
                     }:
                         continue
                     self.transition(
-                        identifier, ConversionStatus.QUEUED,
+                        identifier,
+                        ConversionStatus.QUEUED,
                         error="conversion was interrupted and has been queued again",
                     )
             except ConversionBusyError:
@@ -228,7 +271,8 @@ class ConversionStore:
             selected = method or (ConversionMethod.from_parser(parser) if parser else None)
             stages = payload.get("stages")
             if (
-                selected is None and payload.get("status") == ConversionStatus.IMPORTED.value
+                selected is None
+                and payload.get("status") == ConversionStatus.IMPORTED.value
                 and isinstance(stages, dict)
                 and cast(dict[str, object], stages).get("semantic") in {"pending", "failed"}
             ):
@@ -250,7 +294,8 @@ class ConversionStore:
             payload["next_retry_at"] = None
             payload["stages"] = (
                 {**cast(dict[str, object], stages), "routing": "pending"}
-                if selected is None and isinstance(stages, dict)
+                if selected is None
+                and isinstance(stages, dict)
                 and cast(dict[str, object], stages).get("conversion") == "completed"
                 and cast(dict[str, object], stages).get("quality") == "passed"
                 else {"upload": "completed", "conversion": "queued"}
@@ -272,35 +317,12 @@ class ConversionStore:
         return dict(cast(Mapping[str, object], loaded_object))
 
     def list(self, *, status: ConversionStatus | None = None) -> list[dict[str, object]]:
-        records: list[dict[str, object]] = []
         if not self.root.is_dir():
-            return records
-        for path in self.root.glob("*/status.json"):
-            try:
-                record = self.load(path.parent.name)
-            except (OSError, ValueError, json.JSONDecodeError):
-                continue
-            if status is not None and record.get("status") != status.value:
-                continue
-            records.append(record)
-        records.sort(key=lambda item: str(item.get("updated_at", "")), reverse=True)
-        return records
+            return []
+        return self.catalog.records(statuses=(status.value,) if status is not None else ())
 
-    @staticmethod
-    def _write(path: Path, payload: Mapping[str, object]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, name = tempfile.mkstemp(
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            dir=path.parent,
-        )
-        temporary = Path(name)
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-                json.dump(payload, handle, ensure_ascii=False, indent=2)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
-        finally:
-            temporary.unlink(missing_ok=True)
+    def _write(self, path: Path, payload: Mapping[str, object]) -> None:
+        with self.catalog.writing(path, payload):
+            atomic_write_bytes(
+                path, (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+            )

@@ -23,6 +23,7 @@
     "rewind": "Rembobiner"
   },
   "chat": {
+    "warmCleanupFailed": "Impossible de libérer une session inactive : {error}",
     "selectAvailableModel": "Sélectionnez un modèle disponible avant d’envoyer.",
     "selectAvailableTitleModel": "Sélectionnez un modèle de titre disponible dans les paramètres de Claudian.",
     "rewind": {

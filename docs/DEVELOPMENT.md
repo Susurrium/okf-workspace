@@ -31,7 +31,7 @@ Engine/MarkItDown 各有 uv 环境，Dashboard/Claudian 各有 lockfile。根脚
 | 文档 | `git diff --check`、链接/锚点/命令、受影响文档测试；生成资料按既定入口更新 |
 
 根检查覆盖 Engine pytest/Ruff/Pyright、跨组件 fixture-Vault 测试及 Ruff、Dashboard 类型/测试/构建、
-Claudian 类型/lint/完整测试/构建和 Windows 插件身份迁移。它不执行 Apex 专项、Claudian 性能检查、真实 Obsidian、远端服务和多设备验收。
+Claudian 类型/lint/完整测试/构建/性能检查和 Windows 插件身份迁移。它不执行 Apex 专项、真实 Obsidian、远端服务和多设备验收。
 历史 Originals 使用 `scripts/check-legacy-originals.ps1` 与独立 CI；当前原件迁移和旧设备恢复仍在默认检查中。
 
 | 组件 | 构建与集成位置 |
@@ -43,6 +43,14 @@ Claudian 类型/lint/完整测试/构建和 Windows 插件身份迁移。它不�
 Claudian 可用 `npm run test:affected -- --base origin/main` 选择改动相关测试，支持 `--list`、`--full` 和转发 Jest 参数；
 它覆盖已提交、暂存、未暂存与未跟踪输入，未知输入或基线不可用时保留完整覆盖，不能代替其他必需检查。
 性能比较使用相同提交和测试选择，记录夹具创建/退出及原生平台能力，区分墙钟耗时、套件累计耗时与 runner 用量。
+
+文件系统性能使用 `uv run --project engine python scripts/benchmark-performance.py --documents 5000 --samples 20 --output work/performance.json --enforce-budgets`。
+该入口在忽略的 `work/` 中创建符合当前格式的独立合成 Vault 和队列，验证真实读取、按路径更新和空闲历史读取次数，
+报告首次建索引、逐次样本、P95、索引大小及源码指纹，退出后删除合成 Vault/State。固定机器执行时强制性能预算；
+CI 使用较小规模验证结构性约束并保存耗时报告。原有 `okf test performance --full` 继续覆盖大规模数据库与合成向量检索。
+
+Dashboard 的生产构建默认压缩；`NODE_ENV=development` 保留便于调试的输出。
+Tasks 依据源码、配置、依赖锁和 Node 版本核对构建缓存，候选完整生成后发布并清理旧输出；缓存失效或产物校验失败时重新生成。
 
 ## 正式发布后的继续开发
 

@@ -1,6 +1,7 @@
 // Mock for Obsidian API
 
 export class Plugin {
+  registerInterval = jest.fn((id: number) => id);
   app: any;
   manifest: any;
 

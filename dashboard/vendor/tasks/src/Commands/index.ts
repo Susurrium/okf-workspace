@@ -53,6 +53,7 @@ export class Commands {
                     this.app,
                     () => this.plugin.getTasks(),
                     async () => await this.plugin.saveSettings(),
+                    newLeaf => this.plugin.prepareTaskSourceNavigation(newLeaf),
                 ).open(),
         });
 

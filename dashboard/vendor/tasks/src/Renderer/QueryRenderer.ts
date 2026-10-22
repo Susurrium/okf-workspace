@@ -141,8 +141,8 @@ class QueryRenderChild extends MarkdownRenderChild {
             {
                 allTasks: () => this.plugin.getTasks(),
                 allMarkdownFiles: () => this.app.vault.getMarkdownFiles(),
-                backlinksClickHandler: createBacklinksClickHandler(this.app),
-                backlinksMousedownHandler: createBacklinksMousedownHandler(this.app),
+                backlinksClickHandler: createBacklinksClickHandler(this.plugin),
+                backlinksMousedownHandler: createBacklinksMousedownHandler(this.plugin),
                 editTaskPencilClickHandler: createEditTaskPencilClickHandler(
                     this.app,
                     async () => await this.plugin.saveSettings(),
@@ -376,23 +376,20 @@ function createEditTaskPencilClickHandler(app: App, onSaveSettings: () => Promis
     };
 }
 
-function createBacklinksClickHandler(app: App): BacklinksEventHandler {
+function createBacklinksClickHandler(plugin: TasksPlugin): BacklinksEventHandler {
     return async function backlinksClickHandler(ev: MouseEvent, task: Task) {
+        ev.preventDefault();
+        const app = plugin.app;
+        const open = plugin.prepareTaskSourceNavigation(Keymap.isModEvent(ev));
         const result = await getTaskLineAndFile(task, app.vault);
         if (result) {
             const [line, file] = result;
-            const leaf = app.workspace.getLeaf(Keymap.isModEvent(ev));
-            // When the corresponding task has been found,
-            // suppress the default behavior of the mouse click event
-            // (which would interfere e.g. if the query is rendered inside a callout).
-            ev.preventDefault();
-            // Instead of the default behavior, open the file with the required line highlighted.
-            await leaf.openFile(file, { eState: { line } });
+            await open(file, line);
         }
     };
 }
 
-function createBacklinksMousedownHandler(app: App): BacklinksEventHandler {
+function createBacklinksMousedownHandler(plugin: TasksPlugin): BacklinksEventHandler {
     return async function backlinksMousedownHandler(ev: MouseEvent, task: Task) {
         // Open in a new tab on middle-click.
         // This distinction is not available in the 'click' event, so we handle the 'mousedown' event
@@ -400,12 +397,13 @@ function createBacklinksMousedownHandler(app: App): BacklinksEventHandler {
         // (for regular left-click we prefer the 'click' event, and not to just do everything here, because
         // the 'click' event is more generic for touch devices etc.)
         if (ev.button === 1) {
+            const app = plugin.app;
+            const open = plugin.prepareTaskSourceNavigation('tab');
             ev.preventDefault();
             const result = await getTaskLineAndFile(task, app.vault);
             if (result) {
                 const [line, file] = result;
-                const leaf = app.workspace.getLeaf('tab');
-                await leaf.openFile(file, { eState: { line: line } });
+                await open(file, line);
             }
         }
     };

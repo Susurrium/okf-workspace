@@ -23,6 +23,7 @@
     "rewind": "Rewind"
   },
   "chat": {
+    "warmCleanupFailed": "Could not release an idle session: {error}",
     "selectAvailableModel": "Select an available model before sending.",
     "selectAvailableTitleModel": "Select an available title model in Claudian settings.",
     "rewind": {

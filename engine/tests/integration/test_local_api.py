@@ -28,6 +28,35 @@ from okf_workspace.okf.templates import initialize_vault
 FEED_FIXTURES = Path(__file__).parents[1] / "fixtures" / "feeds"
 
 
+def test_record_pages_preserve_legacy_lists_and_reject_stale_snapshots(tmp_path: Path) -> None:
+    from okf_workspace.semantic.models import SemanticKind, SemanticRequest
+    from okf_workspace.semantic.store import SemanticOperationStore
+
+    vault = initialize_vault(tmp_path / "paged-vault")
+    client, headers, paths = _client(vault, tmp_path, semantic_enabled=True)
+    store = SemanticOperationStore(paths.state)
+    for number in range(3):
+        store.create(SemanticRequest(f"op-{number}", SemanticKind.GENERATE_WIKI, "target.md"),
+                     fingerprint=str(number), source_hashes={})
+    first = client.get("/semantic/operations/page?limit=2", headers=headers)
+    assert first.status_code == 200, first.text
+    page = first.json()
+    assert len(page["items"]) == 2 and page["next_offset"] == 2
+    store.cancel("op-0")
+    stale = client.get("/semantic/operations/page", headers=headers,
+        params={"offset": 2, "snapshot_version": page["version"],
+                "snapshot_index_id": page["index_id"]})
+    assert stale.status_code == 409
+    delta = client.get("/semantic/operations/page", headers=headers,
+        params={"after_version": page["version"], "after_index_id": page["index_id"]})
+    assert delta.status_code == 200 and len(delta.json()["items"]) == 1
+    assert delta.json()["items"][0]["status"] == "cancelled"
+    legacy = client.get("/semantic/operations", headers=headers)
+    assert isinstance(legacy.json(), list) and len(legacy.json()) == 3
+    assert client.get("/documents/conversions/page", headers=headers).status_code == 200
+    assert client.get("/semantic/operations/page?limit=0", headers=headers).status_code == 400
+
+
 def test_project_category_api_preserves_identity_and_rejects_stale_edits(tmp_path: Path) -> None:
     vault = initialize_vault(tmp_path / "category-vault")
     client, headers, _ = _client(vault, tmp_path)

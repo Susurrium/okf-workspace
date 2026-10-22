@@ -1,4 +1,4 @@
-import { Events, HoverParent, HoverPopover, ItemView, MarkdownView, Notice, Platform, setIcon, WorkspaceLeaf, TAbstractFile, TFile, type ViewStateResult } from 'obsidian';
+import { Events, HoverParent, HoverPopover, ItemView, Notice, Platform, setIcon, WorkspaceLeaf, TAbstractFile, TFile, type ViewStateResult } from 'obsidian';
 import { nowMoment } from './datetime';
 import type { ApexHost } from './host';
 import type { AppWithCommands } from './obsidian-internal';
@@ -27,7 +27,8 @@ import { setupDragAndDrop } from './dnd';
 import { startGuardedDrag } from './drag-guard';
 import { clampSidebarWidth, clampWidgetUnitHeight } from './widget-span';
 import { CardEditModal } from './card-edit-modal';
-import { NotePopoverModal, revealMarkdownLine } from './note-popover-modal';
+import { NotePopoverModal } from './note-popover-modal';
+import { openFileInWorkspace } from './file-navigation';
 import { showConfirmDialog } from './confirm-dialog';
 import { showPromptDialog } from './prompt-dialog';
 import { clearWeatherCache } from './weather-service';
@@ -2047,10 +2048,7 @@ export class DashboardView extends ItemView implements HoverParent {
 
 	/** Tab-path open with an optional line reveal once the view is active. */
 	private async openNoteInTab(file: TFile, subpath?: string, line?: number): Promise<void> {
-		await this.app.workspace.openLinkText(subpath ? `${file.path}${subpath}` : file.path, '');
-		if (line === undefined) return;
-		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-		if (view && view.file?.path === file.path) revealMarkdownLine(view, line);
+		await openFileInWorkspace(this.app, file, { origin: this.leaf, subpath, line });
 	}
 
 	private async addColumnWithType(name: string, sectionType?: string, creationId?: string): Promise<void> {
@@ -2706,8 +2704,7 @@ export class DashboardView extends ItemView implements HoverParent {
 		}
 
 		if (file) {
-			const leaf = this.app.workspace.getLeaf(false);
-			await leaf.openFile(file);
+			await openFileInWorkspace(this.app, file, { origin: this.leaf });
 			return;
 		}
 

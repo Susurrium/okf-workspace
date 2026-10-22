@@ -47,6 +47,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Claudian tests failed' }
     & npm.cmd run build
     if ($LASTEXITCODE -ne 0) { throw 'Claudian build failed' }
+    & npm.cmd run check:performance
+    if ($LASTEXITCODE -ne 0) { throw 'Claudian performance check failed' }
 }
 finally { Pop-Location }
 

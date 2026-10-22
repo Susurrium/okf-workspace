@@ -155,6 +155,9 @@ import {
   type DashboardSection as EmbeddedDashboardSection,
 } from "./dashboard-view.js";
 
+import { beginFileNavigation, type FileNavigationRequest } from '../../apex/src/file-navigation.js';
+import { matchingDashboardPage, relatedDashboardPage } from './page-navigation.js';
+
 export default class OkfBrainPlugin extends Plugin {
   public get isMobile(): boolean { return Platform.isMobile; }
   public settings: OkfBrainSettings = DEFAULT_SETTINGS;
@@ -193,6 +196,8 @@ export default class OkfBrainPlugin extends Plugin {
   private readonly workbenchPages = new Map<string, WorkspaceLeaf>();
   private readonly pageIds = new WeakMap<WorkspaceLeaf, string>();
   private focusedNavigationQueue: Promise<void> = Promise.resolve();
+  private focusedNavigationRevision = 0;
+  private localApiCache: LocalApi | undefined;
 
   public async onload(): Promise<void> {
     await this.loadSettings();
@@ -243,11 +248,10 @@ export default class OkfBrainPlugin extends Plugin {
       workspacePresets: WORKBENCH_PRESETS,
       createWorkspaceMarkdown: generateWorkbenchPresetMarkdown,
       chooseWorkspaceContext: (presetId) => chooseWorkspaceContext(this.app, presetId),
-      openTodayNote: async () => { const daily = await this.notes().createDaily(); await this.openVaultPath(daily.path); },
+      openTodayNote: () => this.openTodayDaily(),
       executeQuickAction: async (action) => {
         if (action.type !== "command" || action.target !== "daily-notes") return false;
-        const daily = await this.notes().createDaily();
-        await this.openVaultPath(daily.path);
+        await this.openTodayDaily();
         return true;
       },
       saveTasksToDaily: (block) => this.notes().appendDailyTaskBlock(block),
@@ -331,8 +335,8 @@ export default class OkfBrainPlugin extends Plugin {
         deploymentConfig: this.settings.deploymentConfig,
         logDirectory: this.settings.serviceLogDirectory,
       }));
-      this.indexSync = new IndexSyncCoordinator(async () => {
-        await this.api().syncIndex();
+      this.indexSync = new IndexSyncCoordinator(async (paths) => {
+        await this.api().syncIndex(paths && paths.length <= 1_000 ? paths : undefined);
       });
     }
     this.addSettingTab(new DashboardSettingTab(this.app, this.apexHost, this, {
@@ -580,9 +584,16 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public async openDailyForWriting(): Promise<void> {
+    const navigation = beginFileNavigation(this.app);
     const result = await this.notes().createDaily();
-    await this.openVaultHeading(result.path, "随手记录");
+    await this.openVaultHeading(result.path, "随手记录", navigation);
     this.refreshDashboardViews();
+  }
+
+  private async openTodayDaily(): Promise<void> {
+    const navigation = beginFileNavigation(this.app);
+    const daily = await this.notes().createDaily();
+    await this.openVaultPath(daily.path, undefined, navigation);
   }
 
   public promptActionMenu(): void {
@@ -1359,30 +1370,59 @@ export default class OkfBrainPlugin extends Plugin {
 
   public async navigateToOkfSection(section: EmbeddedDashboardSection, origin?: HTMLElement, workbenchPath?: string,
     config?: Record<string, unknown>, stateKey?: string): Promise<void> {
-    const request = this.focusedNavigationQueue.then(() => this.navigateFocusedPage(section, origin, workbenchPath, config, stateKey));
+    const revision = ++this.focusedNavigationRevision;
+    const source = this.app.workspace.getMostRecentLeaf();
+    const valid = (target?: WorkspaceLeaf) => {
+      let present = !source;
+      this.app.workspace.iterateAllLeaves(leaf => { if (leaf === source) present = true; });
+      const active = this.app.workspace.getMostRecentLeaf();
+      return present && revision === this.focusedNavigationRevision && (active === source || active === target);
+    };
+    const request = this.focusedNavigationQueue.then(async () => {
+      if (valid()) await this.navigateFocusedPage(section, origin, workbenchPath, config, stateKey, source ?? undefined, valid);
+    });
     this.focusedNavigationQueue = request.catch(() => undefined);
     return request;
   }
 
   private async navigateFocusedPage(section: EmbeddedDashboardSection, origin?: HTMLElement, workbenchPath?: string,
-    config?: Record<string, unknown>, stateKey?: string): Promise<void> {
+    config?: Record<string, unknown>, stateKey?: string, source?: WorkspaceLeaf,
+    valid: (target?: WorkspaceLeaf) => boolean = () => true): Promise<void> {
     const target = this.activeApexView(origin, workbenchPath);
     this.updateDashboardUiState({ activeSection: section });
     const pages = this.app.workspace.getLeavesOfType(OKF_DASHBOARD_VIEW);
     const existing = origin ? pages.find(page => page.view.containerEl.contains(origin))
       : pages.find(page => page === this.app.workspace.activeLeaf);
-    const boardPath = target?.view.currentWorkspacePath() ?? workbenchPath;
-    const linked = origin && !existing && boardPath ? this.workbenchPages.get(boardPath) : undefined;
-    const leaf = existing ?? (linked && pages.includes(linked) ? linked : this.app.workspace.getLeaf("tab"));
-    if (existing?.view instanceof OkfDashboardItemView) existing.view.rememberNavigation();
-    else if (leaf.view instanceof OkfDashboardItemView) leaf.view.navigationHistory.length = 0;
+    const restoredBoard = this.app.workspace.getLeavesOfType(DASHBOARD_VIEW_TYPE)[0]?.getViewState().state;
+    const pageOwner = existing?.getViewState().state?.workbenchPath;
+    const boardPath = workbenchPath ?? (typeof pageOwner === 'string' ? pageOwner : undefined)
+      ?? target?.view.currentWorkspacePath()
+      ?? (restoredBoard ? typeof restoredBoard.workspacePath === 'string' ? restoredBoard.workspacePath
+        : this.settings.apex.dashboardFile : undefined);
+    const matching = matchingDashboardPage(existing ? [existing, ...pages.filter(page => page !== existing)] : pages, boardPath, section, config);
+    if (matching && !config?.viewState && !config?.resetTaskQuery) {
+      if (boardPath) this.workbenchPages.set(boardPath, matching);
+      await matching.loadIfDeferred();
+      if (!valid(matching)) return;
+      await this.app.workspace.revealLeaf(matching);
+      if (valid(matching)) this.app.workspace.setActiveLeaf(matching, { focus: true });
+      return;
+    }
+    const related = origin && !existing && boardPath ? relatedDashboardPage(pages, boardPath, config) : undefined;
+    const cached = boardPath ? this.workbenchPages.get(boardPath) : undefined;
+    const linked = relatedDashboardPage(cached && pages.includes(cached) ? [cached] : [], boardPath ?? '', config) ?? related;
+    const leaf = matching ?? existing ?? (origin && linked ? linked
+      : source ? this.app.workspace.createLeafInParent(source.parent, -1) : this.app.workspace.getLeaf("tab"));
+    if (!matching && leaf.view instanceof OkfDashboardItemView) leaf.view.rememberNavigation();
     if (origin && boardPath) this.workbenchPages.set(boardPath, leaf);
     let pageId = this.pageIds.get(leaf);
     if (!pageId) { pageId = crypto.randomUUID(); this.pageIds.set(leaf, pageId); }
     const scope = [config?.course, config?.project, config?.statuses, config?.feedStreams, config?.folders,
       config?.excludeFolders, config?.notePaths, config?.readingView, config?.readingSourceId,
       config?.catalogueKey, config?.taskView, config?.savedViewId];
-    const instance = stateKey ?? workbenchInstanceKey(boardPath ?? "", `page:${pageId}:${section}:${JSON.stringify(scope)}`);
+    const restoredKey = matching?.getViewState().state?.stateKey;
+    const instance = stateKey ?? (typeof restoredKey === 'string' ? restoredKey
+      : workbenchInstanceKey(boardPath ?? "", `page:${pageId}:${section}:${JSON.stringify(scope)}`));
     if (section === 'tasks' && config?.resetTaskQuery) this.updateDashboardPageUiState('tasks', { filters: { taskAdvancedQuery: null, taskQueryDraft: null } }, instance);
     const storedConfig = config ? { ...config } : undefined;
     if (storedConfig) {
@@ -1396,9 +1436,11 @@ export default class OkfBrainPlugin extends Plugin {
       type: OKF_DASHBOARD_VIEW,
       state: { section, workbenchPath: boardPath,
         ...(storedConfig ? { config: storedConfig } : {}), stateKey: instance },
-      active: true,
+      active: false,
     });
+    if (!valid(leaf)) return;
     await this.app.workspace.revealLeaf(leaf);
+    if (valid(leaf)) this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
   private dashboardPage(origin?: HTMLElement): WorkspaceLeaf | undefined {
@@ -1459,7 +1501,9 @@ export default class OkfBrainPlugin extends Plugin {
     feed: FeedKind,
     digestId: string,
     blockId?: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
+    const navigation = beginFileNavigation(this.app);
+    let navigated = false;
     await this.ensureLocalServiceAvailable();
     const adapter = this.app.vault.adapter;
     if (!(adapter instanceof FileSystemAdapter)) {
@@ -1486,11 +1530,7 @@ export default class OkfBrainPlugin extends Plugin {
         }
       },
       open: async (file, targetBlockId) => {
-        if (targetBlockId) {
-          await this.app.workspace.openLinkText(`${file.path}#^${targetBlockId}`, "", false);
-        } else {
-          await this.app.workspace.getLeaf(false).openFile(file);
-        }
+        navigated = await navigation.open(file, targetBlockId ? { subpath: `#^${targetBlockId}` } : {});
       },
       waitForFile: (path) => this.waitForVaultFile(path),
       describePath: (path) => adapter.getFullPath(path),
@@ -1508,6 +1548,7 @@ export default class OkfBrainPlugin extends Plugin {
       });
       throw error;
     });
+    return navigated;
   }
 
   public async loadFeedDashboardDigest(): Promise<FeedDashboardDigest> {
@@ -1702,13 +1743,18 @@ export default class OkfBrainPlugin extends Plugin {
     feed: FeedKind,
     digestId: string,
     blockId: string,
-  ): Promise<void> {
-    await this.openFeedEdition(feed, digestId, blockId);
+  ): Promise<boolean> {
+    return this.openFeedEdition(feed, digestId, blockId);
   }
 
   public api(): LocalApi {
     if (this.isMobile) throw new Error("这个处理操作请在电脑上执行；资料可先保存并同步提交");
-    return new LocalApi(this.settings.baseUrl, this.settings.token, currentVaultFingerprint(this.app));
+    const fingerprint = currentVaultFingerprint(this.app);
+    const cached = this.localApiCache;
+    if (cached?.matchesConnection(this.settings.baseUrl, this.settings.token, fingerprint)) return cached;
+    const client = new LocalApi(this.settings.baseUrl, this.settings.token, fingerprint);
+    this.localApiCache = client;
+    return client;
   }
 
   private feedApi(): HttpFeedApi {
@@ -1765,8 +1811,10 @@ export default class OkfBrainPlugin extends Plugin {
       });
   }
 
-  public refreshDashboardViews(): void {
-    this.apexHost?.refreshAllDashboards();
+  public refreshDashboardViews(businessOnly = false): void {
+    if (businessOnly) {
+      for (const surface of this.embeddedDashboardSurfaces) void surface.refresh();
+    } else this.apexHost?.refreshAllDashboards();
     for (const leaf of this.app.workspace.getLeavesOfType(OKF_DASHBOARD_VIEW)) {
       if (leaf.view instanceof OkfDashboardItemView) void leaf.view.refresh();
     }
@@ -2002,11 +2050,7 @@ export default class OkfBrainPlugin extends Plugin {
     this.addCommand({
       id: "open-today-daily",
       name: "打开/创建今日日记",
-      callback: () => {
-        void this.notes()
-          .createDaily()
-          .then((result) => this.openVaultPath(result.path));
-      },
+      callback: () => { void this.openTodayDaily().catch(error => new Notice(String(error), 10000)); },
     });
     this.addCommand({
       id: "open-action-menu",
@@ -2272,21 +2316,26 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   private registerIndexSync(): void {
+    const dirtyPaths = new Set<string>();
     const refreshDashboard = (): void => {
       if (this.dashboardRefreshTimer !== undefined) {
         window.clearTimeout(this.dashboardRefreshTimer);
       }
       this.dashboardRefreshTimer = window.setTimeout(() => {
         this.dashboardRefreshTimer = undefined;
-        this.refreshDashboardViews();
+        this.refreshDashboardViews(true);
       }, 700);
     };
-    const schedule = (): void => {
+    const schedule = (...paths: string[]): void => {
+      VaultDashboardReader.invalidate(this.app, paths);
       if (this.isMobile) return;
+      for (const path of paths) dirtyPaths.add(path);
       if (this.indexSyncTimer !== undefined) window.clearTimeout(this.indexSyncTimer);
       this.indexSyncTimer = window.setTimeout(() => {
         this.indexSyncTimer = undefined;
-        void this.indexSync?.request().catch((error: unknown) => {
+        const pending = [...dirtyPaths];
+        dirtyPaths.clear();
+        void this.indexSync?.request(pending).catch((error: unknown) => {
           console.warn("[okf-workspace] index sync failed", error);
         });
       }, 1_200);
@@ -2298,7 +2347,7 @@ export default class OkfBrainPlugin extends Plugin {
           file.extension === "md" &&
           file.path !== "index.md" && !file.path.startsWith(".")
         ) {
-          schedule();
+          schedule(file.path);
           if (this.app.metadataCache.getFileCache(file)?.frontmatter?.dashboard !== true) refreshDashboard();
         }
       }),
@@ -2310,25 +2359,30 @@ export default class OkfBrainPlugin extends Plugin {
           file.extension === "md" &&
           file.path !== "index.md" && !file.path.startsWith(".")
         ) {
-          schedule();
+          schedule(file.path);
           refreshDashboard();
         }
       }),
     );
     this.registerEvent(
       this.app.vault.on("delete", (file) => {
+        if (file instanceof TFolder) {
+          schedule(file.path);
+          refreshDashboard();
+          return;
+        }
         if (
           file instanceof TFile &&
           file.extension === "md" &&
           file.path !== "index.md" && !file.path.startsWith(".")
         ) {
-          schedule();
+          schedule(file.path);
           refreshDashboard();
         }
       }),
     );
-    this.registerEvent(this.app.vault.on("rename", () => {
-      schedule();
+    this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
+      schedule(oldPath, file.path);
       refreshDashboard();
     }));
   }
@@ -2429,9 +2483,9 @@ export default class OkfBrainPlugin extends Plugin {
     return normalized.split("/").at(-1)?.replace(/\.md$/iu, "") || normalized;
   }
 
-  public async openVaultPath(path: string, blockId?: string): Promise<void> {
+  public async openVaultPath(path: string, blockId?: string, navigation?: FileNavigationRequest): Promise<void> {
     try {
-      const result = await this.tryOpenVaultPath(path, blockId ? `^${blockId}` : undefined);
+      const result = await this.tryOpenVaultPath(path, blockId ? `^${blockId}` : undefined, navigation);
       if (result !== "opened") this.noticeVaultOpenFailure(result, path);
     } catch (error) {
       console.warn("[okf-workspace] could not open Vault path", { path, error });
@@ -2442,15 +2496,12 @@ export default class OkfBrainPlugin extends Plugin {
   private async tryOpenVaultPath(
     path: string,
     fragment?: string,
+    navigation: FileNavigationRequest = beginFileNavigation(this.app),
   ): Promise<"opened" | "unindexed" | "missing" | "unavailable"> {
     const normalized = path.replace(/\\/gu, "/").replace(/^\/+|\/+$/gu, "");
     const file = await this.waitForVaultFile(normalized);
     if (file) {
-      if (fragment) {
-        await this.app.workspace.openLinkText(`${normalized}#${fragment}`, "", false);
-      } else {
-        await this.app.workspace.getLeaf(false).openFile(file);
-      }
+      await navigation.open(file, fragment ? { subpath: `#${fragment}` } : {});
       return "opened";
     }
     let diskType: "file" | "folder" | undefined;
@@ -2492,8 +2543,8 @@ export default class OkfBrainPlugin extends Plugin {
     return undefined;
   }
 
-  private async openVaultHeading(path: string, heading: string): Promise<void> {
-    const result = await this.tryOpenVaultPath(path, heading);
+  private async openVaultHeading(path: string, heading: string, navigation?: FileNavigationRequest): Promise<void> {
+    const result = await this.tryOpenVaultPath(path, heading, navigation);
     if (result !== "opened") this.noticeVaultOpenFailure(result, path);
   }
 
@@ -2568,6 +2619,10 @@ export default class OkfBrainPlugin extends Plugin {
     }
     const { installTasks } = await import('../../tasks-generated/plugin.js');
     this.taskRuntime = await installTasks(this, {
+      prepareTaskSourceNavigation: newLeaf => {
+        const navigation = beginFileNavigation(this.app, { newLeaf });
+        return async (file, line) => { await navigation.open(file, { line }); };
+      },
       settings: { ...this.settings.tasks, statusSettings: getTaskSettings().statusSettings },
       save: async settings => {
         this.settings.tasks = { ...this.settings.tasks, ...settings };
@@ -2791,10 +2846,12 @@ export default class OkfBrainPlugin extends Plugin {
   }
 
   public async openTaskSource(task: VaultTask, origin?: HTMLElement): Promise<void> {
-    const current = await this.resolveCurrentTask(task);
+    const navigation = beginFileNavigation(this.app);
     const view = this.activeApexView(origin)?.view;
+    const current = await this.resolveCurrentTask(task);
+    if (!navigation.isCurrent()) return;
     if (view) view.revealTaskSource(current.file, current.line, current.blockId);
-    else await this.app.workspace.getLeaf('tab').openFile(current.file, { eState: { line: current.line } });
+    else await navigation.open(current.file, { line: current.line, ...(current.blockId ? { subpath: `#^${current.blockId}` } : {}) });
   }
 
   private async resolveCurrentTask(task: VaultTask): Promise<VaultTask> {

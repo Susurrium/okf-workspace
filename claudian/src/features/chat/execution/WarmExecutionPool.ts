@@ -1,6 +1,7 @@
 export const DEFAULT_MAX_WARM_AGENT_PROCESSES = 5;
 export const MIN_WARM_AGENT_PROCESSES = 5;
 export const MAX_WARM_AGENT_PROCESSES = 10;
+export const WARM_EXECUTION_IDLE_TIMEOUT_MS = 10 * 60_000;
 
 export function normalizeWarmExecutionLimit(configured: unknown): number {
   const finite = typeof configured === 'number' && Number.isFinite(configured)
@@ -21,6 +22,7 @@ export interface WarmExecutionOwner {
 interface WarmExecutionEntry {
   owner: WarmExecutionOwner;
   lastUsed: number;
+  lastActivityAt: number;
 }
 
 export class WarmExecutionCapacityError extends Error {
@@ -42,7 +44,10 @@ export class WarmExecutionPool {
   private operationTail: Promise<void> = Promise.resolve();
   private usageSequence = 0;
 
-  constructor(private readonly getConfiguredLimit: () => number) {}
+  constructor(
+    private readonly getConfiguredLimit: () => number,
+    private readonly now: () => number = Date.now,
+  ) {}
 
   acquire(owner: WarmExecutionOwner): Promise<void> {
     return this.enqueue(async () => {
@@ -50,6 +55,7 @@ export class WarmExecutionPool {
       if (existing) {
         existing.owner = owner;
         existing.lastUsed = this.#nextUsageSequence();
+        existing.lastActivityAt = this.now();
         await this.#coolExcessOwners(this.#getLimit());
         return;
       }
@@ -68,6 +74,7 @@ export class WarmExecutionPool {
       this.entries.set(owner.id, {
         owner,
         lastUsed: this.#nextUsageSequence(),
+        lastActivityAt: this.now(),
       });
     });
   }
@@ -100,7 +107,28 @@ export class WarmExecutionPool {
       const entry = this.entries.get(ownerId);
       if (!entry) return;
       entry.lastUsed = this.#nextUsageSequence();
+      entry.lastActivityAt = this.now();
       await this.#coolExcessOwners(this.#getLimit());
+    });
+  }
+
+  coolIdle(): Promise<number> {
+    return this.enqueue(async () => {
+      const cutoff = this.now() - WARM_EXECUTION_IDLE_TIMEOUT_MS;
+      let cooled = 0;
+      for (const entry of [...this.entries.values()]) {
+        if (entry.lastActivityAt > cutoff || !entry.owner.canCool()) continue;
+        try {
+          await entry.owner.cool();
+        } catch (error) {
+          // A newly admitted interaction protects its owner while snapshot persistence awaits.
+          if (!entry.owner.canCool()) continue;
+          throw error;
+        }
+        if (this.entries.get(entry.owner.id) === entry) this.entries.delete(entry.owner.id);
+        cooled++;
+      }
+      return cooled;
     });
   }
 

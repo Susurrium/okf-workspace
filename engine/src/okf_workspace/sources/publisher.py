@@ -26,6 +26,8 @@ from okf_workspace.okf.paths import resolve_bundle_path
 from okf_workspace.okf.relations import explicit_context_fields
 from okf_workspace.okf.validator import validate_document
 
+from .lookup import source_lookup
+
 ResourceNormalizer = Callable[[str], str]
 
 _SOURCE_PURPOSES = {"study", "wiki", "reference", "undecided"}
@@ -77,6 +79,7 @@ class SourcePublisher:
         self.records_root = (self.vault / "sources" / "records").resolve()
         self.text_root = (self.vault / "sources" / "text").resolve()
         self._snapshots: dict[Path, bytes] = {}
+        self._lookup = source_lookup(self.records_root)
 
     def read_record(self, path: Path) -> OkfDocument:
         """Read exactly the bytes whose version must still exist at publication."""
@@ -106,6 +109,7 @@ class SourcePublisher:
             self._snapshots[source] = render_document(
                 document.frontmatter, document.body,
             ).encode("utf-8")
+            self._lookup.invalidate(source)
         return source
 
     @contextmanager
@@ -145,17 +149,24 @@ class SourcePublisher:
         if not self.records_root.is_dir():
             return None
         expected = normalize(resource) if normalize is not None else resource
-        for path in sorted(self.records_root.rglob("*.md")):
-            with suppress(OSError, ValueError):
-                payload = path.read_bytes()
-                document = parse_document(payload.decode("utf-8"), source=str(path))
-                current = document.frontmatter.get("resource")
-                if document.type != "Source" or not isinstance(current, str):
-                    continue
-                identity = normalize(current) if normalize is not None else current
-                if identity == expected:
-                    self._snapshots[path.resolve()] = payload
-                    return path, document
+        for verify in (False, True):
+            with self.transaction():
+                candidates = self._lookup.candidates(
+                    expected, by_hash=False, normalize=normalize, verify_content=verify,
+                )
+            if not candidates:
+                return None
+            for path in candidates:
+                with suppress(OSError, ValueError):
+                    payload = path.read_bytes()
+                    document = parse_document(payload.decode("utf-8"), source=str(path))
+                    current = document.frontmatter.get("resource")
+                    if document.type != "Source" or not isinstance(current, str):
+                        continue
+                    identity = normalize(current) if normalize is not None else current
+                    if identity == expected:
+                        self._snapshots[path.resolve()] = payload
+                        return path, document
         return None
 
     def find_by_sha256(self, digest: str) -> tuple[Path, OkfDocument] | None:
@@ -164,18 +175,23 @@ class SourcePublisher:
         value = digest.strip().casefold()
         if not value or not self.records_root.is_dir():
             return None
-        for path in sorted(self.records_root.rglob("*.md")):
-            with suppress(OSError, ValueError):
-                payload = path.read_bytes()
-                document = parse_document(payload.decode("utf-8"), source=str(path))
-                current = document.frontmatter.get("sha256")
-                if (
-                    document.type == "Source"
-                    and isinstance(current, str)
-                    and current.casefold() == value
-                ):
-                    self._snapshots[path.resolve()] = payload
-                    return path, document
+        for verify in (False, True):
+            with self.transaction():
+                candidates = self._lookup.candidates(value, by_hash=True, verify_content=verify)
+            if not candidates:
+                return None
+            for path in candidates:
+                with suppress(OSError, ValueError):
+                    payload = path.read_bytes()
+                    document = parse_document(payload.decode("utf-8"), source=str(path))
+                    current = document.frontmatter.get("sha256")
+                    if (
+                        document.type == "Source"
+                        and isinstance(current, str)
+                        and current.casefold() == value
+                    ):
+                        self._snapshots[path.resolve()] = payload
+                        return path, document
         return None
 
     def resolve_text(
@@ -258,6 +274,7 @@ class SourcePublisher:
                 source_document.frontmatter, source_document.body
             ).encode("utf-8")
             self._snapshots[source_text] = rendered_text
+            self._lookup.invalidate(source)
         return PublishedSourcePair(source=source, source_text=source_text)
 
     def add_use(

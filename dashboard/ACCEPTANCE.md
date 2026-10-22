@@ -1,10 +1,57 @@
 # Dashboard 验收台账
 
-更新：2026-10-17。当前功能提交为 `65884bdc`（添加菜单与顶部快速记录），基线 `77381edb`。
-已在固定 OKF-Test 安装验收候选，正式环境未部署。采用边界见 [UPSTREAM.md](UPSTREAM.md)，验收要求见[开发指南](../docs/DEVELOPMENT.md)。
-本地专项验收通过；源码基线 `57e29c21` 的六项 CI 全部通过。1.0 发布验收见[版本记录](../docs/releases/1.0.0.md)。
+更新：2026-10-22。当前文件导航与性能优化候选基于 `6eef8135` 及未提交修改，已安装到固定 OKF-Test。
+正式环境未部署。采用边界见 [UPSTREAM.md](UPSTREAM.md)，验收要求见[开发指南](../docs/DEVELOPMENT.md)。
+1.0 发布验收见[版本记录](../docs/releases/1.0.0.md)。
 
-## 最近验收
+## 性能优化（2026-10-22）
+
+证据位于 `work/performance-optimization-20261022/`；完整结果清单为
+`deliverables/acceptance.json`。实机部署与恢复回执在
+`E:\ObsidianData\OKF-Test-State\reports\performance-20261022`，安装身份以 State 的
+`reports/deployment-receipt.json` 为准。
+
+| 范围 | 结果与证据 |
+| --- | --- |
+| 自动化 | 根检查通过：Engine 628 项、跨组件 13 项、Dashboard 498 项、Claudian 6320 项及 72 项脚本检查；Claudian 3 项既有跳过。MarkItDown 36 项、Ruff 通过；Apex 八项相关专项、lint、独立构建通过。`final-root-check-3.log`、`final-markitdown.log`、`final-apex.log` |
+| 文件系统与队列 | 5000 篇文件、20 次采样：无变化扫描、单路径更新、含刷新及实际读取的检索、空闲队列 P95 分别为 336、62、488、10 ms；首次队列核对为 1.82 s，全部原始样本保留。无变化扫描不解析 YAML，空闲队列不读取终态 JSON。`measurements/filesystem-final-5000.json` |
+| 检索规模 | 10 万文本块的全文及合成向量预算通过；另用实际 BAAI 中文模型验证推理、无变化时生成 0 个向量及矩阵复用。`measurements/vector-full.json`、`measurements/real-vector.json` |
+| 业务区域 | 两个读取器共享一次扫描，49 篇文件各读取一次，热扫描读取 0 次；文件创建、修改、重命名、删除后全文索引与投影正确，Capture 节点、草稿、焦点及选区保持。关闭全部业务视图后缓存清零。`test-dashboard-cache-counts.log`、`test-event-*.log`、`test-dashboard-cache-release.log` |
+| Claudian | 冷模块求值中位数由审查基线 207 ms 降至 130 ms，50 ms 指示线仍有警告。240 条历史全文及 Markdown 完整，渲染后保持底部，原生滚轮向上移动后保留阅读位置；实际 Codex 读取、后台生成、闲置 10 分钟自动释放及同会话再次发送通过。`test-history-*.log`、`test-post-idle-resume-status.log`、`test-semantic-status-2.log` |
+| 导入 | 工作台实际提交 PDF/DOCX/PPTX，均由配置中的 MinerU 云端完成、QC 通过；Office 图片保留。当前 MarkItDown 源码的本地真实 API/Worker/Engine 流程通过，远端现有服务的带图 DOCX/PPTX 兼容性通过。`test-cleanup-ui.log`、`markitdown-smoke.json`、`real-remote-markitdown.log` |
+| 构建 | Dashboard 程序由审查基线 6729434 降至 3947331 字节；Tasks 缓存覆盖并发、校验、过期生成文件和失败保留产物。候选包及安装文件哈希匹配。`build-cache-tests-2.log`、`final-candidate-hashes.log` |
+| 恢复与退出 | 44 个原文件内容不变，布局逐字节恢复；20 个合成文件、3 个转换记录和 1 个后台操作已清理，全文/向量索引无合成残留；会话与临时模型设置已恢复。测试窗口、API、自动启动、LiveSync 关闭，8766/9366 无监听。`test-final-restoration.log`、`test-final-status.log` |
+
+以上为本地候选、固定测试环境和注明的在线接口验证；GitHub CI、正式部署、服务端容器部署及多设备同步不属于此次执行结果。
+
+## 文件导航（2026-10-22）
+
+过程资料位于 `work/navigation-acceptance/`，归档位于
+`E:\ObsidianData\OKF-Test-State\reports\navigation-20261022-8f5a1c84531e`。
+`installed.json` 记录源码提交、未提交文件哈希及候选/安装产物哈希；程序 SHA-256 为
+`8f5a1c84531ecdf3d6836b167d6e34e41fb339e9ea147b4eb6971abfe86fe791`。
+标准测试部署回执同时保存在 State 的 `reports/deployment-receipt.json`。
+
+| 范围 | 结果与证据 |
+| --- | --- |
+| 自动化 | Dashboard 类型检查、67 个文件/489 项测试、构建通过；Apex 日历、文件夹属性筛选、移动端交互、刷新范围、滚动五项专项及 lint、独立构建通过。`dashboard-*.log`、`apex-*.log` |
+| 文件与位置 | 返回工作台重复打开同一文件 20 次保持一个标签页；块/任务行定位、已有光标位置、固定笔记、文件快捷操作、同名不同目录、PDF/Canvas、固定页签通过。`files-1792660204057.json` |
+| 多窗格 | 优先来源标签组、保留已有重复页签、复用独立窗口中的目标通过。`windows-1792660205868.json` |
+| 弹窗 | 转标签页时复用目标、保留定位，编辑内容已写入原文件。`popover-1792660207205.json` |
+| 功能页面 | 命令重复打开、清除内存关联、不同业务范围及明确工作台归属通过；状态标识和返回历史保留。`pages-1792660209798.json` |
+| 重启与布局 | Obsidian 进程重启后，通过原生 API 恢复序列化布局；工作台和功能页均延迟加载时，无显式工作台参数的命令复用原页面，保留状态标识与历史。`cold-1792660198719.json` |
+| Tasks | 真实快速搜索和查询结果来源定位、Ctrl/中键新建、连续明确新建请求通过；来源页面关闭后不打开迟到弹窗。`tasks-1792660211064.json`、`queries-1792660213493.json`、`closing-1792660214872.json` |
+| Feed | 树洞、中国热点、AI 资讯使用真实本地 API 重复打开汇总与切换条目，均复用对应文件标签页。`feeds-1792660220342.json` |
+| 输入 | CDP 浏览器原生鼠标事件验证固定笔记、Ctrl 连续新建及中键新建；确认事件 `isTrusted`，当前原生新标签页偏好为前台打开。后台窗口使用 CDP 焦点模拟，回执明确记录。`native-input.json` |
+| 故障边界 | 导航隔离测试覆盖过期请求、并发创建、来源/弹窗关闭、缺失文件、打开失败和重试；后台新标签页偏好由隔离测试覆盖。`file-navigation.test.ts` 对应测试日志 |
+| 恢复与退出 | 三份原布局/设置及三份原汇总逐字节恢复；合成文件、页签及全文/向量索引残留为零。测试窗口、API、自动启动和 LiveSync 关闭，8766/9366 无监听。`restoration.json`、`cleanup-1792660860390.json`、`exit-status.json` |
+
+上述记录对应具名回执中的开发候选。原始失败回执和后续通过回执均保留。
+移动端完成自动化及加载检查，未使用真实手机；本次没有远端同步、外部在线服务或正式发布验收。
+
+## 添加菜单与顶部快速记录（2026-10-17）
+
+该项功能提交为 `65884bdc`，基线 `77381edb`；源码基线 `57e29c21` 的六项 CI 全部通过。
 
 证据根目录：`work/top-capture/`。`receipt.json` 记录提交前快照及全部 19 个变更文件哈希，已与
 `65884bdc` 核对一致；`installed.json` 和 `deployment-receipt.json` 记录三个候选/安装文件的完整哈希与身份。

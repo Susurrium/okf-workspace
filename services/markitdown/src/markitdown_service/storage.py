@@ -52,6 +52,13 @@ class JobStore:
     def __init__(self, database_path: Path) -> None:
         self.database_path = database_path
 
+    def has_pending(self) -> bool:
+        with self._connect() as connection:
+            return (
+                connection.execute("SELECT 1 FROM jobs WHERE status = 'pending' LIMIT 1").fetchone()
+                is not None
+            )
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path, timeout=5.0)
         connection.row_factory = sqlite3.Row

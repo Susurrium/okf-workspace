@@ -23,6 +23,7 @@
     "rewind": "Zurückspulen"
   },
   "chat": {
+    "warmCleanupFailed": "Eine inaktive Sitzung konnte nicht freigegeben werden: {error}",
     "selectAvailableModel": "Wähle vor dem Senden ein verfügbares Modell aus.",
     "selectAvailableTitleModel": "Wähle in den Claudian-Einstellungen ein verfügbares Titelmodell aus.",
     "rewind": {

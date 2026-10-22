@@ -23,6 +23,7 @@
     "rewind": "Откатить"
   },
   "chat": {
+    "warmCleanupFailed": "Не удалось освободить неактивный сеанс: {error}",
     "selectAvailableModel": "Перед отправкой выберите доступную модель.",
     "selectAvailableTitleModel": "Выберите доступную модель для заголовков в настройках Claudian.",
     "rewind": {

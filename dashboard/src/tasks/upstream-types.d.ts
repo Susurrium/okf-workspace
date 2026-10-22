@@ -70,6 +70,8 @@ declare module '*tasks-generated/plugin.js' {
     }): void;
   }
   export function installTasks(owner: Plugin, options: {
+    prepareTaskSourceNavigation(newLeaf?: import('obsidian').PaneType | boolean):
+      (file: import('obsidian').TFile, line: number) => Promise<void>;
     settings: Record<string, unknown>;
     save(settings: Record<string, unknown>): Promise<void>;
     onError(error: unknown): void;

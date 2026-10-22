@@ -69,6 +69,11 @@ Workspace Kit 安装到 Vault 的根 AGENTS、`.agents/skills/` 和 `system/`，
 | 顶部常用操作、显示开关与 Capture 草稿 | Dashboard 本机插件配置；快捷项为全局偏好，草稿按默认/课程/项目上下文隔离 |
 | 工作台布局、便签、清单、安全副本 | Dashboard/Apex 工作台 Markdown |
 
+语义任务和转换记录继续由所属 Store 持久化 JSON；`State/indexes/operations/` 与 `State/indexes/conversions/`
+保存可重建的 SQLite 查询目录。记录写入先标记派生更新未完成，再原子保存 JSON 和更新目录；中断后从 JSON 核对恢复。
+领取任务仍重新读取候选记录，目录损坏保留诊断副本后重建；这些操作不迁移或改写 Vault。
+Sources 的身份加速缓存限于进程内元数据，命中后重新读取候选；Feeds 先用期次元数据定位条目，再加载对应正文。
+
 ### Artifact 与公共字段
 
 外部兼容读取要求 YAML 可解析且 `type` 非空，容许未知类型、扩展字段与断链；Workspace 自产文件严格遵循 Profile v3。

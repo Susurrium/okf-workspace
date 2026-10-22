@@ -283,6 +283,11 @@
   text-align: center;
 }
 
+.claudian-message-history {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 120px;
+}
+
 .claudian-message {
   padding: 10px 14px;
   border-radius: 8px;

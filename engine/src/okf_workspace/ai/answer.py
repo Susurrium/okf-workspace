@@ -67,12 +67,14 @@ class AnswerService:
         explicit_paths: tuple[str, ...] = (),
         candidate_limit: int = 8,
         context_limit: int = 6,
+        refresh_index: bool = True,
     ) -> AnswerResult:
         hits = self.searcher.search(
             query,
             scope=scope,
             explicit_paths=explicit_paths,
             limit=candidate_limit,
+            refresh_index=refresh_index,
         )
         contexts = self.reader.read(hits, limit=context_limit)
         if not contexts:

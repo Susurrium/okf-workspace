@@ -8,8 +8,10 @@ import type { TaskEditorContext } from './editor-context';
 import { TaskDatesModal } from './task-dates-modal';
 import type { Plugin, PluginSettingTab } from 'obsidian';
 import { setTaskWriter } from './task-file';
+import type { PrepareTaskSourceNavigation } from '../vendor/tasks/src/Obsidian/TaskSourceNavigation';
 
 export async function installTasks(owner: Plugin, options: {
+  prepareTaskSourceNavigation: PrepareTaskSourceNavigation;
   settings: Record<string, unknown>;
   save(settings: object): Promise<void>;
   onError(error: unknown): void;
@@ -20,6 +22,7 @@ export async function installTasks(owner: Plugin, options: {
   setTaskWriter(options.writeTask);
   owner.register(() => setTaskWriter(undefined));
   class IntegratedTasks extends TasksPlugin {
+    override prepareTaskSourceNavigation = options.prepareTaskSourceNavigation;
     settingsTab!: SettingsTab;
     ready!: Promise<void>;
     override async loadSettings() { await configureTasks(options.settings); }

@@ -1,4 +1,5 @@
-import { App, MarkdownView, Modal, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
+import { App, MarkdownView, Modal, Notice, TFile, WorkspaceLeaf, setIcon } from 'obsidian';
+import { beginFileNavigation } from './file-navigation';
 import { t } from './i18n';
 import { applyModalTheme, removeNativeModalCloseButton } from './modal-theme';
 
@@ -58,8 +59,16 @@ export class NotePopoverModal extends Modal {
 		openTabBtn.setAttribute('aria-label', t('notePopover.openInTab'));
 		setIcon(openTabBtn, 'arrow-up-right');
 		openTabBtn.addEventListener('click', () => {
-			void this.app.workspace.getLeaf(false).openFile(this.file);
-			this.close();
+			const embedded = this.leaf;
+			if (!embedded) return;
+			openTabBtn.disabled = true;
+			const navigation = beginFileNavigation(this.app, { isValid: () => this.leaf === embedded });
+			void (async () => {
+				if (embedded.view instanceof MarkdownView) await embedded.view.save();
+				if (await navigation.open(this.file, { subpath: this.subpath, line: this.line })) this.close();
+			})().catch(error => {
+				new Notice(String(error));
+			}).finally(() => { openTabBtn.disabled = false; });
 		});
 
 		const closeBtn = actions.createEl('button', { cls: 'note-popover-btn' });

@@ -17,5 +17,6 @@ await esbuild.build({
   target: "es2022",
   sourcemap: false,
   treeShaking: true,
+  minify: process.env.NODE_ENV !== "development",
   outfile: "dist/main.js",
 });

@@ -14,6 +14,7 @@ import httpx
 
 from .archive import normalize_zip
 from .models import ParserExport, ParserName
+from .originals import sha256_file
 
 MAX_RESULT_BYTES = 512 * 1024 * 1024
 MARKITDOWN_ASSET_PROFILE = "fallback-assets-v2"
@@ -231,7 +232,7 @@ class MinerUClient(_AsyncClient):
             "response_format_zip": "true",
             "return_original_file": "false",
         }
-        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        digest = sha256_file(source)
         with source.open("rb") as handle:
             response = self.client.post(
                 self._url("/tasks"),
@@ -309,7 +310,7 @@ class MarkItDownClient(_AsyncClient):
             else version
         )
         build_key = hashlib.sha256(build_identity.encode("utf-8")).hexdigest()[:16]
-        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        digest = sha256_file(source)
         media_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
         headers = {
             **self.request_headers,

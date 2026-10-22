@@ -110,6 +110,7 @@ class VectorIndex:
     def __init__(self, database: Path) -> None:
         self.database = database.resolve()
         self._numpy_cache: dict[str, _NumpyCache] = {}
+        self._numpy_cache_versions: dict[str, int] = {}
         self.database.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             connection.executescript(
@@ -126,6 +127,19 @@ class VectorIndex:
                     vector BLOB NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS vectors_path ON vectors(path);
+                CREATE TABLE IF NOT EXISTS vector_metadata (
+                    key TEXT PRIMARY KEY, value INTEGER NOT NULL
+                );
+                INSERT OR IGNORE INTO vector_metadata VALUES ('generation', 0);
+                CREATE TRIGGER IF NOT EXISTS vectors_insert AFTER INSERT ON vectors BEGIN
+                    UPDATE vector_metadata SET value = value + 1 WHERE key = 'generation';
+                END;
+                CREATE TRIGGER IF NOT EXISTS vectors_delete AFTER DELETE ON vectors BEGIN
+                    UPDATE vector_metadata SET value = value + 1 WHERE key = 'generation';
+                END;
+                CREATE TRIGGER IF NOT EXISTS vectors_update AFTER UPDATE ON vectors BEGIN
+                    UPDATE vector_metadata SET value = value + 1 WHERE key = 'generation';
+                END;
                 """
             )
 
@@ -152,8 +166,8 @@ class VectorIndex:
         progress: Callable[[int, int], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
     ) -> int:
-        chunks = search_index.all_chunks()
-        active_ids = {chunk.chunk_id for chunk in chunks}
+        fingerprints = search_index.chunk_fingerprints()
+        active_ids = set(fingerprints)
         with self.connect() as connection:
             rows = connection.execute(
                 "SELECT chunk_id, text_hash, model_id FROM vectors"
@@ -161,13 +175,14 @@ class VectorIndex:
             existing = {
                 str(row["chunk_id"]): (str(row["text_hash"]), str(row["model_id"])) for row in rows
             }
-            for chunk_id in set(existing) - active_ids:
+            removed_ids = set(existing) - active_ids
+            for chunk_id in removed_ids:
                 connection.execute("DELETE FROM vectors WHERE chunk_id = ?", (chunk_id,))
 
         pending = [
-            chunk
-            for chunk in chunks
-            if existing.get(chunk.chunk_id) != (chunk.text_hash, embedder.model_id)
+            chunk_id
+            for chunk_id, digest in fingerprints.items()
+            if existing.get(chunk_id) != (digest, embedder.model_id)
         ]
         written = 0
         if progress is not None:
@@ -175,7 +190,7 @@ class VectorIndex:
         for offset in range(0, len(pending), batch_size):
             if should_cancel is not None and should_cancel():
                 break
-            batch = pending[offset : offset + batch_size]
+            batch = search_index.chunks_for_ids(pending[offset : offset + batch_size])
             vectors = embedder.embed([f"{chunk.heading}\n{chunk.text}" for chunk in batch])
             if len(vectors) != len(batch):
                 raise RuntimeError("embedding provider returned the wrong vector count")
@@ -203,18 +218,26 @@ class VectorIndex:
                     written += 1
             if progress is not None:
                 progress(written, len(pending))
-        self._numpy_cache.clear()
+        if written or removed_ids:
+            self._numpy_cache.clear()
+            self._numpy_cache_versions.clear()
         return written
 
     def _load_numpy_cache(self, model_id: str) -> _NumpyCache | None:
-        cached = self._numpy_cache.get(model_id)
-        if cached is not None:
-            return cached
         try:
             numpy = importlib.import_module("numpy")
         except ModuleNotFoundError:
             return None
         with self.connect() as connection:
+            connection.execute("BEGIN")
+            version = int(
+                connection.execute(
+                    "SELECT value FROM vector_metadata WHERE key = 'generation'"
+                ).fetchone()[0]
+            )
+            cached = self._numpy_cache.get(model_id)
+            if cached is not None and self._numpy_cache_versions.get(model_id) == version:
+                return cached
             summary = connection.execute(
                 """
                 SELECT COUNT(*) AS total, MIN(dimensions) AS minimum,
@@ -257,6 +280,7 @@ class VectorIndex:
         norms = numpy.linalg.norm(matrix, axis=1)
         loaded = _NumpyCache(matrix, norms, tuple(metadata))
         self._numpy_cache[model_id] = loaded
+        self._numpy_cache_versions[model_id] = version
         return loaded
 
     def _search_numpy(

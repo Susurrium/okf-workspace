@@ -403,7 +403,7 @@ function uniqueNotes(items: readonly DashboardContinueItem[]): DashboardContinue
   });
 }
 
-function courseRelationPath(
+export function courseRelationPath(
   note: Pick<NoteSummary, "course" | "path">,
 ): string | undefined {
   const explicit = explicitRelationPath(note.course);
@@ -412,7 +412,7 @@ function courseRelationPath(
   return match ? `learning/courses/${match[1]}/course.md` : undefined;
 }
 
-function explicitRelationPath(value: string | null | undefined): string | undefined {
+export function explicitRelationPath(value: string | null | undefined): string | undefined {
   if (!value?.trim()) return undefined;
   return normalizeRelationPath(value.trim());
 }

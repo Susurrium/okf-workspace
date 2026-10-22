@@ -72,5 +72,10 @@ uploads/results are reclaimed after their configured orphan TTL. Every conversio
 network-isolated child process; plugins are disabled.
 
 From this directory run `uv sync`, `uv run pytest` and `uv run ruff check .`.
+Queue polling, Worker heartbeats and expiry cleanup have independent schedules. Idle polling does not
+rescan spool contents; capacity is checked before claiming pending work. Heartbeats run at most every
+five seconds and within one third of the stale threshold; cleanup runs at most every sixty seconds
+and within one quarter of the relevant cache TTL. Cancellation and conversion deadlines retain their
+existing polling cadence, and active uploads remain protected during cleanup.
 Supported deployment uses a host-loopback socket proxy to an internal-only API container,
 authentication on every `/v1` route, and a Worker without networking.

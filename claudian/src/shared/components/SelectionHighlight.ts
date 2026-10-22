@@ -5,9 +5,9 @@
  * when focus moves elsewhere (e.g., to an input field).
  */
 
-import { RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
-import type { DecorationSet } from '@codemirror/view';
-import { Decoration, EditorView } from '@codemirror/view';
+import type * as StateModule from '@codemirror/state';
+import type { Decoration as DecorationType, DecorationSet, EditorView } from '@codemirror/view';
+import type * as ViewModule from '@codemirror/view';
 
 export interface SelectionHighlighter {
   show: (editorView: EditorView, from: number, to: number) => void;
@@ -15,6 +15,10 @@ export interface SelectionHighlighter {
 }
 
 function createSelectionHighlighter(): SelectionHighlighter {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Initialize selection effects only when an editor selection is highlighted.
+  const { RangeSetBuilder, StateEffect, StateField } = require('@codemirror/state') as typeof StateModule;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- Initialize selection effects only when an editor selection is highlighted.
+  const { Decoration, EditorView } = require('@codemirror/view') as typeof ViewModule;
   const showHighlight = StateEffect.define<{ from: number; to: number }>();
   const hideHighlight = StateEffect.define<null>();
 
@@ -23,7 +27,7 @@ function createSelectionHighlighter(): SelectionHighlighter {
     update: (deco, tr) => {
       for (const e of tr.effects) {
         if (e.is(showHighlight)) {
-          const builder = new RangeSetBuilder<Decoration>();
+          const builder = new RangeSetBuilder<DecorationType>();
           builder.add(e.value.from, e.value.to, Decoration.mark({
             class: 'claudian-selection-highlight',
           }));
@@ -65,12 +69,12 @@ function createSelectionHighlighter(): SelectionHighlighter {
   return { show, hide };
 }
 
-const defaultHighlighter = createSelectionHighlighter();
+let defaultHighlighter: SelectionHighlighter | undefined;
 
 export function showSelectionHighlight(editorView: EditorView, from: number, to: number): void {
-  defaultHighlighter.show(editorView, from, to);
+  (defaultHighlighter ??= createSelectionHighlighter()).show(editorView, from, to);
 }
 
 export function hideSelectionHighlight(editorView: EditorView): void {
-  defaultHighlighter.hide(editorView);
+  defaultHighlighter?.hide(editorView);
 }

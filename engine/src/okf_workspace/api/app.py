@@ -109,6 +109,7 @@ from okf_workspace.semantic import (
     SemanticStatus,
 )
 from okf_workspace.semantic.worker import SemanticWorker, SemanticWorkerProcess
+from okf_workspace.state_index import RecordPage, StateRecordIndex
 
 from .auth import LocalTokenStore
 from .originals import original_routes
@@ -121,6 +122,10 @@ class CaptureRequest(BaseModel):
     content: str = Field(default="", max_length=200_000)
     course: str | None = Field(default=None, max_length=500)
     project: str | None = Field(default=None, max_length=500)
+
+
+class IndexSyncRequest(BaseModel):
+    paths: list[str] | None = Field(default=None, max_length=1_000)
 
 
 class CaptureBatchRequest(BaseModel):
@@ -501,10 +506,11 @@ def create_app(
         *,
         force: bool = False,
         include_vectors: bool = False,
+        paths: list[str] | None = None,
     ) -> dict[str, object]:
         rebuild_root_index(configured.vault)
         index = SearchIndex(configured.vault, configured.search_database)
-        result = index.sync(force=force)
+        result = index.sync(force=force, paths=paths)
         response: dict[str, object] = asdict(result)
         # Interactive Vault changes only need the inexpensive lexical index.
         # Vector embedding is deliberately reserved for an explicit rebuild or
@@ -756,6 +762,7 @@ def create_app(
             scope=request.scope,
             explicit_paths=tuple(request.paths),
             candidate_limit=request.limit,
+            refresh_index=False,
         )
         trace = write_trace(
             configured.trace_directory,
@@ -920,7 +927,7 @@ def create_app(
         raise HTTPException(410, "已改为 Vault 全量同步；原件属于正式附件，不再自动清理")
 
     @app.post("/documents/import", dependencies=protected)
-    async def import_document(
+    def import_document(
         file: Annotated[UploadFile, File()],
         intent: Annotated[str, Form()],
         action: Annotated[str, Form()] = "convert",
@@ -942,7 +949,7 @@ def create_app(
             upload.parent.mkdir(parents=True, exist_ok=True)
             total_bytes = 0
             with upload.open("wb") as target:
-                while chunk := await file.read(1024 * 1024):
+                while chunk := file.file.read(1024 * 1024):
                     total_bytes += len(chunk)
                     if total_bytes > MAX_DOCUMENT_UPLOAD_BYTES:
                         raise HTTPException(
@@ -1035,6 +1042,37 @@ def create_app(
                 project=request.project,
             )
         return public
+
+    def record_page(
+        catalog: StateRecordIndex, *, limit: int, offset: int,
+        snapshot_version: int | None, after_version: int | None, status: str | None,
+        after_index_id: str | None, snapshot_index_id: str | None,
+    ) -> RecordPage:
+        try:
+            return catalog.page(limit=limit, offset=offset, snapshot_version=snapshot_version,
+                                after_version=after_version, status=status,
+                                after_index_id=after_index_id, snapshot_index_id=snapshot_index_id)
+        except ValueError as error:
+            code = 409 if "snapshot changed" in str(error) else 400
+            raise HTTPException(status_code=code, detail=str(error)) from error
+
+    @app.get("/documents/conversions/page", dependencies=protected)
+    def conversion_page(
+        limit: int = 200, offset: int = 0, snapshot_version: int | None = None,
+        after_version: int | None = None, status: str | None = None,
+        after_index_id: str | None = None, snapshot_index_id: str | None = None,
+    ) -> RecordPage:
+        if status is not None:
+            try:
+                ConversionStatus(status)
+            except ValueError as error:
+                raise HTTPException(status_code=400, detail="unknown conversion status") from error
+        result = record_page(configured_importer.store.catalog, limit=limit, offset=offset,
+                             snapshot_version=snapshot_version, after_version=after_version,
+                             status=status, after_index_id=after_index_id,
+                             snapshot_index_id=snapshot_index_id)
+        result["items"] = [_conversion_public(item, configured.vault) for item in result["items"]]
+        return result
 
     @app.get("/documents/conversions/{conversion_id}", dependencies=protected)
     def get_conversion(conversion_id: str) -> dict[str, object]:
@@ -1336,8 +1374,8 @@ def create_app(
         return result
 
     @app.post("/index/sync", dependencies=protected)
-    def sync_index() -> dict[str, object]:
-        return sync_indexes()
+    def sync_index(request: IndexSyncRequest | None = None) -> dict[str, object]:
+        return sync_indexes(paths=request.paths if request is not None else None)
 
     @app.post("/semantic/operations", dependencies=protected)
     def create_semantic_operation(request: SemanticCreateRequest) -> dict[str, object]:
@@ -1349,6 +1387,22 @@ def create_app(
             course=request.course,
             project=request.project,
         )
+
+    @app.get("/semantic/operations/page", dependencies=protected)
+    def semantic_page(
+        limit: int = 200, offset: int = 0, snapshot_version: int | None = None,
+        after_version: int | None = None, status: str | None = None,
+        after_index_id: str | None = None, snapshot_index_id: str | None = None,
+    ) -> RecordPage:
+        if status is not None:
+            try:
+                SemanticStatus(status)
+            except ValueError as error:
+                raise HTTPException(status_code=400, detail="unknown semantic status") from error
+        return record_page(require_semantics().store.catalog, limit=limit, offset=offset,
+                           snapshot_version=snapshot_version, after_version=after_version,
+                           status=status, after_index_id=after_index_id,
+                           snapshot_index_id=snapshot_index_id)
 
     @app.get("/semantic/operations", dependencies=protected)
     def list_semantic_operations(status: str | None = None) -> list[dict[str, object]]:
