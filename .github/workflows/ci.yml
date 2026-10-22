@@ -29,6 +29,8 @@ jobs:
       - run: npm ci --prefix dashboard
       - run: uv run --project engine pytest tests/e2e
       - run: uv run --project engine ruff check tests/e2e
+      - run: uv run --project engine pytest scripts/docs/test_build_architecture.py
+      - run: uv run --project engine python scripts/docs/build_architecture.py --check
 
   markitdown:
     runs-on: ubuntu-latest

@@ -362,6 +362,16 @@ def script_json(value: Any) -> str:
     )
 
 
+def source_fingerprint(files: set[Path]) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(files, key=lambda value: value.relative_to(ROOT).as_posix()):
+        digest.update(path.relative_to(ROOT).as_posix().encode("utf-8"))
+        if path.is_file():
+            # 同一证据在 Windows CRLF 和 LF 检出中使用相同文本字节。
+            digest.update(path.read_text(encoding="utf-8").encode("utf-8"))
+    return digest.hexdigest()
+
+
 def build() -> tuple[dict[Path, str], dict[str, Any]]:
     spec_path = HERE / "sources/architecture.json"
     flow_path = HERE / "sources/information-flow.txt"
@@ -376,14 +386,8 @@ def build() -> tuple[dict[Path, str], dict[str, Any]]:
     references.update(n["source"] for n in flat)
     files = {spec_path, flow_path, template_path, Path(__file__).resolve()}
     files.update(check_source(source) for source in references)
-    digest = hashlib.sha256()
-    for path in sorted(files):
-        digest.update(path.relative_to(ROOT).as_posix().encode("utf-8"))
-        if path.is_file():
-            # A Windows CRLF checkout and an LF checkout have the same evidence.
-            digest.update(path.read_text(encoding="utf-8").encode("utf-8"))
     metadata = {key: spec[key] for key in ("reviewed_at", "baseline_commit", "scope")}
-    metadata["source_fingerprint"] = digest.hexdigest()
+    metadata["source_fingerprint"] = source_fingerprint(files)
     payload = {"metadata": metadata, "charts": spec["charts"], "tree": tree}
     images = {c["id"]: render_svg(c) for c in spec["charts"]}
     page = template_path.read_text(encoding="utf-8")

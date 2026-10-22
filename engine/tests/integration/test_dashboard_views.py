@@ -1,14 +1,45 @@
 from __future__ import annotations
 
-from datetime import date
+import json
+from datetime import date, datetime
 from pathlib import Path
 from typing import cast
+
+import pytest
 
 from okf_workspace.dashboard.catalog import scan_notes
 from okf_workspace.dashboard.views import dashboard_view, today_view
 from okf_workspace.feeds import FeedCache, FeedEdition, FeedItem, FeedKind
 from okf_workspace.notes import NoteService
-from okf_workspace.okf.frontmatter import OkfDocument, write_document
+from okf_workspace.okf.frontmatter import OkfDocument, parse_document, write_document
+
+METADATA_CASES = cast(list[dict[str, object]], json.loads(
+    (Path(__file__).parents[3] / "tests/fixtures/metadata/temporal-cases.json").read_text("utf-8")
+))
+
+
+@pytest.mark.parametrize("case", METADATA_CASES, ids=[str(case["name"]) for case in METADATA_CASES])
+def test_catalog_uses_contract_verification_events(vault: Path, case: dict[str, object]) -> None:
+    target = vault / "knowledge/wiki/verification.md"
+    document = parse_document(
+        "---\ntype: Wiki\ntitle: 核验\ndescription: 核验时间\n"
+        f"created_at: 2026-10-20T08:00:00+08:00\n{case['yaml']}\n---\n正文。\n"
+    )
+    write_document(target, document)
+    summary = next(item for item in scan_notes(vault) if item.path.endswith("verification.md"))
+    assert summary.ai_unverified is case["unverified"]
+
+
+def test_catalog_preserves_yaml_native_learning_dates(vault: Path) -> None:
+    target = vault / "knowledge/wiki/dates.md"
+    write_document(target, OkfDocument({
+        "type": "Wiki", "title": "日期", "description": "日期类型",
+        "created_at": datetime.fromisoformat("2026-10-20T08:00:00+08:00"),
+        "studied_at": date(2026, 10, 21),
+    }, "# 日期\n"))
+    summary = next(item for item in scan_notes(vault) if item.path.endswith("dates.md"))
+    assert summary.studied_at == "2026-10-21"
+    assert summary.created_at == "2026-10-20T08:00:00+08:00"
 
 
 def test_dashboard_projections_are_live_markdown_views_with_stale_reminders(

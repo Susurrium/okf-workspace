@@ -93,8 +93,9 @@ from okf_workspace.notes.captures import (
 )
 from okf_workspace.notes.web_captures import publish_web_capture
 from okf_workspace.notes.web_media import mirror_web_source_images
-from okf_workspace.okf.file_io import FileWriteConflict
-from okf_workspace.okf.frontmatter import read_document, write_document
+from okf_workspace.okf.document_role import DocumentRole, document_role
+from okf_workspace.okf.file_io import FileWriteConflict, document_lock
+from okf_workspace.okf.frontmatter import parse_document, write_document
 from okf_workspace.okf.paths import resolve_bundle_path
 from okf_workspace.projections.navigation import rebuild_root_index
 from okf_workspace.retrieval.context import ContextReader
@@ -528,7 +529,7 @@ def create_app(
     @app.exception_handler(FileWriteConflict)
     def stale_ai_write(_request: Request, _error: FileWriteConflict) -> JSONResponse:
         return JSONResponse(
-            status_code=409, content={"detail": "target changed during AI generation"}
+            status_code=409, content={"detail": "target changed before publication"}
         )
 
     @app.exception_handler(AIInputTooLarge)
@@ -720,24 +721,31 @@ def create_app(
     @app.post("/notes/{note_path:path}/fields", dependencies=protected)
     def update_note_fields(note_path: str, request: NoteFieldsRequest) -> dict[str, str]:
         path = resolve_bundle_path(configured.vault, note_path)
-        document = read_document(path)
-        if request.status is not None:
-            if request.status == "stable":
-                document.frontmatter.pop("status", None)
-            else:
-                document.frontmatter["status"] = request.status
-        if request.studied is not None:
-            if document.type not in {"Study Guide", "Wiki"}:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"studied is not valid for {document.type}",
-                )
-            if request.studied:
-                document.frontmatter["studied_at"] = datetime.now(UTC).isoformat(timespec="seconds")
-            else:
-                document.frontmatter.pop("studied_at", None)
-        create_checkpoint(configured.vault, "checkpoint before note status update")
-        write_document(path, document)
+        with document_lock(path):
+            original = path.read_bytes()
+            document = parse_document(original.decode("utf-8"), source=str(path))
+            if request.status is not None:
+                if request.status == "stable":
+                    document.frontmatter.pop("status", None)
+                else:
+                    document.frontmatter["status"] = request.status
+            if request.studied is not None:
+                if (
+                    document.type not in {"Study Guide", "Wiki"}
+                    or document_role(document) is not DocumentRole.ARTIFACT
+                ):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"studied is not valid for {document.type}",
+                    )
+                if request.studied:
+                    document.frontmatter["studied_at"] = datetime.now(UTC).isoformat(
+                        timespec="seconds"
+                    )
+                else:
+                    document.frontmatter.pop("studied_at", None)
+            create_checkpoint(configured.vault, "checkpoint before note status update")
+            write_document(path, document, expected_sha256=hashlib.sha256(original).hexdigest())
         create_checkpoint(configured.vault, f"note: update status for {note_path}")
         return {"path": note_path}
 

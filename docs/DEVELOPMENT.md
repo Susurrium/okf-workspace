@@ -31,7 +31,8 @@ Engine/MarkItDown 各有 uv 环境，Dashboard/Claudian 各有 lockfile。根脚
 | 文档 | `git diff --check`、链接/锚点/命令、受影响文档测试；生成资料按既定入口更新 |
 
 根检查覆盖 Engine pytest/Ruff/Pyright、跨组件 fixture-Vault 测试及 Ruff、Dashboard 类型/测试/构建、
-Claudian 类型/lint/完整测试/构建和 Windows 插件身份迁移。它不执行 Apex 专项、Claudian 性能检查、真实 Obsidian、远端服务和多设备验收。
+Claudian 类型/lint/完整测试/构建、Windows 插件身份迁移及架构生成器测试与产物一致性检查。
+它不执行 Apex 专项、Claudian 性能检查、真实 Obsidian、远端服务和多设备验收。
 历史 Originals 使用 `scripts/check-legacy-originals.ps1` 与独立 CI；当前原件迁移和旧设备恢复仍在默认检查中。
 
 | 组件 | 构建与集成位置 |

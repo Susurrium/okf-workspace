@@ -49,3 +49,24 @@ def test_description_cannot_end_inline_script() -> None:
     rendered = builder.script_json({"title": "</script><script>alert(1)</script>"})
     assert "</script>" not in rendered
     assert "\\u003c" in rendered
+
+
+def test_fingerprint_is_independent_of_platform_path_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class CaseSensitivePath(type(tmp_path)):
+        def __lt__(self, other: object) -> bool:
+            return str(self) < str(other)
+
+    class CaseInsensitivePath(type(tmp_path)):
+        def __lt__(self, other: object) -> bool:
+            return str(self).casefold() < str(other).casefold()
+
+    monkeypatch.setattr(builder, "ROOT", tmp_path)
+    paths = [tmp_path / "Z.md", tmp_path / "a.md"]
+    for path in paths:
+        path.write_text(f"Evidence: {path.name}\n", encoding="utf-8")
+    first = builder.source_fingerprint({CaseSensitivePath(path) for path in paths})
+    assert first == builder.source_fingerprint({CaseInsensitivePath(path) for path in paths})
+    paths[0].write_text("Changed evidence\n", encoding="utf-8")
+    assert first != builder.source_fingerprint(set(paths))

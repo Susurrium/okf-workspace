@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+from okf_workspace.okf.paths import normalize_bundle_path
+
 Actor = Literal["human", "explicit-ai", "automatic-ai"]
 Operation = Literal["create", "replace-managed-region", "edit-section"]
 
@@ -19,7 +21,8 @@ def authorize_write(
     operation: Operation,
     managed_region: str | None = None,
 ) -> None:
-    normalized = path.replace("\\", "/").lstrip("/")
+    # Vault 会同步到 Windows，保留名称空间的保护不依赖调用方的大小写。
+    normalized = normalize_bundle_path(path).as_posix().casefold()
     if actor == "human":
         return
     if normalized.startswith("self/"):

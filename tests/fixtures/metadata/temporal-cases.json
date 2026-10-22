@@ -1,0 +1,14 @@
+[
+  {"name":"empty-verification","yaml":"generated: {by: 'process:codex-background', at: '2026-10-21T08:00:00+08:00'}\nverified: [{}]","unverified":true},
+  {"name":"mixed-timezones","yaml":"generated: {by: 'process:codex-background', at: '2026-10-21T08:00:00+08:00'}\nverified: [{by: 'human:owner', at: '2026-10-22T08:00:00'}]","unverified":true},
+  {"name":"native-yaml-timestamps","yaml":"generated: {by: 'process:codex-background', at: 2026-10-21T08:00:00+08:00}\nverified: [{by: 'human:owner', at: 2026-10-22T08:00:00+08:00}]","unverified":false},
+  {"name":"verified-before-generation","yaml":"generated: {by: 'process:codex-background', at: '2026-10-22T08:00:00+08:00'}\nverified: [{by: 'human:owner', at: '2026-10-21T08:00:00+08:00'}]","unverified":true},
+  {"name":"process-verification","yaml":"generated: {by: 'process:codex-background', at: '2026-10-21T08:00:00+08:00'}\nverified: [{by: 'process:source-check', at: '2026-10-22T08:00:00+08:00'}]","unverified":false},
+  {"name":"equivalent-instant","yaml":"generated: {by: 'process:codex-background', at: '2026-10-21T08:00:00+08:00'}\nverified: [{by: 'human:owner', at: '2026-10-21T00:00:00Z'}]","unverified":false},
+  {"name":"missing-actor","yaml":"generated: {by: 'process:codex-background', at: '2026-10-21T08:00:00+08:00'}\nverified: [{at: '2026-10-22T08:00:00+08:00'}]","unverified":true},
+  {"name":"invalid-calendar-date","yaml":"generated: {by: 'process:codex-background', at: '2026-10-21T08:00:00+08:00'}\nverified: [{by: 'human:owner', at: '2026-02-30T08:00:00Z'}]","unverified":true},
+  {"name":"date-only-verification","yaml":"generated: {by: 'process:codex-background', at: '2026-10-21T08:00:00+08:00'}\nverified: [{by: 'human:owner', at: '2026-10-22'}]","unverified":true},
+  {"name":"both-without-timezones","yaml":"generated: {by: 'process:codex-background', at: '2026-10-21T08:00:00'}\nverified: [{by: 'human:owner', at: '2026-10-22T08:00:00'}]","unverified":true},
+  {"name":"malformed-generation","yaml":"generated: {}\nverified: [{by: 'human:owner', at: '2026-10-22T08:00:00Z'}]","unverified":true},
+  {"name":"later-valid-event","yaml":"generated: {by: 'process:codex-background', at: '2026-10-21T08:00:00+08:00'}\nverified: [{}, {by: 'process:source-check', at: '2026-10-22T08:00:00Z'}]","unverified":false}
+]

@@ -216,6 +216,10 @@ class SemanticOperationStore:
             if (
                 payload.get("status") != SemanticStatus.RUNNING.value
                 or payload.get("worker_id") != worker_id
+                or (
+                    stage is SemanticStage.PUBLISHING
+                    and bool(payload.get("cancel_requested"))
+                )
             ):
                 return False
             now = _now()
