@@ -31,6 +31,7 @@ interface ScannedNote {
 interface CachedScan {
   fingerprint: string;
   note: ScannedNote | undefined;
+  warnings?: readonly string[];
 }
 
 interface CachedRead {
@@ -434,7 +435,11 @@ export class VaultDashboardReader {
       try {
         const fingerprint = `${this.fingerprint(file)}:${current}`;
         const cached = cache.scans.get(file.path);
-        if (cached?.fingerprint === fingerprint) return cached.note;
+        if (cached?.fingerprint === fingerprint) {
+          if (cached.warnings?.length) this.readWarnings.set(file.path, cached.warnings.join('；'));
+          else this.readWarnings.delete(file.path);
+          return cached.note;
+        }
         const markdown = await this.app.vault.cachedRead(file);
         this.readWarnings.delete(file.path);
         cache.reads.set(file.path, { fingerprint: this.fingerprint(file), markdown });
@@ -485,7 +490,7 @@ export class VaultDashboardReader {
           excerpt: markdownExcerpt(body),
         };
         const note = { file, markdown, body, summary };
-        cache.scans.set(file.path, { fingerprint, note });
+        cache.scans.set(file.path, { fingerprint, note, warnings: verification.warnings });
         return note;
       } catch (error) {
         cache.scans.delete(file.path);

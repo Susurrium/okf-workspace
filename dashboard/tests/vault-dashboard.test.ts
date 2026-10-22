@@ -13,15 +13,19 @@ describe("VaultDashboardReader", () => {
     const path = 'knowledge/wiki/verification.md';
     const file = new (TFile as unknown as new (path: string) => TFile)(path);
     const markdown = note('Wiki', '核验', testCase.yaml, '正文。');
-    const reader = new VaultDashboardReader({ vault: {
+    const app = { vault: {
       getMarkdownFiles: () => [file],
       getAbstractFileByPath: (value: string) => value === path ? file : null,
       cachedRead: async () => markdown,
-    } } as unknown as App);
+    } } as unknown as App;
+    const reader = new VaultDashboardReader(app);
     expect((await reader.knowledge()).notes[0]?.ai_unverified).toBe(testCase.unverified);
     if (['empty-verification', 'mixed-timezones', 'missing-actor', 'invalid-calendar-date'].includes(testCase.name)) {
       expect(reader.getReadWarnings()).toEqual([expect.objectContaining({ path })]);
     }
+    const anotherReader = new VaultDashboardReader(app);
+    await anotherReader.knowledge();
+    expect(anotherReader.getReadWarnings()).toEqual(reader.getReadWarnings());
   });
 
   it("projects courses, projects, tasks, and captures directly from Markdown", async () => {
